@@ -197,6 +197,94 @@ input[type="file"] { display:none; }
 .text-dim { color:var(--text3); }
 .text-sm { font-size:12px; }
 .fw-bold { font-weight:600; }
+
+/* ════════════════════════════════════════
+   PLANNING — MOBILE RESPONSIVE
+   ════════════════════════════════════════ */
+@media (max-width: 768px) {
+  /* ── Sidebar ── */
+  #sidebar {
+    position: fixed;
+    left: -240px;
+    top: 0; bottom: 0;
+    width: 240px !important;
+    min-width: 240px !important;
+    z-index: 400;
+    transition: left .25s;
+    overflow-y: auto;
+  }
+  #sidebar.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,0.5); }
+  #sidebar-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 399;
+  }
+  #sidebar.open ~ #sidebar-backdrop { display: block; }
+
+  /* ── Main content full width ── */
+  #main { width: 100% !important; }
+  #content { padding: 12px !important; }
+
+  /* ── Topbar ── */
+  #topbar { padding: 0 10px !important; }
+  #topbar-actions { gap: 4px; }
+  #topbar-actions .btn { padding: 5px 8px !important; font-size: 11px !important; }
+  #topbar-actions .btn-sm { padding: 4px 7px !important; }
+  .page-title { font-size: 14px !important; }
+
+  /* ── Hamburger ── */
+  #plan-menu-btn { display: flex !important; }
+
+  /* ── Grids → single column ── */
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr !important; }
+  .form-grid { grid-template-columns: 1fr !important; }
+
+  /* ── Tables ── */
+  .tbl-wrap, .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { min-width: 600px; }
+
+  /* ── Cards ── */
+  .card { padding: 12px; margin-bottom: 12px; overflow-x: hidden; }
+  .card-title { font-size: 13px; }
+
+  /* ── Forms ── */
+  select, input[type=text], input[type=number], input[type=date] {
+    font-size: 16px !important;
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 36px; }
+
+  /* ── Dispatch truck view ── */
+  .truck-card { padding: 10px; }
+
+  /* ── Bottom padding for safety ── */
+  #content { padding-bottom: 20px !important; }
+
+  /* ── Table scroll wrappers ── */
+  .tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .summary-table { min-width: 700px; }
+
+  /* ── Production table ── */
+  .summary-table { min-width: 700px; }
+  .summary-table td, .summary-table th { padding: 6px 8px; font-size: 11px; }
+
+  /* ── User badge ── */
+  #user-badge-wrap { top: 6px; right: 8px; }
+  #user-badge { font-size: 11px; padding: 3px 8px; }
+
+  /* ── Auth overlay card ── */
+  .auth-card { margin: 20px; padding: 24px 20px; }
+
+  /* ── TEMP alert banner ── */
+  #plan-temp-banner { left: 0 !important; font-size: 11px; padding: 6px 10px; }
+}
+@media (min-width: 769px) {
+  #plan-menu-btn { display: none !important; }
+}
+
 </style>
 <style>
 /* ── AUTH OVERLAY ── */
@@ -245,6 +333,7 @@ input[type="file"] { display:none; }
     <div class="auth-error" id="auth-error"></div>
   </div>
 </div>
+<div id="sidebar-backdrop" onclick="closePlanSidebar()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:399"></div>
 <div id="app">
   <!-- SIDEBAR -->
   <div id="sidebar">
@@ -274,6 +363,7 @@ input[type="file"] { display:none; }
     <div class="nav-item" onclick="navigate('pc-codes')"><span class="icon">🎨</span> PC Codes</div>
     <div class="nav-item" onclick="navigate('archives')"><span class="icon">🗂️</span> Archives</div>
     <div class="nav-item" onclick="navigate('search')"><span class="icon">🔍</span> Search</div>
+    <div class="nav-item" id="nav-reconciliation" onclick="navigate('reconciliation')"><span class="icon">🔄</span> Reconciliation</div>
     <div class="nav-item" id="nav-audit-log" style="display:none" onclick="navigate('audit-log')"><span class="icon">📋</span> Audit Log</div>
     <div class="nav-item" onclick="navigate('settings')"><span class="icon">⚙️</span> Settings</div>
   </div>
@@ -281,13 +371,12 @@ input[type="file"] { display:none; }
   <!-- MAIN -->
   <div id="main">
     <div id="topbar">
-      <div class="topbar-title" id="page-title">Production Planning</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button id="plan-menu-btn" onclick="togglePlanSidebar()" style="display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1;flex-shrink:0">☰</button>
+        <div class="topbar-title" id="page-title">Production Planning</div>
+      </div>
       <div class="topbar-actions" id="topbar-actions">
         <span id="syncStatusBadge" style="margin-right:8px"></span>
-      </div>
-      <div id="plan-user-bar" style="display:none;align-items:center;gap:8px;padding:0 12px 0 0;flex-shrink:0">
-        <span id="plan-user-name" style="font-size:12px;color:var(--color-text-secondary);cursor:pointer" onclick="showUserMenu()">👤</span>
-        <button onclick="doLogout()" style="background:#e74c3c;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap">🚪 Logout</button>
       </div>
     </div>
     <div id="content"></div>
@@ -359,6 +448,7 @@ const PRINT_MACHINES = [
 ];
 
 const PACK_SIZES = {'00':75000,'0':100000,'1':125000,'2':175000,'3':225000,'0EL':100000,'4':175000,'5':175000};
+const CAPSULE_COLOURS = ['White/White','White/Yellow','White/Clear','Yellow/Yellow','Clear/Clear','Orange/White','Orange/Orange','Blue/White','Blue/Blue','Green/White','Green/Green','Pink/White','Pink/Pink','Red/White','Red/Red','Purple/White','Purple/Purple','Brown/White','Black/White','Maroon/White'];
 const SIZES = ['00','0','0EL','1','2','3','4','5'];
 const ZONES = ['BADDI','BADDI + JAMMU','BADDI+JAMMU','NORTH','SOUTH','EAST','WEST','DELHI','MUMBAI','RAJASTHAN','ALWAR','NEPAL','BANGLADESH','LOCAL','EXPORT'];
 const EXPORT_ZONES = ['EXPORT','BANGLADESH','NEPAL','MUMBAI']; // export zones: dispatch only when full container/indent complete
@@ -435,9 +525,6 @@ let state = {
 
 // ─── SERVER SYNC ──────────────────────────────────────────────
 // Sanitize server URL — strip any file path (e.g. /planning.html) and trailing slashes
-
-// Server URL always uses window.location.origin (set at initialization)
-
 function sanitizeServerUrl(url) {
   if (!url) return '';
   url = url.trim();
@@ -451,8 +538,7 @@ function sanitizeServerUrl(url) {
 }
 
 const SYNC = (() => {
-  let _url = window.location.origin; // Always use same origin
-localStorage.setItem('sunloc_server_url', _url);
+  let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
   let _online = false, _lastCheck = 0;
 
   async function online() {
@@ -521,8 +607,7 @@ localStorage.setItem('sunloc_server_url', _url);
     state.zoneMap = ZONE_MAP_RAW;
     // Persist locally too
     try { const s = {...serverState}; delete s.pcCodes; delete s.zoneMap; localStorage.setItem('sunloc_state', JSON.stringify(s)); } catch {}
-    // Load tracking status — wrapped so it never blocks render()
-    try { await loadTrackingStatus(); } catch(e) { console.log('Tracking status skip:', e.message); }
+    await loadTrackingStatus();
     render();
   }
 
@@ -533,21 +618,17 @@ localStorage.setItem('sunloc_server_url', _url);
       if (!r.ok) return;
       const j = await r.json();
       if (!j.ok) return;
-      // Server returns j.summary (array of scan counts per batch/dept)
-      const summary = j.summary || j.closures || [];
       const closureMap = {};
-      summary.forEach(c => {
+      j.closures.forEach(c => {
         if (!closureMap[c.batch_number]) closureMap[c.batch_number] = {};
-        closureMap[c.batch_number][c.dept] = c.type || 'active';
+        closureMap[c.batch_number][c.dept] = 'closed';
       });
       state.orders.forEach(ord => {
         if (ord.batchNumber && closureMap[ord.batchNumber]) {
           ord.stageStatus = closureMap[ord.batchNumber];
         }
       });
-    } catch(e) {
-      console.log('loadTrackingStatus error (non-critical):', e.message);
-    }
+    } catch(e) {}
   }
 
   return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus };
@@ -851,6 +932,7 @@ function checkAndConsolidateExportContainer(ord) {
 // =============================
 function navigate(page) {
   state.currentPage = page;
+  closePlanSidebar();
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.getAttribute('onclick')?.includes(`'${page}'`));
   });
@@ -872,6 +954,7 @@ function render() {
     'machines': renderMachines,
     'pc-codes': renderPcCodes,
     'search': renderSearch,
+    'reconciliation': renderReconciliation,
     'audit-log': () => { if(typeof renderAuditLog==='function') renderAuditLog(); },
     'settings': renderSettings,
   };
@@ -889,6 +972,7 @@ function render() {
     'machines':'Machine Master',
     'pc-codes':'Product Code Master',
     'search':'Search',
+    'reconciliation':'TEMP Batch Reconciliation',
     'settings':'Settings',
   };
   document.getElementById('page-title').textContent = titles[state.currentPage] || '';
@@ -907,13 +991,10 @@ function renderProduction() {
   const topActions = document.getElementById('topbar-actions');
 
   topActions.innerHTML = `
-    <span id="syncStatusBadge" style="margin-right:8px"></span>
     <button class="btn btn-ghost btn-sm" onclick="importSAP()">📥 Import SAP</button>
-    <button class="btn btn-ghost btn-sm" onclick="fixBlankSizes()" title="Auto-fill blank Size column from machine master">🔧 Fix Sizes</button>
     <button class="btn btn-secondary btn-sm" onclick="exportProdPlan()">📤 Export</button>
     <button class="btn btn-primary btn-sm" onclick="showAddOrderModal()">+ New Order</button>
   `;
-  SYNC.updateBadge();
 
   // Group by machine
   const machines = state.machineMaster;
@@ -971,6 +1052,8 @@ function renderProduction() {
 function renderOrderRow(ord, idx, mc) {
   const isClosed = ord.status === 'closed';
   const isRunning = ord.status === 'running';
+  const isWO = ord.woStatus === 'wo';
+  const isWOReconciled = ord.woStatus === 'wo-reconciled';
   const statusBadge = `<select class="status-select" onchange="changeOrderStatus('${ord.id}','${mc.id}',this.value)" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer">
     <option value="pending" ${ord.status==='pending'?'selected':''}>Pending</option>
     <option value="running" ${ord.status==='running'?'selected':''}>In Production</option>
@@ -979,14 +1062,16 @@ function renderOrderRow(ord, idx, mc) {
   const ptdBadge = ord.isPrinted ? '<span class="badge badge-ptd">PTD</span>' : '<span class="badge badge-up">UP</span>';
   const grossQty = ord.grossQty ? fmt(ord.grossQty) : '-';
   const canClose = !isClosed && ord.actualProd >= (ord.qty * 0.99);
-  return `<tr class="${isClosed?'closed':''}">
+  const woBadge = isWO ? '<span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span>' :
+                  isWOReconciled ? '<span class="badge badge-completed" style="font-size:10px">✅ W/O Assigned</span>' : '';
+  return `<tr class="${isClosed?'closed':''}" style="${isWO?'background:rgba(255,171,0,0.03);border-left:3px solid rgba(255,171,0,0.4)':''}">
     <td class="text-mono text-dim">${idx}</td>
     <td class="text-mono" style="white-space:nowrap">
-      ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''
-      }${ord.poNumber||'-'}
+      ${woBadge}
+      ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}${ord.poNumber||'-'}
       ${ord.batchNumber?`<br><span class="text-dim text-sm">${ord.batchNumber}</span>`:''}
     </td>
-    <td style="font-weight:500">${ord.customer||'-'}</td>
+    <td style="font-weight:500">${isWO?'<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>':ord.customer||'-'}</td>
     <td class="text-mono">${ord.size||'-'}</td>
     <td class="text-mono text-accent">${ord.pcCode||'-'}</td>
     <td style="white-space:nowrap;font-size:12px">${ord.colour||'-'}</td>
@@ -996,23 +1081,25 @@ function renderOrderRow(ord, idx, mc) {
     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.startDate)}</td>
     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.endDate)}</td>
     <td class="text-sm">${ord.packing||'-'}</td>
-    <td class="text-sm">${ord.zone||'-'}</td>
+    <td class="text-sm">${isWO?'<span style="color:var(--accent3)">—</span>':ord.zone||'-'}</td>
     <td>
-      <input type="number" value="${ord.actualProd||0}" min="0" placeholder="0" data-actual-batch="${ord.batchNumber}" 
+      <input type="number" value="${ord.actualProd||0}" min="0" placeholder="0"
         style="width:70px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px;font-family:var(--mono)"
         onchange="updateActualProd('${ord.id}',this.value,'${mc.id}')">
     </td>
     <td>${statusBadge}</td>
-    <td><input type="text" value="${ord.remarks||''}" placeholder="Add remark..." 
+    <td><input type="text" value="${ord.remarks||''}" placeholder="Add remark..."
       style="width:130px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px"
       onchange="updateOrderRemark('${ord.id}',this.value)"></td>
     <td style="white-space:nowrap">
       ${canClose?`<button class="btn btn-success btn-sm" onclick="closeOrder('${ord.id}','${mc.id}')">✓ Close</button> `:''}
+      ${isWO?`<button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${ord.id}')">🔶 Assign Customer</button> `:''}
       <button class="btn btn-ghost btn-sm" onclick="editOrder('${ord.id}')">✏️</button>
       <button class="btn btn-danger btn-sm" style="padding:5px 7px" onclick="deleteOrder('${ord.id}','${mc.id}')">✕</button>
     </td>
   </tr>`;
 }
+
 
 function switchSizeTab(el, size) {
   document.querySelectorAll('#size-tabs .tab').forEach(t=>t.classList.remove('active'));
@@ -1103,6 +1190,19 @@ function showAddOrderModal(machineId, existingOrder) {
   const pcList = ord.size ? (state.pcCodes[ord.size] || []) : [];
 
   openModal(isEdit ? 'Edit Order' : 'New Production Order', `
+    <div style="margin-bottom:12px;padding:10px 14px;background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;display:flex;align-items:center;gap:12px">
+      <label style="font-size:13px;font-weight:600;color:var(--text)">Order Type:</label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="radio" name="fo-wotype" value="normal" ${(ord.woStatus||'normal')==='normal'?'checked':''} onchange="toggleWOMode(false)"> Normal Order
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="radio" name="fo-wotype" value="wo" ${ord.woStatus==='wo'||ord.woStatus==='wo-reconciled'?'checked':''} onchange="toggleWOMode(true)">
+        <span style="color:var(--accent3);font-weight:600">🔶 Without Order (W/O)</span>
+      </label>
+    </div>
+    <div id="fo-wo-notice" style="display:${ord.woStatus==='wo'||ord.woStatus==='wo-reconciled'?'block':'none'};margin-bottom:12px;padding:8px 12px;background:rgba(255,171,0,0.05);border-left:3px solid var(--accent3);font-size:12px;color:var(--accent3)">
+      ⚠️ W/O order — Customer and PO fields are locked until customer is confirmed via Reconciliation.
+    </div>
     <div class="form-grid">
       <div class="form-group">
         <label>PO Type</label>
@@ -1114,15 +1214,15 @@ function showAddOrderModal(machineId, existingOrder) {
       </div>
       <div class="form-group" id="fo-ponum-group">
         <label>PO / Reference Number</label>
-        <input class="form-control" id="fo-ponum" value="${ord.poNumber||''}" placeholder="e.g. 26ZD23">
+        <input class="form-control" id="fo-ponum" value="${ord.poNumber||''}" placeholder="e.g. 26ZD23" ${ord.woStatus==='wo'?'disabled':''}>
       </div>
       <div class="form-group">
         <label>Batch Number</label>
         <input class="form-control" id="fo-batch" value="${ord.batchNumber||''}" placeholder="e.g. 26U17">
       </div>
       <div class="form-group">
-        <label>Customer Name</label>
-        <input class="form-control" id="fo-customer" value="${ord.customer||''}" placeholder="e.g. ALKEM">
+        <label>Customer Name ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
+        <input class="form-control" id="fo-customer" value="${ord.customer||''}" placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'e.g. ALKEM'}" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
       </div>
       <div class="form-group">
         <label>Machine</label>
@@ -1145,7 +1245,7 @@ function showAddOrderModal(machineId, existingOrder) {
       </div>
       <div class="form-group">
         <label>Colour (Cap / Body)</label>
-        <input class="form-control" id="fo-colour" value="${ord.colour||''}" placeholder="Auto from PC Code">
+        <input class="form-control" id="fo-colour" value="${ord.colour||''}" placeholder="Auto-filled from PC Code" readonly style="opacity:0.8;cursor:default">
       </div>
       <div class="form-group">
         <label>Printed / Unprinted</label>
@@ -1223,6 +1323,24 @@ function updatePoType(sel) {
   const grp = document.getElementById('fo-ponum-group');
   if (grp) grp.style.display = sel.value === 'verbal' ? 'none' : '';
 }
+
+function toggleWOMode(isWO) {
+  const notice = document.getElementById('fo-wo-notice');
+  const custInput = document.getElementById('fo-customer');
+  const ponumInput = document.getElementById('fo-ponum');
+  if (notice) notice.style.display = isWO ? 'block' : 'none';
+  if (custInput) {
+    custInput.disabled = isWO;
+    custInput.style.opacity = isWO ? '0.5' : '1';
+    custInput.placeholder = isWO ? 'Will be assigned via Reconciliation' : 'e.g. ALKEM';
+    if (isWO) custInput.value = '';
+  }
+  if (ponumInput) {
+    ponumInput.disabled = isWO;
+    if (isWO) ponumInput.value = '';
+  }
+}
+
 
 function onMachineChange(sel) {
   const mc = getMachine(sel.value);
@@ -1302,6 +1420,7 @@ function saveOrderModal(existingId, defaultMachine) {
   const ord = {
     id: existingId || uid(),
     machineId,
+    woStatus: document.querySelector('input[name="fo-wotype"]:checked')?.value === 'wo' ? 'wo' : (existingId ? (state.orders.find(o=>o.id===existingId)?.woStatus||'normal') : 'normal'),
     poType: document.getElementById('fo-potype')?.value,
     poNumber: document.getElementById('fo-ponum')?.value,
     batchNumber: document.getElementById('fo-batch')?.value || autoGenBatchNumber(machineId),
@@ -1421,29 +1540,6 @@ function saveOrderModal(existingId, defaultMachine) {
 // =============================
 // SAP IMPORT
 // =============================
-
-// ── FIX BLANK SIZES ──────────────────────────────────
-// Sets size from machine master for all orders with blank size
-function fixBlankSizes() {
-  let fixed = 0;
-  state.orders.forEach(ord => {
-    if (!ord.size && ord.machineId) {
-      const mc = getMachine(ord.machineId);
-      if (mc && mc.size) {
-        ord.size = mc.size;
-        fixed++;
-      }
-    }
-  });
-  if (fixed > 0) {
-    saveState();
-    render();
-    toast(`✅ Fixed size for ${fixed} order(s) from machine master`, 'var(--green)');
-  } else {
-    toast('All orders already have size set', 'var(--text3)');
-  }
-}
-
 function importSAP() {
   openModal('Import from SAP / Upload Template', `
     <div style="margin-bottom:16px">
@@ -1506,9 +1602,7 @@ function confirmSAPImport(rows) {
     if (!qty) continue;
 
     const isPrinted = (row.Printed_YN || row['Printed (Y/N)'] || 'N').toUpperCase() === 'Y';
-    // Use size from Excel; fallback to machine master size if blank
-    const rawSize = String(row.Size || row['Size'] || '').trim();
-    const size = rawSize || mc?.size || '';
+    const size = String(row.Size || '');
     const ag = mc?.aGrade || 93;
     const grossQty = isPrinted ? qty*1.07*1.02 : qty/(ag/100);
     const daysNeeded = grossQty / (mc?.cap||20);
@@ -3847,7 +3941,7 @@ function viewArchive(ym) {
       <td class="text-mono">${fmt(ord.qty)}</td>
       <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.startDate)}</td>
       <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.endDate)}</td>
-      <td class="text-mono" data-batch="${ord.batchNumber}" id="actual2-${ord.id}">${fmt(ord.actualProd||0)}</td>
+      <td class="text-mono">${fmt(ord.actualProd||0)}</td>
       <td>${ord.status==='closed'?'<span class="badge badge-completed">Closed</span>':ord.status==='running'?'<span class="badge badge-running">Running</span>':'<span class="badge badge-pending">Pending</span>'}</td>
       <td class="text-mono" style="white-space:nowrap">${dp&&dp.plannedDate?fmtDate(dp.plannedDate):'-'}</td>
       <td>${dp&&dp.status==='dispatched'?'<span class="badge badge-completed">Dispatched</span>':dp?'<span class="badge badge-pending">Pending</span>':'-'}</td>
@@ -4096,7 +4190,7 @@ function renderOrderTracker() {
                     <td class="text-mono fw-bold">${fmt(ord.qty)}</td>
                     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.startDate)}</td>
                     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.endDate)}</td>
-                    <td class="text-mono ${(ord.actualProd||0)>0?'text-green':''}" data-batch="${ord.batchNumber}" id="actual-${ord.id}">${fmt(ord.actualProd||0)}</td>
+                    <td class="text-mono ${(ord.actualProd||0)>0?'text-green':''}">${fmt(ord.actualProd||0)}</td>
                     <td>${prodBadge}</td>
                     <td>${printBadge}</td>
                     <td>${renderTrackingStage(ord)}</td>
@@ -4338,6 +4432,411 @@ function deletePcCode(size, code) {
 }
 
 // =============================
+// W/O ASSIGN CUSTOMER MODAL
+// =============================
+function openAssignCustomerModal(orderId) {
+  const ord = state.orders.find(o => o.id === orderId);
+  if (!ord) return;
+  openModal('🔶 Assign Customer to W/O Order', `
+    <div style="padding:8px 0">
+      <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px">
+        <strong>Batch:</strong> ${ord.batchNumber||ord.id} &nbsp;|&nbsp;
+        <strong>Size:</strong> ${ord.size} &nbsp;|&nbsp;
+        <strong>Colour:</strong> ${ord.colour||'—'} &nbsp;|&nbsp;
+        <strong>PC Code:</strong> ${ord.pcCode||'—'} &nbsp;|&nbsp;
+        <strong>Qty:</strong> ${fmt(ord.qty)}L
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Customer Name <span style="color:var(--accent4)">*</span></label>
+          <input class="form-control" id="woc-customer" placeholder="e.g. ALKEM LABORATORIES">
+        </div>
+        <div class="form-group">
+          <label>PO / Reference Number</label>
+          <input class="form-control" id="woc-ponum" placeholder="e.g. PO-2026-445">
+        </div>
+        <div class="form-group">
+          <label>Zone</label>
+          <select class="form-control" id="woc-zone">
+            <option value="">Select Zone</option>
+            ${ZONES.map(z => `<option value="${z}">${z}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Confirmed Qty (Lakhs) — leave blank to keep original</label>
+          <input class="form-control" type="number" id="woc-qty" placeholder="${ord.qty}">
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-top:8px">
+        This will propose a reconciliation request for Admin approval. Once approved, all labels for batch <strong>${ord.batchNumber}</strong> will be updated with the real customer name.
+      </div>
+    </div>
+  `, [
+    { label: 'Propose Reconciliation', cls: 'btn-primary', fn: `proposeWOReconciliation('${orderId}')` },
+    { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' }
+  ]);
+}
+
+async function proposeWOReconciliation(orderId) {
+  const customer = document.getElementById('woc-customer')?.value?.trim();
+  if (!customer) { alert('Customer name is required'); return; }
+  const poNumber = document.getElementById('woc-ponum')?.value?.trim();
+  const zone = document.getElementById('woc-zone')?.value;
+  const qtyConfirmed = parseFloat(document.getElementById('woc-qty')?.value) || null;
+  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/wo/propose-reconciliation', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: currentUser?.token||'', orderId, customer, poNumber, zone, qtyConfirmed }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      alert(`✅ W/O Reconciliation request submitted for Admin approval.\n\nBatch: ${state.orders.find(o=>o.id===orderId)?.batchNumber}\nCustomer: ${customer}\n\nOnce Admin approves, replacement labels will be ready for printing.`);
+      auditLog('WO_RECON_PROPOSED', `W/O reconciliation proposed for order ${orderId} → ${customer}`);
+    } else { alert('Error: ' + j.error); }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+// =============================
+// RECONCILIATION PAGE
+// =============================
+let _reconTempBatches = [];
+let _reconMappings = {}; // { tempBatchId: { orderId, boxes, actualLakhs } }
+let _reconProposedOrder = null;
+
+async function renderReconciliation() {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const content = document.getElementById('content');
+  content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Loading TEMP batches...</div>';
+
+  let tempBatches = [], pendingRequests = [], history = [];
+  if (serverUrl) {
+    try {
+      const [r1, r2, r3, r4, r5] = await Promise.all([
+        fetch(serverUrl+'/api/temp-batches/active', {signal:AbortSignal.timeout(5000)}),
+        currentUser?.role==='admin' ? fetch(serverUrl+'/api/reconciliation/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
+        fetch(serverUrl+'/api/reconciliation/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
+        currentUser?.role==='admin' ? fetch(serverUrl+'/api/wo/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
+        fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)})
+      ]);
+      const j1 = await r1.json(); if(j1.ok) tempBatches = j1.batches;
+      if(r2){ const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; }
+      const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20);
+      let woPendingRequests = [], woHistory = [];
+      if(r4){ const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; }
+      if(r5){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
+    } catch(e) { content.innerHTML = `<div class="alert alert-warn">⚠️ Could not load data: ${e.message}</div>`; return; }
+  }
+
+  _reconTempBatches = tempBatches;
+  const isAdmin = currentUser?.role === 'admin';
+  const isPlanManager = ['admin','planning_manager'].includes(currentUser?.role);
+  // W/O orders awaiting customer assignment
+  const woOrders = (state.orders||[]).filter(o => o.woStatus === 'wo' && o.status !== 'closed');
+
+  content.innerHTML = `
+    ${tempBatches.length === 0 && pendingRequests.length === 0 && woOrders.length === 0 && woPendingRequests.length === 0 ? `
+      <div class="card" style="text-align:center;padding:40px">
+        <div style="font-size:32px;margin-bottom:12px">✅</div>
+        <div style="font-size:16px;font-weight:600;color:var(--accent2)">All batches reconciled</div>
+        <div style="color:var(--text3);margin-top:8px">No unplanned TEMP batches pending. All machines have active planned orders.</div>
+      </div>
+    ` : ''}
+
+    ${tempBatches.length > 0 && isPlanManager ? `
+    <div class="card mb-4">
+      <div class="card-title">⚠️ Active TEMP Batches — Awaiting Reconciliation</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:16px">These machines are running without planned orders. Select TEMP batches and map them to a real order below.</div>
+      <div style="overflow-x:auto">
+        <table class="summary-table">
+          <thead><tr><th>Select</th><th>TEMP Batch ID</th><th>Machine</th><th>Size</th><th>Date</th><th>Cap (L)</th><th>Labels</th><th>Days Active</th></tr></thead>
+          <tbody>
+            ${tempBatches.map(tb=>`<tr>
+              <td><input type="checkbox" id="chk-${tb.id}" value="${tb.id}" onchange="toggleTempSelection('${tb.id}')" style="width:16px;height:16px;cursor:pointer"></td>
+              <td class="text-mono text-accent">${tb.id}</td>
+              <td class="text-mono fw-bold">${tb.machine_id}</td>
+              <td><span class="badge badge-running">Size ${tb.machine_size}</span></td>
+              <td class="text-mono">${tb.date}</td>
+              <td class="text-mono">${tb.daily_cap_lakhs}</td>
+              <td class="text-mono">${tb.label_count}</td>
+              <td><span class="badge ${tb.daysActive>3?'badge-red':'badge-pending'}">${tb.daysActive} day${tb.daysActive>1?'s':''}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div id="recon-selection-summary" style="margin-top:12px;display:none">
+        <div style="background:var(--surface3);border-radius:6px;padding:12px;font-size:13px">
+          <div style="font-weight:600;margin-bottom:8px">Selected for reconciliation: <span id="recon-selected-count" style="color:var(--accent)">0</span> TEMP batch(es)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="form-group">
+              <label>Back-date Order Entry</label>
+              <input type="date" class="form-control" id="recon-backdate" value="${new Date().toISOString().split('T')[0]}">
+              <div style="font-size:11px;color:var(--text3);margin-top:3px">Cannot be before earliest selected TEMP batch date</div>
+            </div>
+            <div class="form-group">
+              <label>Map to Existing Order (or enter below for new)</label>
+              <select class="form-control" id="recon-order-select" onchange="onReconOrderSelect(this.value)">
+                <option value="">-- Enter new order details below --</option>
+                ${state.orders.filter(o=>o.status!=='closed'&&!o.deleted).map(o=>`<option value="${o.id}">${o.batchNumber||o.id} — ${o.customer} — Sz${o.size} — ${fmt(o.qty)}L</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div id="recon-order-form" style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">
+            <div class="form-group"><label>Customer</label><input class="form-control" id="ro-customer" placeholder="Customer name"></div>
+            <div class="form-group"><label>PC Code</label><input class="form-control" id="ro-pccode" placeholder="PC Code"></div>
+            <div class="form-group"><label>Size</label>
+              <select class="form-control" id="ro-size">${SIZES.map(s=>`<option value="${s}">Size ${s}</option>`).join('')}</select>
+            </div>
+            <div class="form-group"><label>Batch Number</label><input class="form-control" id="ro-batch" placeholder="e.g. 26N50"></div>
+            <div class="form-group"><label>Planned Qty (Lakhs)</label><input class="form-control" type="number" id="ro-qty" placeholder="e.g. 30"></div>
+            <div class="form-group"><label>Zone</label>
+              <select class="form-control" id="ro-zone">${ZONES.map(z=>`<option value="${z}">${z}</option>`).join('')}</select>
+            </div>
+          </div>
+          <button class="btn btn-primary mt-4" onclick="proposeReconciliation()">
+            📋 Propose Reconciliation (Sends to Admin for Approval)
+          </button>
+        </div>
+      </div>
+    </div>
+    ` : ''}
+
+    ${pendingRequests.length > 0 && isAdmin ? `
+    <div class="card mb-4">
+      <div class="card-title">🔔 Pending Approval — Reconciliation Requests</div>
+      ${pendingRequests.map(req=>`
+        <div style="background:var(--surface3);border-radius:8px;padding:14px;margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div>
+              <span class="text-mono fw-bold text-accent">${req.id}</span>
+              <span style="font-size:12px;color:var(--text3);margin-left:10px">Proposed by ${req.proposed_by} on ${req.proposed_at?.slice(0,16)}</span>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-success btn-sm" onclick="approveReconciliation('${req.id}')">✅ Approve & Execute</button>
+              <button class="btn btn-danger btn-sm" onclick="rejectReconciliation('${req.id}')">✗ Reject</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;font-size:12px;margin-bottom:10px">
+            <div><span style="color:var(--text3)">Order:</span> <strong>${req.order_details.batchNumber||req.order_id}</strong></div>
+            <div><span style="color:var(--text3)">Customer:</span> ${req.order_details.customer||'—'}</div>
+            <div><span style="color:var(--text3)">Back-date:</span> <span class="text-mono">${req.back_date}</span></div>
+            <div><span style="color:var(--text3)">Total Boxes:</span> <strong>${req.total_boxes}</strong></div>
+            <div><span style="color:var(--text3)">TEMP Batches:</span> ${req.temp_batch_mappings.length}</div>
+          </div>
+          <div style="font-size:12px;color:var(--text3)">TEMP batches: ${req.temp_batch_mappings.map(m=>m.tempBatchId).join(', ')}</div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+
+    ${woOrders.length > 0 && isPlanManager ? `
+    <div class="card mb-4">
+      <div class="card-title" style="color:var(--accent3)">🔶 Section B — W/O Orders Awaiting Customer Assignment</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:16px">These orders were planned without a customer. Once customer order is received, click "Assign Customer" to propose reconciliation.</div>
+      <div style="overflow-x:auto">
+        <table class="summary-table">
+          <thead><tr><th>Batch</th><th>Size</th><th>Colour</th><th>PC Code</th><th>Qty (L)</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>
+            ${woOrders.map(o=>`<tr style="border-left:3px solid rgba(255,171,0,0.5)">
+              <td class="text-mono text-accent">${o.batchNumber||o.id}</td>
+              <td class="text-mono">${o.size}</td>
+              <td style="font-size:12px">${o.colour||'—'}</td>
+              <td class="text-mono">${o.pcCode||'—'}</td>
+              <td class="text-mono">${fmt(o.qty)}</td>
+              <td class="text-mono" style="font-size:11px">${fmtDate(o.startDate)}</td>
+              <td><span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span></td>
+              <td><button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${o.id}')">🔶 Assign Customer</button></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+    ${woPendingRequests.length > 0 && isAdmin ? `
+    <div class="card mb-4">
+      <div class="card-title" style="color:var(--accent3)">🔔 W/O Pending Approval — Customer Assignment Requests</div>
+      ${woPendingRequests.map(req=>`
+        <div style="background:var(--surface3);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid rgba(255,171,0,0.5)">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div>
+              <span class="text-mono fw-bold" style="color:var(--accent3)">${req.id}</span>
+              <span style="font-size:12px;color:var(--text3);margin-left:10px">Proposed by ${req.proposed_by} on ${req.proposed_at?.slice(0,16)}</span>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-success btn-sm" onclick="approveWOReconciliation('${req.id}')">✅ Approve</button>
+              <button class="btn btn-danger btn-sm" onclick="rejectWOReconciliation('${req.id}')">✗ Reject</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;font-size:12px">
+            <div><span style="color:var(--text3)">Order:</span> <strong>${req.orderDetails?.batchNumber||req.order_id}</strong></div>
+            <div><span style="color:var(--text3)">Customer:</span> <strong style="color:var(--accent2)">${req.customer}</strong></div>
+            <div><span style="color:var(--text3)">PO:</span> ${req.po_number||'—'}</div>
+            <div><span style="color:var(--text3)">Zone:</span> ${req.zone||'—'}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
+    ${history.length > 0 ? `
+    <div class="card">
+      <div class="card-title">📋 Reconciliation History</div>
+      <div style="overflow-x:auto">
+        <table class="summary-table">
+          <thead><tr><th>Request ID</th><th>Status</th><th>Proposed By</th><th>Approved By</th><th>Order</th><th>Boxes</th><th>Date</th></tr></thead>
+          <tbody>
+            ${history.map(r=>`<tr>
+              <td class="text-mono text-sm">${r.id}</td>
+              <td><span class="badge ${r.status==='approved'?'badge-completed':r.status==='rejected'?'badge-red':'badge-pending'}">${r.status}</span></td>
+              <td>${r.proposed_by}</td>
+              <td>${r.approved_by||'—'}</td>
+              <td class="text-mono">${r.order_details.batchNumber||r.order_id}</td>
+              <td class="text-mono">${r.total_boxes}</td>
+              <td class="text-mono text-sm">${r.proposed_at?.slice(0,10)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    ` : ''}
+  `;
+}
+
+function toggleTempSelection(tbId) {
+  const chk = document.getElementById('chk-'+tbId);
+  const summary = document.getElementById('recon-selection-summary');
+  const countEl = document.getElementById('recon-selected-count');
+  if (!summary || !countEl) return;
+  const selected = document.querySelectorAll('[id^="chk-"]:checked');
+  const count = selected.length;
+  summary.style.display = count > 0 ? '' : 'none';
+  countEl.textContent = count;
+  // Set min backdate to earliest selected TEMP batch date
+  const dates = [...selected].map(el => {
+    const tb = _reconTempBatches.find(t=>t.id===el.value);
+    return tb?.date || '9999-12-31';
+  });
+  const earliest = dates.reduce((min,d)=>d<min?d:min,'9999-12-31');
+  const bdInput = document.getElementById('recon-backdate');
+  if (bdInput) bdInput.min = earliest;
+}
+
+function onReconOrderSelect(orderId) {
+  if (!orderId) { document.getElementById('recon-order-form').style.display = 'grid'; return; }
+  const ord = state.orders.find(o=>o.id===orderId);
+  if (!ord) return;
+  document.getElementById('recon-order-form').style.display = 'none';
+  _reconProposedOrder = ord;
+}
+
+async function proposeReconciliation() {
+  const selected = [...document.querySelectorAll('[id^="chk-"]:checked')].map(el=>el.value);
+  if (selected.length === 0) { alert('Please select at least one TEMP batch'); return; }
+  const backDate = document.getElementById('recon-backdate')?.value;
+  if (!backDate) { alert('Please enter a back-date'); return; }
+  const existingOrderId = document.getElementById('recon-order-select')?.value;
+  let orderDetails;
+  if (existingOrderId) {
+    orderDetails = state.orders.find(o=>o.id===existingOrderId) || {};
+  } else {
+    const customer = document.getElementById('ro-customer')?.value?.trim();
+    const pcCode = document.getElementById('ro-pccode')?.value?.trim();
+    const size = document.getElementById('ro-size')?.value;
+    const batchNumber = document.getElementById('ro-batch')?.value?.trim();
+    const qty = parseFloat(document.getElementById('ro-qty')?.value)||0;
+    const zone = document.getElementById('ro-zone')?.value;
+    if (!customer || !batchNumber || !qty) { alert('Please fill in Customer, Batch Number and Qty for the new order'); return; }
+    orderDetails = { id: uid(), customer, pcCode, size, batchNumber, qty, zone, status:'pending', isPrinted:false };
+  }
+  const tempBatchMappings = selected.map(tbId => {
+    const tb = _reconTempBatches.find(t=>t.id===tbId);
+    return { tempBatchId: tbId, tempDate: tb?.date, boxes: tb?.label_count||0, actualLakhs: tb?.daily_cap_lakhs||0 };
+  });
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl+'/api/reconciliation/propose', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: currentUser?.token||'', orderDetails, backDate, tempBatchMappings }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(`✅ Reconciliation request ${j.requestId} submitted for Admin approval.\n\n${selected.length} TEMP batch(es) proposed for mapping.`);
+      auditLog('RECON_PROPOSED', `Proposed reconciliation for ${selected.length} TEMP batches → ${orderDetails.batchNumber||orderDetails.id}`);
+      renderReconciliation();
+    } else { alert('Error: ' + j.error); }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function approveReconciliation(reqId) {
+  if (!confirm(`Approve and execute reconciliation ${reqId}?\n\nThis will:\n• Migrate all TEMP batch labels to the real order\n• Migrate all WIP scan records\n• Update Planning actuals\n• Generate replacement labels for printing\n\nThis cannot be undone.`)) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/reconciliation/approve/'+reqId, {
+      method:'POST', headers:{'Content-Type':'application/json', 'x-session-token':currentUser?.token||''},
+      body: JSON.stringify({}), signal: AbortSignal.timeout(15000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(`✅ Reconciliation complete!\n\n• Labels migrated: ${j.results.migratedLabels}\n• Scans migrated: ${j.results.migratedScans}\n\nReplacement labels are ready for printing in the Tracking app.\nFilter by the real batch number to print replacement labels.`);
+      renderReconciliation();
+      checkPlanningTempAlerts();
+    } else { alert('Error: ' + j.error); }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function rejectReconciliation(reqId) {
+  const reason = prompt('Reason for rejection (required):');
+  if (!reason) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/reconciliation/reject/'+reqId, {
+      method:'POST', headers:{'Content-Type':'application/json', 'x-session-token':currentUser?.token||''},
+      body: JSON.stringify({reason}), signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) { alert('Request rejected.'); renderReconciliation(); }
+    else alert('Error: '+j.error);
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+async function approveWOReconciliation(reqId) {
+  if (!confirm(`Approve W/O reconciliation ${reqId}?\n\nThis will:\n• Add customer name to the order\n• Update all batch labels with customer name\n• Generate replacement labels for printing\n\nThis cannot be undone.`)) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/wo/approve/'+reqId, {
+      method:'POST', headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
+      body: JSON.stringify({}), signal: AbortSignal.timeout(10000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(`✅ W/O Reconciliation complete!\n\nCustomer "${j.result?.customer}" assigned to order.\nReplacement labels ready for printing in Tracking app.`);
+      renderReconciliation();
+      checkPlanningTempAlerts();
+    } else alert('Error: '+j.error);
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+async function rejectWOReconciliation(reqId) {
+  const reason = prompt('Reason for rejection (required):');
+  if (!reason) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/wo/reject/'+reqId, {
+      method:'POST', headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
+      body: JSON.stringify({reason}), signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) { alert('W/O request rejected.'); renderReconciliation(); }
+    else alert('Error: '+j.error);
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+// =============================
 // SEARCH PAGE
 // =============================
 function renderSearch() {
@@ -4565,7 +5064,6 @@ function closeModalOverlay(e) { if (e.target===document.getElementById('modal-ov
 // INIT
 // =============================
 loadState();
-// Patch render to always update user badge
 // Render is deferred until after auth — called from doLogin() / initAuth()
 // render();
 // Start server sync check after render
@@ -4574,13 +5072,57 @@ setTimeout(() => SYNC.online().then(() => SYNC.updateBadge()), 800);
 // Refresh tracking WIP every 3 minutes
 setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},180000);
 
+// Check TEMP batch alerts every 5 minutes
+setInterval(checkPlanningTempAlerts, 5*60*1000);
+setTimeout(checkPlanningTempAlerts, 2000);
+
+async function checkPlanningTempAlerts(){
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  if(!serverUrl) return;
+  try{
+    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
+    const j = await r.json();
+    let banner = document.getElementById('plan-temp-banner');
+    if(!banner){
+      banner = document.createElement('div');
+      banner.id = 'plan-temp-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:260px;right:0;z-index:450;background:rgba(255,171,0,0.12);border-bottom:2px solid var(--accent3);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px;cursor:pointer';
+      banner.onclick = () => navigate('reconciliation');
+      document.body.appendChild(banner);
+    }
+    if(j.ok && j.count > 0){
+      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
+      const maxDays = Math.max(...j.batches.map(b=>b.daysActive));
+      // Also count W/O orders
+      const woCount = (state.orders||[]).filter(o=>o.woStatus==='wo'&&o.status!=='closed').length;
+      const woText = woCount > 0 ? ` · ${woCount} W/O order${woCount>1?'s':''} awaiting customer` : '';
+      banner.style.display = 'flex';
+      banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} unreconciled</strong>
+        — Machines: ${machines.join(', ')} — Up to ${maxDays} day${maxDays>1?'s':''} without planned orders.${woText}
+        <span style="color:var(--accent);margin-left:6px;text-decoration:underline">→ Go to Reconciliation</span>`;
+    } else {
+      if(banner) banner.style.display = 'none';
+    }
+    if(currentUser && currentUser.role === 'admin'){
+      try{
+        const r2 = await fetch(serverUrl+'/api/reconciliation/pending',{headers:{'x-session-token':currentUser.token||''},signal:AbortSignal.timeout(4000)});
+        const j2 = await r2.json();
+        const reconNav = document.getElementById('nav-reconciliation');
+        if(reconNav && j2.ok && j2.requests.length > 0){
+          reconNav.innerHTML = `<span class="icon">🔄</span> Reconciliation <span style="background:var(--accent4);color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;margin-left:4px">${j2.requests.length}</span>`;
+        }
+      }catch(e){}
+    }
+  }catch(e){}
+}
+
 // ══════════════════════════════════════════════════════
 // AUTH SYSTEM — Planning Suite
 // ══════════════════════════════════════════════════════
 let currentUser = null; // { username, role, token }
 
 const PLAN_ROLE_NAV = {
-  planning_manager: ['production','prod-summary','printing','daily-printing','dispatch','dispatch-calendar','dispatch-customer','dispatch-export','order-tracker','archives','machines','pc-codes','search','settings'],
+  planning_manager: ['production','prod-summary','printing','daily-printing','dispatch','dispatch-calendar','dispatch-customer','dispatch-export','order-tracker','archives','machines','pc-codes','search','reconciliation','settings'],
   printing_manager: ['printing','daily-printing','search'],
   dispatch_manager: ['dispatch','dispatch-calendar','dispatch-customer','dispatch-export','search'],
   admin: null // null = all pages
@@ -4604,7 +5146,6 @@ async function doLogin() {
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
     render();
-    SYNC.loadFromServer(); // Try to load from server even in offline fallback
     return;
   }
   try {
@@ -4616,12 +5157,11 @@ async function doLogin() {
     const j = await r.json();
     if (!j.ok) { errEl.textContent = j.error || 'Invalid PIN'; return; }
     currentUser = { username: j.username, role: j.role, token: j.token };
-    localStorage.setItem('plan_session', JSON.stringify(currentUser));
+    sessionStorage.setItem('plan_session', JSON.stringify(currentUser));
     applyRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
-    render(); // Render immediately with local state
-    SYNC.loadFromServer(); // Then fetch fresh data from server
+    render();
     auditLog('LOGIN', 'Logged in to Planning Suite');
   } catch(e) {
     errEl.textContent = 'Cannot reach server — check connection';
@@ -4655,12 +5195,22 @@ function applyRoleRestrictions() {
 }
 
 function updateUserBadge() {
-  if (!currentUser) return;
-  document.getElementById('user-badge-wrap')?.remove();
-  const bar = document.getElementById('plan-user-bar');
-  const nameEl = document.getElementById('plan-user-name');
-  if (bar) bar.style.display = 'flex';
-  if (nameEl) nameEl.innerHTML = `👤 <strong>${currentUser.username}</strong> <span style="font-size:10px;opacity:0.7">[${currentUser.role}]</span> ▾`;
+  const topbar = document.getElementById('topbar-actions');
+  if (!topbar || !currentUser) return;
+  // Add user badge to topbar if not already there
+  if (!document.getElementById('user-badge')) {
+    const badge = document.createElement('div');
+    badge.id = 'user-badge';
+    badge.className = 'auth-user-badge';
+    badge.onclick = showUserMenu;
+    badge.innerHTML = `👤 ${currentUser.username} <span style="color:var(--text3);font-size:10px">[${currentUser.role}]</span> ▾`;
+    // Insert at start of body as fixed element
+    const fixed = document.createElement('div');
+    fixed.id = 'user-badge-wrap';
+    fixed.style.cssText = 'position:fixed;top:10px;right:16px;z-index:500';
+    fixed.appendChild(badge);
+    document.body.appendChild(fixed);
+  }
 }
 
 function showUserMenu() {
@@ -4713,10 +5263,8 @@ async function doLogout() {
   if (serverUrl && currentUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:currentUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
-  localStorage.removeItem('plan_session');
+  sessionStorage.removeItem('plan_session');
   currentUser = null;
-  const bar = document.getElementById('plan-user-bar');
-  if (bar) bar.style.display = 'none';
   document.getElementById('user-badge-wrap')?.remove();
   document.getElementById('auth-pin').value = '';
   document.getElementById('auth-error').textContent = '';
@@ -4787,9 +5335,22 @@ const _origRender = render;
   const origRenderFn = window.render || render;
 })();
 
-// On page init — check for saved session
+// ── Mobile sidebar functions ──────────────────────────────────
+function togglePlanSidebar() {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebar-backdrop');
+  if (sb) { sb.classList.toggle('open'); if (bd) bd.style.display = sb.classList.contains('open') ? 'block' : 'none'; }
+}
+function closePlanSidebar() {
+  const sb = document.getElementById('sidebar');
+  const bd = document.getElementById('sidebar-backdrop');
+  if (sb) sb.classList.remove('open');
+  if (bd) bd.style.display = 'none';
+}
+
+// ── On page init — check for saved session ──
 (function initAuth() {
-  const saved = localStorage.getItem('plan_session');
+  const saved = sessionStorage.getItem('plan_session');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);
@@ -4814,87 +5375,5 @@ window.addEventListener('beforeunload', e => {
   e.returnValue = 'You may have unsaved changes. Are you sure you want to leave?';
 });
 </script>
-
-<script>
-// ── REAL-TIME SYNC (SSE) ──────────────────────────────
-// SAFE: Never re-renders form while user is actively working
-let _ssePlan = null;
-let _planLastInput = 0;
-let _planPendingSync = false;
-
-document.addEventListener('input', () => { _planLastInput = Date.now(); });
-document.addEventListener('change', () => { _planLastInput = Date.now(); });
-document.addEventListener('click', () => { _planLastInput = Date.now(); });
-
-function connectPlanSSE() {
-  const url = localStorage.getItem('sunloc_server_url') || '';
-  if (!url || _ssePlan) return;
-  _ssePlan = new EventSource(url + "/api/sync/events?app=planning");
-  _ssePlan.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "dpr_updated" || msg.type === "tracking_updated") {
-        _planPendingSync = true; // Defer until user is idle
-      }
-    } catch(err) {}
-  };
-  _ssePlan.onerror = () => {
-    if (_ssePlan) { _ssePlan.close(); _ssePlan = null; }
-    setTimeout(connectPlanSSE, 15000);
-  };
-}
-
-async function fetchAndUpdateActuals() {
-  const url = localStorage.getItem('sunloc_server_url') || '';
-  if (!url) return;
-  try {
-    const r = await fetch(url + '/api/actuals/by-batch', { signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return;
-    const j = await r.json();
-    if (!j.ok || !j.actuals) return;
-    const actualsMap = {};
-    j.actuals.forEach(a => { actualsMap[a.batch_number] = parseFloat(a.total_qty) || 0; });
-    let changed = false;
-    state.orders.forEach(ord => {
-      if (ord.batchNumber && actualsMap[ord.batchNumber] !== undefined) {
-        const newVal = actualsMap[ord.batchNumber];
-        if (ord.actualProd !== newVal) {
-          ord.actualProd = newVal;
-          changed = true;
-          // Directly update DOM cells by id — no full re-render needed
-          const cell1 = document.getElementById(`actual-${ord.id}`);
-          const cell2 = document.getElementById(`actual2-${ord.id}`);
-          const formatted = newVal.toFixed ? newVal.toFixed(1) : newVal;
-          if (cell1) { cell1.textContent = formatted; cell1.className = 'text-mono' + (newVal > 0 ? ' text-green' : ''); }
-          if (cell2) { cell2.textContent = formatted; }
-          // Also update the actualProd input field if not focused
-          const inp = document.querySelector(`input[data-actual-batch="${ord.batchNumber}"]`);
-          if (inp && inp !== document.activeElement) inp.value = newVal;
-        }
-      }
-    });
-    if (changed) {
-      console.log('✅ Actual prod updated from DPR');
-      // Full re-render only if user idle 30+ seconds
-      if ((Date.now() - _planLastInput) > 30000) render();
-    }
-  } catch(e) {}
-}
-
-// Every 3 seconds: apply pending actuals sync (safe — only updates numbers, not form fields)
-setInterval(() => {
-  if (!_planPendingSync) return;
-  _planPendingSync = false;
-  fetchAndUpdateActuals(); // Safe — only updates actualProd values, never wipes inputs
-}, 3000);
-
-setTimeout(connectPlanSSE, 2000);
-setInterval(() => { if (!_ssePlan) connectPlanSSE(); }, 30000);
-// Also fetch actuals on load
-setTimeout(fetchAndUpdateActuals, 3000);
-// Refresh actuals every 2 minutes
-setInterval(fetchAndUpdateActuals, 2 * 60 * 1000);
-</script>
-
 </body>
 </html>

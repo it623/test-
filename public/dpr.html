@@ -2,19 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<script>
-// Force fresh load — redirect with version param if not already versioned
-(function(){
-  const p = window.location.search;
-  if(!p || !p.includes('v=')) {
-    window.location.replace(window.location.pathname + '?v=20260320');
-  }
-})();
-</script>
-<!-- Version: 20260320172056 -->
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DPR.tracker v7 — Sunloc</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -35,12 +22,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px
 .nbrand{font-family:var(--fc);font-weight:800;font-size:18px;letter-spacing:1px;color:var(--t2);white-space:nowrap;margin-right:16px}
 .nbrand b{color:var(--cyan)}
 .nbrand small{font-size:11px;color:var(--t3);font-weight:400;margin-left:4px}
-.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none;min-width:0}
+.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none}
 .ntabs::-webkit-scrollbar{display:none}
-.ntab{display:flex;align-items:center;gap:4px;padding:0 10px;height:100%;font-family:var(--fc);font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
+.ntab{display:flex;align-items:center;gap:5px;padding:0 13px;height:100%;font-family:var(--fc);font-weight:700;font-size:11.5px;letter-spacing:1px;text-transform:uppercase;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
 .ntab:hover{color:var(--t2)}
 .ntab.on{color:var(--cyan);border-bottom-color:var(--cyan)}
-.nright{display:flex;align-items:center;gap:4px;margin-left:4px;flex-shrink:0;max-width:420px}
+.nright{display:flex;align-items:center;gap:6px;margin-left:8px;flex-shrink:0}
 #ndate{background:transparent;border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:12px;font-weight:600;cursor:pointer;outline:none}
 #ndate::-webkit-calendar-picker-indicator{filter:invert(0.5)}
 .nbtn{padding:5px 11px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1px solid var(--b2);background:transparent;color:var(--t2);transition:.15s;white-space:nowrap}
@@ -136,7 +123,68 @@ input[type=number]{font-family:var(--mono);text-align:right}
 .chart-wrap-lg{position:relative;height:280px;margin:10px 0}
 /* ANALYTICS GRID */
 .agrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-@media(max-width:680px){.agrid{grid-template-columns:1fr}.staff-row{grid-template-columns:1fr}}
+@media(max-width:680px){
+  .agrid{grid-template-columns:1fr}
+  .staff-row{grid-template-columns:1fr}
+}
+
+/* ════════════════════════════════════════
+   DPR — MOBILE RESPONSIVE
+   ════════════════════════════════════════ */
+@media(max-width:768px){
+  /* ── Nav tabs → scrollable ── */
+  #nav { height: auto; min-height: var(--nav); flex-wrap: nowrap; padding: 0 4px; }
+  .ntabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .ntabs::-webkit-scrollbar { display: none; }
+  .ntab { padding: 0 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+  .nbrand { font-size: 14px; white-space: nowrap; }
+  .nright { flex-shrink: 0; gap: 4px; }
+  .nright .btn { padding: 4px 7px; font-size: 11px; }
+
+  /* ── Content padding ── */
+  .container, .content-wrap { padding: 10px !important; }
+
+  /* ── Floor tabs ── */
+  .ftabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+  .ftab { white-space: nowrap; flex-shrink: 0; padding: 6px 14px; font-size: 12px; }
+
+  /* ── Machine table ── */
+  .mtable-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .mtable { min-width: 700px; }
+  .mtable th, .mtable td { padding: 5px 6px; font-size: 11px; }
+
+  /* ── Shift header ── */
+  .shift-hdr { padding: 8px 12px; }
+  .shift-title { font-size: 13px; }
+
+  /* ── Staff row ── */
+  .staff-row { grid-template-columns: 1fr !important; gap: 8px; }
+
+  /* ── Inputs ── */
+  input[type=text], input[type=number], select {
+    font-size: 16px !important;
+    min-height: 38px;
+  }
+  .btn { min-height: 38px; }
+
+  /* ── DT table ── */
+  .dttable-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .dttable { min-width: 600px; }
+
+  /* ── Analytics grids ── */
+  .agrid { grid-template-columns: 1fr !important; }
+  .kpi-grid { grid-template-columns: repeat(2,1fr) !important; }
+  .kpi { padding: 10px; }
+
+  /* ── History table ── */
+  .hist-table-wrap { overflow-x: auto; }
+
+  /* ── Modal ── */
+  .modal-box { margin: 10px; padding: 16px; max-width: calc(100vw - 20px); }
+
+  /* ── User badge ── */
+  #dpr-user-badge { top: 6px; right: 8px; font-size: 10px; padding: 3px 7px; }
+}
 /* TABLE */
 .data-table{width:100%;border-collapse:collapse;font-size:12px}
 .data-table th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);padding:7px 10px;border-bottom:1px solid var(--b1);text-align:left}
@@ -221,10 +269,9 @@ input[type=number]{font-family:var(--mono);text-align:right}
     <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:140px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
       <option value="">📅 History</option>
     </select>
-    <button class="nbtn" onclick="exportData()" title="Export">↓</button>
-    <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import">↑</button>
+    <button class="nbtn" onclick="exportData()">↓ Export</button>
+    <button class="nbtn" onclick="document.getElementById('imp').click()">↑ Import</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
-    <div id="dpr-user-badge-inline" style="display:none;align-items:center;gap:4px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;user-select:none;white-space:nowrap;max-width:140px;overflow:hidden" onclick="event.stopPropagation();showDprUserMenu()"></div>
     <button class="nbtn primary" id="saveBtn" onclick="saveDay()">Save</button>
   </div>
 </div>
@@ -429,9 +476,6 @@ let curFloor = 'GF';
 let targets = JSON.parse(localStorage.getItem('dpr_targets')||'{}');
 let activeOrders = {}; // {machineId: [{id, batchNumber, customer, poNumber}]}
 // Sanitize server URL — strip any file path and trailing slashes
-
-// Server URL always uses window.location.origin (set at initialization)
-
 function sanitizeServerUrl(url) {
   if (!url) return '';
   url = url.trim();
@@ -443,8 +487,7 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = window.location.origin; // Always use same origin - app served from Railway
-localStorage.setItem('sunloc_server_url', serverUrl); // Keep localStorage in sync
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
 let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
 let unsaved = false;
 
@@ -476,23 +519,6 @@ function migrateMachineData(m){
   };
 }
 
-// Number formatting — max 4 decimal places, no trailing zeros
-function fmt4(n){ 
-  if(n===null||n===undefined||n==='') return '—';
-  const num = parseFloat(n);
-  if(isNaN(num)) return n;
-  // Round to 4 decimal places, remove trailing zeros
-  return parseFloat(num.toFixed(4)).toString();
-}
-// Format for display — 2 decimal max for production values
-function fmtProd(n){
-  if(n===null||n===undefined||n==='') return '—';
-  const num = parseFloat(n);
-  if(isNaN(num)) return '—';
-  if(num===0) return '0';
-  return parseFloat(num.toFixed(4)).toString();
-}
-
 // Total production for a machine = sum of all runs
 function mcTotalProd(m){ return (m.runs||[]).reduce((s,r)=>s+parseFloat(r.qty||0),0); }
 function blankDay(fl){ return {floor:fl,shifts:{A:blankShift(fl),B:blankShift(fl),C:blankShift(fl)},remarks:[],resort:[]}; }
@@ -516,32 +542,7 @@ function loadDay(fl,d){
 }
 function saveDay(){
   const fl=curFloor, d=getDate();
-  const today=new Date().toISOString().split('T')[0];
-
-  // Non-admin cannot save past dates
-  if(dprUser && dprUser.role !== 'admin' && d !== today){
-    alert('⚠️ Only Admin can save past records.\nYou can view past data but not make changes.');
-    return;
-  }
-
   const data=collectForm();
-
-  // Check if there is any actual data entered before saving
-  let hasData = false;
-  if(data.shifts) {
-    Object.values(data.shifts).forEach(sh => {
-      if(sh.incharge || sh.fitter || sh.chemist) { hasData = true; return; }
-      if(sh.machines) Object.values(sh.machines).forEach(m => {
-        if(m.operator || (m.runs && m.runs.some(r => r.qty || r.batchNumber))) hasData = true;
-      });
-    });
-  }
-
-  if(!hasData) {
-    toast('Nothing to save — enter data first', 'var(--amber)');
-    return;
-  }
-
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   setUnsaved(false);
   pushToServer(fl,d,data);
@@ -566,8 +567,8 @@ function collectForm(){
         m.runs=Array.from(runEls).map(el=>{
           const ri=el.dataset.ri;
           return{
-            orderId:document.getElementById('run-ord-'+sh+'-'+mc.id+'-'+ri)?.dataset?.orderId||'',
-            batchNumber:v('run-batch-'+sh+'-'+mc.id+'-'+ri)||v('run-ord-'+sh+'-'+mc.id+'-'+ri)||'',
+            orderId:v(`run-ord-${sh}-${mc.id}-${ri}`)||'',
+            batchNumber:v(`run-batch-${sh}-${mc.id}-${ri}`)||'',
             qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'',
             note:v(`run-note-${sh}-${mc.id}-${ri}`)||''
           };
@@ -575,12 +576,6 @@ function collectForm(){
         if(m.runs.length===0) m.runs=[blankRun()];
       }
       day.shifts[sh].machines[mc.id]=m;
-    });
-    // Collect Re-Sort input values per machine per shift
-    FLOORS[fl].machines.forEach(mc=>{
-      const rsVal = parseFloat(v(`rs-${sh}-${mc.id}`)) || 0;
-      day.resort = (day.resort||[]).filter(r=>!(r.mc===mc.id&&r.shift===sh&&r.fromInput));
-      if(rsVal>0) day.resort.push({mc:mc.id,shift:sh,reason:'Re-Sort',qty:rsVal,note:'',ts:new Date().toISOString(),fromInput:true});
     });
   });
   return day;
@@ -627,50 +622,32 @@ function calcShiftDT(fl,d,sh){
 // SERVER SYNC (SunlocAPI lite — inline)
 // ═══════════════════════════════════════════════════════
 async function checkServer(){
-  // Always ensure serverUrl is set — use window.location.origin as fallback
-  if(!serverUrl || serverUrl === '') {
-    serverUrl = window.location.origin;
-    localStorage.setItem('sunloc_server_url', serverUrl);
-    console.log('🔧 DPR serverUrl auto-fixed to:', serverUrl);
-  }
+  if(!serverUrl){ setSyncBadge('offline'); return false; }
   setSyncBadge('syncing');
   try{
     const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
     if(r.ok){ setSyncBadge('synced'); return true; }
-    // If current URL fails, try window.location.origin
-    if(serverUrl !== window.location.origin) {
-      serverUrl = window.location.origin;
-      localStorage.setItem('sunloc_server_url', serverUrl);
-      const r2=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
-      if(r2.ok){ setSyncBadge('synced'); return true; }
-    }
     setSyncBadge('offline'); return false;
-  }catch{
-    // Fallback to origin
-    if(serverUrl !== window.location.origin) {
-      serverUrl = window.location.origin;
-      localStorage.setItem('sunloc_server_url', serverUrl);
-    }
-    setSyncBadge('offline'); return false;
-  }
+  }catch{ setSyncBadge('offline'); return false; }
 }
 async function pushToServer(fl,d,data){
   if(!serverUrl) return;
-  // Flatten runs into actuals array — use only the CURRENT floor (fl) being saved
+  // Flatten runs into actuals array for server to process
   const actuals=[];
-  if(data.shifts && FLOORS[fl]) {
+  Object.keys(FLOORS).forEach(f=>{
+    if(!data.shifts) return;
     SHIFTS.forEach(sh=>{
       const sd=data.shifts[sh];
       if(!sd) return;
-      FLOORS[fl].machines.forEach(mc=>{
+      FLOORS[f]?.machines.forEach(mc=>{
         const m=migrateMachineData(sd.machines?.[mc.id]||blankMachine());
         (m.runs||[]).forEach((run,ri)=>{
           const qty=parseFloat(run.qty||0);
-          if(qty>0) actuals.push({floor:fl,machineId:mc.id,shift:sh,orderId:run.orderId||null,batchNumber:run.batchNumber||null,qty,runIndex:ri});
+          if(qty>0) actuals.push({floor:f,machineId:mc.id,shift:sh,orderId:run.orderId||null,batchNumber:run.batchNumber||null,qty,runIndex:ri});
         });
       });
     });
-  }
+  });
   try{
     await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
@@ -682,9 +659,7 @@ async function pushToServer(fl,d,data){
   }catch{ setSyncBadge('offline'); }
 }
 async function fetchActiveOrders(){
-  if(!serverUrl){ serverUrl = window.location.origin; }
-  if(false){
-    // Try cache even without server
+  if(!serverUrl){
     const cached=localStorage.getItem('dpr_active_orders');
     if(cached) try{activeOrders=JSON.parse(cached);}catch{}
     return;
@@ -702,18 +677,94 @@ async function fetchActiveOrders(){
       });
       // Cache locally
       localStorage.setItem('dpr_active_orders',JSON.stringify(activeOrders));
-      toast('✓ Orders synced from Planning App','var(--cyan)');
-      // Save current unsaved form data before re-rendering dropdowns
-      try { const cur=collectForm(); const fl=curFloor,d=getDate(); localStorage.setItem(skey(fl,d),JSON.stringify(cur)); } catch(e) {}
+      toast('✓ Orders synced from Planning App','var(--green)');
+
+      // Check each machine on current floor — if no active order, ensure TEMP batch exists
+      await checkAndCreateTempBatches();
+
       renderShifts(); // Re-render so dropdowns populate
     }
   }catch{
-    // Try cache
     const cached=localStorage.getItem('dpr_active_orders');
     if(cached) try{activeOrders=JSON.parse(cached);}catch{}
   }
-  // Also pull tracking A-Grade actuals to show rolling actuals in DPR
   await fetchTrackingAGrade();
+}
+
+// Check all machines on current floor — create TEMP batch if no active order
+async function checkAndCreateTempBatches(){
+  if(!serverUrl) return;
+  const fl = curFloor;
+  const machines = FLOORS[fl]?.machines || [];
+  for(const mc of machines){
+    if(!activeOrders[mc.id] || activeOrders[mc.id].length === 0){
+      try{
+        // Check/create TEMP batch for today
+        const r = await fetch(serverUrl+'/api/temp-batches/check/'+mc.id, {signal:AbortSignal.timeout(4000)});
+        const j = await r.json();
+        if(j.ok && j.needsTemp){
+          // Create TEMP if not exists for today
+          if(!j.todayTempBatch){
+            await fetch(serverUrl+'/api/temp-batches/create',{
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({machineId:mc.id}), signal:AbortSignal.timeout(4000)
+            });
+          }
+          // Add TEMP batch as a synthetic "order" in activeOrders
+          const tb = j.todayTempBatch || (await fetch(serverUrl+'/api/temp-batches/check/'+mc.id,{signal:AbortSignal.timeout(4000)}).then(r=>r.json()).then(j=>j.todayTempBatch));
+          if(tb){
+            if(!activeOrders[mc.id]) activeOrders[mc.id]=[];
+            activeOrders[mc.id].push({
+              id: tb.id,
+              batchNumber: tb.id,
+              customer: '⚠️ TEMP BATCH',
+              machineId: mc.id,
+              size: tb.machine_size,
+              qty: tb.daily_cap_lakhs,
+              actualQty: 0,
+              status: 'temp',
+              isTemp: true,
+              labelCount: tb.label_count,
+              colour: tb.colour || null,
+              pcCode: tb.pc_code || null,
+              colourConfirmed: !!tb.colour_confirmed
+            });
+            // Prompt for PC Code if not yet confirmed (one-time per TEMP batch)
+            if (!tb.colour_confirmed) {
+              setTimeout(() => promptTempBatchDetails(tb.id, mc.id), 400);
+            }
+          }
+        }
+      }catch(e){ /* non-blocking */ }
+    }
+  }
+  // Update TEMP alert banner
+  updateTempAlertBanner();
+}
+
+// Show/hide TEMP batch alert banner
+async function updateTempAlertBanner(){
+  if(!serverUrl) return;
+  try{
+    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
+    const j = await r.json();
+    let banner = document.getElementById('temp-alert-banner');
+    if(!banner){
+      banner = document.createElement('div');
+      banner.id = 'temp-alert-banner';
+      banner.style.cssText = 'position:fixed;top:var(--nav);left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-bottom:2px solid var(--amber);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px';
+      document.body.appendChild(banner);
+    }
+    if(j.ok && j.count > 0){
+      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
+      banner.style.display = 'flex';
+      banner.innerHTML = `⚠️ <strong style="color:var(--amber)">${j.count} TEMP batch${j.count>1?'es':''} active</strong>
+        — Machines: ${machines.join(', ')} — No planned orders assigned.
+        <span style="color:var(--amber);margin-left:4px">Planning entry + Admin reconciliation required.</span>`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }catch(e){}
 }
 
 let trackingAGrade = {}; // { machineId: { batchNumber, aGradePct, inspected } }
@@ -807,27 +858,6 @@ function clearServerUrl(){
 // RENDER — DATA ENTRY
 // ═══════════════════════════════════════════════════════
 function renderEntry(){
-  // Lock form for non-admin viewing past dates
-  const today = new Date().toISOString().split('T')[0];
-  const viewingDate = getDate();
-  const isAdmin = dprUser?.role === 'admin';
-  const isPast = viewingDate < today;
-  const isLocked = isPast && !isAdmin;
-
-  // Update Save button
-  const saveBtn = document.getElementById('saveBtn');
-  if(saveBtn){
-    if(isLocked){
-      saveBtn.disabled = true;
-      saveBtn.style.opacity = '0.4';
-      saveBtn.title = 'View only — Admin can edit past records';
-    } else {
-      saveBtn.disabled = false;
-      saveBtn.style.opacity = '1';
-      saveBtn.title = '';
-    }
-  }
-
   renderDayKpis();
   renderShifts();
   renderDTTable();
@@ -843,12 +873,12 @@ function renderDayKpis(){
   const dtCls=s.dtPct<=5?'green':s.dtPct<=10?'amber':'red';
   document.getElementById('dayKpis').innerHTML=`
     <div class="kpi"><div class="kpi-label">Target</div><div class="kpi-val cyan">${s.totTgt||'—'}</div><div class="kpi-sub">units/day</div></div>
-    <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${fmtProd(s.totProd)}</div><div class="kpi-sub">units today</div></div>
-    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+fmtProd(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
-    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${fmtProd(s.totAim)||'—'}</div><div class="kpi-sub">planned today</div></div>
+    <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
+    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
+    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim||'—'}</div><div class="kpi-sub">planned today</div></div>
     <div class="kpi"><div class="kpi-label">Net Backlog</div><div class="kpi-val ${s.backlog>0?'amber':'green'}">${s.backlog||'—'}</div><div class="kpi-sub">units behind</div></div>
-    <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${fmtProd(s.totResort)}</div><div class="kpi-sub">units</div></div>
-    <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${fmtProd(s.totDT)||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
+    <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
+    <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
 }
 
@@ -874,18 +904,18 @@ function renderShifts(){
           ${fl==='GF'?`<div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>`:`<div class="field-grp"></div>`}
           <div class="field-grp"><label>Shift Chemist</label><input type="text" id="si-${sh}-chemist" value="${esc(sd.chemist||'')}" placeholder="Name" oninput="markUnsaved()"></div>
         </div>
-        <table class="mtable">
+        <div class="mtable-wrap"><table class="mtable">
           <thead><tr>
             <th style="min-width:36px">MC</th>
-            <th style="min-width:36px">SZ</th>
+            <th>SZ</th>
             <th style="min-width:90px">Operator</th>
-            <th style="min-width:300px">Batch Runs <span style="color:var(--t3);font-weight:400;font-size:9px;letter-spacing:0">(+ Add Run for colour/batch change)</span></th>
-            <th class="r" style="min-width:52px">Target</th>
-            <th class="r" style="min-width:72px">Total Prod</th>
-            <th class="r" style="min-width:68px">VS TGT</th>
-            <th class="r" style="min-width:64px">AIM</th>
-            <th class="r" style="min-width:68px">Backlog</th>
-            <th class="r" style="min-width:72px;color:var(--red)">Re-Sort ✏️</th>
+            <th style="min-width:340px">Batch Runs <span style="color:var(--t3);font-weight:400;font-size:9px;letter-spacing:0">(+ Add Run for colour/batch change)</span></th>
+            <th class="r" style="min-width:44px">Target</th>
+            <th class="r" style="min-width:56px">Total Prod</th>
+            <th class="r" style="min-width:52px">VS TGT</th>
+            <th class="r" style="min-width:52px">AIM</th>
+            <th class="r" style="min-width:52px">Backlog</th>
+            <th class="r" style="min-width:52px;color:var(--amber)">Re-Sort</th>
           </tr></thead>
           <tbody>`;
 
@@ -907,18 +937,14 @@ function renderShifts(){
       let runsHtml='';
       runs.forEach((run,ri)=>{
         const orders=activeOrders[mc.id]||[];
-        // Match on orderId first, fallback to batchNumber — so saved selection restores after reload
-        const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${
-          (run.orderId && run.orderId===o.id) || (!run.orderId && run.batchNumber && run.batchNumber===o.batchNumber)
-          ?'selected':''}>${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}</option>`).join('');
+        const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${run.orderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
         const isMult=runs.length>1;
         runsHtml+=`
           <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}">
             ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
-            <input id="run-ord-${sh}-${mc.id}-${ri}" list="run-ord-list-${sh}-${mc.id}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0;border:1px solid var(--b2);border-radius:4px;background:var(--s2);color:var(--t1)" placeholder="— Order —" oninput="onRunOrderChange('${sh}','${mc.id}',${ri})" title="Select or type batch/order" autocomplete="off" value="${run.batchNumber||''}">
-            <datalist id="run-ord-list-${sh}-${mc.id}-${ri}">
-              ${(activeOrders[mc.id]||[]).map(o=>`<option value="${esc(o.batchNumber||o.poNumber||'')}">${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}</option>`).join('')}
-            </datalist>
+            <select id="run-ord-${sh}-${mc.id}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mc.id}',${ri})" title="Select active order">
+              ${ordOpts}
+            </select>
             <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" title="Type batch number if not in dropdown" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
             <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:54px;font-size:11px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" title="Production in Lakhs">
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
@@ -935,11 +961,11 @@ function renderShifts(){
           <button onclick="addRun('${sh}','${mc.id}')" style="margin-top:5px;padding:2px 8px;background:transparent;border:1px dashed var(--b2);border-radius:3px;color:var(--t3);font-size:10px;font-family:var(--fc);letter-spacing:.5px;cursor:pointer" title="Add another batch/colour change run">+ Add Run</button>
         </td>
         <td class="r" style="font-family:var(--mono);color:var(--t2)">${t}</td>
-        <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${fmtProd(p)}</td>
-        <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${fmtProd(vs)}</span>`:`<span class="vs-neg">${fmtProd(vs)}</span>`}</td>
+        <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${p||'—'}</td>
+        <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`}</td>
         <td><input type="number" id="aim-${sh}-${mc.id}" value="${m.aim||''}" placeholder="0" min="0" style="width:52px" oninput="markUnsaved();updateBacklog('${sh}','${mc.id}')"></td>
-        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);color:var(--amber)">${bl===null?'—':fmtProd(bl)}</td>
-        <td class="r" style="vertical-align:middle"><input type="number" id="rs-${sh}-${mc.id}" value="${mcResort||''}" placeholder="0" min="0" style="width:56px;color:var(--red);border:1px solid rgba(255,64,96,.4);border-radius:4px;background:rgba(255,64,96,.06);text-align:center;font-family:var(--mono)" oninput="updateResortFromInput('${sh}','${mc.id}');markUnsaved()" title="Enter Re-Sort quantity"></td>
+        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);color:var(--amber)">${bl===null?'—':bl}</td>
+        <td class="r" style="font-family:var(--mono);color:var(--red)">${mcResort||`<span style="color:var(--t3)">0</span>`}</td>
       </tr>`;
     });
 
@@ -947,12 +973,12 @@ function renderShifts(){
     html+=`</tbody><tfoot><tr class="tot-row">
       <td colspan="4" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
       <td class="r" style="font-family:var(--mono)">${shTgt}</td>
-      <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${fmtProd(shProd)||'—'}</td>
-      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${fmtProd(shVs)}</span>`:`<span class="vs-neg">${fmtProd(shVs)}</span>`}</td>
-      <td class="r" style="font-family:var(--mono)">${fmtProd(shAim)||'—'}</td>
-      <td class="r" style="font-family:var(--mono);color:var(--amber)">—</td>
-      <td class="r" style="font-family:var(--mono)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
-    </tr></tfoot></table></div></div>`;
+      <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
+      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
+      <td class="r" style="font-family:var(--mono)">${shAim||'—'}</td>
+      <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
+      <td></td>
+    </tr></tfoot></table></div></div></div>`;
   });
   document.getElementById('shiftsArea').innerHTML=html;
 }
@@ -978,13 +1004,10 @@ function addRun(sh, mcId){
     div.dataset.sh=sh; div.dataset.mc=mcId; div.dataset.ri=ri;
     div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}`;
     const orders=activeOrders[mcId]||[];
-    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}">${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}</option>`).join('');
+    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}">${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp&&o.pcCode?' | PC:'+esc(o.pcCode):''}${o.isTemp&&!o.colourConfirmed?' ⚠️ PC not set':''}</option>`).join('');
     div.innerHTML=`
       ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
-      <input id="run-ord-${sh}-${mcId}-${ri}" list="run-ord-list2-${sh}-${mcId}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0;border:1px solid var(--b2);border-radius:4px;background:var(--s2);color:var(--t1)" placeholder="— Order —" oninput="onRunOrderChange('${sh}','${mcId}',${ri})" title="Select or type batch" autocomplete="off" value="${run.batchNumber||''}">
-      <datalist id="run-ord-list2-${sh}-${mcId}-${ri}">
-        ${(activeOrders[mcId]||[]).map(o=>`<option value="${esc(o.batchNumber||o.poNumber||'')}">${esc(o.batchNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}</option>`).join('')}
-      </datalist>
+      <select id="run-ord-${sh}-${mcId}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mcId}',${ri})" title="Select active order">${ordOpts}</select>
       <input type="text" id="run-batch-${sh}-${mcId}-${ri}" placeholder="Batch #" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
       <input type="number" id="run-qty-${sh}-${mcId}-${ri}" placeholder="Qty" min="0" style="width:54px;font-size:11px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved();updateMcTotals('${sh}','${mcId}')" title="Production in Lakhs">
       <input type="text" id="run-note-${sh}-${mcId}-${ri}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()">
@@ -1014,23 +1037,51 @@ function removeRun(sh, mcId, ri){
 }
 
 function onRunOrderChange(sh, mcId, ri){
-  const inp=document.getElementById('run-ord-'+sh+'-'+mcId+'-'+ri);
-  const batchInp=document.getElementById('run-batch-'+sh+'-'+mcId+'-'+ri);
-  const val=inp?inp.value.trim():'';
-  if(!val) return;
-  const allMcOrders = activeOrders[mcId]||[];
-  const ord = allMcOrders.find(function(o){return o.batchNumber===val||o.id===val||o.poNumber===val;})
-    || Object.values(activeOrders).flat().find(function(o){return o.batchNumber===val||o.id===val;});
-  if(ord){
-    if(batchInp) batchInp.value=ord.batchNumber||val;
-    if(inp) inp.dataset.orderId = ord.id || '';
-  } else {
-    if(batchInp) batchInp.value=val;
-    if(inp) inp.dataset.orderId='';
+  const sel=document.getElementById(`run-ord-${sh}-${mcId}-${ri}`);
+  const batchInp=document.getElementById(`run-batch-${sh}-${mcId}-${ri}`);
+  const ordId=sel?.value;
+  if(ordId && activeOrders[mcId]){
+    const ord=activeOrders[mcId].find(o=>o.id===ordId);
+    if(ord){
+      if(batchInp) batchInp.value=ord.batchNumber||ord.poNumber||'';
+      // Show order qty and remaining qty as a tooltip/note on the run row
+      const rowEl=document.querySelector(`.run-row[data-sh="${sh}"][data-mc="${mcId}"][data-ri="${ri}"]`);
+      if(rowEl){
+        let infoEl=rowEl.querySelector('.run-ord-info');
+        if(!infoEl){
+          infoEl=document.createElement('span');
+          infoEl.className='run-ord-info';
+          infoEl.style.cssText='font-size:9px;color:var(--t3);font-family:var(--mono);white-space:nowrap;flex-shrink:0';
+          rowEl.appendChild(infoEl);
+        }
+        const planned=ord.qty||0;
+        const actual=ord.actualQty||0;
+        const remaining=Math.max(0,planned-actual);
+        infoEl.textContent=`Ord:${planned}L Prod:${actual}L Rem:${remaining}L`;
+        infoEl.style.color=remaining<=0?'var(--green)':'var(--t3)';
+      }
+    }
   }
   markUnsaved();
-  updateMcTotals(sh,mcId);
-  updateBacklog(sh,mcId);
+}
+
+// Recalculate total prod + VS TGT for a machine live as user types qty
+function updateMcTotals(sh, mcId){
+  const fl=curFloor;
+  const runQtyEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mcId}"] input[id^="run-qty-"]`);
+  let total=0;
+  runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
+  const t=tgt(fl,mcId);
+  const vs=total>0?total-t:null;
+  const totEl=document.getElementById(`tot-${sh}-${mcId}`);
+  const vsEl=document.getElementById(`vs-${sh}-${mcId}`);
+  if(totEl){
+    totEl.textContent=total||'—';
+    totEl.style.color=total>0?(total>=t?'var(--green)':'var(--amber)'):'var(--t3)';
+  }
+  if(vsEl) vsEl.innerHTML=vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`;
+  updateBacklog(sh, mcId);
+  renderDayKpis();
 }
 
 function updateBacklog(sh,mcId){
@@ -1064,7 +1115,7 @@ function renderDTTable(){
     html+=`</tr>`;
   });
   html+=`</tbody></table>`;
-  document.getElementById('dtTable').innerHTML=html;
+  document.getElementById('dtTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
 }
 
 function renderDTSummary(){
@@ -1087,7 +1138,7 @@ function renderDTSummary(){
   DT_CATS.forEach(c=>html+=`<td style="color:var(--amber);font-family:var(--mono)">${dayTotals[c]||'—'}</td>`);
   html+=`<td style="color:var(--amber);font-family:var(--mono)">${dayTotals.total||'—'}</td><td style="color:var(--amber);font-family:var(--mono)">${dayTotals.total>0?dayDtPct.toFixed(1)+'%':'—'}</td></tr>`;
   html+=`</tbody></table>`;
-  document.getElementById('dtSumTable').innerHTML=html;
+  document.getElementById('dtSumTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
 }
 function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
 
@@ -1119,22 +1170,6 @@ function deleteRemark(i){
   day.remarks.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   renderRemarks();
-}
-
-
-function updateResortFromInput(sh, mcId) {
-  const val = parseFloat(document.getElementById(`rs-${sh}-${mcId}`)?.value) || 0;
-  const fl = curFloor, d = getDate();
-  const day = loadDay(fl, d);
-  // Remove existing resort entries for this machine+shift (entered via input)
-  day.resort = (day.resort||[]).filter(r => !(r.mc === mcId && r.shift === sh && r.fromInput));
-  // Add new entry if value > 0
-  if (val > 0) {
-    day.resort.push({ mc: mcId, shift: sh, reason: 'Re-Sort', qty: val, note: '', ts: new Date().toISOString(), fromInput: true });
-  }
-  localStorage.setItem(skey(fl, d), JSON.stringify(day));
-  renderDayKpis();
-  renderResort();
 }
 
 function renderResort(){
@@ -1452,33 +1487,12 @@ function renderPerf(){
 // ═══════════════════════════════════════════════════════
 // HISTORY
 // ═══════════════════════════════════════════════════════
-async function renderHistory(){
-  // First load from server for all floors, then merge with localStorage
-  const serverEntries = [];
-  if(serverUrl) {
-    try {
-      for(const fl of Object.keys(FLOORS)) {
-        const r = await fetch(serverUrl+`/api/dpr/dates/${fl}`, {signal:AbortSignal.timeout(5000)});
-        if(r.ok) {
-          const j = await r.json();
-          (j.dates||[]).forEach(date => {
-            serverEntries.push({key:`dpr3_${fl}_${date}`, floor:fl, date, fromServer:true});
-          });
-        }
-      }
-    } catch(e) {}
-  }
-  // Merge with localStorage entries
-  const localKeys = Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
-  const localEntries = localKeys.map(k=>{ const parts=k.split('_'); return{key:k,floor:parts[1],date:parts[2]}; });
-  // Combine and deduplicate
-  const seen = new Set();
-  const allEntries = [...serverEntries, ...localEntries].filter(e => {
-    const key = `${e.floor}_${e.date}`;
-    if(seen.has(key)) return false;
-    seen.add(key); return true;
+function renderHistory(){
+  const allKeys=Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
+  const entries=allKeys.map(k=>{
+    const parts=k.split('_');
+    return{key:k,floor:parts[1],date:parts[2]};
   }).sort((a,b)=>b.date.localeCompare(a.date));
-  const entries = allEntries;
   if(!entries.length){document.getElementById('historyList').innerHTML=`<p style="color:var(--t3);padding:10px">No saved records yet.</p>`;return;}
   let html=`<table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
   entries.forEach(e=>{
@@ -1498,21 +1512,7 @@ async function renderHistory(){
   html+=`</tbody></table>`;
   document.getElementById('historyList').innerHTML=html;
 }
-async function loadRecord(fl,d){
-  // Try to fetch from server first if not in localStorage
-  const key=skey(fl,d);
-  if(!localStorage.getItem(key) && serverUrl){
-    try{
-      const r=await fetch(serverUrl+`/api/dpr/${fl}/${d}`,{signal:AbortSignal.timeout(5000)});
-      if(r.ok){
-        const j=await r.json();
-        if(j.ok && j.data){
-          localStorage.setItem(key, JSON.stringify(j.data));
-          toast('✅ Record loaded from server','var(--green)');
-        }
-      }
-    }catch(e){}
-  }
+function loadRecord(fl,d){
   curFloor=fl;
   document.getElementById('ndate').value=d;
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
@@ -1584,34 +1584,21 @@ function onDateChange(){
   }
 }
 
-async function refreshRecentDates(){
+function refreshRecentDates(){
   const sel=document.getElementById('recentDatesSelect');
   if(!sel) return;
   const fl=curFloor;
-  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
   // Collect dates from localStorage
-  const localDates=Object.keys(localStorage)
-    .filter(k=>k.startsWith(`dpr3_${fl}_`))
-    .map(k=>k.split('_')[2])
-    .filter(Boolean);
-
-  // Also fetch dates from server
-  let serverDates=[];
-  if(serverUrl){
-    try{
-      const r=await fetch(serverUrl+`/api/dpr/dates/${fl}`,{signal:AbortSignal.timeout(5000)});
-      if(r.ok){ const j=await r.json(); serverDates=j.dates||[]; }
-    }catch(e){}
-  }
-
-  // Merge and deduplicate
-  const allDates=[...new Set([...serverDates,...localDates])]
-    .sort((a,b)=>b.localeCompare(a)).slice(0,60);
-
+  const localDates=[...new Set(
+    Object.keys(localStorage)
+      .filter(k=>k.startsWith(`dpr3_${fl}_`))
+      .map(k=>k.split('_')[2])
+      .filter(Boolean)
+  )].sort((a,b)=>b.localeCompare(a)).slice(0,60);
   sel.innerHTML='<option value="">📅 History</option>'+
-    allDates.map(d=>{
+    localDates.map(d=>{
       const [y,m,day]=d.split('-');
+      const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       return `<option value="${d}">${parseInt(day)} ${months[parseInt(m)-1]} ${y}</option>`;
     }).join('');
 }
@@ -1721,38 +1708,14 @@ function renderDprSearch(){
 document.getElementById('ndate').value=today();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
-async function postAuthServerInit() {
-  // Step 1: Load cached orders immediately so dropdowns aren't blank
-  const cached = localStorage.getItem('dpr_active_orders');
-  if (cached) {
-    try { activeOrders = JSON.parse(cached); } catch {}
-  }
-
-  // Step 2: Fetch today's saved DPR data from server for ALL floors
-  const d = getDate();
-  try {
-    for (const fl of Object.keys(FLOORS)) {
-      const r = await fetch(serverUrl + `/api/dpr/${fl}/${d}`, {signal: AbortSignal.timeout(5000)});
-      if (r.ok) {
-        const j = await r.json();
-        if (j.ok && j.data && Object.keys(j.data).length > 0) {
-          // Only save if server has actual data (not empty)
-          localStorage.setItem(skey(fl, d), JSON.stringify(j.data));
-        }
-      }
+function postAuthServerInit() {
+  checkServer().then(ok=>{
+    if(ok){ fetchActiveOrders(); }
+    else {
+      const cached=localStorage.getItem('dpr_active_orders');
+      if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
     }
-  } catch(e) {}
-
-  // Step 3: Render with loaded data
-  renderEntry();
-
-  // Step 4: Fetch fresh orders from server
-  fetchActiveOrders();
-
-  // Step 5: Load history dates from server for current floor
-  setTimeout(async () => {
-    await refreshRecentDates();
-  }, 500);
+  });
 }
 
 window.addEventListener('beforeunload',e=>{ if(unsaved){e.preventDefault();e.returnValue='';} });
@@ -1775,33 +1738,6 @@ async function doDprLogin() {
   const errEl = document.getElementById('auth-error');
   errEl.textContent = '';
   if (!pin) { errEl.textContent = 'Please enter your PIN'; return; }
-  
-  // Quick offline check first — always works instantly
-  const offlinePins = { GF:'1111', FF:'2222', DPR_Admin:'9999' };
-  const resolvedRoleQuick = role === 'DPR_Admin' ? 'admin' : role.toLowerCase();
-  if (offlinePins[role] === pin) {
-    // Login immediately with offline auth
-    dprUser = { username: role, role: resolvedRoleQuick, token: null };
-    localStorage.setItem('dpr_session', JSON.stringify(dprUser));
-    applyDprRoleRestrictions();
-    document.getElementById('auth-overlay').classList.add('hidden');
-    addDprUserBadge();
-    renderEntry();
-    go('entry');
-    postAuthServerInit(); // Async — loads server data in background
-    dprAuditLog('LOGIN', 'Logged in to DPR');
-    // Try to upgrade to server token in background
-    if (serverUrl) {
-      fetch(serverUrl + '/api/auth/login', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username: role, pin, app: 'dpr' }),
-        signal: AbortSignal.timeout(5000)
-      }).then(r=>r.json()).then(j=>{
-        if(j.ok){ dprUser.token = j.token; localStorage.setItem('dpr_session', JSON.stringify(dprUser)); }
-      }).catch(()=>{});
-    }
-    return;
-  }
 
   // Try server auth first, fall back to defaults
   const defaults = { GF:'1111', FF:'2222', DPR_Admin:'9999' };
@@ -1819,15 +1755,7 @@ async function doDprLogin() {
       if (j.ok) {
         dprUser = { username: j.username, role: j.role, token: j.token };
         authOk = true;
-      } else {
-        // Server rejected — try offline PIN as fallback
-        if (defaults[role] && defaults[role] === pin) {
-          dprUser = { username: role, role: resolvedRole, token: null };
-          authOk = true;
-        } else {
-          errEl.textContent = j.error || 'Invalid PIN'; return;
-        }
-      }
+      } else { errEl.textContent = j.error || 'Invalid PIN'; return; }
     } catch(e) {
       // Fall through to offline check
     }
@@ -1839,13 +1767,13 @@ async function doDprLogin() {
   }
 
   if (authOk) {
-    localStorage.setItem('dpr_session', JSON.stringify(dprUser));
+    sessionStorage.setItem('dpr_session', JSON.stringify(dprUser));
     applyDprRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     addDprUserBadge();
     renderEntry();
     go('entry');
-    postAuthServerInit(); // Loads today's data + orders + history
+    postAuthServerInit();
     dprAuditLog('LOGIN', 'Logged in to DPR');
   }
 }
@@ -1881,21 +1809,13 @@ function isBackDateAllowed() {
 }
 
 function addDprUserBadge() {
-  // Use inline badge in navbar — no overlap with Save button
-  const inline = document.getElementById('dpr-user-badge-inline');
-  if (inline) {
-    inline.style.display = 'flex';
-    inline.innerHTML = `👤 ${dprUser.username} <span style="color:var(--t3);font-size:10px">[${dprUser.role.toUpperCase()}]</span> <span style="color:var(--t3)">▾</span>`;
-    inline.id = 'dpr-user-badge'; // Keep same ID for compatibility
-  } else {
-    if (document.getElementById('dpr-user-badge')) return;
-    const wrap = document.createElement('div');
-    wrap.id = 'dpr-user-badge';
-    wrap.style.cssText = 'display:flex;align-items:center;gap:4px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;max-width:150px;overflow:hidden';
-    wrap.innerHTML = `👤 ${dprUser.username} <span style="color:var(--t3)">[${dprUser.role.toUpperCase()}]</span> <span style="color:var(--t3)">▾</span>`;
-    wrap.onclick = showDprUserMenu;
-    document.getElementById('nright') ? document.getElementById('nright').insertBefore(wrap, document.getElementById('saveBtn')) : document.body.appendChild(wrap);
-  }
+  if (document.getElementById('dpr-user-badge')) return;
+  const wrap = document.createElement('div');
+  wrap.id = 'dpr-user-badge';
+  wrap.style.cssText = 'position:fixed;top:8px;right:10px;z-index:500;display:flex;align-items:center;gap:6px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer';
+  wrap.innerHTML = `👤 ${dprUser.username} <span style="color:var(--t3)">[${dprUser.role.toUpperCase()}]</span> <span style="color:var(--t3)">▾</span>`;
+  wrap.onclick = showDprUserMenu;
+  document.body.appendChild(wrap);
 
   // Show audit tab for admin
   if (dprUser.role === 'admin') {
@@ -1914,13 +1834,13 @@ function addDprUserBadge() {
 
 function showDprUserMenu() {
   const isAdmin = dprUser?.role === 'admin';
-  openModal(`👤 ${dprUser?.username}`,`
+  openModal(`👤 ${dprUser?.username}`, `
     <div style="padding:4px 0">
       <div style="font-size:13px;color:var(--t3);margin-bottom:14px">Role: <strong style="color:var(--cyan)">${dprUser?.role?.toUpperCase()}</strong></div>
-      ${isAdmin ? `<button class="nbtn" style="width:100%;margin-bottom:8px" onclick="closeModal();showDprAuditPage()">📋 Audit Log</button>` : ''}
-      <button class="nbtn" style="width:100%;background:var(--red,#e74c3c);color:#fff;margin-top:4px" onclick="doDprLogout()">🚪 Log Out</button>
+      ${isAdmin ? `<button class="btn btn-sm" style="width:100%;margin-bottom:8px;background:var(--s3);color:var(--t1)" onclick="closeModal();showDprAuditPage()">📋 Audit Log</button>` : ''}
+      <button class="btn btn-sm btn-danger" style="width:100%" onclick="doDprLogout()">🚪 Log Out</button>
     </div>
-  `,[{label:'Close', fn: closeModal}]);
+  `, [{label:'Close', fn:'closeModal()'}]);
 }
 
 async function doDprLogout() {
@@ -1928,11 +1848,9 @@ async function doDprLogout() {
   if (serverUrl && dprUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:dprUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
-  localStorage.removeItem('dpr_session');
+  sessionStorage.removeItem('dpr_session');
   dprUser = null;
-  // Hide inline badge
-  const inlineBadge = document.getElementById('dpr-user-badge');
-  if (inlineBadge) { inlineBadge.style.display = 'none'; inlineBadge.id = 'dpr-user-badge-inline'; }
+  document.getElementById('dpr-user-badge')?.remove();
   document.getElementById('auth-pin').value = '';
   document.getElementById('auth-error').textContent = '';
   document.getElementById('auth-overlay').classList.remove('hidden');
@@ -2009,110 +1927,88 @@ function showDprAuditPage() {
 
 // On init — check saved session
 (function initDprAuth() {
-  const saved = localStorage.getItem('dpr_session');
+  const saved = sessionStorage.getItem('dpr_session');
   if (saved) {
     try {
       dprUser = JSON.parse(saved);
-      // Load cached orders immediately
-      const cachedOrders = localStorage.getItem('dpr_active_orders');
-      if (cachedOrders) try { activeOrders = JSON.parse(cachedOrders); } catch {}
       document.getElementById('auth-overlay').classList.add('hidden');
       applyDprRoleRestrictions();
       addDprUserBadge();
       renderEntry();
       go('entry');
-      postAuthServerInit(); // This now loads today's data from server
+      postAuthServerInit();
       return;
     } catch(e) {}
   }
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// Force immediate server connection on every page load
-(function forceConnect() {
-  setTimeout(async () => {
-    try {
-      const r = await fetch(serverUrl + '/api/health', {signal: AbortSignal.timeout(5000)});
-      if (r.ok) {
-        setSyncBadge('synced');
-        // Always fetch orders regardless of login state — orders are needed for dropdowns
-        await fetchActiveOrders();
-      }
-    } catch(e) {}
-  }, 800);
-  // Also retry at 3s and 6s
-  setTimeout(() => { if(Object.keys(activeOrders).length === 0) fetchActiveOrders(); }, 3000);
-  setTimeout(() => { if(Object.keys(activeOrders).length === 0) fetchActiveOrders(); }, 6000);
-})();
-</script>
+// ── TEMP Batch PC Code Prompt (one-time per TEMP batch) ────────
+const _tempPromptShown = new Set();
 
-<script>
-// ── REAL-TIME SYNC (SSE) ──────────────────────────────
-// SAFE: Never re-renders form. Only updates order dropdowns when user is idle 10+ seconds.
-let _sseSource = null;
-let _lastUserInput = 0;
-let _pendingOrderRefresh = false;
+async function promptTempBatchDetails(tempBatchId, machineId) {
+  if (_tempPromptShown.has(tempBatchId)) return;
+  _tempPromptShown.add(tempBatchId);
+  openModal('⚠️ TEMP Batch — Enter PC Code', `
+    <div style="padding:4px 0">
+      <div style="background:rgba(255,64,96,0.08);border:1px solid rgba(255,64,96,0.3);border-left:4px solid #ff4060;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px">
+        <strong>TEMP Batch:</strong> ${tempBatchId}<br>
+        <span style="font-size:12px;color:var(--t2)">Machine is running without a planned order. Please enter the PC Code being produced. Colour is derived automatically from PC Code.</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <label style="font-size:11px;font-weight:600;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.8px">PC Code <span style="color:var(--red)">*</span></label>
+          <input id="tmp-pccode" style="width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:5px;color:var(--t1);padding:9px 12px;font-size:13px" placeholder="e.g. 00145" oninput="onTempPcInput(this.value)">
+          <div style="font-size:11px;color:var(--t3);margin-top:4px">Enter the PC Code of the capsule being produced</div>
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.8px">Colour (from PC Code)</label>
+          <input id="tmp-colour" style="width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:5px;color:var(--t1);padding:9px 12px;font-size:13px;opacity:0.7" placeholder="Auto-filled from PC Code" readonly>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--t3);margin-top:10px">These details will migrate to the real order when Planning reconciles this batch.</div>
+    </div>
+  `, [
+    { label: 'Save', fn: \`saveTempBatchDetails('\${tempBatchId}')\` },
+    { label: 'Skip', fn: 'closeModal()' }
+  ]);
+}
 
-document.addEventListener('input', () => { _lastUserInput = Date.now(); });
-document.addEventListener('change', () => { _lastUserInput = Date.now(); });
+function onTempPcInput(pcCode) {
+  const colourEl = document.getElementById('tmp-colour');
+  if (!colourEl) return;
+  let found = '';
+  Object.values(activeOrders || {}).forEach(orders => {
+    orders.forEach(o => { if (o.pcCode === pcCode && o.colour) found = o.colour; });
+  });
+  colourEl.value = found || '';
+  colourEl.placeholder = found ? '' : 'Colour not found for this PC Code';
+}
 
-async function safeRefreshOrders() {
-  if (!serverUrl) return;
-  if ((Date.now() - _lastUserInput) < 10000) { _pendingOrderRefresh = true; return; }
-  _pendingOrderRefresh = false;
+async function saveTempBatchDetails(tempBatchId) {
+  const pcCode = document.getElementById('tmp-pccode')?.value?.trim();
+  const colour = document.getElementById('tmp-colour')?.value?.trim();
+  if (!pcCode) { alert('Please enter a PC Code'); return; }
+  if (!serverUrl) { closeModal(); return; }
   try {
-    const r = await fetch(serverUrl + '/api/orders/active', {signal: AbortSignal.timeout(5000)});
-    if (!r.ok) return;
+    const r = await fetch(serverUrl + '/api/temp-batches/update-details', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tempBatchId, colour, pcCode }),
+      signal: AbortSignal.timeout(5000)
+    });
     const j = await r.json();
-    if (j.ok && j.orders) {
-      activeOrders = {};
-      j.orders.filter(o => o.machineId).forEach(o => {
-        if (!activeOrders[o.machineId]) activeOrders[o.machineId] = [];
-        activeOrders[o.machineId].push(o);
+    if (j.ok) {
+      Object.values(activeOrders || {}).forEach(orders => {
+        orders.forEach(o => {
+          if (o.id === tempBatchId) { o.colour = colour; o.pcCode = pcCode; o.colourConfirmed = true; }
+        });
       });
-      localStorage.setItem('dpr_active_orders', JSON.stringify(activeOrders));
-      // Silently update only the <option> elements in dropdowns — never touches input values
-      document.querySelectorAll('input[id^="run-ord-"]').forEach(sel => {
-        const parts = sel.id.split('-');
-        const mcId = parts[3];
-        const currentVal = sel.value;
-        const orders = activeOrders[mcId] || [];
-        sel.innerHTML = '<option value="">— Order —</option>' +
-          orders.map(o => `<option value="${o.id}" ${o.id===currentVal?'selected':''}>${o.batchNumber}|${o.customer}|S${o.size}</option>`).join('');
-        sel.value = currentVal;
-      });
-    }
-  } catch(e) {}
+      closeModal();
+      renderEntry();
+      dprAuditLog('TEMP_DETAILS_SET', 'TEMP ' + tempBatchId + ': PC Code=' + pcCode + ', Colour=' + (colour||'—'));
+    } else alert('Error saving: ' + j.error);
+  } catch(e) { alert('Server error: ' + e.message); }
 }
-
-// Check every 5 seconds — refresh only if pending AND user has been idle 10+ seconds
-setInterval(() => { if (_pendingOrderRefresh) safeRefreshOrders(); }, 5000);
-
-function connectSSE() {
-  if (!serverUrl || _sseSource) return;
-  _sseSource = new EventSource(serverUrl + "/api/sync/events?app=dpr");
-  _sseSource.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.type === "planning_updated") {
-        _pendingOrderRefresh = true; // Defer until user is idle
-      }
-    } catch(err) {}
-  };
-  _sseSource.onerror = () => {
-    if (_sseSource) { _sseSource.close(); _sseSource = null; }
-    setTimeout(connectSSE, 10000);
-  };
-}
-// SSE connect after auth
-window.addEventListener('DOMContentLoaded', () => {
-  if(typeof postAuthServerInit !== 'undefined') {
-    const _origPAI = postAuthServerInit;
-    window.postAuthServerInit = async function() { await _origPAI(); setTimeout(connectSSE, 1000); };
-  }
-});
-// Background polling removed — safeRefreshOrders() handles updates when user is idle
 </script>
-
 </body>
 </html>

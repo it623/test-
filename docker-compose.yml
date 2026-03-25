@@ -1,0 +1,45 @@
+services:
+  sunloc-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sunloc-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Server configuration
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      # SQLite database path (stored in volume)
+      DB_PATH: /data/sunloc.db
+    volumes:
+      # Persist SQLite database
+      - sunloc-data:/data
+      # Enable for development with hot reload
+      # - ./server.js:/app/server.js
+      # - ./public:/app/public
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/health', (r) => { if (r.statusCode !== 200) throw new Error(r.statusCode); }).on('error', () => { process.exit(1); })"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # Uncomment for production deployments with resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 1G
+    #     reservations:
+    #       cpus: '1'
+    #       memory: 512M
+
+volumes:
+  # SQLite data persistence
+  sunloc-data:
+    driver: local
+
+networks:
+  default:
+    driver: bridge

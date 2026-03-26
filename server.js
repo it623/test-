@@ -879,7 +879,7 @@ app.get('/app/tracking', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  const tf=require('fs').readFileSync(path.join(__dirname,'public','tracking.html'),'utf8');res.send(tf.replace(/\\\$\{s\.labelId\.slice/g,'\$\{(s.labelId||\\).slice'));
+  res.sendFile(path.join(__dirname, 'public', 'tracking.html'));
 });
 
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

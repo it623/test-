@@ -1196,7 +1196,7 @@ function generateZPL(label, batch){
 ^PW1200
 ^LL800
 ^MNM
-^PON
+^POI
 
 ^CF0,46
 ^FO20,16^FB1160,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
@@ -1608,7 +1608,7 @@ function openLabelGen(preselect){
       <label>Batch</label>
       <select id="lg-batch" onchange="updateLabelGenInfo()">
         <option value="">-- Select Batch --</option>
-        ${activeBatches.map(b=>{const bkey=b.batchNumber||b.id;const blabel=b.batchNumber||(b.poNumber?'PO:'+b.poNumber:'Order:'+(b.id||'').slice(-4));return `<option value="${bkey}" ${bkey===preselect?'selected':''}>${blabel} — ${b.customer||''} | Size ${b.size} | ${b.isPrinted?'PTD':'UP'}</option>`;}).join('')}
+        ${activeBatches.map(b=>{const bkey=b.batchNumber||b.id;const blabel=b.batchNumber||(b.poNumber?'PO:'+b.poNumber:'Order:'+b.id.slice(-4));return `<option value="${bkey}" ${bkey===preselect?'selected':''}>${blabel} — ${b.customer||''} | Size ${b.size} | ${b.isPrinted?'PTD':'UP'}</option>`;}).join('')}
       </select>
     </div>
     <div id="lg-info" class="alert alert-info hidden"></div>
@@ -1922,23 +1922,7 @@ const DEPT_CONFIG={
 
 function renderDeptScan(dept){
   const el=document.getElementById('page-'+dept);
-  if(!el){ console.error('Page element not found: page-'+dept); return; }
   const cfg=DEPT_CONFIG[dept];
-  if(!cfg){ console.error('DEPT_CONFIG not found for: '+dept); return; }
-  
-  // If batches not loaded yet, show loading state and retry
-  if(state.batches.length===0){
-    el.innerHTML=`<div class="card" style="text-align:center;padding:40px">
-      <div style="font-size:32px;margin-bottom:12px">⏳</div>
-      <div class="section-title">Loading batches...</div>
-      <div class="text-sm text-muted mt-8">Fetching data from server</div>
-      <button class="btn btn-primary mt-16" onclick="pullFromServer().then(()=>renderPage(currentPage))">🔄 Retry</button>
-    </div>`;
-    // Auto retry after 2 seconds
-    setTimeout(()=>{ if(state.batches.length>0) renderPage(currentPage); }, 2000);
-    return;
-  }
-
   const myAlerts=state.alerts.filter(a=>a.dept===dept);
   const activeBatches=getActiveBatchesForDept(dept);
 
@@ -1951,7 +1935,7 @@ function renderDeptScan(dept){
     <div class="section-header" style="margin-bottom:8px">
       <div><div class="section-title">${cfg.label}</div><div class="section-sub">Scan boxes IN and OUT of this department</div></div>
     </div>
-    ${myAlerts.length>0?`<div class="alert alert-danger">🚨 ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+(a.labelId||'').slice(-4)).join(', ')}</div>`:''}
+    ${myAlerts.length>0?`<div class="alert alert-danger">🚨 ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+a.labelId.slice(-4)).join(', ')}</div>`:''}
     <!-- SCAN PANEL -->
     <div class="grid-2">
       <div>
@@ -2018,7 +2002,7 @@ function renderDeptScan(dept){
     <div class="tbl-wrap"><table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Scan IN</th><th>Scan OUT</th><th>A-Grade</th><th>Wastage</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
-      ${activeBatches.filter(b=>b&&b.batchNumber).map(b=>{
+      ${activeBatches.map(b=>{
         const inCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='in').length;
         const outCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='out').length;
         const w=getTotalWastage(b.batchNumber,dept);
@@ -2043,8 +2027,8 @@ function renderDeptScan(dept){
           <td class="td-mono ${aGradePct<90?'red':aGradePct<95?'amber':'green'}">${fmt(aGradePct,1)}%</td>
           <td class="td-mono">S:${fmt(w.salvage)} R:${fmt(w.remelt)}</td>
           <td>${closed?'<span class="badge badge-green">✅ Closed</span>':inCount===0?'<span class="badge badge-gray">No scans</span>':balanced?'<span class="badge badge-blue">Ready to Close</span>':`<span class="badge badge-amber">⚠ ${balanceShortfall>0?balanceShortfall+' boxes unaccounted':'Over by '+Math.abs(balanceShortfall)+' boxes'}</span>`}</td>
-          <td>${!closed&&canClose?`<button class="btn btn-sm btn-success" onclick="closeBatchStage('${b.batchNumber||''}','${dept}')">Close Stage</button>`:
-            !closed&&currentDept==='admin'?`<button class="btn btn-sm btn-warning" onclick="adminCloseBatchStage('${b.batchNumber||''}','${dept}')">⚡ Force Close</button>`:'—'}</td>
+          <td>${!closed&&canClose?`<button class="btn btn-sm btn-success" onclick="closeBatchStage('${b.batchNumber}','${dept}')">Close Stage</button>`:
+            !closed&&currentDept==='admin'?`<button class="btn btn-sm btn-warning" onclick="adminCloseBatchStage('${b.batchNumber}','${dept}')">⚡ Force Close</button>`:'—'}</td>
         </tr>`;
       }).join('')||'<tr><td colspan="8" class="text-center text-muted">No active batches at this stage</td></tr>'}
       </tbody>
@@ -2057,10 +2041,10 @@ function renderDeptScan(dept){
     <div class="tbl-wrap"><table>
       <thead><tr><th>Time</th><th>Label ID</th><th>Batch</th><th>Type</th><th>Qty (L)</th></tr></thead>
       <tbody>
-      ${state.scans.filter(s=>s&&s.dept===dept).slice(-20).reverse().map(s=>`<tr>
+      ${state.scans.filter(s=>s.dept===dept).slice(-20).reverse().map(s=>`<tr>
         <td class="td-mono text-sm">${fmtDateTime(s.ts)}</td>
-        <td class="td-mono text-sm">${(s.labelId||'').slice(-8)}</td>
-        <td class="td-bold td-mono">${s.batchNumber||'-'}</td>
+        <td class="td-mono text-sm">${s.labelId.slice(-8)}</td>
+        <td class="td-bold td-mono">${s.batchNumber}</td>
         <td>${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
         <td class="td-mono">${fmt(s.qty)}</td>
       </tr>`).join('')||'<tr><td colspan="5" class="text-center text-muted">No scans recorded yet</td></tr>'}
@@ -2202,10 +2186,10 @@ function adminCloseBatchStage(batchNo,dept){
 
 function getActiveBatchesForDept(dept){
   return state.batches.filter(b=>{
-    if(!b || !b.batchNumber) return false;
     if(b.status==='closed') return false;
     const flow=getBatchFlow(b);
-    if(!flow || !flow.includes(dept)) return false;
+    if(!flow.includes(dept)) return false;
+    // Show if previous stage is complete or it's the first stage
     return canScanDept(b.batchNumber,dept)||isStageComplete(b.batchNumber,dept)||currentDept==='admin';
   });
 }

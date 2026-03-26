@@ -783,7 +783,7 @@ async function pullFromServer(){
       const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
       Object.assign(state, j.state);
       // Guard: ensure arrays are never undefined after server merge
-      state.scans        = Array.isArray(state.scans)        ? state.scans.filter(s=>s&&s.labelId)        : [];
+      state.scans        = Array.isArray(state.scans)        ? state.scans.filter(s=>s&&s.batchNumber)        : [];
       state.labels       = Array.isArray(state.labels)       ? state.labels       : [];
       state.batches      = Array.isArray(state.batches)      ? state.batches      : [];
       state.stageClosure = Array.isArray(state.stageClosure) ? state.stageClosure : [];
@@ -2028,8 +2028,8 @@ function renderDeptScan(dept){
       <thead><tr><th>Batch</th><th>Customer</th><th>Scan IN</th><th>Scan OUT</th><th>A-Grade</th><th>Wastage</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
       ${activeBatches.filter(b=>b&&b.batchNumber).map(b=>{
-        const inCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='in').length;
-        const outCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='out').length;
+        const inCount=state.scans.filter(s=>s&&s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='in').length;
+        const outCount=state.scans.filter(s=>s&&s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='out').length;
         const w=getTotalWastage(b.batchNumber,dept);
         const inQty=boxToLakh(inCount,b.size);
         const outQty=boxToLakh(outCount,b.size);

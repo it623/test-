@@ -239,134 +239,11 @@ input[type=number]{font-family:var(--mono)}
 
 /* ── RESPONSIVE ── */
 @media(max-width:768px){
-  /* ── Layout ── */
   #sidebar{position:fixed;left:-var(--nav-w);transition:.3s;z-index:200}
   #sidebar.open{left:0}
   #main{width:100%}
   .grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
   .form-row.cols-2,.form-row.cols-3{grid-template-columns:1fr}
-
-  /* ── Hamburger button ── */
-  #mobile-menu-btn{display:block!important}
-
-  /* ── Sidebar overlay backdrop ── */
-  #sidebar{position:fixed;left:-260px;top:0;bottom:0;width:260px;z-index:400;transition:left .25s;overflow-y:auto}
-  #sidebar.open{left:0;box-shadow:4px 0 20px rgba(0,0,0,0.5)}
-  #sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:399}
-  #sidebar.open ~ #sidebar-backdrop{display:block}
-
-  /* ── Topbar ── */
-  #topbar{padding:0 10px;height:52px}
-  #tb-title{font-size:14px}
-  #tb-subtitle{display:none}
-  #tb-actions .btn{padding:5px 8px;font-size:11px}
-
-  /* ── Login page ── */
-  .login-card{padding:24px 18px;margin:16px}
-  .dept-grid{grid-template-columns:repeat(2,1fr)!important;gap:8px}
-  .dept-btn{padding:12px 8px;font-size:12px}
-  .dept-btn .dept-icon{font-size:22px}
-
-  /* ── Scan zones — MOBILE OPTIMISED ── */
-  .scan-zone{
-    padding:16px 12px;
-    min-height:140px;
-    border-radius:10px;
-    border:2px dashed var(--border)
-  }
-  .scan-zone .scan-input{
-    font-size:16px!important;  /* prevents iOS zoom */
-    padding:12px 14px!important;
-    border-radius:8px;
-    width:100%;
-    -webkit-appearance:none;
-  }
-  .scan-zone .btn{
-    padding:12px 20px!important;
-    font-size:14px!important;
-    min-height:44px;  /* minimum touch target */
-    border-radius:8px;
-  }
-  /* Stack IN/OUT scan panels vertically on mobile */
-  .scan-panels-grid{
-    grid-template-columns:1fr!important;
-    gap:12px
-  }
-
-  /* ── Camera button prominence on mobile ── */
-  .btn-camera-mobile{
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-    width:100%;
-    padding:14px!important;
-    font-size:15px!important;
-    font-weight:700;
-    min-height:52px;
-    background:var(--accent)!important;
-    color:#0a0f1e!important;
-    border-radius:10px;
-    margin-bottom:8px;
-  }
-
-  /* ── Tables → card view on mobile ── */
-  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{min-width:500px}
-
-  /* ── Cards ── */
-  .card{padding:12px;border-radius:8px;margin-bottom:12px}
-  .card-title{font-size:13px}
-
-  /* ── Batch tracker ── */
-  .batch-card{padding:12px}
-  .batch-card .stage-pills{flex-wrap:wrap;gap:4px}
-  .stage-pill{font-size:11px;padding:3px 8px}
-
-  /* ── General touch targets ── */
-  .btn{min-height:40px;padding:8px 12px}
-  .btn-sm{min-height:36px}
-  select,input[type=text],input[type=number]{
-    font-size:16px!important;
-    min-height:42px;
-    padding:8px 10px;
-  }
-
-  /* ── Navigation bottom bar for mobile ── */
-  #mobile-nav{
-    display:flex!important;
-    position:fixed;
-    bottom:0;left:0;right:0;
-    background:var(--surface2);
-    border-top:1px solid var(--border);
-    z-index:300;
-    padding:4px 0 env(safe-area-inset-bottom);
-  }
-  .mobile-nav-item{
-    flex:1;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    padding:6px 2px;
-    font-size:10px;
-    color:var(--text3);
-    cursor:pointer;
-    gap:2px;
-  }
-  .mobile-nav-item.active{color:var(--accent)}
-  .mobile-nav-item .nav-icon{font-size:18px}
-
-  /* ── Content bottom padding for mobile nav ── */
-  #main{padding-bottom:64px}
-
-  /* ── Hide desktop-only elements ── */
-  .desktop-only{display:none!important}
-  .mobile-show{display:block!important}
-}
-
-@media(min-width:769px){
-  #mobile-nav{display:none!important}
-  .mobile-show{display:none!important}
 }
 
 /* ── MISC ── */
@@ -387,30 +264,6 @@ input[type=number]{font-family:var(--mono)}
 </style>
 </head>
 <body>
-
-<!-- MOBILE BOTTOM NAV (hidden on desktop via CSS) -->
-<div id="mobile-nav" style="display:none">
-  <div class="mobile-nav-item" id="mnav-scan" onclick="mobileNavTo('scan')">
-    <span class="nav-icon">📷</span>
-    <span>Scan</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-tracker" onclick="mobileNavTo('batch-tracker')">
-    <span class="nav-icon">📦</span>
-    <span>Tracker</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-labels" onclick="mobileNavTo('labels')">
-    <span class="nav-icon">🏷️</span>
-    <span>Labels</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-search" onclick="mobileNavTo('search')">
-    <span class="nav-icon">🔍</span>
-    <span>Search</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-more" onclick="toggleMobileMenu()">
-    <span class="nav-icon">☰</span>
-    <span>More</span>
-  </div>
-</div>
 
 <!-- LOGIN PAGE -->
 <div id="login-page">
@@ -444,8 +297,7 @@ input[type=number]{font-family:var(--mono)}
 <!-- MAIN APP -->
 <div id="app" style="display:none">
   <!-- SIDEBAR -->
-  <div id="sidebar-backdrop" onclick="toggleMobileMenu()"></div>
-<div id="sidebar">
+  <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
       <p>Tracking Suite v1.0</p>
@@ -467,12 +319,9 @@ input[type=number]{font-family:var(--mono)}
   <!-- MAIN -->
   <div id="main">
     <div id="topbar">
-      <div style="display:flex;align-items:center;gap:10px">
-        <button id="mobile-menu-btn" onclick="toggleMobileMenu()" style="display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1">☰</button>
-        <div>
-          <div class="tb-title" id="tb-title">Dashboard</div>
-          <div class="tb-subtitle" id="tb-subtitle">Sunloc Tracking Suite</div>
-        </div>
+      <div>
+        <div class="tb-title" id="tb-title">Dashboard</div>
+        <div class="tb-subtitle" id="tb-subtitle">Sunloc Tracking Suite</div>
       </div>
       <div class="tb-actions" id="tb-actions"></div>
     </div>
@@ -580,6 +429,9 @@ const ALERT_HOURS = 48;
 let currentDept = null;
 let currentPage = null;
 // Sanitize server URL — strip any file path and trailing slashes
+
+// Server URL always uses window.location.origin (set at initialization)
+
 function sanitizeServerUrl(url) {
   if (!url) return '';
   url = url.trim();
@@ -591,7 +443,8 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+let serverUrl = window.location.origin; // Always use same origin
+localStorage.setItem('sunloc_server_url', serverUrl);
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;
@@ -752,7 +605,7 @@ function doLogin(){
         signal: AbortSignal.timeout(3000)
       }).then(r=>r.json()).then(j=>{
         if(j.ok) {
-          sessionStorage.setItem('trk_token', j.token);
+          localStorage.setItem('trk_token', j.token);
           trkAuditLog('LOGIN', `Logged into Tracking as: ${currentDept}`);
         }
       }).catch(()=>{});
@@ -789,7 +642,6 @@ function initApp(){
   const defaultPage = info.pages[0];
   navigate(defaultPage);
   checkServer();
-  initMobileNav();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -817,8 +669,6 @@ function buildSidebar(){
 
 function navigate(page){
   currentPage=page;
-  mobileCloseSidebar();
-  updateMobileNavActive(page);
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const pageEl = document.getElementById('page-'+page);
@@ -866,13 +716,28 @@ function setSyncBadge(status){
 }
 
 async function checkServer(){
-  if(!serverUrl){ setSyncBadge('offline'); return false; }
+  if(!serverUrl || serverUrl === '') {
+    serverUrl = window.location.origin;
+    localStorage.setItem('sunloc_server_url', serverUrl);
+  }
   setSyncBadge('syncing');
   try{
     const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
     if(r.ok){ setSyncBadge('synced'); return true; }
+    if(serverUrl !== window.location.origin) {
+      serverUrl = window.location.origin;
+      localStorage.setItem('sunloc_server_url', serverUrl);
+      const r2=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
+      if(r2.ok){ setSyncBadge('synced'); return true; }
+    }
     setSyncBadge('offline'); return false;
-  }catch{ setSyncBadge('offline'); return false; }
+  }catch{
+    if(serverUrl !== window.location.origin) {
+      serverUrl = window.location.origin;
+      localStorage.setItem('sunloc_server_url', serverUrl);
+    }
+    setSyncBadge('offline'); return false;
+  }
 }
 
 function configureServer(){
@@ -890,14 +755,33 @@ async function pullFromServer(){
     if(!r.ok) return;
     const j=await r.json();
     if(j.ok && j.state){
-      // Merge labels: keep local labels not yet on server (by id), then overlay server labels
-      const serverLabelIds = new Set((j.state.labels||[]).map(l=>l.id));
+      // Map server labels - normalize column names (server uses snake_case)
+      const serverLabels = (j.state.labels||[]).map(l => ({
+        id: l.id,
+        batchNumber: l.batch_number || l.batchNumber,
+        labelNumber: l.label_number || l.labelNumber,
+        size: l.size,
+        qty: parseFloat(l.qty) || 0,
+        printed: l.printed === true || l.printed === 1 || l.printed === 'true',
+        printedAt: l.printed_at || l.printedAt || null,
+        voided: l.voided === true || l.voided === 1 || l.voided === 'true',
+        voidReason: l.void_reason || l.voidReason || '',
+        voidedBy: l.voided_by || l.voidedBy || '',
+        customer: l.customer || '',
+        colour: l.colour || '',
+        pcCode: l.pc_code || l.pcCode || '',
+        poNumber: l.po_number || l.poNumber || '',
+        machineId: l.machine_id || l.machineId || '',
+        generated: l.generated || now(),
+        isPartial: l.is_partial || l.isPartial || false,
+        isOrange: l.is_orange || l.isOrange || false,
+        qrData: l.qr_data || l.qrData || '',
+      }));
+      // Merge: keep local labels not yet on server
+      const serverLabelIds = new Set(serverLabels.map(l=>l.id));
       const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
       Object.assign(state, j.state);
-      // Re-add any local-only labels (generated but not yet confirmed saved on server)
-      if(localOnlyLabels.length>0){
-        state.labels = [...state.labels, ...localOnlyLabels];
-      }
+      state.labels = [...serverLabels, ...localOnlyLabels];
     }
     // Also pull planning orders for batch data
     const pr=await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
@@ -913,11 +797,13 @@ async function pullFromServer(){
     }
     saveLocal();
     setSyncBadge('synced');
-    if(currentPage) renderPage(currentPage);
+    // Only re-render if user has been idle 30+ seconds — never wipe active form/scan input
+    const idleMs = Date.now() - (_trkLastInput || 0);
+    if(currentPage && idleMs > 30000) renderPage(currentPage);
   }catch(e){ setSyncBadge('offline'); }
 }
 
-async async function pushToServer(endpoint, data){
+async function pushToServer(endpoint, data){
   if(!serverUrl) return;
   try{
     await fetch(serverUrl+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(8000)});
@@ -933,14 +819,49 @@ function saveLocal(){
   }catch(e){}
 }
 
-function loadState(){
+// Push all labels to server — called after any label state change
+function syncLabelsToServer(){
+  if(!serverUrl || !state.labels.length) return;
+  const labelsToSync = state.labels.map(l => ({
+    id: l.id,
+    batchNumber: l.batchNumber,
+    labelNumber: l.labelNumber,
+    size: l.size,
+    qty: l.qty,
+    printed: l.printed || false,
+    printedAt: l.printedAt || null,
+    voided: l.voided || false,
+    voidReason: l.voidReason || '',
+    voidedBy: l.voidedBy || '',
+    customer: l.customer || '',
+    colour: l.colour || '',
+    pcCode: l.pcCode || '',
+    poNumber: l.poNumber || '',
+    machineId: l.machineId || '',
+    qrData: l.qrData || '',
+    isPartial: l.isPartial || false,
+    isOrange: l.isOrange || false,
+  }));
+  pushToServer('/api/tracking/labels', {labels: labelsToSync});
+}
+
+async function loadState(){
+  // First: load from localStorage for instant display
   try{
     const saved=localStorage.getItem('sunloc_tracking');
     if(saved){ const p=JSON.parse(saved); Object.assign(state,p); }
   }catch{}
-  // Pull from server immediately — batches from Planning must load on every login
-  if(serverUrl){
-    pullFromServer();
+  // Always pull from server — server is source of truth for labels
+  const url = serverUrl || window.location.origin;
+  if(url){
+    if(!serverUrl) {
+      serverUrl = url;
+      localStorage.setItem('sunloc_server_url', url);
+    }
+    // Wait for server data before first render
+    await pullFromServer();
+    // Re-render after server data loaded
+    if(currentPage) renderPage(currentPage);
   }
 }
 
@@ -1088,7 +1009,11 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
 
   state.labels.push(...newLabels);
   saveLocal();
-  pushToServer('/api/tracking/labels',{labels:newLabels});
+  // Push all label data to server including customer, colour etc
+  const labelsWithMeta = newLabels.map(l => ({...l, customer: batch.customer||'', colour: batch.colour||'', pcCode: batch.pcCode||'', poNumber: batch.poNumber||'', machineId: batch.machineId||''}));
+  pushToServer('/api/tracking/labels',{labels:labelsWithMeta});
+  // Also sync all labels to ensure server is complete
+  setTimeout(syncLabelsToServer, 1000);
   return newLabels;
 }
 
@@ -1200,42 +1125,40 @@ function updatePlanningStageStatus(batchNo){
 // ═══════════════════════════════════════════════════════
 
 function generateZPL(label, batch){
-  // Colour split: "BROWN/WHITE" → Cap=BROWN, Body=WHITE
+  // ── Colour split: "BROWN/WHITE" → Cap + Body ──
   const colourParts = (label.colour||'').split('/');
-  const colourCap  = (colourParts[0]||'').trim() || (label.colour||'');
-  const colourBody = (colourParts[1]||'').trim() || '';
+  const colourCap  = colourParts[0]?.trim() || (label.colour||'');
+  const colourBody = colourParts[1]?.trim() || '';
 
-  // Quantity
+  // ── Quantity ──
+  // Standard box  → fixed pack size qty (e.g. Size 0 = 1.00L = 100,000 pcs)
+  // Partial/last box → actual qty entered manually at generation
   const packSizeL   = PACK_SIZES[String(label.size)] || 1;
   const standardPcs = Math.round(packSizeL * 100000);
   const actualPcs   = Math.round(label.qty * 100000);
   const pieces      = label.isPartial ? actualPcs : standardPcs;
 
-  // MFG Date
+  // ── MFG Date from batch start date ──
   const mfgRaw  = batch?.startDate ? new Date(batch.startDate) : new Date();
   const mfgDate = mfgRaw.toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
 
+  // ── Container No = label number ──
   const containerNo = label.labelNumber;
-  const batchNo     = label.batchNumber || '';
 
-  // Label type flags
-  const isTemp = batchNo.startsWith('TEMP-');
-  const isWO   = label.woStatus === 'wo';
-  const customerText = isTemp ? '*** TEMP BATCH - REPLACEMENT REQUIRED ***'
-                     : isWO   ? 'W/O - WITHOUT ORDER - CUSTOMER PENDING'
-                     :          (label.customer || '');
+  // ── 203 DPI: 1mm ≈ 8 dots ──
+  // Main label:   150mm W × 100mm H → PW1200, LL800
+  // Orange label: 100mm W × 50mm H  → PW800,  LL400
 
-  // ═══════════════════════════════════════════════════════════════
-  // ORANGE LABEL — Landscape 100mm W × 50mm H  (PW800, LL400)
-  // ═══════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════
+  // ORANGE LABEL — 100mm W × 50mm H
+  // Affixed outside/alongside the main white label
+  // Contains: Cap printing matter, Body printing matter, QR code
+  // ════════════════════════════════════════════
   if(label.isOrange){
     const printMatter = label.printingMatter || batch?.printMatter || '';
-    const pmParts  = printMatter.split('/');
-    const pmCap    = (pmParts[0]||'').trim() || printMatter;
-    const pmBody   = (pmParts[1]||'').trim() || '';
-    // Orange label: Landscape 100mm W x 50mm H (PW800, LL400) at 203 DPI
-    // Left content area: x=10 to x=560 (70mm)
-    // Right QR area: x=570 to x=790 (28mm)
+    const pmParts = printMatter.split('/');
+    const pmCap   = pmParts[0]?.trim() || printMatter;
+    const pmBody  = pmParts[1]?.trim() || '';
     return `^XA
 ^CI28
 ^PW800
@@ -1243,86 +1166,31 @@ function generateZPL(label, batch){
 ^MNM
 ^PON
 
-^FO10,10^GB780,378,2^FS
-^FO560,10^GB2,378,2^FS
+^FO10,10^GB780,380,2^FS
+
+^CF0,32
+^FO20,20^FB560,1,0,C^FDPRINTING DETAILS^FS
+^FO20,55^GB560,2,2^FS
 
 ^CF0,28
-^FO20,18^FB530,1,0,C^FDPRINTING DETAILS^FS
-^FO20,50^GB540,2,2^FS
+^FO30,70^FDCAP  :  ${pmCap}^FS
+^FO30,150^FDBODY :  ${pmBody}^FS
 
-^CF0,26
-^FO25,58^FDCAP   :  ${pmCap}^FS
-^FO25,96^FDBODY :  ${pmBody}^FS
-
-^FO20,140^GB540,2,2^FS
+^FO20,240^GB560,2,2^FS
 ^CF0,22
-^FO25,148^FDBatch No. :  ${batchNo}^FS
-^FO25,178^FDContainer :  ${containerNo}^FS
-^FO25,210^FDSize          :  ${label.size}^FS
+^FO30,255^FDBatch: ${label.batchNumber}^FS
+^FO30,295^FDContainer: ${containerNo}^FS
 
-^FO20,252^GB540,2,2^FS
-^CF0,19
-^FO25,258^FDExpiry: 5 years from Mfg Date. Drug Mfg Raj-867, Dt 08.12.1981^FS
-
-^FO574,20^BQN,2,4^FDLA,${label.qrData}^FS
+^FO590,10^GB200,380,2^FS
+^FO600,30^BQN,2,4^FDLA,${label.qrData}^FS
 
 ^XZ`;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // MAIN WHITE LABEL — Landscape 150mm W × 100mm H (PW1200, LL800)
-  // 203 DPI: 1mm = 8 dots
-  // Total: 1200 dots wide × 800 dots tall
-  //
-  // Layout (matching physical label in photo):
-  //   Row  0- 50: Company header (2 lines)
-  //   Row 50- 90: Horizontal rule + CUSTOMER NAME
-  //   Row 90-480: Data table (left col | right col, separated at x=580)
-  //   Row480-520: PRINTED row
-  //   Row520-560: Horizontal rule
-  //   Row560-600: EXPIRY text
-  //   Row600-640: Horizontal rule
-  //   Row640-790: QR code (left) + Q RELEASED (centre) + SIGNATURE (right)
-  //   Row790-800: Bottom rule
-  //
-  // Left  col: x=20  to x=560  (fields: QUANTITY, SIZE, COLOUR CAP, COLOUR BODY, PRINTED)
-  // Right col: x=580 to x=1180 (fields: BATCH NO, CONTAINER NO, GROSS WT, NETT WT, MFG DATE)
-  // Divider: x=560
-  // ═══════════════════════════════════════════════════════════════
-
-  // TEMP/WO visual treatment: header band + border
-  const outerBorder = isTemp
-    ? `^FO4,4^GB1192,792,5^FS\n^FO10,10^GB1180,780,2^FS`
-    : isWO
-    ? `^FO4,4^GB1192,792,4^FS`
-    : '';
-
-  const headerBandH = isTemp || isWO ? 36 : 0;
-  const headerBand  = isTemp
-    ? `^FO20,100^GB1160,${headerBandH},${headerBandH}^FS\n^CF0,22\n^FR^FO20,108^FB1160,1,0,C^FD** TEMP BATCH — REPLACEMENT LABEL REQUIRED **^FS\n`
-    : isWO
-    ? `^FO20,100^GB1160,${headerBandH},${headerBandH}^FS\n^CF0,22\n^FR^FO20,108^FB1160,1,0,C^FDWITHOUT ORDER — CUSTOMER TO BE ASSIGNED^FS\n`
-    : '';
-
-  // Y offsets — shift everything down if header band present
-  const D = headerBandH; // 0 for normal, 36 for TEMP/WO
-
-  // Row Y positions
-  const custY    = 56 + D;   // CUSTOMER NAME row
-  const tableTop = 96 + D;   // top of data table
-  const r1 = tableTop + 8;   // QUANTITY / BATCH NO
-  const r2 = r1 + 52;        // SIZE / CONTAINER NO
-  const r3 = r2 + 52;        // COLOUR CAP / GROSS WT
-  const r4 = r3 + 52;        // COLOUR BODY / NETT WT
-  const r5 = r4 + 52;        // (empty left) / MFG DATE
-  const tableBot = tableTop + 52*5; // bottom of table
-  const printedY = tableBot + 8;
-  const rule1Y   = tableBot + 50;
-  const expiryY  = rule1Y + 10;
-  const rule2Y   = expiryY + 38;
-  const qrY      = rule2Y + 10;
-  const bottomY  = 788;
-
+  // ════════════════════════════════════════════
+  // MAIN WHITE LABEL — 150mm W × 100mm H (1200 × 800 dots at 203 DPI)
+  // Matches Sunil Healthcare existing label format
+  // ════════════════════════════════════════════
   return `^XA
 ^CI28
 ^PW1200
@@ -1330,76 +1198,116 @@ function generateZPL(label, batch){
 ^MNM
 ^PON
 
-${outerBorder}
-
-^CF0,44
-^FO20,10^FB1160,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
-^CF0,30
-^FO20,58^FB1160,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
-${headerBand}
-^FO20,${custY - 4}^GB1160,2,2^FS
-^CF0,26
-^FO20,${custY + 2}^FDCUSTOMER NAME :  ${customerText}^FS
-^FO20,${tableTop - 2}^GB1160,2,2^FS
-
-^FO20,${tableTop}^GB560,${52*5 + 2},2^FS
-^FO580,${tableTop}^GB600,${52*5 + 2},2^FS
-^FO20,${tableTop + 52}^GB560,2,2^FS
-^FO20,${tableTop + 52*2}^GB560,2,2^FS
-^FO20,${tableTop + 52*3}^GB560,2,2^FS
-^FO20,${tableTop + 52*4}^GB560,2,2^FS
-^FO580,${tableTop + 52}^GB600,2,2^FS
-^FO580,${tableTop + 52*2}^GB600,2,2^FS
-^FO580,${tableTop + 52*3}^GB600,2,2^FS
-^FO580,${tableTop + 52*4}^GB600,2,2^FS
-
-^CF0,26
-^FO30,${r1}^FDQUANTITY      :  ${pieces}^FS
-^FO30,${r2}^FDSIZE                :  ${label.size}^FS
-^FO30,${r3}^FDCOLOUR CAP  :  ${colourCap}^FS
-^FO30,${r4}^FDCOLOUR BODY:  ${colourBody}^FS
-^FO30,${r5}^FDPRINTED          :^FS
-
-^FO590,${r1}^FDBATCH NO.         :  ${batchNo}^FS
-^FO590,${r2}^FDCONTAINER NO.  :  ${containerNo}^FS
-^FO590,${r3}^FDGROSS WT.          :^FS
-^FO590,${r4}^FDNETT WT.             :^FS
-^FO590,${r5}^FDMFG DATE           :  ${mfgDate}^FS
-
-^FO20,${rule1Y - 2}^GB1160,2,2^FS
-
-^CF0,19
-^FO20,${expiryY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
-^FO20,${rule2Y}^GB1160,2,2^FS
-
-^FO20,${qrY}^BQN,2,5^FDLA,${label.qrData}^FS
+^CF0,46
+^FO20,16^FB1160,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
+^CF0,32
+^FO20,68^FB1160,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
+^FO20,108^GB1160,3,3^FS
 
 ^CF0,28
-^FO380,${qrY + 50}^FB440,1,0,C^FDQ RELEASED^FS
+^FO20,118^FDCUSTOMER NAME : ${label.customer||''}^FS
+^FO20,152^GB1160,2,2^FS
 
-^FO820,${qrY + 30}^GB360,2,2^FS
+^FO20,158^GB1160,192,2^FS
+^FO598,158^GB2,192,2^FS
+^FO20,196^GB580,2,1^FS
+^FO20,234^GB580,2,1^FS
+^FO20,272^GB580,2,1^FS
+^FO20,310^GB580,2,1^FS
+^FO598,196^GB582,2,1^FS
+^FO598,234^GB582,2,1^FS
+^FO598,272^GB582,2,1^FS
+^FO598,310^GB582,2,1^FS
+
 ^CF0,24
-^FO820,${qrY + 38}^FB360,1,0,C^FDSIGNATURE^FS
+^FO35,170^FDQUANTITY^FS
+^FO180,170^FD: ${pieces}^FS
+^FO35,208^FDSIZE^FS
+^FO180,208^FD: ${label.size}^FS
+^FO35,246^FDCOLOUR CAP^FS
+^FO180,246^FD: ${colourCap}^FS
+^FO35,284^FDCOLOUR BODY^FS
+^FO180,284^FD: ${colourBody}^FS
 
-^FO20,${bottomY}^GB1160,3,3^FS
+^FO610,170^FDBATCH NO.^FS
+^FO800,170^FD: ${label.batchNumber}^FS
+^FO610,208^FDCONTAINER NO.^FS
+^FO800,208^FD: ${containerNo}^FS
+^FO610,246^FDGROSS WT.^FS
+^FO800,246^FD:^FS
+^FO610,284^FDNETT WT.^FS
+^FO800,284^FD:^FS
+^FO610,322^FDMFG DATE^FS
+^FO800,322^FD: ${mfgDate}^FS
+
+^FO20,354^GB1160,2,2^FS
+
+^CF0,24
+^FO35,366^FDPRINTED :^FS
+
+^FO20,400^GB1160,2,2^FS
+
+^CF0,19
+^FO25,412^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
+
+^FO20,440^GB1160,2,2^FS
+
+^FO20,448^BQN,2,5^FDLA,${label.qrData}^FS
+
+^CF0,26
+^FO380,530^FDQ RELEASED^FS
+
+^FO820,448^GB340,2,2^FS
+^CF0,24
+^FO820,458^FDSIGNATURE^FS
+
+^FO20,630^GB1160,3,3^FS
 ^XZ`;
 }
-
 
 function printLabel(labelId){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label) return;
   const batch = getBatch(label.batchNumber);
   const zpl = generateZPL(label,batch);
-  // Try to send to local printer bridge or download as file
-  const printerUrl = localStorage.getItem('sunloc_printer_url');
-  if(printerUrl){
-    fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
-      .then(r=>{ if(r.ok){ label.printed=true; label.printedAt=now(); saveLocal(); renderPage(currentPage); } })
-      .catch(()=>downloadZPL(zpl,label));
+  const printerMode = localStorage.getItem('sunloc_printer_mode') || 'download';
+  const printerUrl = localStorage.getItem('sunloc_printer_url') || '';
+
+  const markPrinted = () => {
+    label.printed = true;
+    label.printedAt = now();
+    saveLocal();
+    if(serverUrl){
+      pushToServer('/api/tracking/label-printed', {labelId, printed:true, printedAt:label.printedAt});
+      pushToServer('/api/tracking/labels', {labels:[{...label, customer:batch?.customer||'', colour:batch?.colour||'', pcCode:batch?.pcCode||'', poNumber:batch?.poNumber||'', machineId:batch?.machineId||''}]});
+    }
+    renderPage(currentPage);
+  };
+
+  if(printerMode==='network' || printerMode==='bridge'){
+    if(!printerUrl){
+      toast('⚠️ Printer not configured. Go to Printer Setup.', 'var(--color-warning)');
+      downloadZPL(zpl,label); markPrinted(); return;
+    }
+    // Send ZPL directly to HPRT HT800 via network/bridge
+    fetch(printerUrl, {method:'POST', headers:{'Content-Type':'text/plain'}, body:zpl, signal:AbortSignal.timeout(8000)})
+      .then(r=>{
+        if(r.ok){
+          toast('✅ Label sent to HPRT HT800', 'var(--color-success,green)');
+          markPrinted();
+        } else {
+          toast('⚠️ Printer error — downloading ZPL instead', 'var(--color-warning)');
+          downloadZPL(zpl,label); markPrinted();
+        }
+      })
+      .catch(()=>{
+        toast('❌ Cannot reach printer — downloading ZPL', 'var(--color-error,red)');
+        downloadZPL(zpl,label); markPrinted();
+      });
   } else {
+    // Download mode
     downloadZPL(zpl,label);
-    label.printed=true; label.printedAt=now(); saveLocal();
+    markPrinted();
   }
 }
 
@@ -1596,16 +1504,66 @@ function renderLabels(){
   document.getElementById('tb-actions').innerHTML=`
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
+  // Get unique sizes and customers for filters
+  const sizes=[...new Set(activeBatches.map(b=>b.size).filter(Boolean))].sort();
+  const customers=[...new Set(activeBatches.map(b=>b.customer).filter(Boolean))].sort();
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Label Generation</div><div class="section-sub">Generate and print box labels for active batches</div></div>
     <button class="btn btn-primary" onclick="openLabelGen()">+ Generate Labels</button>
   </div>
   <div class="alert alert-info">Labels are capped by: (1) daily machine target in boxes, (2) total gross quantity planned. Gross qty amendments in Planning App automatically unlock additional labels.</div>
+
   <div class="card">
-    <div class="card-title">Active Batches — Label Status</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Size</th><th>Gross Qty</th><th>Max Labels</th><th>Generated</th><th>Printed</th><th>Remaining</th><th>Daily Cap</th><th>Actions</th></tr></thead>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="card-title" style="margin:0">Active Batches — Label Status</div>
+      <span id="lbl-filter-count" style="font-size:12px;color:var(--color-text-secondary)"></span>
+    </div>
+    <div class="tbl-wrap"><table id="labels-table">
+      <thead>
+        <tr>
+          <th onclick="sortLabelsTable('batch')" style="cursor:pointer;user-select:none">Batch <span id="sort-batch">↕</span></th>
+          <th onclick="sortLabelsTable('customer')" style="cursor:pointer;user-select:none">Customer <span id="sort-customer">↕</span></th>
+          <th onclick="sortLabelsTable('size')" style="cursor:pointer;user-select:none">Size <span id="sort-size">↕</span></th>
+          <th onclick="sortLabelsTable('grossqty')" style="cursor:pointer;user-select:none">Gross Qty <span id="sort-grossqty">↕</span></th>
+          <th onclick="sortLabelsTable('maxlabels')" style="cursor:pointer;user-select:none">Max Labels <span id="sort-maxlabels">↕</span></th>
+          <th onclick="sortLabelsTable('generated')" style="cursor:pointer;user-select:none">Generated <span id="sort-generated">↕</span></th>
+          <th onclick="sortLabelsTable('printed')" style="cursor:pointer;user-select:none">Printed <span id="sort-printed">↕</span></th>
+          <th onclick="sortLabelsTable('remaining')" style="cursor:pointer;user-select:none">Remaining <span id="sort-remaining">↕</span></th>
+          <th>Daily Cap</th>
+          <th>Actions</th>
+        </tr>
+        <tr style="background:var(--color-background-secondary)">
+          <td><input type="text" id="f-batch" placeholder="Search..." oninput="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)"></td>
+          <td><input type="text" id="f-customer" placeholder="Search..." oninput="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)"></td>
+          <td><select id="f-size" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            ${sizes.map(s=>`<option value="${s}">Size ${s}</option>`).join('')}
+          </select></td>
+          <td></td>
+          <td></td>
+          <td><select id="f-generated" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            <option value="none">None (0)</option>
+            <option value="partial">Partial</option>
+            <option value="full">Full</option>
+          </select></td>
+          <td><select id="f-printed" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            <option value="none">None</option>
+            <option value="partial">Partial</option>
+            <option value="all">All Printed</option>
+          </select></td>
+          <td><select id="f-remaining" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            <option value="yes">Has Remaining</option>
+            <option value="no">None Left</option>
+          </select></td>
+          <td></td>
+          <td><button onclick="clearLabelFilters()" style="padding:3px 8px;font-size:11px;border:1px solid var(--color-border-tertiary);border-radius:4px;cursor:pointer;background:var(--color-background-primary)">✕ Clear</button></td>
+        </tr>
+      </thead>
       <tbody>
       ${activeBatches.map(b=>{
         const ps=PACK_SIZES[String(b.size)]||1;
@@ -1617,7 +1575,9 @@ function renderLabels(){
         const dailyCap=lakhToBox(machine?.dailyTarget||machine?.yTarget||27,b.size);
         const todayGen=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.generated?.slice(0,10)===today()).length;
         const pct=maxLabels>0?(generated/maxLabels*100):0;
-        return `<tr>
+        const bStatus = generated===0?'pending':(generated>=maxLabels?'complete':'partial');
+        const bPrinted = generated>0&&printed===generated?'printed':'unprinted';
+        return `<tr class="lbl-row" data-batch="${b.batchNumber||''}" data-customer="${b.customer||''}" data-size="${b.size||''}" data-status="${bStatus}" data-printed-status="${bPrinted}" data-generated="${generated}" data-maxlabels="${maxLabels}" data-printed="${printed}" data-remaining="${remaining}" data-grossqty="${b.grossQty||b.qty||0}">
           <td class="td-bold td-mono">${b.batchNumber}</td>
           <td>${b.customer||'-'}</td>
           <td class="td-mono">${b.size} (${ps}L/box)</td>
@@ -1719,14 +1679,16 @@ function viewBatchLabels(batchNo){
       <thead><tr><th>#</th><th>Qty (L)</th><th>Status</th><th>Generated</th><th>Printed</th><th>Actions</th></tr></thead>
       <tbody>
       ${labels.map(l=>`<tr>
-        <td class="td-mono fw-bold">${l.labelNumber}${l.isPartial?' <span class="badge badge-amber">PARTIAL</span>':''}${l.batchNumber&&l.batchNumber.startsWith('TEMP-')?'<span class="badge" style="background:rgba(255,64,96,0.12);color:#ff4060;border:1px solid rgba(255,64,96,0.35);font-size:9px;margin-left:3px">⚠️ TEMP</span>':l.woStatus&&l.woStatus==='wo'?'<span class="badge" style="background:rgba(255,171,0,0.12);color:#C55A11;border:1px solid rgba(255,171,0,0.35);font-size:9px;margin-left:3px">🔶 W/O</span>':''}</td>
+        <td class="td-mono fw-bold">${l.labelNumber}${l.isPartial?' <span class="badge badge-amber">PARTIAL</span>':''}</td>
         <td class="td-mono">${fmt(l.qty)}</td>
         <td>${l.voided?'<span class="badge badge-red">VOIDED</span>':l.printed?'<span class="badge badge-green">Printed</span>':'<span class="badge badge-gray">Not Printed</span>'}</td>
         <td class="td-mono text-sm">${fmtDateTime(l.generated)}</td>
         <td class="td-mono text-sm">${l.printedAt?fmtDateTime(l.printedAt):'-'}</td>
         <td class="flex gap-8">
-          ${!l.voided?`<button class="btn btn-sm btn-primary" onclick="printLabel('${l.id}');renderPage('labels')">🖨️</button>`:''}
-          ${!l.voided&&currentDept==='admin'?`<button class="btn btn-sm btn-danger" onclick="voidLabel('${l.id}','Admin void');renderPage('labels')">Void</button>`:''}\n          ${!l.voided&&currentDept==='admin'?`<button class="btn btn-sm btn-warning" onclick="openDamagedReprint('${l.id}')">🔄 Reprint</button>`:''}
+          ${!l.voided && !l.printed ? `<button class="btn btn-sm btn-primary" onclick="printLabel('${l.id}');renderPage('labels')" title="Print this label">🖨️ Print</button>` : ''}
+          ${!l.voided && l.printed && currentDept==='admin' ? `<button class="btn btn-sm btn-warning" onclick="openDamagedReprint('${l.id}')" title="Reprint damaged or misplaced label">🔄 Reprint</button>` : ''}
+          ${!l.voided && l.printed && currentDept!=='admin' ? `<span style="font-size:11px;color:var(--text3)">Contact admin to reprint</span>` : ''}
+          ${!l.voided&&currentDept==='admin'?`<button class="btn btn-sm btn-danger" onclick="voidLabel('${l.id}','Admin void');renderPage('labels')">Void</button>`:''}
           ${l.isPartial&&!l.voided?`<button class="btn btn-sm btn-warning" onclick="openRegenPartial('${l.id}')">Regen</button>`:''}
         </td>
       </tr>`).join('')||'<tr><td colspan="6" class="text-center text-muted">No labels</td></tr>'}
@@ -1747,7 +1709,7 @@ function openRegenPartial(labelId){
 function openDamagedReprint(labelId){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label) return;
-  openModal('🔄 Damaged Label Reprint Request', `
+  openModal('🔄 Damaged Label Reprint Request', `Label #${label.labelNumber} — ${label.batchNumber}`, `
     <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;padding:12px;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text3);margin-bottom:6px">LABEL BEING REPLACED</div>
       <div style="font-family:var(--mono);font-size:13px">Label #${label.labelNumber} — Batch ${label.batchNumber}</div>
@@ -1818,8 +1780,12 @@ function confirmDamagedReprint(labelId){
     pushToServer('/api/tracking/labels',{labels:[newLabel]});
     pushToServer('/api/tracking/reprint-log',{log:reprintLog});
     closeModal();
-    alert(`✅ Label voided and replacement Label #${newLabel.labelNumber} generated.\nReason: ${reason}\nLogged for audit.`);
     renderPage(currentPage);
+    // Auto-print the replacement label immediately
+    setTimeout(() => {
+      printLabel(newLabel.id);
+      toast(`✅ Replacement Label #${newLabel.labelNumber} generated & sent to printer. Reason: ${reason}`, 'var(--warning)');
+    }, 300);
   } else {
     closeModal();
     alert('Could not generate replacement — batch not found.');
@@ -1827,11 +1793,120 @@ function confirmDamagedReprint(labelId){
 }
 
 function configurePrinter(){
-  const current=localStorage.getItem('sunloc_printer_url')||'';
-  const url=prompt('Enter Zebra Printer Bridge URL:\n(e.g. http://localhost:9100 or http://printer-ip:9100)\n\nLeave blank to download ZPL files instead.',current);
-  if(url===null) return;
-  localStorage.setItem('sunloc_printer_url',url.trim());
-  alert(url.trim()?'Printer URL saved. Labels will be sent directly to printer.':'ZPL download mode activated.');
+  openModal('🖨️ HPRT HT800 Printer Setup', 'Configure your label printer', `
+    <div style="font-size:13px;line-height:1.8">
+      <div style="background:var(--color-background-secondary);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-weight:700;margin-bottom:6px;color:var(--color-text-primary)">Printer Model: HPRT HT800 (ZPL)</div>
+        <div style="color:var(--color-text-secondary)">Choose how to send ZPL labels to your printer:</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:2px solid var(--color-border-tertiary);border-radius:8px;cursor:pointer" onclick="setPrinterMode('network')">
+          <input type="radio" name="printer-mode" value="network" ${(localStorage.getItem('sunloc_printer_mode')||'network')==='network'?'checked':''} style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-weight:600">🌐 Network / WiFi (Recommended)</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">HPRT HT800 connected via WiFi or Ethernet. Enter printer IP address.</div>
+            <input type="text" id="printer-ip" value="${localStorage.getItem('sunloc_printer_ip')||''}" placeholder="e.g. 192.168.1.100" 
+              style="margin-top:6px;width:100%;padding:6px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;font-size:12px;font-family:monospace">
+            <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">Port: 9100 (default ZPL port)</div>
+          </div>
+        </label>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:2px solid var(--color-border-tertiary);border-radius:8px;cursor:pointer" onclick="setPrinterMode('bridge')">
+          <input type="radio" name="printer-mode" value="bridge" ${localStorage.getItem('sunloc_printer_mode')==='bridge'?'checked':''} style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-weight:600">🔌 USB via Print Bridge</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">HPRT HT800 connected via USB. Requires local bridge app running on the computer.</div>
+            <input type="text" id="printer-bridge" value="${localStorage.getItem('sunloc_printer_url')||'http://localhost:9100'}" placeholder="http://localhost:9100"
+              style="margin-top:6px;width:100%;padding:6px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;font-size:12px;font-family:monospace">
+          </div>
+        </label>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:2px solid var(--color-border-tertiary);border-radius:8px;cursor:pointer" onclick="setPrinterMode('download')">
+          <input type="radio" name="printer-mode" value="download" ${localStorage.getItem('sunloc_printer_mode')==='download'?'checked':''} style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-weight:600">💾 Download ZPL File</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">Download .zpl file and send manually to printer. No network needed.</div>
+          </div>
+        </label>
+      </div>
+
+      <div id="printer-test-result" style="margin-top:10px"></div>
+
+      <div style="margin-top:14px;padding:10px;background:var(--color-background-secondary);border-radius:6px;font-size:11px;color:var(--color-text-secondary)">
+        <strong>HPRT HT800 Setup Tips:</strong><br>
+        • Network: Find IP in printer menu → Settings → Network → IP Address<br>
+        • USB Bridge: Download <strong>Sunloc Print Bridge</strong> app and run on this computer<br>
+        • Label size: 100mm × 150mm (set in HPRT utility)
+      </div>
+    </div>
+  `, [
+    {label:'Test Print', cls:'btn-secondary', fn:'testPrinterConnection()'},
+    {label:'Save', cls:'btn-primary', fn:'savePrinterSetup()'},
+    {label:'Cancel', cls:'btn-secondary', fn:'closeModal()'}
+  ]);
+}
+
+function setPrinterMode(mode){
+  document.querySelectorAll('input[name="printer-mode"]').forEach(r=>r.checked=r.value===mode);
+}
+
+function savePrinterSetup(){
+  const mode = document.querySelector('input[name="printer-mode"]:checked')?.value || 'download';
+  localStorage.setItem('sunloc_printer_mode', mode);
+  if(mode==='network'){
+    const ip = document.getElementById('printer-ip')?.value.trim();
+    if(!ip){ alert('Please enter the printer IP address'); return; }
+    localStorage.setItem('sunloc_printer_ip', ip);
+    localStorage.setItem('sunloc_printer_url', 'http://'+ip+':9100');
+  } else if(mode==='bridge'){
+    const url = document.getElementById('printer-bridge')?.value.trim();
+    localStorage.setItem('sunloc_printer_url', url||'http://localhost:9100');
+  } else {
+    localStorage.setItem('sunloc_printer_url', '');
+  }
+  closeModal();
+  toast('✅ Printer settings saved', 'var(--success)');
+}
+
+async function testPrinterConnection(){
+  const mode = document.querySelector('input[name="printer-mode"]:checked')?.value || 'download';
+  const resultEl = document.getElementById('printer-test-result');
+  if(!resultEl) return;
+
+  if(mode==='download'){
+    resultEl.innerHTML='<div style="color:var(--color-text-secondary);font-size:12px">📄 Download mode — no connection test needed</div>';
+    return;
+  }
+
+  let url = '';
+  if(mode==='network'){
+    const ip = document.getElementById('printer-ip')?.value.trim();
+    if(!ip){ resultEl.innerHTML='<div style="color:red;font-size:12px">❌ Enter IP address first</div>'; return; }
+    url = 'http://'+ip+':9100';
+  } else {
+    url = document.getElementById('printer-bridge')?.value.trim() || 'http://localhost:9100';
+  }
+
+  resultEl.innerHTML='<div style="font-size:12px;color:var(--color-text-secondary)">🔄 Testing connection to '+url+'...</div>';
+
+  // Send a minimal test ZPL
+  const testZPL = '^XA^FO50,50^ADN,36,20^FDSunloc Test Print^FS^XZ';
+  try {
+    const r = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body: testZPL,
+      signal: AbortSignal.timeout(5000)
+    });
+    if(r.ok){
+      resultEl.innerHTML='<div style="color:green;font-size:12px">✅ Connected! Test label sent to HPRT HT800</div>';
+    } else {
+      resultEl.innerHTML='<div style="color:orange;font-size:12px">⚠️ Printer responded with error '+r.status+'</div>';
+    }
+  } catch(e){
+    resultEl.innerHTML='<div style="color:red;font-size:12px">❌ Cannot reach printer at '+url+'<br><span style="opacity:.7">Check IP address and make sure printer is on</span></div>';
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1847,7 +1922,23 @@ const DEPT_CONFIG={
 
 function renderDeptScan(dept){
   const el=document.getElementById('page-'+dept);
+  if(!el){ console.error('Page element not found: page-'+dept); return; }
   const cfg=DEPT_CONFIG[dept];
+  if(!cfg){ console.error('DEPT_CONFIG not found for: '+dept); return; }
+  
+  // If batches not loaded yet, show loading state and retry
+  if(state.batches.length===0){
+    el.innerHTML=`<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:32px;margin-bottom:12px">⏳</div>
+      <div class="section-title">Loading batches...</div>
+      <div class="text-sm text-muted mt-8">Fetching data from server</div>
+      <button class="btn btn-primary mt-16" onclick="pullFromServer().then(()=>renderPage(currentPage))">🔄 Retry</button>
+    </div>`;
+    // Auto retry after 2 seconds
+    setTimeout(()=>{ if(state.batches.length>0) renderPage(currentPage); }, 2000);
+    return;
+  }
+
   const myAlerts=state.alerts.filter(a=>a.dept===dept);
   const activeBatches=getActiveBatchesForDept(dept);
 
@@ -1862,19 +1953,17 @@ function renderDeptScan(dept){
     </div>
     ${myAlerts.length>0?`<div class="alert alert-danger">🚨 ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+a.labelId.slice(-4)).join(', ')}</div>`:''}
     <!-- SCAN PANEL -->
-    <div class="grid-2 scan-panels-grid">
+    <div class="grid-2">
       <div>
         <div class="card-title">📥 Scan IN</div>
         <div class="scan-zone" id="scan-zone-in-${dept}">
-          <div style="font-size:28px;margin-bottom:6px;text-align:center">📥</div>
-          <div class="fw-bold mb-8" style="text-align:center">Scan box to check IN</div>
-          <button class="btn btn-camera-mobile mobile-show" onclick="startCamera(v=>fillScanInput('${dept}','in',v))">📷 Open Camera to Scan</button>
+          <div style="font-size:32px;margin-bottom:8px">📷</div>
+          <div class="fw-bold mb-8">Scan box to check IN</div>
           <input class="scan-input" id="scan-in-${dept}" placeholder="Scan or type label ID" 
-            onkeydown="if(event.key==='Enter')processScanInput('${dept}','in')"
-            style="width:100%;margin-bottom:8px">
-          <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary desktop-only" onclick="startCamera(v=>fillScanInput('${dept}','in',v))">📷 Camera</button>
-            <button class="btn btn-sm btn-primary" onclick="processScanInput('${dept}','in')" style="flex:1">✓ Confirm IN</button>
+            onkeydown="if(event.key==='Enter')processScanInput('${dept}','in')">
+          <div class="flex gap-8 mt-12" style="justify-content:center">
+            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('${dept}','in',v))">📷 Camera</button>
+            <button class="btn btn-sm btn-primary" onclick="processScanInput('${dept}','in')">✓ Confirm</button>
           </div>
         </div>
         <div id="scan-result-in-${dept}" class="mt-8"></div>
@@ -1882,16 +1971,14 @@ function renderDeptScan(dept){
       <div>
         <div class="card-title">📤 Scan OUT</div>
         <div class="scan-zone" id="scan-zone-out-${dept}">
-          <div style="font-size:28px;margin-bottom:6px;text-align:center">📤</div>
-          <div class="fw-bold mb-8" style="text-align:center">Scan box to check OUT</div>
-          <button class="btn btn-camera-mobile mobile-show" style="background:var(--accent2)!important" onclick="startCamera(v=>fillScanInput('${dept}','out',v))">📷 Open Camera to Scan</button>
+          <div style="font-size:32px;margin-bottom:8px">📤</div>
+          <div class="fw-bold mb-8">Scan box to check OUT</div>
           <input class="scan-input" id="scan-out-${dept}" placeholder="Scan or type label ID"
-            onkeydown="if(event.key==='Enter')processScanInput('${dept}','out')"
-            style="width:100%;margin-bottom:8px">
+            onkeydown="if(event.key==='Enter')processScanInput('${dept}','out')">
           ${dept==='pi'?`<div class="text-sm text-muted mt-4">⚠️ Also scan orange label for printed batches</div>`:''}
-          <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary desktop-only" onclick="startCamera(v=>fillScanInput('${dept}','out',v))">📷 Camera</button>
-            <button class="btn btn-sm btn-success" onclick="processScanInput('${dept}','out')" style="flex:1">✓ Confirm OUT</button>
+          <div class="flex gap-8 mt-12" style="justify-content:center">
+            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('${dept}','out',v))">📷 Camera</button>
+            <button class="btn btn-sm btn-success" onclick="processScanInput('${dept}','out')">✓ Confirm</button>
           </div>
         </div>
         <div id="scan-result-out-${dept}" class="mt-8"></div>
@@ -1994,15 +2081,65 @@ function processScanInput(dept,type){
   if(!el) return;
   const raw=el.value.trim();
   if(!raw) return;
-  const parsed=parseScanInput(raw);
-  const result=recordScan(parsed.labelId,dept,type,currentDept);
   el.value='';
+
+  const parsed=parseScanInput(raw);
+  let labelId = parsed.labelId;
+
+  // If input looks like a batch number (e.g. BT002), find the next unscanned label for that batch
+  const isBatchNumber = state.labels.length > 0 && !state.labels.find(l=>l.id===labelId);
+  if(isBatchNumber){
+    const batchUpper = raw.toUpperCase().trim();
+    // Find labels for this batch that are printed but not yet scanned at this dept
+    const batchLabels = state.labels.filter(l=>
+      l.batchNumber===batchUpper && !l.voided && !l.isOrange
+    );
+    if(batchLabels.length === 0){
+      zoneEl.className='scan-zone error';
+      resultEl.innerHTML=`<div class="alert alert-danger">❌ No labels found for batch ${batchUpper}. Generate labels first.</div>`;
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+      el.focus(); return;
+    }
+    if(type==='in'){
+      // Find next label not yet scanned IN at this dept
+      const nextLabel = batchLabels.find(l=>{
+        const deptScans = state.scans.filter(s=>s.labelId===l.id&&s.dept===dept);
+        const ins = deptScans.filter(s=>s.type==='in').length;
+        const outs = deptScans.filter(s=>s.type==='out').length;
+        return ins === outs; // not currently checked in
+      });
+      if(!nextLabel){
+        zoneEl.className='scan-zone error';
+        resultEl.innerHTML=`<div class="alert alert-danger">❌ All labels for ${batchUpper} already scanned IN at this department.</div>`;
+        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+        el.focus(); return;
+      }
+      labelId = nextLabel.id;
+    } else {
+      // Find next label scanned IN but not yet OUT at this dept
+      const nextLabel = batchLabels.find(l=>{
+        const deptScans = state.scans.filter(s=>s.labelId===l.id&&s.dept===dept);
+        const ins = deptScans.filter(s=>s.type==='in').length;
+        const outs = deptScans.filter(s=>s.type==='out').length;
+        return ins > outs;
+      });
+      if(!nextLabel){
+        zoneEl.className='scan-zone error';
+        resultEl.innerHTML=`<div class="alert alert-danger">❌ No labels for ${batchUpper} are scanned IN at this department.</div>`;
+        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+        el.focus(); return;
+      }
+      labelId = nextLabel.id;
+    }
+  }
+
+  const result=recordScan(labelId,dept,type,currentDept);
 
   if(result.ok){
     zoneEl.className='scan-zone success';
     resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>`;
     setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },3000);
-    renderDeptScan(dept); // refresh stats
+    renderDeptScan(dept);
   } else {
     zoneEl.className='scan-zone error';
     resultEl.innerHTML=`<div class="alert alert-danger">❌ ${result.msg}</div>`;
@@ -2052,7 +2189,7 @@ function closeBatchStage(batchNo, dept){
     return;
   }
   if(!confirm('Close batch '+batchNo+' at '+dept+'?\nScan IN: '+inCount+' | Scan OUT: '+outCount+' | Wastage: '+wastageBoxes+'\nAll accounted')) return;
-  state.stageClosure.push({batchNumber:batchNo, dept, closedAt:now(), closedBy:currentDept});
+  state.closures.push({batchNumber:batchNo, dept, closedAt:now(), closedBy:currentDept});
   saveLocal();
   pushToServer('/api/tracking/stage-close',{batchNumber:batchNo,dept,closedBy:currentDept});
   renderPage(currentPage);
@@ -2322,7 +2459,7 @@ function renderBatchCard(batch){
     <div class="flex items-center justify-between mb-12">
       <div class="flex items-center gap-12">
         <div>
-          <div class="fw-bold" style="font-size:15px">${batchNo} ${alerts.length>0?`<span class="red-flag">🚩 ${alerts.length} alert${alerts.length>1?'s':''}</span>`:''} ${batchNo.startsWith('TEMP-')?'<span style="background:rgba(255,64,96,0.12);color:#ff4060;border:1px solid rgba(255,64,96,0.35);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">⚠️ TEMP — Reconciliation Required</span>':''}</div>
+          <div class="fw-bold" style="font-size:15px">${batchNo} ${alerts.length>0?`<span class="red-flag">🚩 ${alerts.length} alert${alerts.length>1?'s':''}</span>`:''}</div>
           <div class="text-sm text-muted">${batch.customer||''} | ${batch.machineId||''} | Size ${batch.size} | ${batch.isPrinted?'<span class="badge badge-purple">PTD</span>':'<span class="badge badge-gray">UP</span>'}</div>
         </div>
       </div>
@@ -2989,6 +3126,22 @@ function savePrinterUrl(){
   alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
 }
 
+async function testPrinterFromSettings(){
+  const mode = localStorage.getItem('sunloc_printer_mode')||'download';
+  const url = localStorage.getItem('sunloc_printer_url')||'';
+  if(mode==='download'){ toast('Download mode — no connection needed','var(--color-text-secondary)'); return; }
+  if(!url){ toast('Configure printer first','var(--color-warning)'); return; }
+  toast('Testing connection...','var(--color-text-secondary)');
+  const testZPL = '^XA^FO50,50^ADN,36,20^FDSunloc Test^FS^XZ';
+  try {
+    const r = await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body:testZPL,signal:AbortSignal.timeout(5000)});
+    if(r.ok) toast('✅ HPRT HT800 connected!','green');
+    else toast('⚠️ Printer error '+r.status,'orange');
+  } catch(e){
+    toast('❌ Cannot reach printer at '+url,'red');
+  }
+}
+
 function clearAllScans(){
   if(!confirm('⚠️ ADMIN: Clear ALL scan data? This cannot be undone.')) return;
   state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[];
@@ -3046,43 +3199,17 @@ setInterval(()=>{
   buildSidebar();
 },5*60*1000);
 
-// Auto sync every 2 minutes
+// Auto sync every 5 minutes — only when user is idle
 setInterval(()=>{
-  if(serverUrl) pullFromServer();
-},2*60*1000);
-
-// Check TEMP batch alerts every 5 minutes
-setInterval(checkTrackingTempAlerts, 5*60*1000);
-setTimeout(checkTrackingTempAlerts, 3000);
-
-async function checkTrackingTempAlerts(){
-  if(!serverUrl) return;
-  try{
-    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
-    const j = await r.json();
-    let banner = document.getElementById('trk-temp-banner');
-    if(!banner){
-      banner = document.createElement('div');
-      banner.id = 'trk-temp-banner';
-      banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-top:2px solid var(--accent3);padding:8px 16px;font-size:12px;text-align:center';
-      document.body.appendChild(banner);
-    }
-    if(j.ok && j.count > 0){
-      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
-      banner.style.display = 'block';
-      banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} active</strong> on machines: ${machines.join(', ')} — Labels will show <span style="color:#ff4060;font-weight:600">⚠️ TEMP</span> badge (red border) until reconciled. &nbsp;|&nbsp; W/O orders show <span style="color:#C55A11;font-weight:600">🔶 W/O</span> badge (orange border) until customer assigned.`;
-    } else {
-      banner.style.display = 'none';
-    }
-  }catch(e){}
-}
+  if(serverUrl && (Date.now() - _trkLastInput) > 10000) pullFromServer();
+}, 5*60*1000);
 
 // ══════════════════════════════════════════════════════
 // TRACKING — Audit log (admin role already handled by currentDept)
 // ══════════════════════════════════════════════════════
 async function trkAuditLog(action, details) {
   if (!serverUrl || !currentDept) return;
-  const token = sessionStorage.getItem('trk_token');
+  const token = localStorage.getItem('trk_token');
   if (!token) return;
   try {
     await fetch(serverUrl + '/api/audit/log', {
@@ -3101,7 +3228,7 @@ async function renderTrackingAuditLog() {
   const el = document.getElementById('page-settings');
   if (!el || currentDept !== 'admin') return;
 
-  const token = sessionStorage.getItem('trk_token');
+  const token = localStorage.getItem('trk_token');
   if (!serverUrl || !token) {
     el.innerHTML += '<div style="margin-top:16px;color:var(--text3)">Audit log requires server connection and admin login.</div>';
     return;
@@ -3140,56 +3267,125 @@ window.addEventListener('beforeunload', e => {
 
 // Audit key save actions
 // saveLocal audit is handled inside the original saveLocal function above
-
-// ── Mobile Navigation ─────────────────────────────────────────
-function initMobileNav() {
-  // Show mobile nav after login
-  const mobileNav = document.getElementById('mobile-nav');
-  if (mobileNav) mobileNav.style.display = 'flex';
-  // Set active based on current dept
-  const defaultPage = DEPT_INFO[currentDept]?.defaultPage || 'scan';
-  updateMobileNavActive(defaultPage);
-}
-
-function mobileNavTo(page) {
-  // 'scan' navigates to the dept's own scan page
-  if (page === 'scan') {
-    const deptPage = currentDept === 'admin' ? 'batch-tracker' : currentDept === 'planning' ? 'batch-tracker' : currentDept;
-    navigate(deptPage);
-    updateMobileNavActive('scan');
-  } else {
-    navigate(page);
-    updateMobileNavActive(page);
-  }
-}
-
-function updateMobileNavActive(page) {
-  document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active'));
-  const map = { 'scan': 'mnav-scan', 'batch-tracker': 'mnav-tracker', 'labels': 'mnav-labels', 'label-gen': 'mnav-labels', 'search': 'mnav-search' };
-  const activeId = map[page] || 'mnav-more';
-  document.getElementById(activeId)?.classList.add('active');
-}
-
-function toggleMobileMenu() {
-  const sb = document.getElementById('sidebar');
-  if (sb) sb.classList.toggle('open');
-}
-
-// Close sidebar when a nav item is tapped on mobile
-function mobileCloseSidebar() {
-  const sb = document.getElementById('sidebar');
-  if (sb && window.innerWidth <= 768) sb.classList.remove('open');
-}
-
-// Auto-focus scan input on mobile after page load for quick scanning
-function autoFocusScanInput(dept, type) {
-  const isMobile = window.innerWidth <= 768;
-  if (isMobile) {
-    setTimeout(() => {
-      document.getElementById(`scan-${type}-${dept}`)?.focus();
-    }, 300);
-  }
-}
 </script>
+
+<script>
+// ── REAL-TIME SYNC (SSE) ──────────────────────────────
+// SAFE: Only syncs when user has been idle 10+ seconds — never interrupts active work
+let _sseTrk = null;
+let _trkLastInput = 0;
+let _trkPendingSync = false;
+
+document.addEventListener('input', () => { _trkLastInput = Date.now(); });
+document.addEventListener('change', () => { _trkLastInput = Date.now(); });
+document.addEventListener('click', () => { _trkLastInput = Date.now(); });
+
+function connectTrackingSSE() {
+  if (!serverUrl || _sseTrk) return;
+  _sseTrk = new EventSource(serverUrl + "/api/sync/events?app=tracking");
+  _sseTrk.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "planning_updated") {
+        _trkPendingSync = true; // Defer until idle
+      }
+    } catch(err) {}
+  };
+  _sseTrk.onerror = () => {
+    if (_sseTrk) { _sseTrk.close(); _sseTrk = null; }
+    setTimeout(connectTrackingSSE, 15000);
+  };
+}
+
+// Every 5 seconds: if planning updated AND user idle 10+ seconds → refresh batch list ONLY
+setInterval(async () => {
+  if (!_trkPendingSync || !serverUrl) return;
+  if ((Date.now() - _trkLastInput) < 10000) return; // user still active
+  _trkPendingSync = false;
+  try {
+    // Only refresh the batch/order list — never re-render active scan forms
+    const pr = await fetch(serverUrl + '/api/planning/state', {signal: AbortSignal.timeout(5000)});
+    if (!pr.ok) return;
+    const pj = await pr.json();
+    if (pj.ok && pj.state?.orders) {
+      const batches = pj.state.orders.filter(o => !o.deleted);
+      if (batches.length > 0) {
+        state.batches = batches;
+        // Silently update only batch <select> dropdowns — never touch scan inputs or forms
+        document.querySelectorAll('select.batch-select, select[id*="batch"]').forEach(sel => {
+          const cur = sel.value;
+          sel.innerHTML = '<option value="">-- Select Batch --</option>' +
+            batches.map(b => `<option value="${b.batchNumber||b.id}" ${(b.batchNumber||b.id)===cur?'selected':''}>${b.batchNumber||b.id} — ${b.customer||''}</option>`).join('');
+          sel.value = cur;
+        });
+      }
+    }
+  } catch(e) {}
+}, 5000);
+
+setTimeout(connectTrackingSSE, 2000);
+setInterval(() => { if (!_sseTrk) connectTrackingSSE(); }, 30000);
+
+// ── LABEL TABLE FILTER + SORT ─────────────────────
+let _lblSortCol = '', _lblSortDir = 1;
+
+function sortLabelsTable(col) {
+  if (_lblSortCol === col) _lblSortDir *= -1; else { _lblSortCol = col; _lblSortDir = 1; }
+  // Update sort indicators
+  ['batch','customer','size','grossqty','maxlabels','generated','printed','remaining'].forEach(c => {
+    const el = document.getElementById('sort-'+c);
+    if (el) el.textContent = c === col ? (_lblSortDir === 1 ? '↑' : '↓') : '↕';
+  });
+  const tbody = document.querySelector('#labels-table tbody');
+  if (!tbody) return;
+  const rows = [...tbody.querySelectorAll('tr.lbl-row')];
+  rows.sort((a, b) => {
+    const av = (a.dataset[col] || '').toLowerCase();
+    const bv = (b.dataset[col] || '').toLowerCase();
+    const an = parseFloat(av), bn = parseFloat(bv);
+    if (!isNaN(an) && !isNaN(bn)) return (an - bn) * _lblSortDir;
+    return av.localeCompare(bv) * _lblSortDir;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+  filterLabelsTable();
+}
+
+function filterLabelsTable() {
+  const fBatch = (document.getElementById('f-batch')?.value || '').toLowerCase();
+  const fCustomer = (document.getElementById('f-customer')?.value || '').toLowerCase();
+  const fSize = document.getElementById('f-size')?.value || '';
+  const fGenerated = document.getElementById('f-generated')?.value || '';
+  const fPrinted = document.getElementById('f-printed')?.value || '';
+  const fRemaining = document.getElementById('f-remaining')?.value || '';
+  const rows = document.querySelectorAll('.lbl-row');
+  let visible = 0;
+  rows.forEach(row => {
+    const d = row.dataset;
+    const gen = parseInt(d.generated)||0, maxl = parseInt(d.maxlabels)||0;
+    const prt = parseInt(d.printed)||0, rem = parseInt(d.remaining)||0;
+    const matchBatch = !fBatch || (d.batch||'').toLowerCase().includes(fBatch);
+    const matchCustomer = !fCustomer || (d.customer||'').toLowerCase().includes(fCustomer);
+    const matchSize = !fSize || d.size === fSize;
+    const matchGen = !fGenerated ||
+      (fGenerated==='none' && gen===0) ||
+      (fGenerated==='partial' && gen>0 && gen<maxl) ||
+      (fGenerated==='full' && gen>=maxl && maxl>0);
+    const matchPrinted = !fPrinted ||
+      (fPrinted==='none' && prt===0) ||
+      (fPrinted==='partial' && prt>0 && prt<gen) ||
+      (fPrinted==='all' && prt>=gen && gen>0);
+    const matchRemaining = !fRemaining ||
+      (fRemaining==='yes' && rem>0) ||
+      (fRemaining==='no' && rem===0);
+    const show = matchBatch && matchCustomer && matchSize && matchGen && matchPrinted && matchRemaining;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  const countEl = document.getElementById('lbl-filter-count');
+  if (countEl) countEl.textContent = `Showing ${visible} of ${rows.length} batches`;
+}
+
+</script>
+
 </body>
 </html>

@@ -1608,7 +1608,7 @@ function openLabelGen(preselect){
       <label>Batch</label>
       <select id="lg-batch" onchange="updateLabelGenInfo()">
         <option value="">-- Select Batch --</option>
-        ${activeBatches.map(b=>{const bkey=b.batchNumber||b.id;const blabel=b.batchNumber||(b.poNumber?'PO:'+b.poNumber:'Order:'+b.id.slice(-4));return `<option value="${bkey}" ${bkey===preselect?'selected':''}>${blabel} — ${b.customer||''} | Size ${b.size} | ${b.isPrinted?'PTD':'UP'}</option>`;}).join('')}
+        ${activeBatches.map(b=>{const bkey=b.batchNumber||b.id;const blabel=b.batchNumber||(b.poNumber?'PO:'+b.poNumber:'Order:'+(b.id||'').slice(-4));return `<option value="${bkey}" ${bkey===preselect?'selected':''}>${blabel} — ${b.customer||''} | Size ${b.size} | ${b.isPrinted?'PTD':'UP'}</option>`;}).join('')}
       </select>
     </div>
     <div id="lg-info" class="alert alert-info hidden"></div>
@@ -1951,7 +1951,7 @@ function renderDeptScan(dept){
     <div class="section-header" style="margin-bottom:8px">
       <div><div class="section-title">${cfg.label}</div><div class="section-sub">Scan boxes IN and OUT of this department</div></div>
     </div>
-    ${myAlerts.length>0?`<div class="alert alert-danger">🚨 ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+a.labelId.slice(-4)).join(', ')}</div>`:''}
+    ${myAlerts.length>0?`<div class="alert alert-danger">🚨 ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+(a.labelId||'').slice(-4)).join(', ')}</div>`:''}
     <!-- SCAN PANEL -->
     <div class="grid-2">
       <div>
@@ -2059,7 +2059,7 @@ function renderDeptScan(dept){
       <tbody>
       ${state.scans.filter(s=>s.dept===dept).slice(-20).reverse().map(s=>`<tr>
         <td class="td-mono text-sm">${fmtDateTime(s.ts)}</td>
-        <td class="td-mono text-sm">${s.labelId.slice(-8)}</td>
+        <td class="td-mono text-sm">${(s.labelId||'').slice(-8)}</td>
         <td class="td-bold td-mono">${s.batchNumber}</td>
         <td>${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
         <td class="td-mono">${fmt(s.qty)}</td>

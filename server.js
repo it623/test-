@@ -659,20 +659,31 @@ app.get('/api/actuals/by-batch', (req, res) => {
  * Returns full tracking state (labels + scans) for the Tracking app
  */
 app.get('/api/tracking/state', (req, res) => {
+  // Normalize scan rows from snake_case (DB) to camelCase (frontend)
+  function normalizeScans(rows) {
+    return (rows || []).map(s => ({
+      id: s.id,
+      labelId: s.label_id || s.labelId,
+      batchNumber: s.batch_number || s.batchNumber,
+      dept: s.dept,
+      type: s.type,
+      qty: s.qty || 0,
+      ts: s.ts,
+    }));
+  }
   getPlanningState((planningState) => {
     const batches = (planningState?.orders || []).filter(o => !o.deleted);
     const machineMaster = planningState?.machineMaster || [];
-
     if (!USE_POSTGRES) {
       const labels = db.prepare('SELECT * FROM tracking_labels WHERE voided != 1 OR voided IS NULL').all();
-      const scans = db.prepare('SELECT * FROM tracking_scans').all();
+      const scans = normalizeScans(db.prepare('SELECT * FROM tracking_scans').all());
       res.json({ ok: true, state: { labels, scans, batches, machineMaster } });
     } else {
       db.query('SELECT * FROM tracking_labels ORDER BY generated ASC', (err, labelsRes) => {
         db.query('SELECT * FROM tracking_scans ORDER BY ts ASC', (err2, scansRes) => {
           res.json({ ok: true, state: {
             labels: labelsRes?.rows || [],
-            scans: scansRes?.rows || [],
+            scans: normalizeScans(scansRes?.rows),
             batches,
             machineMaster
           }});

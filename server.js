@@ -1,4 +1,4 @@
-/**
+﻿/**
  * SUNLOC INTEGRATED SERVER
  * Shared backend for Planning App + DPR App + Tracking App
  * Stack: Node.js + Express + PostgreSQL/SQLite (auto-detected)
@@ -17,11 +17,11 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors({
   origin: true,
-  credentials: true,   // ← required for cookies to work cross-origin
+  credentials: true,   // â† required for cookies to work cross-origin
 }));
 app.use(express.json({ limit: '50mb' }));
 
-// Disable caching for HTML files — always serve fresh version
+// Disable caching for HTML files â€” always serve fresh version
 app.use((req, res, next) => {
   if (req.path.endsWith('.html') || req.path === '/') {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -42,7 +42,7 @@ initializeDB();
 
 function initializeDB() {
   if (process.env.DATABASE_URL) {
-    console.log('🐘 PostgreSQL DATABASE_URL detected...');
+    console.log('ðŸ˜ PostgreSQL DATABASE_URL detected...');
     USE_POSTGRES = true;
 
     try {
@@ -55,22 +55,22 @@ function initializeDB() {
 
       db.query('SELECT NOW()', (err) => {
         if (err) {
-          console.error('❌ PostgreSQL failed:', err.message);
+          console.error('âŒ PostgreSQL failed:', err.message);
           USE_POSTGRES = false;
           initializeSQLite(':memory:');
         } else {
-          console.log('✅ PostgreSQL connected');
+          console.log('âœ… PostgreSQL connected');
           DB_PATH = 'PostgreSQL (Railway)';
           createPostgresSchema();
           setTimeout(() => {
             seedPostgresUsers();
             dbReady = true;
-            console.log('✅ Database ready');
+            console.log('âœ… Database ready');
           }, 1000);
         }
       });
     } catch (e) {
-      console.error('❌ PostgreSQL error:', e.message);
+      console.error('âŒ PostgreSQL error:', e.message);
       USE_POSTGRES = false;
       initializeSQLite(':memory:');
     }
@@ -89,7 +89,7 @@ function initializeSQLite(filePath) {
     DB_PATH = filePath;
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
-    console.log(`💾 SQLite: ${filePath}`);
+    console.log(`ðŸ’¾ SQLite: ${filePath}`);
     createSQLiteSchema();
     seedSQLiteUsers();
     dbReady = true;
@@ -104,9 +104,9 @@ function initializeSQLite(filePath) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SCHEMA
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function createSQLiteSchema() {
   if (!db?.exec) return;
@@ -213,7 +213,7 @@ function createPostgresSchema() {
     `CREATE TABLE IF NOT EXISTS dpr_records (id SERIAL PRIMARY KEY, floor TEXT NOT NULL, date TEXT NOT NULL, data_json TEXT NOT NULL, saved_at TIMESTAMP DEFAULT NOW(), UNIQUE(floor, date))`,
     `CREATE TABLE IF NOT EXISTS production_actuals (id SERIAL PRIMARY KEY, order_id TEXT, batch_number TEXT, machine_id TEXT NOT NULL, date TEXT NOT NULL, shift TEXT NOT NULL, run_index INTEGER DEFAULT 0, qty_lakhs NUMERIC DEFAULT 0, floor TEXT, synced_at TIMESTAMP DEFAULT NOW(), UNIQUE(machine_id, date, shift, run_index))`,
     `CREATE TABLE IF NOT EXISTS app_users (id SERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE, pin_hash TEXT NOT NULL, role TEXT NOT NULL, app TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())`,
-    // ← NEW: persistent sessions table in Postgres
+    // â† NEW: persistent sessions table in Postgres
     `CREATE TABLE IF NOT EXISTS app_sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, username TEXT NOT NULL, role TEXT NOT NULL, app TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW(), expires_at TIMESTAMP NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS tracking_labels (id TEXT PRIMARY KEY, batch_number TEXT NOT NULL, label_number INTEGER NOT NULL, size TEXT NOT NULL, qty NUMERIC NOT NULL, printed BOOLEAN DEFAULT FALSE, printed_at TIMESTAMP, voided BOOLEAN DEFAULT FALSE, void_reason TEXT, voided_by TEXT, customer TEXT, colour TEXT, pc_code TEXT, po_number TEXT, machine_id TEXT, generated TIMESTAMP DEFAULT NOW())`,
     `CREATE TABLE IF NOT EXISTS tracking_scans (id TEXT PRIMARY KEY, label_id TEXT NOT NULL, batch_number TEXT NOT NULL, dept TEXT NOT NULL, type TEXT NOT NULL, ts TIMESTAMP DEFAULT NOW())`,
@@ -223,9 +223,9 @@ function createPostgresSchema() {
   }));
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // AUTH HELPERS
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function hashPin(pin) { return crypto.createHash('sha256').update(pin + 'sunloc_salt').digest('hex'); }
 
@@ -233,7 +233,7 @@ function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 
 /**
  * Save session to DB (works for both Postgres and SQLite)
- * This replaces localStorage-based auth — tokens now survive browser history clears!
+ * This replaces localStorage-based auth â€” tokens now survive browser history clears!
  */
 function saveSession(token, user, callback) {
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
@@ -256,7 +256,7 @@ function saveSession(token, user, callback) {
 }
 
 /**
- * Look up a session token — returns user info or null if expired/missing
+ * Look up a session token â€” returns user info or null if expired/missing
  */
 function getSession(token, callback) {
   if (!token) return callback(null, null);
@@ -302,9 +302,9 @@ function requireAuth(req, res, next) {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SEED USERS
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function seedSQLiteUsers() {
   if (!db?.prepare) return;
@@ -336,9 +336,9 @@ function seedPostgresUsers() {
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ROUTES: AUTH  ← NEW
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ROUTES: AUTH  â† NEW
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * POST /api/auth/login
@@ -347,7 +347,7 @@ function seedPostgresUsers() {
  *
  * Frontend should save the token and send it as:
  *   Authorization: Bearer <token>
- * Token is stored in DB — survives browser history clears!
+ * Token is stored in DB â€” survives browser history clears!
  */
 app.post('/api/auth/login', (req, res) => {
   const { username, pin, app: appName } = req.body;
@@ -407,9 +407,9 @@ app.get('/api/auth/verify', (req, res) => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SYNCHRONIZATION LOGIC
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function getPlanningState(callback) {
   if (!USE_POSTGRES) {
@@ -445,12 +445,12 @@ function savePlanningState(state, callback) {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// REAL-TIME SYNC — Server-Sent Events (SSE)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// REAL-TIME SYNC â€” Server-Sent Events (SSE)
 // All connected apps receive instant push when data changes
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-const sseClients = new Map(); // clientId → { res, app }
+const sseClients = new Map(); // clientId â†’ { res, app }
 
 /**
  * GET /api/sync/events?app=dpr|planning|tracking
@@ -475,12 +475,12 @@ app.get('/api/sync/events', (req, res) => {
   }, 25000);
 
   sseClients.set(clientId, { res, app: appName });
-  console.log(`📡 SSE client connected: ${appName} (${clientId}) — total: ${sseClients.size}`);
+  console.log(`ðŸ“¡ SSE client connected: ${appName} (${clientId}) â€” total: ${sseClients.size}`);
 
   req.on('close', () => {
     clearInterval(keepAlive);
     sseClients.delete(clientId);
-    console.log(`📡 SSE client disconnected: ${appName} (${clientId}) — total: ${sseClients.size}`);
+    console.log(`ðŸ“¡ SSE client disconnected: ${appName} (${clientId}) â€” total: ${sseClients.size}`);
   });
 });
 
@@ -496,12 +496,12 @@ function broadcast(eventType, data, excludeApp = null) {
       try { res.write(`data: ${payload}\n\n`); count++; } catch (e) {}
     }
   });
-  if (count > 0) console.log(`📡 Broadcast [${eventType}] → ${count} client(s)`);
+  if (count > 0) console.log(`ðŸ“¡ Broadcast [${eventType}] â†’ ${count} client(s)`);
 }
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ROUTES: PLANNING APP
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.get('/api/planning/state', (req, res) => {
   getPlanningState((state) => res.json({ ok: true, state }));
@@ -516,10 +516,10 @@ app.post('/api/planning/state', (req, res) => {
   if (!state.orders || state.orders.length === 0) {
     getPlanningState((existing) => {
       if (existing && existing.orders && existing.orders.length > 0) {
-        console.log('⚠️  Blocked empty orders overwrite — existing orders preserved');
+        console.log('âš ï¸  Blocked empty orders overwrite â€” existing orders preserved');
         return res.json({ ok: true, synced: true, protected: true });
       }
-      // No existing orders — safe to save empty state
+      // No existing orders â€” safe to save empty state
       savePlanningState(state, () => {
         broadcast('planning_updated', { message: 'Planning state updated' }, 'planning');
         res.json({ ok: true, synced: true });
@@ -529,7 +529,7 @@ app.post('/api/planning/state', (req, res) => {
   }
 
   savePlanningState(state, (result) => {
-    console.log(`✅ Planning state saved — ${state.orders.length} orders. Syncing...`);
+    console.log(`âœ… Planning state saved â€” ${state.orders.length} orders. Syncing...`);
     broadcast('planning_updated', { message: 'Planning state updated' }, 'planning');
     res.json({ ok: true, synced: true });
   });
@@ -558,9 +558,9 @@ app.get('/api/orders/machine/:machineId', (req, res) => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ROUTES: DPR APP
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 
 
@@ -619,14 +619,14 @@ app.post('/api/dpr/save', (req, res) => {
     }
   }
 
-  console.log(`✅ DPR saved: ${floor} ${date} — ${(actuals||[]).length} actuals`);
+  console.log(`âœ… DPR saved: ${floor} ${date} â€” ${(actuals||[]).length} actuals`);
   broadcast('dpr_updated', { floor, date, message: `DPR updated: ${floor} / ${date}` }, 'dpr');
   res.json({ ok: true, synced: true });
 });
 
 /**
  * GET /api/actuals/by-batch
- * Returns total actual production per batch number — used by Planning app ACTUAL PROD column
+ * Returns total actual production per batch number â€” used by Planning app ACTUAL PROD column
  */
 app.get('/api/actuals/by-batch', (req, res) => {
   if (!USE_POSTGRES) {
@@ -650,9 +650,9 @@ app.get('/api/actuals/by-batch', (req, res) => {
 });
 
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ROUTES: TRACKING APP
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * GET /api/tracking/state
@@ -828,9 +828,9 @@ app.post('/api/tracking/scan', (req, res) => {
   res.json({ ok: true });
 });
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // HEALTH CHECK
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.get('/api/health', (req, res) => {
   res.json({
@@ -840,14 +840,14 @@ app.get('/api/health', (req, res) => {
     dbType: USE_POSTGRES ? 'PostgreSQL' : 'SQLite',
     ready: dbReady,
     uptime: Math.floor(process.uptime()) + 's',
-    sync: 'ACTIVE ✅',
-    sessions: 'DB-persisted ✅',
+    sync: 'ACTIVE âœ…',
+    sessions: 'DB-persisted âœ…',
   });
 });
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CATCH-ALL
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 app.get('*', (req, res) => {
   const idx = path.join(__dirname, 'public', 'index.html');
@@ -856,9 +856,9 @@ app.get('*', (req, res) => {
 });
 
 
-// ═══════════════════════════════════════════════════════════════
-// DIRECT HTML ROUTES — bypass static file cache completely
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// DIRECT HTML ROUTES â€” bypass static file cache completely
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 const fs_html = require('fs');
 
 app.get('/app/dpr', (req, res) => {
@@ -879,16 +879,16 @@ app.get('/app/tracking', (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
-  res.sendFile(path.join(__dirname, 'public', 'tracking.html'));
+  const tf=require('fs').readFileSync(path.join(__dirname,'public','tracking.html'),'utf8');res.send(tf.replace(/\\\$\{s\.labelId\.slice/g,'\$\{(s.labelId||\\).slice'));
 });
 
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // HEALTH + DATA INTEGRITY ENDPOINTS
-// ═══════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 /**
  * GET /api/backup/export
- * Downloads all data as JSON — use for manual backups
+ * Downloads all data as JSON â€” use for manual backups
  * Protected: requires admin token
  */
 app.get('/api/backup/export', async (req, res) => {
@@ -923,16 +923,16 @@ app.get('/api/backup/export', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/json');
     res.json(backup);
-    console.log(`📦 Backup exported: ${filename}`);
+    console.log(`ðŸ“¦ Backup exported: ${filename}`);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Sunloc Server v1.1 running on port ${PORT}`);
+  console.log(`âœ… Sunloc Server v1.1 running on port ${PORT}`);
   console.log(`   DB: ${DB_PATH}`);
-  console.log(`   Sync: ALL APPS CONNECTED ✅`);
+  console.log(`   Sync: ALL APPS CONNECTED âœ…`);
   console.log(`   Health: /api/health`);
 });
 

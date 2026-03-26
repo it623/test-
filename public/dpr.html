@@ -1969,7 +1969,7 @@ async function promptTempBatchDetails(tempBatchId, machineId) {
       <div style="font-size:11px;color:var(--t3);margin-top:10px">These details will migrate to the real order when Planning reconciles this batch.</div>
     </div>
   `, [
-    { label: 'Save', fn: \`saveTempBatchDetails('\${tempBatchId}')\` },
+    { label: 'Save', fn: `saveTempBatchDetails('${tempBatchId}')` },
     { label: 'Skip', fn: 'closeModal()' }
   ]);
 }

@@ -2065,7 +2065,7 @@ function renderDeptScan(dept){
     <div class="tbl-wrap"><table>
       <thead><tr><th>Time</th><th>Label ID</th><th>Batch</th><th>Type</th><th>Qty (L)</th></tr></thead>
       <tbody>
-      ${state.scans.filter(s=>s&&s.dept===dept).slice(-20).reverse().map(s=>`<tr>
+      ${(state.scans||[]).filter(s=>s&&s.dept===dept&&s.labelId).slice(-20).reverse().map(s=>`<tr>
         <td class="td-mono text-sm">${fmtDateTime(s.ts)}</td>
         <td class="td-mono text-sm">${(s.labelId||'').slice(-8)}</td>
         <td class="td-bold td-mono">${s.batchNumber||'-'}</td>

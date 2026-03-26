@@ -682,15 +682,21 @@ app.get('/api/tracking/state', (req, res) => {
     const batches = (planningState?.orders || []).filter(o => !o.deleted);
     const machineMaster = planningState?.machineMaster || [];
     if (!USE_POSTGRES) {
-      const labels = db.prepare('SELECT * FROM tracking_labels WHERE voided != 1 OR voided IS NULL').all();
-      const scans = normalizeScans(db.prepare('SELECT * FROM tracking_scans').all());
-      res.json({ ok: true, state: { labels, scans, batches, machineMaster } });
+      const labels = db.prepare('SELECT * FROM tracking_labels WHERE voided != 1 OR voided IS NULL').all() || [];
+      const scans = normalizeScans(db.prepare('SELECT * FROM tracking_scans').all() || []);
+      res.json({ ok: true, state: { labels, scans, stageClosure: [], wastage: [], dispatchRecs: [], alerts: [], batches, machineMaster } });
     } else {
       db.query('SELECT * FROM tracking_labels ORDER BY generated ASC', (err, labelsRes) => {
+        if (err) console.error('Labels query error:', err);
         db.query('SELECT * FROM tracking_scans ORDER BY ts ASC', (err2, scansRes) => {
+          if (err2) console.error('Scans query error:', err2);
           res.json({ ok: true, state: {
             labels: labelsRes?.rows || [],
-            scans: normalizeScans(scansRes?.rows),
+            scans: normalizeScans(scansRes?.rows || []),
+            stageClosure: [],
+            wastage: [],
+            dispatchRecs: [],
+            alerts: [],
             batches,
             machineMaster
           }});

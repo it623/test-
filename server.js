@@ -327,6 +327,12 @@ function seedPostgresUsers() {
     { username: 'DPR_Admin', pin: '9999', role: 'admin', app: 'dpr' },
     { username: 'Planning_Manager', pin: '3333', role: 'planning_manager', app: 'planning' },
     { username: 'Plan_Admin', pin: '9999', role: 'admin', app: 'planning' },
+    { username: 'Track_Admin', pin: '9999', role: 'admin', app: 'tracking' },
+    { username: 'aim', pin: '1111', role: 'aim', app: 'tracking' },
+    { username: 'printing', pin: '2222', role: 'printing', app: 'tracking' },
+    { username: 'pi', pin: '3333', role: 'pi', app: 'tracking' },
+    { username: 'packing', pin: '4444', role: 'packing', app: 'tracking' },
+    { username: 'dispatch', pin: '5555', role: 'dispatch', app: 'tracking' },
   ];
   seedUsers.forEach(u => {
     db.query(
@@ -464,6 +470,7 @@ app.get('/api/sync/events', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   // Send initial connection confirmation

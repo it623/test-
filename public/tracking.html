@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0</title>
+<title>Sunloc Tracking Suite v1.1</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -45,14 +45,14 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
 
-/* ── LAYOUT ── */
+/* â”€â”€ LAYOUT â”€â”€ */
 #app{display:flex;height:100vh;overflow:hidden}
 #sidebar{width:var(--nav-w);min-width:var(--nav-w);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;z-index:100}
 #main{flex:1;overflow:hidden;display:flex;flex-direction:column}
 #topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;height:58px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;box-shadow:var(--shadow)}
 #content{flex:1;overflow-y:auto;padding:24px}
 
-/* ── SIDEBAR ── */
+/* â”€â”€ SIDEBAR â”€â”€ */
 .sb-logo{padding:20px 16px 12px;border-bottom:1px solid var(--border)}
 .sb-logo h1{font-size:17px;font-weight:800;color:var(--accent);letter-spacing:-0.3px}
 .sb-logo p{font-size:10px;color:var(--text3);font-family:var(--mono);margin-top:2px}
@@ -78,12 +78,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .sync-badge.offline{background:var(--accent3-light);color:var(--accent3);cursor:pointer}
 .sync-badge.syncing{background:var(--accent-light);color:var(--accent)}
 
-/* ── TOPBAR ── */
+/* â”€â”€ TOPBAR â”€â”€ */
 .tb-title{font-size:16px;font-weight:700;color:var(--text)}
 .tb-subtitle{font-size:11px;color:var(--text3);margin-top:1px}
 .tb-actions{display:flex;align-items:center;gap:8px}
 
-/* ── BUTTONS ── */
+/* â”€â”€ BUTTONS â”€â”€ */
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font-family:var(--font);font-size:12px;font-weight:600;cursor:pointer;border:1px solid transparent;transition:all .15s;white-space:nowrap}
 .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 .btn-primary:hover{background:#1d4ed8}
@@ -99,12 +99,12 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .btn-icon{padding:7px;border-radius:var(--r-sm);background:var(--surface);border:1px solid var(--border2);cursor:pointer;font-size:14px;transition:.15s}
 .btn-icon:hover{background:var(--surface2)}
 
-/* ── CARDS ── */
+/* â”€â”€ CARDS â”€â”€ */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:20px;box-shadow:var(--shadow)}
 .card-sm{padding:14px}
 .card-title{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:12px;font-family:var(--mono)}
 
-/* ── KPI GRID ── */
+/* â”€â”€ KPI GRID â”€â”€ */
 .kpi-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:20px}
 .kpi{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px;box-shadow:var(--shadow)}
 .kpi-label{font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--text3);margin-bottom:8px;font-family:var(--mono)}
@@ -116,7 +116,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .kpi-val.red{color:var(--accent4)}
 .kpi-val.purple{color:var(--accent5)}
 
-/* ── TABLES ── */
+/* â”€â”€ TABLES â”€â”€ */
 .tbl-wrap{overflow-x:auto;border-radius:var(--r);border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{background:var(--surface2);font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--text3);padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;font-family:var(--mono)}
@@ -127,7 +127,7 @@ tr:hover td{background:var(--surface2)}
 .td-mono{font-family:var(--mono);font-size:11px}
 .td-right{text-align:right}
 
-/* ── STATUS BADGES ── */
+/* â”€â”€ STATUS BADGES â”€â”€ */
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:10px;font-size:10px;font-weight:600;font-family:var(--mono);white-space:nowrap}
 .badge-blue{background:var(--accent-light);color:var(--accent)}
 .badge-green{background:var(--accent2-light);color:var(--accent2)}
@@ -137,7 +137,7 @@ tr:hover td{background:var(--surface2)}
 .badge-orange{background:var(--orange-light);color:var(--orange)}
 .badge-gray{background:var(--surface3);color:var(--text3)}
 
-/* ── FORMS ── */
+/* â”€â”€ FORMS â”€â”€ */
 .form-group{margin-bottom:14px}
 .form-group label{display:block;font-size:11px;font-weight:600;color:var(--text2);margin-bottom:5px;letter-spacing:.3px}
 input[type=text],input[type=number],input[type=password],input[type=date],select,textarea{width:100%;background:var(--surface);border:1px solid var(--border2);border-radius:var(--r-sm);color:var(--text);padding:8px 10px;font-family:var(--font);font-size:13px;outline:none;transition:.15s}
@@ -147,7 +147,7 @@ input[type=number]{font-family:var(--mono)}
 .form-row.cols-2{grid-template-columns:1fr 1fr}
 .form-row.cols-3{grid-template-columns:1fr 1fr 1fr}
 
-/* ── MODAL ── */
+/* â”€â”€ MODAL â”€â”€ */
 .modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.4);backdrop-filter:blur(4px);z-index:500;display:none;align-items:center;justify-content:center}
 .modal-overlay.show{display:flex}
 .modal{background:var(--surface);border-radius:var(--r);padding:24px;max-width:580px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
@@ -155,14 +155,14 @@ input[type=number]{font-family:var(--mono)}
 .modal-sub{font-size:12px;color:var(--text3);margin-bottom:20px}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
 
-/* ── ALERTS ── */
+/* â”€â”€ ALERTS â”€â”€ */
 .alert{padding:12px 14px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px;border:1px solid transparent}
 .alert-info{background:var(--accent-light);color:var(--accent);border-color:rgba(37,99,235,.2)}
 .alert-success{background:var(--accent2-light);color:var(--accent2);border-color:rgba(5,150,105,.2)}
 .alert-warning{background:var(--accent3-light);color:var(--accent3);border-color:rgba(217,119,6,.2)}
 .alert-danger{background:var(--accent4-light);color:var(--accent4);border-color:rgba(220,38,38,.2)}
 
-/* ── SCAN INPUT ── */
+/* â”€â”€ SCAN INPUT â”€â”€ */
 .scan-zone{background:var(--surface2);border:2px dashed var(--border2);border-radius:var(--r);padding:24px;text-align:center;transition:.15s}
 .scan-zone.active{border-color:var(--accent);background:var(--accent-light)}
 .scan-zone.success{border-color:var(--accent2);background:var(--accent2-light)}
@@ -170,7 +170,7 @@ input[type=number]{font-family:var(--mono)}
 .scan-input{font-size:18px;font-family:var(--mono);text-align:center;border:2px solid var(--border2);border-radius:var(--r-sm);padding:12px;width:100%;max-width:320px;letter-spacing:2px}
 .scan-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
 
-/* ── PROGRESS BAR ── */
+/* â”€â”€ PROGRESS BAR â”€â”€ */
 .progress{height:8px;background:var(--surface3);border-radius:4px;overflow:hidden}
 .progress-bar{height:100%;border-radius:4px;transition:width .3s}
 .progress-bar.blue{background:var(--accent)}
@@ -178,7 +178,7 @@ input[type=number]{font-family:var(--mono)}
 .progress-bar.amber{background:var(--accent3)}
 .progress-bar.red{background:var(--accent4)}
 
-/* ── FLOW STEPS ── */
+/* â”€â”€ FLOW STEPS â”€â”€ */
 .flow-steps{display:flex;align-items:center;gap:0;margin:16px 0;overflow-x:auto;padding-bottom:4px}
 .flow-step{display:flex;flex-direction:column;align-items:center;min-width:80px}
 .flow-step-dot{width:32px;height:32px;border-radius:50%;border:2px solid var(--border2);background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--text3);position:relative;z-index:1;flex-shrink:0}
@@ -191,20 +191,20 @@ input[type=number]{font-family:var(--mono)}
 .flow-conn{flex:1;height:2px;background:var(--border2);min-width:20px;margin-bottom:18px}
 .flow-conn.done{background:var(--accent2)}
 
-/* ── PAGES ── */
+/* â”€â”€ PAGES â”€â”€ */
 .page{display:none}.page.active{display:block}
 
-/* ── SECTION HEADER ── */
+/* â”€â”€ SECTION HEADER â”€â”€ */
 .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
 .section-title{font-size:18px;font-weight:700;color:var(--text)}
 .section-sub{font-size:12px;color:var(--text3);margin-top:2px}
 
-/* ── GRID LAYOUTS ── */
+/* â”€â”€ GRID LAYOUTS â”€â”€ */
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
 .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
 
-/* ── LOGIN PAGE ── */
+/* â”€â”€ LOGIN PAGE â”€â”€ */
 #login-page{position:fixed;inset:0;background:linear-gradient(135deg,#eff6ff 0%,#f0f9ff 50%,#ecfdf5 100%);display:flex;align-items:center;justify-content:center;z-index:1000}
 .login-card{background:var(--surface);border-radius:16px;padding:40px;width:360px;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
 .login-logo{text-align:center;margin-bottom:28px}
@@ -216,11 +216,11 @@ input[type=number]{font-family:var(--mono)}
 .dept-btn.active{border-color:var(--accent);background:var(--accent-light);color:var(--accent)}
 .dept-btn .dept-icon{font-size:20px;display:block;margin-bottom:4px}
 
-/* ── RED FLAG ── */
+/* â”€â”€ RED FLAG â”€â”€ */
 .red-flag{display:inline-flex;align-items:center;gap:4px;color:var(--accent4);font-size:11px;font-weight:700;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 
-/* ── LABEL PREVIEW ── */
+/* â”€â”€ LABEL PREVIEW â”€â”€ */
 .label-preview{background:#fff;border:2px solid #333;border-radius:4px;padding:12px;font-family:var(--mono);font-size:10px;width:240px;position:relative}
 .label-preview.orange-label{border-color:var(--orange);background:var(--orange-light)}
 .label-batch{font-size:14px;font-weight:700;margin-bottom:4px;color:#000}
@@ -228,7 +228,7 @@ input[type=number]{font-family:var(--mono)}
 .label-qty{font-size:18px;font-weight:800;color:#000;margin:6px 0}
 .label-qr{float:right;margin-left:8px}
 
-/* ── DEPT HEADER STRIP ── */
+/* â”€â”€ DEPT HEADER STRIP â”€â”€ */
 .dept-strip{height:5px;border-radius:5px 5px 0 0;margin:-20px -20px 16px -20px}
 .dept-strip.aim{background:linear-gradient(90deg,#3b82f6,#60a5fa)}
 .dept-strip.printing{background:linear-gradient(90deg,#8b5cf6,#a78bfa)}
@@ -237,139 +237,16 @@ input[type=number]{font-family:var(--mono)}
 .dept-strip.dispatch{background:linear-gradient(90deg,#d97706,#fbbf24)}
 .dept-strip.labels{background:linear-gradient(90deg,#2563eb,#3b82f6)}
 
-/* ── RESPONSIVE ── */
+/* â”€â”€ RESPONSIVE â”€â”€ */
 @media(max-width:768px){
-  /* ── Layout ── */
   #sidebar{position:fixed;left:-var(--nav-w);transition:.3s;z-index:200}
   #sidebar.open{left:0}
   #main{width:100%}
   .grid-2,.grid-3,.grid-4{grid-template-columns:1fr}
   .form-row.cols-2,.form-row.cols-3{grid-template-columns:1fr}
-
-  /* ── Hamburger button ── */
-  #mobile-menu-btn{display:block!important}
-
-  /* ── Sidebar overlay backdrop ── */
-  #sidebar{position:fixed;left:-260px;top:0;bottom:0;width:260px;z-index:400;transition:left .25s;overflow-y:auto}
-  #sidebar.open{left:0;box-shadow:4px 0 20px rgba(0,0,0,0.5)}
-  #sidebar-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:399}
-  #sidebar.open ~ #sidebar-backdrop{display:block}
-
-  /* ── Topbar ── */
-  #topbar{padding:0 10px;height:52px}
-  #tb-title{font-size:14px}
-  #tb-subtitle{display:none}
-  #tb-actions .btn{padding:5px 8px;font-size:11px}
-
-  /* ── Login page ── */
-  .login-card{padding:24px 18px;margin:16px}
-  .dept-grid{grid-template-columns:repeat(2,1fr)!important;gap:8px}
-  .dept-btn{padding:12px 8px;font-size:12px}
-  .dept-btn .dept-icon{font-size:22px}
-
-  /* ── Scan zones — MOBILE OPTIMISED ── */
-  .scan-zone{
-    padding:16px 12px;
-    min-height:140px;
-    border-radius:10px;
-    border:2px dashed var(--border)
-  }
-  .scan-zone .scan-input{
-    font-size:16px!important;  /* prevents iOS zoom */
-    padding:12px 14px!important;
-    border-radius:8px;
-    width:100%;
-    -webkit-appearance:none;
-  }
-  .scan-zone .btn{
-    padding:12px 20px!important;
-    font-size:14px!important;
-    min-height:44px;  /* minimum touch target */
-    border-radius:8px;
-  }
-  /* Stack IN/OUT scan panels vertically on mobile */
-  .scan-panels-grid{
-    grid-template-columns:1fr!important;
-    gap:12px
-  }
-
-  /* ── Camera button prominence on mobile ── */
-  .btn-camera-mobile{
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-    width:100%;
-    padding:14px!important;
-    font-size:15px!important;
-    font-weight:700;
-    min-height:52px;
-    background:var(--accent)!important;
-    color:#0a0f1e!important;
-    border-radius:10px;
-    margin-bottom:8px;
-  }
-
-  /* ── Tables → card view on mobile ── */
-  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{min-width:500px}
-
-  /* ── Cards ── */
-  .card{padding:12px;border-radius:8px;margin-bottom:12px}
-  .card-title{font-size:13px}
-
-  /* ── Batch tracker ── */
-  .batch-card{padding:12px}
-  .batch-card .stage-pills{flex-wrap:wrap;gap:4px}
-  .stage-pill{font-size:11px;padding:3px 8px}
-
-  /* ── General touch targets ── */
-  .btn{min-height:40px;padding:8px 12px}
-  .btn-sm{min-height:36px}
-  select,input[type=text],input[type=number]{
-    font-size:16px!important;
-    min-height:42px;
-    padding:8px 10px;
-  }
-
-  /* ── Navigation bottom bar for mobile ── */
-  #mobile-nav{
-    display:flex!important;
-    position:fixed;
-    bottom:0;left:0;right:0;
-    background:var(--surface2);
-    border-top:1px solid var(--border);
-    z-index:300;
-    padding:4px 0 env(safe-area-inset-bottom);
-  }
-  .mobile-nav-item{
-    flex:1;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    padding:6px 2px;
-    font-size:10px;
-    color:var(--text3);
-    cursor:pointer;
-    gap:2px;
-  }
-  .mobile-nav-item.active{color:var(--accent)}
-  .mobile-nav-item .nav-icon{font-size:18px}
-
-  /* ── Content bottom padding for mobile nav ── */
-  #main{padding-bottom:64px}
-
-  /* ── Hide desktop-only elements ── */
-  .desktop-only{display:none!important}
-  .mobile-show{display:block!important}
 }
 
-@media(min-width:769px){
-  #mobile-nav{display:none!important}
-  .mobile-show{display:none!important}
-}
-
-/* ── MISC ── */
+/* â”€â”€ MISC â”€â”€ */
 .divider{height:1px;background:var(--border);margin:16px 0}
 .text-muted{color:var(--text3)}
 .text-sm{font-size:11px}
@@ -388,30 +265,6 @@ input[type=number]{font-family:var(--mono)}
 </head>
 <body>
 
-<!-- MOBILE BOTTOM NAV (hidden on desktop via CSS) -->
-<div id="mobile-nav" style="display:none">
-  <div class="mobile-nav-item" id="mnav-scan" onclick="mobileNavTo('scan')">
-    <span class="nav-icon">📷</span>
-    <span>Scan</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-tracker" onclick="mobileNavTo('batch-tracker')">
-    <span class="nav-icon">📦</span>
-    <span>Tracker</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-labels" onclick="mobileNavTo('labels')">
-    <span class="nav-icon">🏷️</span>
-    <span>Labels</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-search" onclick="mobileNavTo('search')">
-    <span class="nav-icon">🔍</span>
-    <span>Search</span>
-  </div>
-  <div class="mobile-nav-item" id="mnav-more" onclick="toggleMobileMenu()">
-    <span class="nav-icon">☰</span>
-    <span>More</span>
-  </div>
-</div>
-
 <!-- LOGIN PAGE -->
 <div id="login-page">
   <div class="login-card">
@@ -422,14 +275,14 @@ input[type=number]{font-family:var(--mono)}
     <div class="form-group">
       <label>Select Department / Role</label>
       <div class="dept-grid">
-        <div class="dept-btn" onclick="selectDept('admin')" id="dept-admin"><span class="dept-icon">🔐</span>Admin</div>
-        <div class="dept-btn" onclick="selectDept('planning')" id="dept-planning"><span class="dept-icon">📋</span>Planning</div>
-        <div class="dept-btn" onclick="selectDept('aim')" id="dept-aim"><span class="dept-icon">🔍</span>AIM</div>
-        <div class="dept-btn" onclick="selectDept('printing')" id="dept-printing"><span class="dept-icon">🖨️</span>Printing</div>
-        <div class="dept-btn" onclick="selectDept('pi')" id="dept-pi"><span class="dept-icon">🟠</span>Print Inspection</div>
-        <div class="dept-btn" onclick="selectDept('packing')" id="dept-packing"><span class="dept-icon">📦</span>Packing</div>
-        <div class="dept-btn" onclick="selectDept('dispatch')" id="dept-dispatch"><span class="dept-icon">🚚</span>Dispatch</div>
-        <div class="dept-btn" onclick="selectDept('labels')" id="dept-labels"><span class="dept-icon">🏷️</span>Label Gen.</div>
+        <div class="dept-btn" onclick="selectDept('admin')" id="dept-admin"><span class="dept-icon">ðŸ”</span>Admin</div>
+        <div class="dept-btn" onclick="selectDept('planning')" id="dept-planning"><span class="dept-icon">ðŸ“‹</span>Planning</div>
+        <div class="dept-btn" onclick="selectDept('aim')" id="dept-aim"><span class="dept-icon">ðŸ”</span>AIM</div>
+        <div class="dept-btn" onclick="selectDept('printing')" id="dept-printing"><span class="dept-icon">ðŸ–¨ï¸</span>Printing</div>
+        <div class="dept-btn" onclick="selectDept('pi')" id="dept-pi"><span class="dept-icon">ðŸŸ </span>Print Inspection</div>
+        <div class="dept-btn" onclick="selectDept('packing')" id="dept-packing"><span class="dept-icon">ðŸ“¦</span>Packing</div>
+        <div class="dept-btn" onclick="selectDept('dispatch')" id="dept-dispatch"><span class="dept-icon">ðŸšš</span>Dispatch</div>
+        <div class="dept-btn" onclick="selectDept('labels')" id="dept-labels"><span class="dept-icon">ðŸ·ï¸</span>Label Gen.</div>
       </div>
     </div>
     <div class="form-group mt-12" id="pin-group" style="display:none">
@@ -444,8 +297,7 @@ input[type=number]{font-family:var(--mono)}
 <!-- MAIN APP -->
 <div id="app" style="display:none">
   <!-- SIDEBAR -->
-  <div id="sidebar-backdrop" onclick="toggleMobileMenu()"></div>
-<div id="sidebar">
+  <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
       <p>Tracking Suite v1.0</p>
@@ -460,19 +312,16 @@ input[type=number]{font-family:var(--mono)}
     </div>
     <div id="sidebar-nav"></div>
     <div class="sb-sync">
-      <div class="sync-badge offline" id="syncBadge" onclick="configureServer()">⚙ Server</div>
+      <div class="sync-badge offline" id="syncBadge" onclick="configureServer()">âš™ Server</div>
     </div>
   </div>
 
   <!-- MAIN -->
   <div id="main">
     <div id="topbar">
-      <div style="display:flex;align-items:center;gap:10px">
-        <button id="mobile-menu-btn" onclick="toggleMobileMenu()" style="display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer;padding:4px 8px;line-height:1">☰</button>
-        <div>
-          <div class="tb-title" id="tb-title">Dashboard</div>
-          <div class="tb-subtitle" id="tb-subtitle">Sunloc Tracking Suite</div>
-        </div>
+      <div>
+        <div class="tb-title" id="tb-title">Dashboard</div>
+        <div class="tb-subtitle" id="tb-subtitle">Sunloc Tracking Suite</div>
       </div>
       <div class="tb-actions" id="tb-actions"></div>
     </div>
@@ -506,7 +355,7 @@ input[type=number]{font-family:var(--mono)}
 <!-- CAMERA SCAN MODAL -->
 <div class="modal-overlay" id="cam-overlay">
   <div class="modal" style="max-width:420px">
-    <div class="modal-title">📷 Camera Scan</div>
+    <div class="modal-title">ðŸ“· Camera Scan</div>
     <div class="modal-sub">Point camera at QR code or barcode</div>
     <div style="background:#000;border-radius:8px;overflow:hidden;margin-bottom:12px">
       <video id="cam-video" style="width:100%;display:block" autoplay playsinline></video>
@@ -519,9 +368,9 @@ input[type=number]{font-family:var(--mono)}
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CONSTANTS & CONFIG
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const PACK_SIZES = { '00':0.75, '0':1.00, '1':1.25, '2':1.75, '3':2.25, '4':3.00 };
 
@@ -553,17 +402,17 @@ const DEPT_INFO = {
 };
 
 const NAV_ITEMS = [
-  { id:'dashboard',     icon:'📊', label:'Dashboard',       section:'Overview' },
-  { id:'labels',        icon:'🏷️',  label:'Label Generation', section:'Operations' },
-  { id:'aim',           icon:'🔍', label:'AIM Inspection',  section:'Operations' },
-  { id:'printing',      icon:'🖨️', label:'Printing',         section:'Operations' },
-  { id:'pi',            icon:'🟠', label:'Print Inspection', section:'Operations' },
-  { id:'packing',       icon:'📦', label:'Packing',          section:'Operations' },
-  { id:'dispatch',      icon:'🚚', label:'Dispatch',         section:'Operations' },
-  { id:'batch-tracker', icon:'🗺️', label:'Batch Tracker',    section:'Tracking' },
-  { id:'reports',       icon:'📈', label:'Reports',          section:'Tracking' },
-  { id:'search',        icon:'🔍', label:'Search',           section:'Tracking' },
-  { id:'settings',      icon:'⚙️',  label:'Settings',         section:'System' }
+  { id:'dashboard',     icon:'ðŸ“Š', label:'Dashboard',       section:'Overview' },
+  { id:'labels',        icon:'ðŸ·ï¸',  label:'Label Generation', section:'Operations' },
+  { id:'aim',           icon:'ðŸ”', label:'AIM Inspection',  section:'Operations' },
+  { id:'printing',      icon:'ðŸ–¨ï¸', label:'Printing',         section:'Operations' },
+  { id:'pi',            icon:'ðŸŸ ', label:'Print Inspection', section:'Operations' },
+  { id:'packing',       icon:'ðŸ“¦', label:'Packing',          section:'Operations' },
+  { id:'dispatch',      icon:'ðŸšš', label:'Dispatch',         section:'Operations' },
+  { id:'batch-tracker', icon:'ðŸ—ºï¸', label:'Batch Tracker',    section:'Tracking' },
+  { id:'reports',       icon:'ðŸ“ˆ', label:'Reports',          section:'Tracking' },
+  { id:'search',        icon:'ðŸ”', label:'Search',           section:'Tracking' },
+  { id:'settings',      icon:'âš™ï¸',  label:'Settings',         section:'System' }
 ];
 
 const DEPT_PINS = {
@@ -573,13 +422,16 @@ const DEPT_PINS = {
 
 const ALERT_HOURS = 48;
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // STATE
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 let currentDept = null;
 let currentPage = null;
-// Sanitize server URL — strip any file path and trailing slashes
+// Sanitize server URL â€” strip any file path and trailing slashes
+
+// Server URL always uses window.location.origin (set at initialization)
+
 function sanitizeServerUrl(url) {
   if (!url) return '';
   url = url.trim();
@@ -591,7 +443,8 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+let serverUrl = window.location.origin; // Always use same origin
+localStorage.setItem('sunloc_server_url', serverUrl);
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;
@@ -609,9 +462,9 @@ let state = {
   machineMaster: []  // from DPR
 };
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // UTILITIES
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7) }
 function today(){ return new Date().toISOString().slice(0,10) }
@@ -694,13 +547,14 @@ function canScanDept(batchNo, dept){
   const thisIn = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
 
   // Allow scan-in as long as this dept has not received more than prev dept has sent out
-  // Previous dept does NOT need to be closed — boxes flow in real time
+  // Previous dept does NOT need to be closed â€” boxes flow in real time
   return thisIn < prevOut;
 }
 
 function checkAlerts(){
   const newAlerts = [];
   state.scans.forEach(scan=>{
+    if(!scan||!scan.labelId) return;
     if(scan.type!=='in') return;
     // Check if there's a corresponding out
     const hasOut = state.scans.some(s=>s.labelId===scan.labelId&&s.dept===scan.dept&&s.type==='out'&&new Date(s.ts)>new Date(scan.ts));
@@ -711,18 +565,18 @@ function checkAlerts(){
       }
     }
   });
-  state.alerts = [...state.alerts.filter(a=>!newAlerts.find(n=>n.labelId===a.labelId&&n.dept===a.dept)), ...newAlerts];
+  state.alerts = [...state.alerts.filter(a=>a&&!newAlerts.find(n=>n.labelId===a.labelId&&n.dept===a.dept)), ...newAlerts];
   return state.alerts;
 }
 
 function getAlertCount(dept){
   checkAlerts();
-  return dept ? state.alerts.filter(a=>a.dept===dept).length : state.alerts.length;
+  return dept ? state.alerts.filter(a=>a&&a.dept===dept).length : state.alerts.length;
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // AUTH
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 let selectedDeptForLogin = null;
 
@@ -752,7 +606,7 @@ function doLogin(){
         signal: AbortSignal.timeout(3000)
       }).then(r=>r.json()).then(j=>{
         if(j.ok) {
-          sessionStorage.setItem('trk_token', j.token);
+          localStorage.setItem('trk_token', j.token);
           trkAuditLog('LOGIN', `Logged into Tracking as: ${currentDept}`);
         }
       }).catch(()=>{});
@@ -789,12 +643,11 @@ function initApp(){
   const defaultPage = info.pages[0];
   navigate(defaultPage);
   checkServer();
-  initMobileNav();
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SIDEBAR
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function buildSidebar(){
   const info = DEPT_INFO[currentDept];
@@ -817,8 +670,6 @@ function buildSidebar(){
 
 function navigate(page){
   currentPage=page;
-  mobileCloseSidebar();
-  updateMobileNavActive(page);
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const pageEl = document.getElementById('page-'+page);
@@ -828,9 +679,9 @@ function navigate(page){
   renderPage(page);
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // MODAL
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function openModal(title,sub,body,footer){
   document.getElementById('modal-title').textContent=title;
@@ -851,28 +702,43 @@ function openModal(title,sub,body,footer){
 function closeModal(){ document.getElementById('modal-overlay').classList.remove('show'); }
 document.getElementById('modal-overlay').addEventListener('click',e=>{ if(e.target===e.currentTarget) closeModal(); });
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SERVER SYNC
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function setSyncBadge(status){
   syncStatus=status;
   const el=document.getElementById('syncBadge');
   if(!el) return;
   el.className='sync-badge';
-  if(status==='synced'){ el.className='sync-badge synced'; el.innerHTML='🟢 Synced'; }
-  else if(status==='syncing'){ el.className='sync-badge syncing'; el.innerHTML='⟳ Syncing...'; }
-  else { el.className='sync-badge offline'; el.innerHTML=serverUrl?'🟡 Offline':'⚙ Server'; }
+  if(status==='synced'){ el.className='sync-badge synced'; el.innerHTML='ðŸŸ¢ Synced'; }
+  else if(status==='syncing'){ el.className='sync-badge syncing'; el.innerHTML='âŸ³ Syncing...'; }
+  else { el.className='sync-badge offline'; el.innerHTML=serverUrl?'ðŸŸ¡ Offline':'âš™ Server'; }
 }
 
 async function checkServer(){
-  if(!serverUrl){ setSyncBadge('offline'); return false; }
+  if(!serverUrl || serverUrl === '') {
+    serverUrl = window.location.origin;
+    localStorage.setItem('sunloc_server_url', serverUrl);
+  }
   setSyncBadge('syncing');
   try{
     const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
     if(r.ok){ setSyncBadge('synced'); return true; }
+    if(serverUrl !== window.location.origin) {
+      serverUrl = window.location.origin;
+      localStorage.setItem('sunloc_server_url', serverUrl);
+      const r2=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
+      if(r2.ok){ setSyncBadge('synced'); return true; }
+    }
     setSyncBadge('offline'); return false;
-  }catch{ setSyncBadge('offline'); return false; }
+  }catch{
+    if(serverUrl !== window.location.origin) {
+      serverUrl = window.location.origin;
+      localStorage.setItem('sunloc_server_url', serverUrl);
+    }
+    setSyncBadge('offline'); return false;
+  }
 }
 
 function configureServer(){
@@ -890,14 +756,41 @@ async function pullFromServer(){
     if(!r.ok) return;
     const j=await r.json();
     if(j.ok && j.state){
-      // Merge labels: keep local labels not yet on server (by id), then overlay server labels
-      const serverLabelIds = new Set((j.state.labels||[]).map(l=>l.id));
+      // Map server labels - normalize column names (server uses snake_case)
+      const serverLabels = (j.state.labels||[]).map(l => ({
+        id: l.id,
+        batchNumber: l.batch_number || l.batchNumber,
+        labelNumber: l.label_number || l.labelNumber,
+        size: l.size,
+        qty: parseFloat(l.qty) || 0,
+        printed: l.printed === true || l.printed === 1 || l.printed === 'true',
+        printedAt: l.printed_at || l.printedAt || null,
+        voided: l.voided === true || l.voided === 1 || l.voided === 'true',
+        voidReason: l.void_reason || l.voidReason || '',
+        voidedBy: l.voided_by || l.voidedBy || '',
+        customer: l.customer || '',
+        colour: l.colour || '',
+        pcCode: l.pc_code || l.pcCode || '',
+        poNumber: l.po_number || l.poNumber || '',
+        machineId: l.machine_id || l.machineId || '',
+        generated: l.generated || now(),
+        isPartial: l.is_partial || l.isPartial || false,
+        isOrange: l.is_orange || l.isOrange || false,
+        qrData: l.qr_data || l.qrData || '',
+      }));
+      // Merge: keep local labels not yet on server
+      const serverLabelIds = new Set(serverLabels.map(l=>l.id));
       const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
       Object.assign(state, j.state);
-      // Re-add any local-only labels (generated but not yet confirmed saved on server)
-      if(localOnlyLabels.length>0){
-        state.labels = [...state.labels, ...localOnlyLabels];
-      }
+      // Guard: ensure arrays are never undefined after server merge
+      state.scans        = Array.isArray(state.scans)        ? state.scans.filter(s=>s&&s.labelId)        : [];
+      state.labels       = Array.isArray(state.labels)       ? state.labels       : [];
+      state.batches      = Array.isArray(state.batches)      ? state.batches      : [];
+      state.stageClosure = Array.isArray(state.stageClosure) ? state.stageClosure : [];
+      state.wastage      = Array.isArray(state.wastage)      ? state.wastage      : [];
+      state.dispatchRecs = Array.isArray(state.dispatchRecs) ? state.dispatchRecs : [];
+      state.alerts       = Array.isArray(state.alerts)       ? state.alerts.filter(a=>a&&a.labelId)       : [];
+      state.labels = [...serverLabels, ...localOnlyLabels];
     }
     // Also pull planning orders for batch data
     const pr=await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
@@ -913,7 +806,9 @@ async function pullFromServer(){
     }
     saveLocal();
     setSyncBadge('synced');
-    if(currentPage) renderPage(currentPage);
+    // Only re-render if user has been idle 30+ seconds â€” never wipe active form/scan input
+    const idleMs = Date.now() - (_trkLastInput || 0);
+    if(currentPage && idleMs > 30000) renderPage(currentPage);
   }catch(e){ setSyncBadge('offline'); }
 }
 
@@ -929,24 +824,59 @@ function saveLocal(){
   try{
     const toSave={labels:state.labels,scans:state.scans,stageClosure:state.stageClosure,wastage:state.wastage,dispatchRecs:state.dispatchRecs,alerts:state.alerts};
     localStorage.setItem('sunloc_tracking',JSON.stringify(toSave));
-    trkAuditLog('SAVE', `Tracking data saved — dept: ${currentDept}`);
+    trkAuditLog('SAVE', `Tracking data saved â€” dept: ${currentDept}`);
   }catch(e){}
 }
 
-function loadState(){
+// Push all labels to server â€” called after any label state change
+function syncLabelsToServer(){
+  if(!serverUrl || !state.labels.length) return;
+  const labelsToSync = state.labels.map(l => ({
+    id: l.id,
+    batchNumber: l.batchNumber,
+    labelNumber: l.labelNumber,
+    size: l.size,
+    qty: l.qty,
+    printed: l.printed || false,
+    printedAt: l.printedAt || null,
+    voided: l.voided || false,
+    voidReason: l.voidReason || '',
+    voidedBy: l.voidedBy || '',
+    customer: l.customer || '',
+    colour: l.colour || '',
+    pcCode: l.pcCode || '',
+    poNumber: l.poNumber || '',
+    machineId: l.machineId || '',
+    qrData: l.qrData || '',
+    isPartial: l.isPartial || false,
+    isOrange: l.isOrange || false,
+  }));
+  pushToServer('/api/tracking/labels', {labels: labelsToSync});
+}
+
+async function loadState(){
+  // First: load from localStorage for instant display
   try{
     const saved=localStorage.getItem('sunloc_tracking');
     if(saved){ const p=JSON.parse(saved); Object.assign(state,p); }
   }catch{}
-  // Pull from server immediately — batches from Planning must load on every login
-  if(serverUrl){
-    pullFromServer();
+  // Always pull from server â€” server is source of truth for labels
+  const url = serverUrl || window.location.origin;
+  if(url){
+    if(!serverUrl) {
+      serverUrl = url;
+      localStorage.setItem('sunloc_server_url', url);
+    }
+    // Wait for server data before first render
+    await pullFromServer();
+    // Re-render after server data loaded
+    if(currentPage) renderPage(currentPage);
   }
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // SCAN ENGINE
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function recordScan(labelId, dept, type, operator){
   const label = state.labels.find(l=>l.id===labelId);
@@ -1026,9 +956,9 @@ function generateQRData(label){
   return `SUNLOC|${label.batchNumber}|${label.labelNumber}|${label.size}|${label.qty}|${label.id}`;
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // LABEL GENERATION
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function canGenerateLabels(batchNo, requestedBoxes){
   const batch = getBatch(batchNo);
@@ -1088,7 +1018,11 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
 
   state.labels.push(...newLabels);
   saveLocal();
-  pushToServer('/api/tracking/labels',{labels:newLabels});
+  // Push all label data to server including customer, colour etc
+  const labelsWithMeta = newLabels.map(l => ({...l, customer: batch.customer||'', colour: batch.colour||'', pcCode: batch.pcCode||'', poNumber: batch.poNumber||'', machineId: batch.machineId||''}));
+  pushToServer('/api/tracking/labels',{labels:labelsWithMeta});
+  // Also sync all labels to ensure server is complete
+  setTimeout(syncLabelsToServer, 1000);
   return newLabels;
 }
 
@@ -1113,9 +1047,9 @@ function regeneratePartialLabel(labelId, newQty){
   return newLabel;
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // WIP CALCULATIONS
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function getBatchWIPDays(batchNo){
   const batch = getBatch(batchNo);
@@ -1195,47 +1129,45 @@ function updatePlanningStageStatus(batchNo){
   pushToServer('/api/tracking/stage-status',{batchNumber:batchNo,statusMap});
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // ZPL LABEL PRINTING
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function generateZPL(label, batch){
-  // Colour split: "BROWN/WHITE" → Cap=BROWN, Body=WHITE
+  // â”€â”€ Colour split: "BROWN/WHITE" â†’ Cap + Body â”€â”€
   const colourParts = (label.colour||'').split('/');
-  const colourCap  = (colourParts[0]||'').trim() || (label.colour||'');
-  const colourBody = (colourParts[1]||'').trim() || '';
+  const colourCap  = colourParts[0]?.trim() || (label.colour||'');
+  const colourBody = colourParts[1]?.trim() || '';
 
-  // Quantity
+  // â”€â”€ Quantity â”€â”€
+  // Standard box  â†’ fixed pack size qty (e.g. Size 0 = 1.00L = 100,000 pcs)
+  // Partial/last box â†’ actual qty entered manually at generation
   const packSizeL   = PACK_SIZES[String(label.size)] || 1;
   const standardPcs = Math.round(packSizeL * 100000);
   const actualPcs   = Math.round(label.qty * 100000);
   const pieces      = label.isPartial ? actualPcs : standardPcs;
 
-  // MFG Date
+  // â”€â”€ MFG Date from batch start date â”€â”€
   const mfgRaw  = batch?.startDate ? new Date(batch.startDate) : new Date();
   const mfgDate = mfgRaw.toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
 
+  // â”€â”€ Container No = label number â”€â”€
   const containerNo = label.labelNumber;
-  const batchNo     = label.batchNumber || '';
 
-  // Label type flags
-  const isTemp = batchNo.startsWith('TEMP-');
-  const isWO   = label.woStatus === 'wo';
-  const customerText = isTemp ? '*** TEMP BATCH - REPLACEMENT REQUIRED ***'
-                     : isWO   ? 'W/O - WITHOUT ORDER - CUSTOMER PENDING'
-                     :          (label.customer || '');
+  // â”€â”€ 203 DPI: 1mm â‰ˆ 8 dots â”€â”€
+  // Main label:   150mm W Ã— 100mm H â†’ PW1200, LL800
+  // Orange label: 100mm W Ã— 50mm H  â†’ PW800,  LL400
 
-  // ═══════════════════════════════════════════════════════════════
-  // ORANGE LABEL — Landscape 100mm W × 50mm H  (PW800, LL400)
-  // ═══════════════════════════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // ORANGE LABEL â€” 100mm W Ã— 50mm H
+  // Affixed outside/alongside the main white label
+  // Contains: Cap printing matter, Body printing matter, QR code
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   if(label.isOrange){
     const printMatter = label.printingMatter || batch?.printMatter || '';
-    const pmParts  = printMatter.split('/');
-    const pmCap    = (pmParts[0]||'').trim() || printMatter;
-    const pmBody   = (pmParts[1]||'').trim() || '';
-    // Orange label: Landscape 100mm W x 50mm H (PW800, LL400) at 203 DPI
-    // Left content area: x=10 to x=560 (70mm)
-    // Right QR area: x=570 to x=790 (28mm)
+    const pmParts = printMatter.split('/');
+    const pmCap   = pmParts[0]?.trim() || printMatter;
+    const pmBody  = pmParts[1]?.trim() || '';
     return `^XA
 ^CI28
 ^PW800
@@ -1243,86 +1175,31 @@ function generateZPL(label, batch){
 ^MNM
 ^PON
 
-^FO10,10^GB780,378,2^FS
-^FO560,10^GB2,378,2^FS
+^FO10,10^GB780,380,2^FS
+
+^CF0,32
+^FO20,20^FB560,1,0,C^FDPRINTING DETAILS^FS
+^FO20,55^GB560,2,2^FS
 
 ^CF0,28
-^FO20,18^FB530,1,0,C^FDPRINTING DETAILS^FS
-^FO20,50^GB540,2,2^FS
+^FO30,70^FDCAP  :  ${pmCap}^FS
+^FO30,150^FDBODY :  ${pmBody}^FS
 
-^CF0,26
-^FO25,58^FDCAP   :  ${pmCap}^FS
-^FO25,96^FDBODY :  ${pmBody}^FS
-
-^FO20,140^GB540,2,2^FS
+^FO20,240^GB560,2,2^FS
 ^CF0,22
-^FO25,148^FDBatch No. :  ${batchNo}^FS
-^FO25,178^FDContainer :  ${containerNo}^FS
-^FO25,210^FDSize          :  ${label.size}^FS
+^FO30,255^FDBatch: ${label.batchNumber}^FS
+^FO30,295^FDContainer: ${containerNo}^FS
 
-^FO20,252^GB540,2,2^FS
-^CF0,19
-^FO25,258^FDExpiry: 5 years from Mfg Date. Drug Mfg Raj-867, Dt 08.12.1981^FS
-
-^FO574,20^BQN,2,4^FDLA,${label.qrData}^FS
+^FO590,10^GB200,380,2^FS
+^FO600,30^BQN,2,4^FDLA,${label.qrData}^FS
 
 ^XZ`;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // MAIN WHITE LABEL — Landscape 150mm W × 100mm H (PW1200, LL800)
-  // 203 DPI: 1mm = 8 dots
-  // Total: 1200 dots wide × 800 dots tall
-  //
-  // Layout (matching physical label in photo):
-  //   Row  0- 50: Company header (2 lines)
-  //   Row 50- 90: Horizontal rule + CUSTOMER NAME
-  //   Row 90-480: Data table (left col | right col, separated at x=580)
-  //   Row480-520: PRINTED row
-  //   Row520-560: Horizontal rule
-  //   Row560-600: EXPIRY text
-  //   Row600-640: Horizontal rule
-  //   Row640-790: QR code (left) + Q RELEASED (centre) + SIGNATURE (right)
-  //   Row790-800: Bottom rule
-  //
-  // Left  col: x=20  to x=560  (fields: QUANTITY, SIZE, COLOUR CAP, COLOUR BODY, PRINTED)
-  // Right col: x=580 to x=1180 (fields: BATCH NO, CONTAINER NO, GROSS WT, NETT WT, MFG DATE)
-  // Divider: x=560
-  // ═══════════════════════════════════════════════════════════════
-
-  // TEMP/WO visual treatment: header band + border
-  const outerBorder = isTemp
-    ? `^FO4,4^GB1192,792,5^FS\n^FO10,10^GB1180,780,2^FS`
-    : isWO
-    ? `^FO4,4^GB1192,792,4^FS`
-    : '';
-
-  const headerBandH = isTemp || isWO ? 36 : 0;
-  const headerBand  = isTemp
-    ? `^FO20,100^GB1160,${headerBandH},${headerBandH}^FS\n^CF0,22\n^FR^FO20,108^FB1160,1,0,C^FD** TEMP BATCH — REPLACEMENT LABEL REQUIRED **^FS\n`
-    : isWO
-    ? `^FO20,100^GB1160,${headerBandH},${headerBandH}^FS\n^CF0,22\n^FR^FO20,108^FB1160,1,0,C^FDWITHOUT ORDER — CUSTOMER TO BE ASSIGNED^FS\n`
-    : '';
-
-  // Y offsets — shift everything down if header band present
-  const D = headerBandH; // 0 for normal, 36 for TEMP/WO
-
-  // Row Y positions
-  const custY    = 56 + D;   // CUSTOMER NAME row
-  const tableTop = 96 + D;   // top of data table
-  const r1 = tableTop + 8;   // QUANTITY / BATCH NO
-  const r2 = r1 + 52;        // SIZE / CONTAINER NO
-  const r3 = r2 + 52;        // COLOUR CAP / GROSS WT
-  const r4 = r3 + 52;        // COLOUR BODY / NETT WT
-  const r5 = r4 + 52;        // (empty left) / MFG DATE
-  const tableBot = tableTop + 52*5; // bottom of table
-  const printedY = tableBot + 8;
-  const rule1Y   = tableBot + 50;
-  const expiryY  = rule1Y + 10;
-  const rule2Y   = expiryY + 38;
-  const qrY      = rule2Y + 10;
-  const bottomY  = 788;
-
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+  // MAIN WHITE LABEL â€” 150mm W Ã— 100mm H (1200 Ã— 800 dots at 203 DPI)
+  // Matches Sunil Healthcare existing label format
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   return `^XA
 ^CI28
 ^PW1200
@@ -1330,76 +1207,116 @@ function generateZPL(label, batch){
 ^MNM
 ^PON
 
-${outerBorder}
-
-^CF0,44
-^FO20,10^FB1160,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
-^CF0,30
-^FO20,58^FB1160,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
-${headerBand}
-^FO20,${custY - 4}^GB1160,2,2^FS
-^CF0,26
-^FO20,${custY + 2}^FDCUSTOMER NAME :  ${customerText}^FS
-^FO20,${tableTop - 2}^GB1160,2,2^FS
-
-^FO20,${tableTop}^GB560,${52*5 + 2},2^FS
-^FO580,${tableTop}^GB600,${52*5 + 2},2^FS
-^FO20,${tableTop + 52}^GB560,2,2^FS
-^FO20,${tableTop + 52*2}^GB560,2,2^FS
-^FO20,${tableTop + 52*3}^GB560,2,2^FS
-^FO20,${tableTop + 52*4}^GB560,2,2^FS
-^FO580,${tableTop + 52}^GB600,2,2^FS
-^FO580,${tableTop + 52*2}^GB600,2,2^FS
-^FO580,${tableTop + 52*3}^GB600,2,2^FS
-^FO580,${tableTop + 52*4}^GB600,2,2^FS
-
-^CF0,26
-^FO30,${r1}^FDQUANTITY      :  ${pieces}^FS
-^FO30,${r2}^FDSIZE                :  ${label.size}^FS
-^FO30,${r3}^FDCOLOUR CAP  :  ${colourCap}^FS
-^FO30,${r4}^FDCOLOUR BODY:  ${colourBody}^FS
-^FO30,${r5}^FDPRINTED          :^FS
-
-^FO590,${r1}^FDBATCH NO.         :  ${batchNo}^FS
-^FO590,${r2}^FDCONTAINER NO.  :  ${containerNo}^FS
-^FO590,${r3}^FDGROSS WT.          :^FS
-^FO590,${r4}^FDNETT WT.             :^FS
-^FO590,${r5}^FDMFG DATE           :  ${mfgDate}^FS
-
-^FO20,${rule1Y - 2}^GB1160,2,2^FS
-
-^CF0,19
-^FO20,${expiryY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
-^FO20,${rule2Y}^GB1160,2,2^FS
-
-^FO20,${qrY}^BQN,2,5^FDLA,${label.qrData}^FS
+^CF0,46
+^FO20,16^FB1160,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
+^CF0,32
+^FO20,68^FB1160,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
+^FO20,108^GB1160,3,3^FS
 
 ^CF0,28
-^FO380,${qrY + 50}^FB440,1,0,C^FDQ RELEASED^FS
+^FO20,118^FDCUSTOMER NAME : ${label.customer||''}^FS
+^FO20,152^GB1160,2,2^FS
 
-^FO820,${qrY + 30}^GB360,2,2^FS
+^FO20,158^GB1160,192,2^FS
+^FO598,158^GB2,192,2^FS
+^FO20,196^GB580,2,1^FS
+^FO20,234^GB580,2,1^FS
+^FO20,272^GB580,2,1^FS
+^FO20,310^GB580,2,1^FS
+^FO598,196^GB582,2,1^FS
+^FO598,234^GB582,2,1^FS
+^FO598,272^GB582,2,1^FS
+^FO598,310^GB582,2,1^FS
+
 ^CF0,24
-^FO820,${qrY + 38}^FB360,1,0,C^FDSIGNATURE^FS
+^FO35,170^FDQUANTITY^FS
+^FO180,170^FD: ${pieces}^FS
+^FO35,208^FDSIZE^FS
+^FO180,208^FD: ${label.size}^FS
+^FO35,246^FDCOLOUR CAP^FS
+^FO180,246^FD: ${colourCap}^FS
+^FO35,284^FDCOLOUR BODY^FS
+^FO180,284^FD: ${colourBody}^FS
 
-^FO20,${bottomY}^GB1160,3,3^FS
+^FO610,170^FDBATCH NO.^FS
+^FO800,170^FD: ${label.batchNumber}^FS
+^FO610,208^FDCONTAINER NO.^FS
+^FO800,208^FD: ${containerNo}^FS
+^FO610,246^FDGROSS WT.^FS
+^FO800,246^FD:^FS
+^FO610,284^FDNETT WT.^FS
+^FO800,284^FD:^FS
+^FO610,322^FDMFG DATE^FS
+^FO800,322^FD: ${mfgDate}^FS
+
+^FO20,354^GB1160,2,2^FS
+
+^CF0,24
+^FO35,366^FDPRINTED :^FS
+
+^FO20,400^GB1160,2,2^FS
+
+^CF0,19
+^FO25,412^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
+
+^FO20,440^GB1160,2,2^FS
+
+^FO20,448^BQN,2,5^FDLA,${label.qrData}^FS
+
+^CF0,26
+^FO380,530^FDQ RELEASED^FS
+
+^FO820,448^GB340,2,2^FS
+^CF0,24
+^FO820,458^FDSIGNATURE^FS
+
+^FO20,630^GB1160,3,3^FS
 ^XZ`;
 }
-
 
 function printLabel(labelId){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label) return;
   const batch = getBatch(label.batchNumber);
   const zpl = generateZPL(label,batch);
-  // Try to send to local printer bridge or download as file
-  const printerUrl = localStorage.getItem('sunloc_printer_url');
-  if(printerUrl){
-    fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
-      .then(r=>{ if(r.ok){ label.printed=true; label.printedAt=now(); saveLocal(); renderPage(currentPage); } })
-      .catch(()=>downloadZPL(zpl,label));
+  const printerMode = localStorage.getItem('sunloc_printer_mode') || 'download';
+  const printerUrl = localStorage.getItem('sunloc_printer_url') || '';
+
+  const markPrinted = () => {
+    label.printed = true;
+    label.printedAt = now();
+    saveLocal();
+    if(serverUrl){
+      pushToServer('/api/tracking/label-printed', {labelId, printed:true, printedAt:label.printedAt});
+      pushToServer('/api/tracking/labels', {labels:[{...label, customer:batch?.customer||'', colour:batch?.colour||'', pcCode:batch?.pcCode||'', poNumber:batch?.poNumber||'', machineId:batch?.machineId||''}]});
+    }
+    renderPage(currentPage);
+  };
+
+  if(printerMode==='network' || printerMode==='bridge'){
+    if(!printerUrl){
+      toast('âš ï¸ Printer not configured. Go to Printer Setup.', 'var(--color-warning)');
+      downloadZPL(zpl,label); markPrinted(); return;
+    }
+    // Send ZPL directly to HPRT HT800 via network/bridge
+    fetch(printerUrl, {method:'POST', headers:{'Content-Type':'text/plain'}, body:zpl, signal:AbortSignal.timeout(8000)})
+      .then(r=>{
+        if(r.ok){
+          toast('âœ… Label sent to HPRT HT800', 'var(--color-success,green)');
+          markPrinted();
+        } else {
+          toast('âš ï¸ Printer error â€” downloading ZPL instead', 'var(--color-warning)');
+          downloadZPL(zpl,label); markPrinted();
+        }
+      })
+      .catch(()=>{
+        toast('âŒ Cannot reach printer â€” downloading ZPL', 'var(--color-error,red)');
+        downloadZPL(zpl,label); markPrinted();
+      });
   } else {
+    // Download mode
     downloadZPL(zpl,label);
-    label.printed=true; label.printedAt=now(); saveLocal();
+    markPrinted();
   }
 }
 
@@ -1422,9 +1339,9 @@ function printBatchLabels(batchNo){
   renderPage(currentPage);
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // CAMERA SCAN
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 async function startCamera(callback){
   scanCallback=callback;
@@ -1470,9 +1387,9 @@ async function scanQRFromVideo(video){
   }
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE: DASHBOARD
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderPage(page){
   document.getElementById('tb-title').textContent = NAV_ITEMS.find(n=>n.id===page)?.label||page;
@@ -1518,7 +1435,7 @@ function renderDashboard(){
     <div class="kpi"><div class="kpi-label">Labels Generated</div><div class="kpi-val">${totalLabels}</div><div class="kpi-sub">Total active labels</div></div>
     <div class="kpi"><div class="kpi-label">Packed Boxes</div><div class="kpi-val green">${packedBoxes}</div><div class="kpi-sub">Ready for dispatch</div></div>
     <div class="kpi"><div class="kpi-label">Dispatched Boxes</div><div class="kpi-val purple">${dispBoxes}</div><div class="kpi-sub">This month</div></div>
-    <div class="kpi"><div class="kpi-label">🚨 Alerts</div><div class="kpi-val ${totalAlerts>0?'red':'green'}">${totalAlerts}</div><div class="kpi-sub">Boxes stuck 48h+</div></div>
+    <div class="kpi"><div class="kpi-label">ðŸš¨ Alerts</div><div class="kpi-val ${totalAlerts>0?'red':'green'}">${totalAlerts}</div><div class="kpi-sub">Boxes stuck 48h+</div></div>
   </div>
   <div class="grid-2">
     <div class="card">
@@ -1532,19 +1449,19 @@ function renderDashboard(){
       `).join('')}
     </div>
     <div class="card">
-      <div class="card-title">Recent Alerts 🚨</div>
-      ${state.alerts.length===0?'<div class="text-muted text-sm text-center" style="padding:20px">✅ No active alerts</div>':
+      <div class="card-title">Recent Alerts ðŸš¨</div>
+      ${state.alerts.length===0?'<div class="text-muted text-sm text-center" style="padding:20px">âœ… No active alerts</div>':
         state.alerts.slice(0,6).map(a=>`
           <div class="flex items-center justify-between mb-8 p-8" style="background:var(--accent4-light);border-radius:6px">
             <div><div class="fw-bold text-sm" style="color:var(--accent4)">${a.batchNumber}</div>
             <div class="text-sm text-muted">Box in ${DEPT_LABELS[a.dept]} for ${parseFloat(a.hoursStuck).toFixed(0)}h</div></div>
-            <span class="red-flag">🚩 ${parseFloat(a.hoursStuck).toFixed(0)}h</span>
+            <span class="red-flag">ðŸš© ${parseFloat(a.hoursStuck).toFixed(0)}h</span>
           </div>`).join('')
       }
     </div>
   </div>
   <div class="card mt-16">
-    <div class="card-title">Active Batches — WIP Status</div>
+    <div class="card-title">Active Batches â€” WIP Status</div>
     <div class="tbl-wrap">
     <table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Machine</th><th>Size</th><th>Printed</th><th>Stage</th><th>WIP Days</th><th>Dispatch Est.</th><th>Status</th></tr></thead>
@@ -1553,10 +1470,10 @@ function renderDashboard(){
         const wipDays=getBatchWIPDays(b.batchNumber);
         const dispDate=calcDispatchDate(b);
         const std=b.isPrinted?3:2;
-        const statusBadge=wipDays===0?'<span class="badge badge-green">✅ Closed</span>':wipDays<=std?'<span class="badge badge-blue">🔵 On Track</span>':'<span class="badge badge-amber">⚠️ Delayed</span>';
-        const alerts=state.alerts.filter(a=>a.batchNumber===b.batchNumber).length;
+        const statusBadge=wipDays===0?'<span class="badge badge-green">âœ… Closed</span>':wipDays<=std?'<span class="badge badge-blue">ðŸ”µ On Track</span>':'<span class="badge badge-amber">âš ï¸ Delayed</span>';
+        const alerts=state.alerts.filter(a=>a&&a.batchNumber===b.batchNumber).length;
         return `<tr>
-          <td class="td-bold td-mono">${b.batchNumber}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
+          <td class="td-bold td-mono">${b.batchNumber}${alerts>0?` <span class="red-flag">ðŸš©</span>`:''}</td>
           <td>${b.customer||'-'}</td>
           <td class="td-mono">${b.machineId||'-'}</td>
           <td class="td-mono">${b.size||'-'}</td>
@@ -1585,16 +1502,20 @@ function getBoxCurrentStageForBatch(batchNo){
   return DEPT_LABELS[flow[0]];
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE: LABEL GENERATION
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderLabels(){
   const el=document.getElementById('page-labels');
   const activeBatches=state.batches.filter(b=>b.status!=='closed');
 
   document.getElementById('tb-actions').innerHTML=`
-    <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
+    <button class="btn btn-secondary" onclick="configurePrinter()">ðŸ–¨ï¸ Printer Setup</button>`;
+
+  // Get unique sizes and customers for filters
+  const sizes=[...new Set(activeBatches.map(b=>b.size).filter(Boolean))].sort();
+  const customers=[...new Set(activeBatches.map(b=>b.customer).filter(Boolean))].sort();
 
   el.innerHTML=`
   <div class="section-header">
@@ -1602,10 +1523,56 @@ function renderLabels(){
     <button class="btn btn-primary" onclick="openLabelGen()">+ Generate Labels</button>
   </div>
   <div class="alert alert-info">Labels are capped by: (1) daily machine target in boxes, (2) total gross quantity planned. Gross qty amendments in Planning App automatically unlock additional labels.</div>
+
   <div class="card">
-    <div class="card-title">Active Batches — Label Status</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Size</th><th>Gross Qty</th><th>Max Labels</th><th>Generated</th><th>Printed</th><th>Remaining</th><th>Daily Cap</th><th>Actions</th></tr></thead>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="card-title" style="margin:0">Active Batches â€” Label Status</div>
+      <span id="lbl-filter-count" style="font-size:12px;color:var(--color-text-secondary)"></span>
+    </div>
+    <div class="tbl-wrap"><table id="labels-table">
+      <thead>
+        <tr>
+          <th onclick="sortLabelsTable('batch')" style="cursor:pointer;user-select:none">Batch <span id="sort-batch">â†•</span></th>
+          <th onclick="sortLabelsTable('customer')" style="cursor:pointer;user-select:none">Customer <span id="sort-customer">â†•</span></th>
+          <th onclick="sortLabelsTable('size')" style="cursor:pointer;user-select:none">Size <span id="sort-size">â†•</span></th>
+          <th onclick="sortLabelsTable('grossqty')" style="cursor:pointer;user-select:none">Gross Qty <span id="sort-grossqty">â†•</span></th>
+          <th onclick="sortLabelsTable('maxlabels')" style="cursor:pointer;user-select:none">Max Labels <span id="sort-maxlabels">â†•</span></th>
+          <th onclick="sortLabelsTable('generated')" style="cursor:pointer;user-select:none">Generated <span id="sort-generated">â†•</span></th>
+          <th onclick="sortLabelsTable('printed')" style="cursor:pointer;user-select:none">Printed <span id="sort-printed">â†•</span></th>
+          <th onclick="sortLabelsTable('remaining')" style="cursor:pointer;user-select:none">Remaining <span id="sort-remaining">â†•</span></th>
+          <th>Daily Cap</th>
+          <th>Actions</th>
+        </tr>
+        <tr style="background:var(--color-background-secondary)">
+          <td><input type="text" id="f-batch" placeholder="Search..." oninput="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)"></td>
+          <td><input type="text" id="f-customer" placeholder="Search..." oninput="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)"></td>
+          <td><select id="f-size" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            ${sizes.map(s=>`<option value="${s}">Size ${s}</option>`).join('')}
+          </select></td>
+          <td></td>
+          <td></td>
+          <td><select id="f-generated" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            <option value="none">None (0)</option>
+            <option value="partial">Partial</option>
+            <option value="full">Full</option>
+          </select></td>
+          <td><select id="f-printed" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            <option value="none">None</option>
+            <option value="partial">Partial</option>
+            <option value="all">All Printed</option>
+          </select></td>
+          <td><select id="f-remaining" onchange="filterLabelsTable()" style="width:100%;padding:4px 6px;border:1px solid var(--color-border-tertiary);border-radius:4px;font-size:11px;background:var(--color-background-primary)">
+            <option value="">All</option>
+            <option value="yes">Has Remaining</option>
+            <option value="no">None Left</option>
+          </select></td>
+          <td></td>
+          <td><button onclick="clearLabelFilters()" style="padding:3px 8px;font-size:11px;border:1px solid var(--color-border-tertiary);border-radius:4px;cursor:pointer;background:var(--color-background-primary)">âœ• Clear</button></td>
+        </tr>
+      </thead>
       <tbody>
       ${activeBatches.map(b=>{
         const ps=PACK_SIZES[String(b.size)]||1;
@@ -1617,7 +1584,9 @@ function renderLabels(){
         const dailyCap=lakhToBox(machine?.dailyTarget||machine?.yTarget||27,b.size);
         const todayGen=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.generated?.slice(0,10)===today()).length;
         const pct=maxLabels>0?(generated/maxLabels*100):0;
-        return `<tr>
+        const bStatus = generated===0?'pending':(generated>=maxLabels?'complete':'partial');
+        const bPrinted = generated>0&&printed===generated?'printed':'unprinted';
+        return `<tr class="lbl-row" data-batch="${b.batchNumber||''}" data-customer="${b.customer||''}" data-size="${b.size||''}" data-status="${bStatus}" data-printed-status="${bPrinted}" data-generated="${generated}" data-maxlabels="${maxLabels}" data-printed="${printed}" data-remaining="${remaining}" data-grossqty="${b.grossQty||b.qty||0}">
           <td class="td-bold td-mono">${b.batchNumber}</td>
           <td>${b.customer||'-'}</td>
           <td class="td-mono">${b.size} (${ps}L/box)</td>
@@ -1648,7 +1617,7 @@ function openLabelGen(preselect){
       <label>Batch</label>
       <select id="lg-batch" onchange="updateLabelGenInfo()">
         <option value="">-- Select Batch --</option>
-        ${activeBatches.map(b=>{const bkey=b.batchNumber||b.id;const blabel=b.batchNumber||(b.poNumber?'PO:'+b.poNumber:'Order:'+b.id.slice(-4));return `<option value="${bkey}" ${bkey===preselect?'selected':''}>${blabel} — ${b.customer||''} | Size ${b.size} | ${b.isPrinted?'PTD':'UP'}</option>`;}).join('')}
+        ${activeBatches.map(b=>{const bkey=b.batchNumber||b.id;const blabel=b.batchNumber||(b.poNumber?'PO:'+b.poNumber:'Order:'+(b.id||'').slice(-4));return `<option value="${bkey}" ${bkey===preselect?'selected':''}>${blabel} â€” ${b.customer||''} | Size ${b.size} | ${b.isPrinted?'PTD':'UP'}</option>`;}).join('')}
       </select>
     </div>
     <div id="lg-info" class="alert alert-info hidden"></div>
@@ -1691,10 +1660,10 @@ function updateLabelGenInfo(){
   const dailyEl=document.getElementById('lg-daily-rem');
   if(!batchNo||!infoEl) return;
   const check=canGenerateLabels(batchNo,Math.max(count,1));
-  if(dailyEl) dailyEl.value=check.dailyRemaining!==undefined?check.dailyRemaining+' boxes':'—';
+  if(dailyEl) dailyEl.value=check.dailyRemaining!==undefined?check.dailyRemaining+' boxes':'â€”';
   infoEl.classList.remove('hidden','alert-danger','alert-success','alert-info');
-  if(!check.ok){ infoEl.classList.add('alert-danger'); infoEl.textContent='⚠️ '+check.msg; }
-  else { infoEl.classList.add('alert-success'); infoEl.textContent=`✅ OK — ${check.totalRemaining} total remaining, ${check.dailyRemaining} today`; }
+  if(!check.ok){ infoEl.classList.add('alert-danger'); infoEl.textContent='âš ï¸ '+check.msg; }
+  else { infoEl.classList.add('alert-success'); infoEl.textContent=`âœ… OK â€” ${check.totalRemaining} total remaining, ${check.dailyRemaining} today`; }
 }
 
 function confirmLabelGen(){
@@ -1706,7 +1675,7 @@ function confirmLabelGen(){
   const labels=generateLabels(batchNo,count,isPartial,partialQty);
   if(labels.length){
     closeModal();
-    alert(`✅ ${labels.length} label(s) generated for batch ${batchNo}.`);
+    alert(`âœ… ${labels.length} label(s) generated for batch ${batchNo}.`);
     renderLabels();
   }
 }
@@ -1714,19 +1683,21 @@ function confirmLabelGen(){
 function viewBatchLabels(batchNo){
   const batch=getBatch(batchNo);
   const labels=state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange).sort((a,b)=>a.labelNumber-b.labelNumber);
-  openModal(`Labels — ${batchNo}`,`${labels.length} labels | ${batch?.customer||''} | Size ${batch?.size}`,`
+  openModal(`Labels â€” ${batchNo}`,`${labels.length} labels | ${batch?.customer||''} | Size ${batch?.size}`,`
     <div class="tbl-wrap"><table>
       <thead><tr><th>#</th><th>Qty (L)</th><th>Status</th><th>Generated</th><th>Printed</th><th>Actions</th></tr></thead>
       <tbody>
       ${labels.map(l=>`<tr>
-        <td class="td-mono fw-bold">${l.labelNumber}${l.isPartial?' <span class="badge badge-amber">PARTIAL</span>':''}${l.batchNumber&&l.batchNumber.startsWith('TEMP-')?'<span class="badge" style="background:rgba(255,64,96,0.12);color:#ff4060;border:1px solid rgba(255,64,96,0.35);font-size:9px;margin-left:3px">⚠️ TEMP</span>':l.woStatus&&l.woStatus==='wo'?'<span class="badge" style="background:rgba(255,171,0,0.12);color:#C55A11;border:1px solid rgba(255,171,0,0.35);font-size:9px;margin-left:3px">🔶 W/O</span>':''}</td>
+        <td class="td-mono fw-bold">${l.labelNumber}${l.isPartial?' <span class="badge badge-amber">PARTIAL</span>':''}</td>
         <td class="td-mono">${fmt(l.qty)}</td>
         <td>${l.voided?'<span class="badge badge-red">VOIDED</span>':l.printed?'<span class="badge badge-green">Printed</span>':'<span class="badge badge-gray">Not Printed</span>'}</td>
         <td class="td-mono text-sm">${fmtDateTime(l.generated)}</td>
         <td class="td-mono text-sm">${l.printedAt?fmtDateTime(l.printedAt):'-'}</td>
         <td class="flex gap-8">
-          ${!l.voided?`<button class="btn btn-sm btn-primary" onclick="printLabel('${l.id}');renderPage('labels')">🖨️</button>`:''}
-          ${!l.voided&&currentDept==='admin'?`<button class="btn btn-sm btn-danger" onclick="voidLabel('${l.id}','Admin void');renderPage('labels')">Void</button>`:''}\n          ${!l.voided&&currentDept==='admin'?`<button class="btn btn-sm btn-warning" onclick="openDamagedReprint('${l.id}')">🔄 Reprint</button>`:''}
+          ${!l.voided && !l.printed ? `<button class="btn btn-sm btn-primary" onclick="printLabel('${l.id}');renderPage('labels')" title="Print this label">ðŸ–¨ï¸ Print</button>` : ''}
+          ${!l.voided && l.printed && currentDept==='admin' ? `<button class="btn btn-sm btn-warning" onclick="openDamagedReprint('${l.id}')" title="Reprint damaged or misplaced label">ðŸ”„ Reprint</button>` : ''}
+          ${!l.voided && l.printed && currentDept!=='admin' ? `<span style="font-size:11px;color:var(--text3)">Contact admin to reprint</span>` : ''}
+          ${!l.voided&&currentDept==='admin'?`<button class="btn btn-sm btn-danger" onclick="voidLabel('${l.id}','Admin void');renderPage('labels')">Void</button>`:''}
           ${l.isPartial&&!l.voided?`<button class="btn btn-sm btn-warning" onclick="openRegenPartial('${l.id}')">Regen</button>`:''}
         </td>
       </tr>`).join('')||'<tr><td colspan="6" class="text-center text-muted">No labels</td></tr>'}
@@ -1741,17 +1712,17 @@ function openRegenPartial(labelId){
   const newQty=parseFloat(prompt(`Current qty: ${label.qty}L\nEnter corrected qty (Lakhs):`));
   if(!newQty||isNaN(newQty)||newQty<=0){alert('Invalid quantity.');return;}
   const newLabel=regeneratePartialLabel(labelId,newQty);
-  if(newLabel){alert(`✅ New label #${newLabel.labelNumber} generated with ${fmt(newQty)}L`);renderPage(currentPage);}
+  if(newLabel){alert(`âœ… New label #${newLabel.labelNumber} generated with ${fmt(newQty)}L`);renderPage(currentPage);}
 }
 
 function openDamagedReprint(labelId){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label) return;
-  openModal('🔄 Damaged Label Reprint Request', `
+  openModal('ðŸ”„ Damaged Label Reprint Request', `Label #${label.labelNumber} â€” ${label.batchNumber}`, `
     <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;padding:12px;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text3);margin-bottom:6px">LABEL BEING REPLACED</div>
-      <div style="font-family:var(--mono);font-size:13px">Label #${label.labelNumber} — Batch ${label.batchNumber}</div>
-      <div style="font-size:12px;color:var(--text3);margin-top:4px">Size ${label.size} · ${label.qty}L · ${label.customer||'-'}</div>
+      <div style="font-family:var(--mono);font-size:13px">Label #${label.labelNumber} â€” Batch ${label.batchNumber}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">Size ${label.size} Â· ${label.qty}L Â· ${label.customer||'-'}</div>
     </div>
     <div class="form-group">
       <label>Reason for Reprint <span style="color:var(--red)">*</span></label>
@@ -1773,7 +1744,7 @@ function openDamagedReprint(labelId){
       <input class="form-control" id="dr-auth" placeholder="Name of authorising person">
     </div>
     <div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:4px;padding:10px;font-size:11px;color:var(--text3)">
-      ⚠️ This action will void the original label and generate a replacement. This is logged for audit purposes.
+      âš ï¸ This action will void the original label and generate a replacement. This is logged for audit purposes.
     </div>
   `, [
     {label:'Void & Reprint', cls:'btn-warning', fn:`confirmDamagedReprint('${labelId}')`},
@@ -1818,25 +1789,138 @@ function confirmDamagedReprint(labelId){
     pushToServer('/api/tracking/labels',{labels:[newLabel]});
     pushToServer('/api/tracking/reprint-log',{log:reprintLog});
     closeModal();
-    alert(`✅ Label voided and replacement Label #${newLabel.labelNumber} generated.\nReason: ${reason}\nLogged for audit.`);
     renderPage(currentPage);
+    // Auto-print the replacement label immediately
+    setTimeout(() => {
+      printLabel(newLabel.id);
+      toast(`âœ… Replacement Label #${newLabel.labelNumber} generated & sent to printer. Reason: ${reason}`, 'var(--warning)');
+    }, 300);
   } else {
     closeModal();
-    alert('Could not generate replacement — batch not found.');
+    alert('Could not generate replacement â€” batch not found.');
   }
 }
 
 function configurePrinter(){
-  const current=localStorage.getItem('sunloc_printer_url')||'';
-  const url=prompt('Enter Zebra Printer Bridge URL:\n(e.g. http://localhost:9100 or http://printer-ip:9100)\n\nLeave blank to download ZPL files instead.',current);
-  if(url===null) return;
-  localStorage.setItem('sunloc_printer_url',url.trim());
-  alert(url.trim()?'Printer URL saved. Labels will be sent directly to printer.':'ZPL download mode activated.');
+  openModal('ðŸ–¨ï¸ HPRT HT800 Printer Setup', 'Configure your label printer', `
+    <div style="font-size:13px;line-height:1.8">
+      <div style="background:var(--color-background-secondary);border-radius:8px;padding:12px;margin-bottom:12px">
+        <div style="font-weight:700;margin-bottom:6px;color:var(--color-text-primary)">Printer Model: HPRT HT800 (ZPL)</div>
+        <div style="color:var(--color-text-secondary)">Choose how to send ZPL labels to your printer:</div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:2px solid var(--color-border-tertiary);border-radius:8px;cursor:pointer" onclick="setPrinterMode('network')">
+          <input type="radio" name="printer-mode" value="network" ${(localStorage.getItem('sunloc_printer_mode')||'network')==='network'?'checked':''} style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-weight:600">ðŸŒ Network / WiFi (Recommended)</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">HPRT HT800 connected via WiFi or Ethernet. Enter printer IP address.</div>
+            <input type="text" id="printer-ip" value="${localStorage.getItem('sunloc_printer_ip')||''}" placeholder="e.g. 192.168.1.100" 
+              style="margin-top:6px;width:100%;padding:6px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;font-size:12px;font-family:monospace">
+            <div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px">Port: 9100 (default ZPL port)</div>
+          </div>
+        </label>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:2px solid var(--color-border-tertiary);border-radius:8px;cursor:pointer" onclick="setPrinterMode('bridge')">
+          <input type="radio" name="printer-mode" value="bridge" ${localStorage.getItem('sunloc_printer_mode')==='bridge'?'checked':''} style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-weight:600">ðŸ”Œ USB via Print Bridge</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">HPRT HT800 connected via USB. Requires local bridge app running on the computer.</div>
+            <input type="text" id="printer-bridge" value="${localStorage.getItem('sunloc_printer_url')||'http://localhost:9100'}" placeholder="http://localhost:9100"
+              style="margin-top:6px;width:100%;padding:6px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;font-size:12px;font-family:monospace">
+          </div>
+        </label>
+
+        <label style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:2px solid var(--color-border-tertiary);border-radius:8px;cursor:pointer" onclick="setPrinterMode('download')">
+          <input type="radio" name="printer-mode" value="download" ${localStorage.getItem('sunloc_printer_mode')==='download'?'checked':''} style="margin-top:3px;flex-shrink:0">
+          <div>
+            <div style="font-weight:600">ðŸ’¾ Download ZPL File</div>
+            <div style="font-size:11px;color:var(--color-text-secondary)">Download .zpl file and send manually to printer. No network needed.</div>
+          </div>
+        </label>
+      </div>
+
+      <div id="printer-test-result" style="margin-top:10px"></div>
+
+      <div style="margin-top:14px;padding:10px;background:var(--color-background-secondary);border-radius:6px;font-size:11px;color:var(--color-text-secondary)">
+        <strong>HPRT HT800 Setup Tips:</strong><br>
+        â€¢ Network: Find IP in printer menu â†’ Settings â†’ Network â†’ IP Address<br>
+        â€¢ USB Bridge: Download <strong>Sunloc Print Bridge</strong> app and run on this computer<br>
+        â€¢ Label size: 100mm Ã— 150mm (set in HPRT utility)
+      </div>
+    </div>
+  `, [
+    {label:'Test Print', cls:'btn-secondary', fn:'testPrinterConnection()'},
+    {label:'Save', cls:'btn-primary', fn:'savePrinterSetup()'},
+    {label:'Cancel', cls:'btn-secondary', fn:'closeModal()'}
+  ]);
 }
 
-// ═══════════════════════════════════════════════════════
+function setPrinterMode(mode){
+  document.querySelectorAll('input[name="printer-mode"]').forEach(r=>r.checked=r.value===mode);
+}
+
+function savePrinterSetup(){
+  const mode = document.querySelector('input[name="printer-mode"]:checked')?.value || 'download';
+  localStorage.setItem('sunloc_printer_mode', mode);
+  if(mode==='network'){
+    const ip = document.getElementById('printer-ip')?.value.trim();
+    if(!ip){ alert('Please enter the printer IP address'); return; }
+    localStorage.setItem('sunloc_printer_ip', ip);
+    localStorage.setItem('sunloc_printer_url', 'http://'+ip+':9100');
+  } else if(mode==='bridge'){
+    const url = document.getElementById('printer-bridge')?.value.trim();
+    localStorage.setItem('sunloc_printer_url', url||'http://localhost:9100');
+  } else {
+    localStorage.setItem('sunloc_printer_url', '');
+  }
+  closeModal();
+  toast('âœ… Printer settings saved', 'var(--success)');
+}
+
+async function testPrinterConnection(){
+  const mode = document.querySelector('input[name="printer-mode"]:checked')?.value || 'download';
+  const resultEl = document.getElementById('printer-test-result');
+  if(!resultEl) return;
+
+  if(mode==='download'){
+    resultEl.innerHTML='<div style="color:var(--color-text-secondary);font-size:12px">ðŸ“„ Download mode â€” no connection test needed</div>';
+    return;
+  }
+
+  let url = '';
+  if(mode==='network'){
+    const ip = document.getElementById('printer-ip')?.value.trim();
+    if(!ip){ resultEl.innerHTML='<div style="color:red;font-size:12px">âŒ Enter IP address first</div>'; return; }
+    url = 'http://'+ip+':9100';
+  } else {
+    url = document.getElementById('printer-bridge')?.value.trim() || 'http://localhost:9100';
+  }
+
+  resultEl.innerHTML='<div style="font-size:12px;color:var(--color-text-secondary)">ðŸ”„ Testing connection to '+url+'...</div>';
+
+  // Send a minimal test ZPL
+  const testZPL = '^XA^FO50,50^ADN,36,20^FDSunloc Test Print^FS^XZ';
+  try {
+    const r = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body: testZPL,
+      signal: AbortSignal.timeout(5000)
+    });
+    if(r.ok){
+      resultEl.innerHTML='<div style="color:green;font-size:12px">âœ… Connected! Test label sent to HPRT HT800</div>';
+    } else {
+      resultEl.innerHTML='<div style="color:orange;font-size:12px">âš ï¸ Printer responded with error '+r.status+'</div>';
+    }
+  } catch(e){
+    resultEl.innerHTML='<div style="color:red;font-size:12px">âŒ Cannot reach printer at '+url+'<br><span style="opacity:.7">Check IP address and make sure printer is on</span></div>';
+  }
+}
+
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE: DEPARTMENT SCAN (AIM / PRINTING / PI / PACKING)
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const DEPT_CONFIG={
   aim:    {color:'#3b82f6',strip:'aim',    wastage:true,  orangeOut:false, label:'AIM Inspection'},
@@ -1847,12 +1931,28 @@ const DEPT_CONFIG={
 
 function renderDeptScan(dept){
   const el=document.getElementById('page-'+dept);
+  if(!el){ console.error('Page element not found: page-'+dept); return; }
   const cfg=DEPT_CONFIG[dept];
-  const myAlerts=state.alerts.filter(a=>a.dept===dept);
+  if(!cfg){ console.error('DEPT_CONFIG not found for: '+dept); return; }
+  
+  // If batches not loaded yet, show loading state and retry
+  if(state.batches.length===0){
+    el.innerHTML=`<div class="card" style="text-align:center;padding:40px">
+      <div style="font-size:32px;margin-bottom:12px">â³</div>
+      <div class="section-title">Loading batches...</div>
+      <div class="text-sm text-muted mt-8">Fetching data from server</div>
+      <button class="btn btn-primary mt-16" onclick="pullFromServer().then(()=>renderPage(currentPage))">ðŸ”„ Retry</button>
+    </div>`;
+    // Auto retry after 2 seconds
+    setTimeout(()=>{ if(state.batches.length>0) renderPage(currentPage); }, 2000);
+    return;
+  }
+
+  const myAlerts=state.alerts.filter(a=>a&&a.dept===dept);
   const activeBatches=getActiveBatchesForDept(dept);
 
   document.getElementById('tb-actions').innerHTML=`
-    <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">📊 View All Batches</button>`;
+    <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">ðŸ“Š View All Batches</button>`;
 
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid ${cfg.color}">
@@ -1860,38 +1960,34 @@ function renderDeptScan(dept){
     <div class="section-header" style="margin-bottom:8px">
       <div><div class="section-title">${cfg.label}</div><div class="section-sub">Scan boxes IN and OUT of this department</div></div>
     </div>
-    ${myAlerts.length>0?`<div class="alert alert-danger">🚨 ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+a.labelId.slice(-4)).join(', ')}</div>`:''}
+    ${myAlerts.length>0?`<div class="alert alert-danger">ðŸš¨ ${myAlerts.length} box(es) stuck in this department for 48h+: ${myAlerts.map(a=>a.batchNumber+' Box#'+(a.labelId||'').slice(-4)).join(', ')}</div>`:''}
     <!-- SCAN PANEL -->
-    <div class="grid-2 scan-panels-grid">
+    <div class="grid-2">
       <div>
-        <div class="card-title">📥 Scan IN</div>
+        <div class="card-title">ðŸ“¥ Scan IN</div>
         <div class="scan-zone" id="scan-zone-in-${dept}">
-          <div style="font-size:28px;margin-bottom:6px;text-align:center">📥</div>
-          <div class="fw-bold mb-8" style="text-align:center">Scan box to check IN</div>
-          <button class="btn btn-camera-mobile mobile-show" onclick="startCamera(v=>fillScanInput('${dept}','in',v))">📷 Open Camera to Scan</button>
+          <div style="font-size:32px;margin-bottom:8px">ðŸ“·</div>
+          <div class="fw-bold mb-8">Scan box to check IN</div>
           <input class="scan-input" id="scan-in-${dept}" placeholder="Scan or type label ID" 
-            onkeydown="if(event.key==='Enter')processScanInput('${dept}','in')"
-            style="width:100%;margin-bottom:8px">
-          <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary desktop-only" onclick="startCamera(v=>fillScanInput('${dept}','in',v))">📷 Camera</button>
-            <button class="btn btn-sm btn-primary" onclick="processScanInput('${dept}','in')" style="flex:1">✓ Confirm IN</button>
+            onkeydown="if(event.key==='Enter')processScanInput('${dept}','in')">
+          <div class="flex gap-8 mt-12" style="justify-content:center">
+            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('${dept}','in',v))">ðŸ“· Camera</button>
+            <button class="btn btn-sm btn-primary" onclick="processScanInput('${dept}','in')">âœ“ Confirm</button>
           </div>
         </div>
         <div id="scan-result-in-${dept}" class="mt-8"></div>
       </div>
       <div>
-        <div class="card-title">📤 Scan OUT</div>
+        <div class="card-title">ðŸ“¤ Scan OUT</div>
         <div class="scan-zone" id="scan-zone-out-${dept}">
-          <div style="font-size:28px;margin-bottom:6px;text-align:center">📤</div>
-          <div class="fw-bold mb-8" style="text-align:center">Scan box to check OUT</div>
-          <button class="btn btn-camera-mobile mobile-show" style="background:var(--accent2)!important" onclick="startCamera(v=>fillScanInput('${dept}','out',v))">📷 Open Camera to Scan</button>
+          <div style="font-size:32px;margin-bottom:8px">ðŸ“¤</div>
+          <div class="fw-bold mb-8">Scan box to check OUT</div>
           <input class="scan-input" id="scan-out-${dept}" placeholder="Scan or type label ID"
-            onkeydown="if(event.key==='Enter')processScanInput('${dept}','out')"
-            style="width:100%;margin-bottom:8px">
-          ${dept==='pi'?`<div class="text-sm text-muted mt-4">⚠️ Also scan orange label for printed batches</div>`:''}
-          <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary desktop-only" onclick="startCamera(v=>fillScanInput('${dept}','out',v))">📷 Camera</button>
-            <button class="btn btn-sm btn-success" onclick="processScanInput('${dept}','out')" style="flex:1">✓ Confirm OUT</button>
+            onkeydown="if(event.key==='Enter')processScanInput('${dept}','out')">
+          ${dept==='pi'?`<div class="text-sm text-muted mt-4">âš ï¸ Also scan orange label for printed batches</div>`:''}
+          <div class="flex gap-8 mt-12" style="justify-content:center">
+            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('${dept}','out',v))">ðŸ“· Camera</button>
+            <button class="btn btn-sm btn-success" onclick="processScanInput('${dept}','out')">âœ“ Confirm</button>
           </div>
         </div>
         <div id="scan-result-out-${dept}" class="mt-8"></div>
@@ -1902,13 +1998,13 @@ function renderDeptScan(dept){
   <!-- WASTAGE ENTRY -->
   ${cfg.wastage?`
   <div class="card mb-16">
-    <div class="card-title">⚠️ Wastage Entry (Salvage & Remelt)</div>
+    <div class="card-title">âš ï¸ Wastage Entry (Salvage & Remelt)</div>
     <div class="form-row cols-3">
       <div class="form-group">
         <label>Batch</label>
         <select id="wastage-batch-${dept}">
           <option value="">-- Select Batch --</option>
-          ${activeBatches.map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''}</option>`).join('')}
+          ${activeBatches.map(b=>`<option value="${b.batchNumber}">${b.batchNumber} â€” ${b.customer||''}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -1926,12 +2022,12 @@ function renderDeptScan(dept){
 
   <!-- BATCH CLOSURE -->
   <div class="card mb-16">
-    <div class="card-title">✅ Batch Stage Closure</div>
+    <div class="card-title">âœ… Batch Stage Closure</div>
     <div class="text-sm text-muted mb-12">Close a batch at this stage once all boxes have been scanned OUT.</div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Scan IN</th><th>Scan OUT</th><th>A-Grade</th><th>Wastage</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
-      ${activeBatches.map(b=>{
+      ${activeBatches.filter(b=>b&&b.batchNumber).map(b=>{
         const inCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='in').length;
         const outCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='out').length;
         const w=getTotalWastage(b.batchNumber,dept);
@@ -1947,17 +2043,17 @@ function renderDeptScan(dept){
         const balanced=inCount>0&&accountedBoxes===inCount;
         const canClose=balanced&&!closed&&(currentDept==='admin'||balanced);
         const balanceShortfall=inCount-accountedBoxes; // positive = unaccounted boxes remain
-        const alerts=state.alerts.filter(a=>a.batchNumber===b.batchNumber&&a.dept===dept).length;
+        const alerts=state.alerts.filter(a=>a&&a.batchNumber===b.batchNumber&&a.dept===dept).length;
         return `<tr>
-          <td class="td-bold td-mono">${b.batchNumber}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
+          <td class="td-bold td-mono">${b.batchNumber}${alerts>0?` <span class="red-flag">ðŸš©</span>`:''}</td>
           <td class="text-sm">${b.customer||'-'}</td>
           <td class="td-mono">${inCount} <span class="text-muted">(${fmt(inQty)}L)</span></td>
           <td class="td-mono">${outCount} <span class="text-muted">(${fmt(outQty)}L)</span></td>
           <td class="td-mono ${aGradePct<90?'red':aGradePct<95?'amber':'green'}">${fmt(aGradePct,1)}%</td>
           <td class="td-mono">S:${fmt(w.salvage)} R:${fmt(w.remelt)}</td>
-          <td>${closed?'<span class="badge badge-green">✅ Closed</span>':inCount===0?'<span class="badge badge-gray">No scans</span>':balanced?'<span class="badge badge-blue">Ready to Close</span>':`<span class="badge badge-amber">⚠ ${balanceShortfall>0?balanceShortfall+' boxes unaccounted':'Over by '+Math.abs(balanceShortfall)+' boxes'}</span>`}</td>
-          <td>${!closed&&canClose?`<button class="btn btn-sm btn-success" onclick="closeBatchStage('${b.batchNumber}','${dept}')">Close Stage</button>`:
-            !closed&&currentDept==='admin'?`<button class="btn btn-sm btn-warning" onclick="adminCloseBatchStage('${b.batchNumber}','${dept}')">⚡ Force Close</button>`:'—'}</td>
+          <td>${closed?'<span class="badge badge-green">âœ… Closed</span>':inCount===0?'<span class="badge badge-gray">No scans</span>':balanced?'<span class="badge badge-blue">Ready to Close</span>':`<span class="badge badge-amber">âš  ${balanceShortfall>0?balanceShortfall+' boxes unaccounted':'Over by '+Math.abs(balanceShortfall)+' boxes'}</span>`}</td>
+          <td>${!closed&&canClose?`<button class="btn btn-sm btn-success" onclick="closeBatchStage('${b.batchNumber||''}','${dept}')">Close Stage</button>`:
+            !closed&&currentDept==='admin'?`<button class="btn btn-sm btn-warning" onclick="adminCloseBatchStage('${b.batchNumber||''}','${dept}')">âš¡ Force Close</button>`:'â€”'}</td>
         </tr>`;
       }).join('')||'<tr><td colspan="8" class="text-center text-muted">No active batches at this stage</td></tr>'}
       </tbody>
@@ -1966,15 +2062,15 @@ function renderDeptScan(dept){
 
   <!-- RECENT SCANS -->
   <div class="card">
-    <div class="card-title">Recent Scans — ${cfg.label}</div>
+    <div class="card-title">Recent Scans â€” ${cfg.label}</div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Time</th><th>Label ID</th><th>Batch</th><th>Type</th><th>Qty (L)</th></tr></thead>
       <tbody>
-      ${state.scans.filter(s=>s.dept===dept).slice(-20).reverse().map(s=>`<tr>
+      ${(state.scans||[]).filter(s=>s&&s.dept===dept&&s.labelId).slice(-20).reverse().map(s=>`<tr>
         <td class="td-mono text-sm">${fmtDateTime(s.ts)}</td>
-        <td class="td-mono text-sm">${s.labelId.slice(-8)}</td>
-        <td class="td-bold td-mono">${s.batchNumber}</td>
-        <td>${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
+        <td class="td-mono text-sm">${(s.labelId||'').slice(-8)}</td>
+        <td class="td-bold td-mono">${s.batchNumber||'-'}</td>
+        <td>${s.type==='in'?'<span class="badge badge-blue">ðŸ“¥ IN</span>':'<span class="badge badge-green">ðŸ“¤ OUT</span>'}</td>
         <td class="td-mono">${fmt(s.qty)}</td>
       </tr>`).join('')||'<tr><td colspan="5" class="text-center text-muted">No scans recorded yet</td></tr>'}
       </tbody>
@@ -1994,18 +2090,68 @@ function processScanInput(dept,type){
   if(!el) return;
   const raw=el.value.trim();
   if(!raw) return;
-  const parsed=parseScanInput(raw);
-  const result=recordScan(parsed.labelId,dept,type,currentDept);
   el.value='';
+
+  const parsed=parseScanInput(raw);
+  let labelId = parsed.labelId;
+
+  // If input looks like a batch number (e.g. BT002), find the next unscanned label for that batch
+  const isBatchNumber = state.labels.length > 0 && !state.labels.find(l=>l.id===labelId);
+  if(isBatchNumber){
+    const batchUpper = raw.toUpperCase().trim();
+    // Find labels for this batch that are printed but not yet scanned at this dept
+    const batchLabels = state.labels.filter(l=>
+      l.batchNumber===batchUpper && !l.voided && !l.isOrange
+    );
+    if(batchLabels.length === 0){
+      zoneEl.className='scan-zone error';
+      resultEl.innerHTML=`<div class="alert alert-danger">âŒ No labels found for batch ${batchUpper}. Generate labels first.</div>`;
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+      el.focus(); return;
+    }
+    if(type==='in'){
+      // Find next label not yet scanned IN at this dept
+      const nextLabel = batchLabels.find(l=>{
+        const deptScans = state.scans.filter(s=>s.labelId===l.id&&s.dept===dept);
+        const ins = deptScans.filter(s=>s.type==='in').length;
+        const outs = deptScans.filter(s=>s.type==='out').length;
+        return ins === outs; // not currently checked in
+      });
+      if(!nextLabel){
+        zoneEl.className='scan-zone error';
+        resultEl.innerHTML=`<div class="alert alert-danger">âŒ All labels for ${batchUpper} already scanned IN at this department.</div>`;
+        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+        el.focus(); return;
+      }
+      labelId = nextLabel.id;
+    } else {
+      // Find next label scanned IN but not yet OUT at this dept
+      const nextLabel = batchLabels.find(l=>{
+        const deptScans = state.scans.filter(s=>s.labelId===l.id&&s.dept===dept);
+        const ins = deptScans.filter(s=>s.type==='in').length;
+        const outs = deptScans.filter(s=>s.type==='out').length;
+        return ins > outs;
+      });
+      if(!nextLabel){
+        zoneEl.className='scan-zone error';
+        resultEl.innerHTML=`<div class="alert alert-danger">âŒ No labels for ${batchUpper} are scanned IN at this department.</div>`;
+        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+        el.focus(); return;
+      }
+      labelId = nextLabel.id;
+    }
+  }
+
+  const result=recordScan(labelId,dept,type,currentDept);
 
   if(result.ok){
     zoneEl.className='scan-zone success';
-    resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>`;
+    resultEl.innerHTML=`<div class="alert alert-success">âœ… Scanned ${type.toUpperCase()} â€” Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>`;
     setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },3000);
-    renderDeptScan(dept); // refresh stats
+    renderDeptScan(dept);
   } else {
     zoneEl.className='scan-zone error';
-    resultEl.innerHTML=`<div class="alert alert-danger">❌ ${result.msg}</div>`;
+    resultEl.innerHTML=`<div class="alert alert-danger">âŒ ${result.msg}</div>`;
     setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
   }
   el.focus();
@@ -2034,7 +2180,7 @@ function saveWastage(dept){
   pushToServer('/api/tracking/wastage',{batchNumber:batchNo,dept,salvage,remelt});
   document.getElementById(`wastage-salvage-${dept}`).value='';
   document.getElementById(`wastage-remelt-${dept}`).value='';
-  if(resultEl) resultEl.innerHTML=`<div class="alert alert-success">✅ Wastage saved — S:${fmt(salvage)}L R:${fmt(remelt)}L</div>`;
+  if(resultEl) resultEl.innerHTML=`<div class="alert alert-success">âœ… Wastage saved â€” S:${fmt(salvage)}L R:${fmt(remelt)}L</div>`;
   setTimeout(()=>{ if(resultEl) resultEl.innerHTML=''; renderDeptScan(dept); },2000);
 }
 
@@ -2052,30 +2198,30 @@ function closeBatchStage(batchNo, dept){
     return;
   }
   if(!confirm('Close batch '+batchNo+' at '+dept+'?\nScan IN: '+inCount+' | Scan OUT: '+outCount+' | Wastage: '+wastageBoxes+'\nAll accounted')) return;
-  state.stageClosure.push({batchNumber:batchNo, dept, closedAt:now(), closedBy:currentDept});
+  state.closures.push({batchNumber:batchNo, dept, closedAt:now(), closedBy:currentDept});
   saveLocal();
   pushToServer('/api/tracking/stage-close',{batchNumber:batchNo,dept,closedBy:currentDept});
   renderPage(currentPage);
 }
 
 function adminCloseBatchStage(batchNo,dept){
-  if(!confirm(`⚡ ADMIN OVERRIDE: Force close ${DEPT_LABELS[dept]} for ${batchNo}?`)) return;
+  if(!confirm(`âš¡ ADMIN OVERRIDE: Force close ${DEPT_LABELS[dept]} for ${batchNo}?`)) return;
   closeBatchStage(batchNo,dept);
 }
 
 function getActiveBatchesForDept(dept){
   return state.batches.filter(b=>{
+    if(!b || !b.batchNumber) return false;
     if(b.status==='closed') return false;
     const flow=getBatchFlow(b);
-    if(!flow.includes(dept)) return false;
-    // Show if previous stage is complete or it's the first stage
+    if(!flow || !flow.includes(dept)) return false;
     return canScanDept(b.batchNumber,dept)||isStageComplete(b.batchNumber,dept)||currentDept==='admin';
   });
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE: DISPATCH
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderDispatch(){
   const el=document.getElementById('page-dispatch');
@@ -2105,27 +2251,27 @@ function renderDispatch(){
     <!-- SCAN PANEL -->
     <div class="grid-2 mb-16">
       <div>
-        <div class="card-title">📥 Receive from Packing</div>
+        <div class="card-title">ðŸ“¥ Receive from Packing</div>
         <div class="scan-zone" id="scan-zone-in-dispatch">
-          <div style="font-size:28px;margin-bottom:6px">📥</div>
+          <div style="font-size:28px;margin-bottom:6px">ðŸ“¥</div>
           <input class="scan-input" id="scan-in-dispatch" placeholder="Scan label to receive"
             onkeydown="if(event.key==='Enter')processScanInput('dispatch','in')">
           <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('dispatch','in',v))">📷</button>
-            <button class="btn btn-sm btn-primary" onclick="processScanInput('dispatch','in')">✓ Receive</button>
+            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('dispatch','in',v))">ðŸ“·</button>
+            <button class="btn btn-sm btn-primary" onclick="processScanInput('dispatch','in')">âœ“ Receive</button>
           </div>
         </div>
         <div id="scan-result-in-dispatch" class="mt-8"></div>
       </div>
       <div>
-        <div class="card-title">📤 Dispatch Out</div>
+        <div class="card-title">ðŸ“¤ Dispatch Out</div>
         <div class="scan-zone" id="scan-zone-out-dispatch">
-          <div style="font-size:28px;margin-bottom:6px">🚚</div>
+          <div style="font-size:28px;margin-bottom:6px">ðŸšš</div>
           <input class="scan-input" id="scan-out-dispatch" placeholder="Scan label to dispatch"
             onkeydown="if(event.key==='Enter')processScanInput('dispatch','out')">
           <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('dispatch','out',v))">📷</button>
-            <button class="btn btn-sm btn-success" onclick="processScanInput('dispatch','out')">✓ Dispatch</button>
+            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('dispatch','out',v))">ðŸ“·</button>
+            <button class="btn btn-sm btn-success" onclick="processScanInput('dispatch','out')">âœ“ Dispatch</button>
           </div>
         </div>
         <div id="scan-result-out-dispatch" class="mt-8"></div>
@@ -2135,7 +2281,7 @@ function renderDispatch(){
 
   <!-- PACKED LEDGER -->
   <div class="card mb-16">
-    <div class="card-title">📦 Packed Quantity Ledger — Ready for Dispatch</div>
+    <div class="card-title">ðŸ“¦ Packed Quantity Ledger â€” Ready for Dispatch</div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Size</th><th>Packed Boxes</th><th>Packed Qty (L)</th><th>Received</th><th>Dispatched</th><th>Pending</th><th>Action</th></tr></thead>
       <tbody>
@@ -2155,7 +2301,7 @@ function renderDispatch(){
           <td class="td-mono">${s.dispIn}</td>
           <td class="td-mono green">${s.dispOut} (${fmt(dispQty)}L)</td>
           <td class="td-mono ${pending>0?'fw-bold':''}">${pending} (${fmt(pendingQty)}L)</td>
-          <td>${pending>0?`<button class="btn btn-sm btn-primary" onclick="openDispatchRecord('${batchNo}',${s.dispOut},${s.packed})">🚚 Dispatch</button>`:'<span class="badge badge-green">All Out</span>'}</td>
+          <td>${pending>0?`<button class="btn btn-sm btn-primary" onclick="openDispatchRecord('${batchNo}',${s.dispOut},${s.packed})">ðŸšš Dispatch</button>`:'<span class="badge badge-green">All Out</span>'}</td>
         </tr>`;
       }).join('')||'<tr><td colspan="9" class="text-center text-muted">No packed boxes yet</td></tr>'}
       </tbody>
@@ -2164,7 +2310,7 @@ function renderDispatch(){
 
   <!-- DISPATCH RECORDS -->
   <div class="card">
-    <div class="card-title">📋 Dispatch Records</div>
+    <div class="card-title">ðŸ“‹ Dispatch Records</div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Date</th><th>Batch</th><th>Customer</th><th>Qty (L)</th><th>Boxes</th><th>Vehicle</th><th>Invoice</th><th>Status</th></tr></thead>
       <tbody>
@@ -2174,8 +2320,8 @@ function renderDispatch(){
         <td class="text-sm">${r.customer||'-'}</td>
         <td class="td-mono fw-bold">${fmt(r.qty)}L</td>
         <td class="td-mono">${r.boxes}</td>
-        <td class="td-mono">${r.vehicleNo||'<span class="text-muted">—</span>'}</td>
-        <td class="td-mono">${r.invoiceNo||'<span class="text-muted">—</span>'}</td>
+        <td class="td-mono">${r.vehicleNo||'<span class="text-muted">â€”</span>'}</td>
+        <td class="td-mono">${r.invoiceNo||'<span class="text-muted">â€”</span>'}</td>
         <td><span class="badge badge-green">Dispatched</span></td>
       </tr>`).join('')||'<tr><td colspan="8" class="text-center text-muted">No dispatch records yet</td></tr>'}
       </tbody>
@@ -2187,7 +2333,7 @@ function openDispatchRecord(batchNo, alreadyDispatched, totalPacked){
   const batch=getBatch(batchNo);
   const pending=totalPacked-alreadyDispatched;
   const pendingQty=boxToLakh(pending,batch?.size||'0');
-  openModal('Record Dispatch',`Batch ${batchNo} — ${fmt(pendingQty)}L available to dispatch`,`
+  openModal('Record Dispatch',`Batch ${batchNo} â€” ${fmt(pendingQty)}L available to dispatch`,`
     <div class="form-row cols-2">
       <div class="form-group">
         <label>Qty to Dispatch (Lakhs)</label>
@@ -2215,7 +2361,7 @@ function openDispatchRecord(batchNo, alreadyDispatched, totalPacked){
     <div class="alert alert-info">Once invoice app is live, Invoice Number will auto-populate here.</div>
   `,[
     {label:'Cancel',cls:'btn-secondary',fn:'closeModal()'},
-    {label:'🚚 Confirm Dispatch',cls:'btn-primary',fn:`confirmDispatch('${batchNo}')`}
+    {label:'ðŸšš Confirm Dispatch',cls:'btn-primary',fn:`confirmDispatch('${batchNo}')`}
   ]);
 }
 
@@ -2234,13 +2380,13 @@ function confirmDispatch(batchNo){
   // Update planning app
   pushToServer('/api/tracking/dispatch-update',{batchNumber:batchNo,dispatchedQty:qty,vehicleNo,invoiceNo});
   closeModal();
-  alert(`✅ Dispatch recorded — ${fmt(qty)}L dispatched`);
+  alert(`âœ… Dispatch recorded â€” ${fmt(qty)}L dispatched`);
   renderDispatch();
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE: BATCH TRACKER
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderBatchTracker(){
   const el=document.getElementById('page-batch-tracker');
@@ -2248,7 +2394,7 @@ function renderBatchTracker(){
   const batches=state.batches.filter(b=>!b.deleted);
 
   document.getElementById('tb-actions').innerHTML=`
-    <button class="btn btn-secondary btn-sm" onclick="exportTrackerReport()">📥 Export</button>`;
+    <button class="btn btn-secondary btn-sm" onclick="exportTrackerReport()">ðŸ“¥ Export</button>`;
 
   el.innerHTML=`
   <div class="section-header">
@@ -2297,7 +2443,7 @@ function applyBatchFilter(){
 function renderBatchCard(batch){
   const batchNo=batch.batchNumber;
   const flow=getBatchFlow(batch);
-  const alerts=state.alerts.filter(a=>a.batchNumber===batchNo);
+  const alerts=state.alerts.filter(a=>a&&a.batchNumber===batchNo);
   const wipDays=getBatchWIPDays(batchNo);
   const std=batch.isPrinted?3:2;
   const dispDate=calcDispatchDate(batch);
@@ -2315,14 +2461,14 @@ function renderBatchCard(batch){
     const deptAlerts=alerts.filter(a=>a.dept===dept).length;
     const cls=deptAlerts>0?'alert':closed?'done':isActive?'active':'';
     const conn=i<flow.length-1?`<div class="flow-conn ${closed?'done':''}"></div>`:'';
-    return `<div class="flow-step"><div class="flow-step-dot ${cls}">${deptAlerts>0?'🚩':closed?'✓':isActive?'●':'○'}</div><div class="flow-step-label ${cls}">${DEPT_LABELS[dept]||dept}</div></div>${conn}`;
+    return `<div class="flow-step"><div class="flow-step-dot ${cls}">${deptAlerts>0?'ðŸš©':closed?'âœ“':isActive?'â—':'â—‹'}</div><div class="flow-step-label ${cls}">${DEPT_LABELS[dept]||dept}</div></div>${conn}`;
   }).join('');
 
   return `<div class="card mb-12 ${alerts.length>0?'border-2':''}" style="${alerts.length>0?'border-color:var(--accent4)':''}">
     <div class="flex items-center justify-between mb-12">
       <div class="flex items-center gap-12">
         <div>
-          <div class="fw-bold" style="font-size:15px">${batchNo} ${alerts.length>0?`<span class="red-flag">🚩 ${alerts.length} alert${alerts.length>1?'s':''}</span>`:''} ${batchNo.startsWith('TEMP-')?'<span style="background:rgba(255,64,96,0.12);color:#ff4060;border:1px solid rgba(255,64,96,0.35);padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">⚠️ TEMP — Reconciliation Required</span>':''}</div>
+          <div class="fw-bold" style="font-size:15px">${batchNo} ${alerts.length>0?`<span class="red-flag">ðŸš© ${alerts.length} alert${alerts.length>1?'s':''}</span>`:''}</div>
           <div class="text-sm text-muted">${batch.customer||''} | ${batch.machineId||''} | Size ${batch.size} | ${batch.isPrinted?'<span class="badge badge-purple">PTD</span>':'<span class="badge badge-gray">UP</span>'}</div>
         </div>
       </div>
@@ -2375,7 +2521,7 @@ function renderBatchDetail(batch){
   });
 
   return `<div class="divider"></div>
-  <div class="card-title">Box-Level Detail — All ${labels.length} Labels</div>
+  <div class="card-title">Box-Level Detail â€” All ${labels.length} Labels</div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
     ${flow.map(dept=>{
       const atStage=labels.filter(l=>getBoxCurrentStage(l.id)===dept).length;
@@ -2392,7 +2538,7 @@ function renderBatchDetail(batch){
       const stage=getBoxCurrentStage(l.id);
       const scans=getScansForBox(l.id);
       const getStamp=(dept,type)=>{const s=scans.find(sc=>sc.dept===dept&&sc.type===type);return s?fmtDateTime(s.ts):null;};
-      const boxAlerts=state.alerts.filter(a=>a.labelId===l.id);
+      const boxAlerts=state.alerts.filter(a=>a&&a.labelId===l.id);
       const isVoided=l.voided;
       const statusBadge=isVoided?'<span class="badge badge-red">Voided</span>':
         stage==='dispatch'?'<span class="badge badge-green">Dispatched</span>':
@@ -2405,11 +2551,11 @@ function renderBatchDetail(batch){
         <td><span class="badge ${stage==='dispatch'?'badge-green':stage==='pending'?'badge-gray':'badge-blue'}">${DEPT_LABELS[stage]||stage}</span></td>
         ${flow.map(dept=>{
           const inT=getStamp(dept,'in'); const outT=getStamp(dept,'out');
-          if(outT) return `<td class="td-mono text-sm"><span class="badge badge-green" title="OUT: ${outT}">✓</span></td>`;
+          if(outT) return `<td class="td-mono text-sm"><span class="badge badge-green" title="OUT: ${outT}">âœ“</span></td>`;
           if(inT) return `<td class="td-mono text-sm"><span class="badge badge-blue" title="IN: ${inT}">IN</span></td>`;
-          return `<td style="color:var(--text3);font-size:11px;text-align:center">—</td>`;
+          return `<td style="color:var(--text3);font-size:11px;text-align:center">â€”</td>`;
         }).join('')}
-        <td>${boxAlerts.length>0?`<span class="red-flag" title="${boxAlerts.map(a=>a.msg).join('; ')}">🚩 ${boxAlerts.length}</span>`:'—'}</td>
+        <td>${boxAlerts.length>0?`<span class="red-flag" title="${boxAlerts.map(a=>a.msg).join('; ')}">ðŸš© ${boxAlerts.length}</span>`:'â€”'}</td>
       </tr>`;
     }).join('')}
     </tbody>
@@ -2427,31 +2573,31 @@ function renderReports(){
       <div class="card-title">Report A</div>
       <div class="fw-bold mb-4">Complete Batch Tracking</div>
       <div class="text-sm text-muted">Full movement history per batch. Every box, every scan, current location, dispatch readiness.</div>
-      <button class="btn btn-primary btn-sm mt-12">Generate →</button>
+      <button class="btn btn-primary btn-sm mt-12">Generate â†’</button>
     </div>
     <div class="card cursor-pointer" onclick="renderReportB()" style="border-left:4px solid var(--accent2)">
       <div class="card-title">Report B</div>
       <div class="fw-bold mb-4">Department-wise WIP</div>
       <div class="text-sm text-muted">Per department: which batches are present, box count, time in department, red flags.</div>
-      <button class="btn btn-success btn-sm mt-12">Generate →</button>
+      <button class="btn btn-success btn-sm mt-12">Generate â†’</button>
     </div>
     <div class="card cursor-pointer" onclick="renderReportC()" style="border-left:4px solid var(--accent3)">
       <div class="card-title">Report C</div>
       <div class="fw-bold mb-4">Machine-wise WIP Status</div>
       <div class="text-sm text-muted">Per machine: Closed / Pending / In Progress status for each batch.</div>
-      <button class="btn btn-warning btn-sm mt-12">Generate →</button>
+      <button class="btn btn-warning btn-sm mt-12">Generate â†’</button>
     </div>
     <div class="card cursor-pointer" onclick="renderReportD()" style="border-left:4px solid var(--accent5)">
       <div class="card-title">Report D</div>
       <div class="fw-bold mb-4">Overall Summary</div>
       <div class="text-sm text-muted">Gross Production vs A-Grade vs Stage-wise WIP across all machines.</div>
-      <button class="btn btn-sm mt-12" style="background:var(--accent5);color:#fff">Generate →</button>
+      <button class="btn btn-sm mt-12" style="background:var(--accent5);color:#fff">Generate â†’</button>
     </div>
     <div class="card cursor-pointer" onclick="renderReportE()" style="border-left:4px solid #0891b2;grid-column:span 2">
       <div class="card-title">Report E</div>
       <div class="fw-bold mb-4">Machine-wise Production Tracking Sheet</div>
       <div class="text-sm text-muted">Replaces the current Excel tracking sheet. Per machine, per batch: production, AIM output (shift-wise), manual inspection, printing, packing, dispatch with floor subtotals (GF/FF/SF).</div>
-      <button class="btn btn-sm mt-12" style="background:#0891b2;color:#fff">Generate →</button>
+      <button class="btn btn-sm mt-12" style="background:#0891b2;color:#fff">Generate â†’</button>
     </div>
   </div>
   <div id="report-output" class="mt-20"></div>`;
@@ -2459,7 +2605,7 @@ function renderReports(){
 
 function renderReportB(){
   const depts=['aim','printing','pi','packing'];
-  let html=`<div class="card"><div class="section-title mb-16">Report B — Department-wise WIP</div>`;
+  let html=`<div class="card"><div class="section-title mb-16">Report B â€” Department-wise WIP</div>`;
   depts.forEach(dept=>{
     const inScans=state.scans.filter(s=>s.dept===dept&&s.type==='in');
     const outScans=state.scans.filter(s=>s.dept===dept&&s.type==='out');
@@ -2475,26 +2621,26 @@ function renderReportB(){
       const wipQty=boxToLakh(wip,batch?.size||'0');
       const firstIn=inScans.filter(s=>s.batchNumber===batchNo).sort((a,b)=>new Date(a.ts)-new Date(b.ts))[0];
       const hrs=firstIn?hoursAgo(firstIn.ts):0;
-      const alerts=state.alerts.filter(a=>a.batchNumber===batchNo&&a.dept===dept).length;
+      const alerts=state.alerts.filter(a=>a&&a.batchNumber===batchNo&&a.dept===dept).length;
       html+=`<tr>
-        <td class="td-bold td-mono">${batchNo}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
+        <td class="td-bold td-mono">${batchNo}${alerts>0?` <span class="red-flag">ðŸš©</span>`:''}</td>
         <td class="text-sm">${batch?.customer||'-'}</td>
         <td class="td-mono">${inn}</td><td class="td-mono">${out}</td>
         <td class="td-mono fw-bold">${wip}</td>
         <td class="td-mono">${fmt(wipQty)}</td>
         <td class="td-mono ${hrs>=48?'red':''}">${hrs.toFixed(0)}h</td>
-        <td>${isStageComplete(batchNo,dept)?'<span class="badge badge-green">✅ Closed</span>':wip>0?'<span class="badge badge-blue">In Dept</span>':'<span class="badge badge-gray">-</span>'}</td>
+        <td>${isStageComplete(batchNo,dept)?'<span class="badge badge-green">âœ… Closed</span>':wip>0?'<span class="badge badge-blue">In Dept</span>':'<span class="badge badge-gray">-</span>'}</td>
       </tr>`;
     });
     html+=`</tbody></table></div></div>`;
   });
-  html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportB()">📥 Export Excel</button></div>`;
+  html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportB()">ðŸ“¥ Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
 
 function renderReportC(){
-  let html=`<div class="card"><div class="section-title mb-16">Report C — Machine-wise WIP Status</div><div class="tbl-wrap"><table>
+  let html=`<div class="card"><div class="section-title mb-16">Report C â€” Machine-wise WIP Status</div><div class="tbl-wrap"><table>
     <thead><tr><th>Machine</th><th>Floor</th><th>Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
   const machines=[...new Set(state.batches.map(b=>b.machineId).filter(Boolean))].sort();
   machines.forEach(mc=>{
@@ -2506,9 +2652,9 @@ function renderReportC(){
       const packedQty=boxToLakh(packedOut,b.size);
       const grossProd=b.actualProd||0;
       let statusBadge='';
-      if(wipDays===0&&packedOut>0) statusBadge='<span class="badge badge-green">✅ Closed</span>';
-      else if(wipDays<=std) statusBadge='<span class="badge badge-blue">🔵 In Progress</span>';
-      else statusBadge='<span class="badge badge-amber">⚠️ Pending</span>';
+      if(wipDays===0&&packedOut>0) statusBadge='<span class="badge badge-green">âœ… Closed</span>';
+      else if(wipDays<=std) statusBadge='<span class="badge badge-blue">ðŸ”µ In Progress</span>';
+      else statusBadge='<span class="badge badge-amber">âš ï¸ Pending</span>';
       html+=`<tr>
         <td class="td-bold td-mono">${mc}</td>
         <td class="td-mono">${getMachineFloor(mc)}</td>
@@ -2521,7 +2667,7 @@ function renderReportC(){
       </tr>`;
     });
   });
-  html+=`</tbody></table></div><button class="btn btn-secondary btn-sm mt-12" onclick="exportReportC()">📥 Export Excel</button></div>`;
+  html+=`</tbody></table></div><button class="btn btn-secondary btn-sm mt-12" onclick="exportReportC()">ðŸ“¥ Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
@@ -2540,7 +2686,7 @@ function renderReportD(){
     return s+ag.aGrade;
   },0);
   const aGradePct=totalGross>0?(totalAGrade/totalGross*100):0;
-  const html=`<div class="card"><div class="section-title mb-16">Report D — Overall Summary</div>
+  const html=`<div class="card"><div class="section-title mb-16">Report D â€” Overall Summary</div>
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Gross Production</div><div class="kpi-val">${fmt(totalGross)}L</div></div>
     <div class="kpi"><div class="kpi-label">Total A-Grade</div><div class="kpi-val green">${fmt(totalAGrade)}L</div></div>
@@ -2559,7 +2705,7 @@ function renderReportD(){
     }).join('')}
     </tbody>
   </table></div>
-  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportD()">📥 Export Excel</button></div>`;
+  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportD()">ðŸ“¥ Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
@@ -2569,15 +2715,15 @@ function renderReportA(){
   const filterBatch = window._rptABatch||'';
   const batches = state.batches.filter(b=>!b.deleted && (!filterBatch||b.batchNumber===filterBatch));
   const batchOptions = state.batches.filter(b=>!b.deleted)
-    .map(b=>`<option value="${b.batchNumber}" ${filterBatch===b.batchNumber?'selected':''}>${b.batchNumber} — ${b.customer||''}</option>`).join('');
+    .map(b=>`<option value="${b.batchNumber}" ${filterBatch===b.batchNumber?'selected':''}>${b.batchNumber} â€” ${b.customer||''}</option>`).join('');
 
   let html=`<div class="card">
-    <div class="section-title mb-16">Report A — Complete Batch Tracking (Full Duration)</div>
+    <div class="section-title mb-16">Report A â€” Complete Batch Tracking (Full Duration)</div>
     <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
       <select class="form-control" style="max-width:280px" onchange="window._rptABatch=this.value;renderReportA()">
         <option value="">All Batches</option>${batchOptions}
       </select>
-      ${filterBatch?`<button class="btn btn-ghost btn-sm" onclick="window._rptABatch='';renderReportA()">✕ Clear</button>`:''}
+      ${filterBatch?`<button class="btn btn-ghost btn-sm" onclick="window._rptABatch='';renderReportA()">âœ• Clear</button>`:''}
     </div>`;
 
   batches.forEach(b=>{
@@ -2607,7 +2753,7 @@ function renderReportA(){
                 const out=dayScans.filter(s=>s.dept===dept&&s.type==='out').length;
                 const hasActivity=inn>0||out>0;
                 return `<td style="padding:5px 10px;text-align:center;font-family:var(--mono);font-size:11px;${hasActivity?'color:var(--text)':'color:var(--text3)'}">
-                  ${hasActivity?`IN:${inn} / OUT:${out}`:'—'}
+                  ${hasActivity?`IN:${inn} / OUT:${out}`:'â€”'}
                 </td>`;
               }).join('')}
             </tr>`;
@@ -2627,7 +2773,7 @@ function renderReportA(){
 
     html+=`<div class="mb-20" style="border-bottom:1px solid var(--border);padding-bottom:16px">
       <div class="flex justify-between mb-8">
-        <div class="fw-bold">${b.batchNumber} — ${b.customer||''} | ${b.machineId} | Size ${b.size}</div>
+        <div class="fw-bold">${b.batchNumber} â€” ${b.customer||''} | ${b.machineId} | Size ${b.size}</div>
         <span class="badge ${ag.pct>=95?'badge-green':ag.pct>=90?'badge-amber':'badge-red'}">${fmt(ag.pct,1)}% A-Grade</span>
       </div>
       <div class="grid-4 mb-8">
@@ -2640,7 +2786,7 @@ function renderReportA(){
       ${dayHistoryHtml}
     </div>`;
   });
-  html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportA()">📥 Export Excel</button></div>`;
+  html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportA()">ðŸ“¥ Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
@@ -2655,14 +2801,14 @@ function renderBatchFlowSummary(batch){
     return `<div style="background:${closed?'var(--accent2-light)':'var(--surface2)'};border:1px solid ${closed?'var(--accent2)':'var(--border)'};border-radius:6px;padding:6px 10px;text-align:center">
       <div class="text-sm fw-bold">${DEPT_LABELS[dept]}</div>
       <div class="mono text-sm">IN:${inn} OUT:${out}</div>
-      <div class="text-sm ${closed?'green':''}">${closed?'✅ Done':'⏳ Open'}</div>
+      <div class="text-sm ${closed?'green':''}">${closed?'âœ… Done':'â³ Open'}</div>
     </div>`;
   }).join('')}
   </div>`;
 }
 
 function renderReportE(){
-  // Machine-wise Production Tracking Sheet — cumulative up to date, with optional date filter
+  // Machine-wise Production Tracking Sheet â€” cumulative up to date, with optional date filter
   const filterDate = window._rptEDate || '';
   const allScanDates = [...new Set(state.scans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
 
@@ -2700,14 +2846,14 @@ function renderReportE(){
       });
     });
   });
-  let html=`<div class="card"><div class="section-title mb-4">Report E — Machine-wise Production Tracking Sheet</div>
+  let html=`<div class="card"><div class="section-title mb-4">Report E â€” Machine-wise Production Tracking Sheet</div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
-    <span class="text-sm text-muted">${filterDate?'Date: '+filterDate:'Cumulative — all entries to date'}</span>
+    <span class="text-sm text-muted">${filterDate?'Date: '+filterDate:'Cumulative â€” all entries to date'}</span>
     <select style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:5px 10px;font-size:12px;outline:none" onchange="window._rptEDate=this.value;renderReportE()">
       <option value="">All Dates (Cumulative)</option>
       ${allScanDates.map(d=>`<option value="${d}" ${filterDate===d?'selected':''}>${d}</option>`).join('')}
     </select>
-    ${filterDate?`<button class="btn btn-ghost btn-sm" onclick="window._rptEDate='';renderReportE()">✕ Show All</button>`:''}
+    ${filterDate?`<button class="btn btn-ghost btn-sm" onclick="window._rptEDate='';renderReportE()">âœ• Show All</button>`:''}
   </div>
   <div class="tbl-wrap"><table>
     <thead><tr><th>Machine</th><th>Floor</th><th>Batch</th><th>Size</th><th>Planned (L)</th><th>Gross Prod</th><th>AIM Run</th><th>AIM Sal</th><th>AIM Remelt</th><th>AIM A-Grade</th><th>AIM %</th><th>Manual Insp</th><th>Total A-Grade</th><th>A-Grade %</th><th>WIP</th><th>Avail UNPTD</th><th>Avail PTD</th><th>Print TD</th><th>Print Rej</th><th>PI Inspect</th><th>PI Sal/Rem</th><th>Pack UNPTD</th><th>Pack PTD</th><th>Dispatch</th></tr></thead>
@@ -2725,7 +2871,7 @@ function renderReportE(){
     </tr>`).join('')||'<tr><td colspan="24" class="text-center text-muted">No data yet</td></tr>'}
     </tbody>
   </table></div>
-  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportE()">📥 Export Excel (matches current format)</button></div>`;
+  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportE()">ðŸ“¥ Export Excel (matches current format)</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
@@ -2822,9 +2968,9 @@ function exportTrackerReport(){
   exportReportA();
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // PAGE: SETTINGS
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 function renderTrackingSearch(){
   const el=document.getElementById('page-search');
@@ -2851,7 +2997,7 @@ function renderTrackingSearch(){
 
   el.innerHTML=`
     <div class="card">
-      <div class="section-title mb-16">🔍 Search</div>
+      <div class="section-title mb-16">ðŸ” Search</div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
         <input type="text" id="trk-search-input" value="${window._trkSearchQ||''}"
           placeholder="Batch number, customer name, or PC code..."
@@ -2864,7 +3010,7 @@ function renderTrackingSearch(){
           <option value="customer" ${by==='customer'?'selected':''}>Customer</option>
           <option value="pccode" ${by==='pccode'?'selected':''}>PC Code</option>
         </select>
-        ${q?`<button class="btn btn-ghost btn-sm" onclick="window._trkSearchQ='';renderTrackingSearch()">✕ Clear</button>`:''}
+        ${q?`<button class="btn btn-ghost btn-sm" onclick="window._trkSearchQ='';renderTrackingSearch()">âœ• Clear</button>`:''}
       </div>
       ${q.length>=2?`
         <div style="font-size:12px;color:var(--text3);margin-bottom:10px">${results.length} result${results.length!==1?'s':''} for "${q}"</div>
@@ -2907,16 +3053,16 @@ function renderSettings(){
   </div>
   <div class="grid-2">
     <div class="card">
-      <div class="card-title">🔗 Server Connection</div>
+      <div class="card-title">ðŸ”— Server Connection</div>
       <div class="form-group">
         <label>Sunloc Server URL</label>
         <input type="text" id="s-server" value="${serverUrl}" placeholder="https://sunloc.up.railway.app">
-      <div style="font-size:11px;color:var(--text3);margin-top:4px">⚠️ Enter the base URL only — no <code>/tracking.html</code> or <code>/planning.html</code> at the end</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">âš ï¸ Enter the base URL only â€” no <code>/tracking.html</code> or <code>/planning.html</code> at the end</div>
       </div>
       <button class="btn btn-primary btn-sm" onclick="saveServerUrl()">Save & Test</button>
     </div>
     <div class="card">
-      <div class="card-title">🖨️ Label Printer</div>
+      <div class="card-title">ðŸ–¨ï¸ Label Printer</div>
       <div class="form-group">
         <label>Zebra Printer Bridge URL</label>
         <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:9100">
@@ -2925,7 +3071,7 @@ function renderSettings(){
       <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
     </div>
     <div class="card">
-      <div class="card-title">📦 Pack Size Master</div>
+      <div class="card-title">ðŸ“¦ Pack Size Master</div>
       <div class="tbl-wrap"><table>
         <thead><tr><th>Size</th><th>Qty per Box (Lakhs)</th></tr></thead>
         <tbody>
@@ -2935,12 +3081,12 @@ function renderSettings(){
     </div>
     ${isAdmin?`
     <div class="card">
-      <div class="card-title">🔐 Admin Tools</div>
+      <div class="card-title">ðŸ” Admin Tools</div>
       <div class="flex flex-col gap-8">
-        <button class="btn btn-warning btn-sm" onclick="clearAllScans()">⚠️ Clear All Scans (Test Mode)</button>
-        <button class="btn btn-secondary btn-sm" onclick="loadDemoData()">📋 Load Demo Data</button>
-        <button class="btn btn-secondary btn-sm" onclick="exportAllData()">💾 Export All Data</button>
-        <button class="btn btn-danger btn-sm" onclick="resetApp()">🗑️ Reset App Data</button>
+        <button class="btn btn-warning btn-sm" onclick="clearAllScans()">âš ï¸ Clear All Scans (Test Mode)</button>
+        <button class="btn btn-secondary btn-sm" onclick="loadDemoData()">ðŸ“‹ Load Demo Data</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportAllData()">ðŸ’¾ Export All Data</button>
+        <button class="btn btn-danger btn-sm" onclick="resetApp()">ðŸ—‘ï¸ Reset App Data</button>
       </div>
       <div class="divider"></div>
       <div class="card-title">Override Powers Active</div>
@@ -2953,7 +3099,7 @@ function renderSettings(){
       </ul>
     </div>`:''}
     <div class="card">
-      <div class="card-title">ℹ️ App Info</div>
+      <div class="card-title">â„¹ï¸ App Info</div>
       <div class="text-sm" style="line-height:2">
         <div><strong>Version:</strong> Sunloc Tracking Suite v1.0</div>
         <div><strong>Role:</strong> ${DEPT_INFO[currentDept]?.label}</div>
@@ -2973,12 +3119,12 @@ function saveServerUrl(){
     if(ok){
       pullFromServer().then(()=>{
         const msg = state.batches.length > 0
-          ? '✅ Server connected! ' + state.batches.length + ' batches loaded from Planning App.'
-          : '⚠️ Server connected but 0 batches found. Open Planning App and make sure orders are saved, then click Save & Test again.';
+          ? 'âœ… Server connected! ' + state.batches.length + ' batches loaded from Planning App.'
+          : 'âš ï¸ Server connected but 0 batches found. Open Planning App and make sure orders are saved, then click Save & Test again.';
         alert(msg);
       });
     } else {
-      alert('❌ Could not connect to server. Check URL.');
+      alert('âŒ Could not connect to server. Check URL.');
     }
   });
 }
@@ -2986,17 +3132,33 @@ function saveServerUrl(){
 function savePrinterUrl(){
   const url=document.getElementById('s-printer')?.value.trim()||'';
   localStorage.setItem('sunloc_printer_url',url);
-  alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
+  alert(url?'âœ… Printer URL saved.':'âœ… ZPL download mode activated.');
+}
+
+async function testPrinterFromSettings(){
+  const mode = localStorage.getItem('sunloc_printer_mode')||'download';
+  const url = localStorage.getItem('sunloc_printer_url')||'';
+  if(mode==='download'){ toast('Download mode â€” no connection needed','var(--color-text-secondary)'); return; }
+  if(!url){ toast('Configure printer first','var(--color-warning)'); return; }
+  toast('Testing connection...','var(--color-text-secondary)');
+  const testZPL = '^XA^FO50,50^ADN,36,20^FDSunloc Test^FS^XZ';
+  try {
+    const r = await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain'},body:testZPL,signal:AbortSignal.timeout(5000)});
+    if(r.ok) toast('âœ… HPRT HT800 connected!','green');
+    else toast('âš ï¸ Printer error '+r.status,'orange');
+  } catch(e){
+    toast('âŒ Cannot reach printer at '+url,'red');
+  }
 }
 
 function clearAllScans(){
-  if(!confirm('⚠️ ADMIN: Clear ALL scan data? This cannot be undone.')) return;
+  if(!confirm('âš ï¸ ADMIN: Clear ALL scan data? This cannot be undone.')) return;
   state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[];
   saveLocal(); renderPage(currentPage); alert('Scans cleared.');
 }
 
 function resetApp(){
-  if(!confirm('⚠️ ADMIN: Reset ALL tracking data? This will delete labels, scans, and records.')) return;
+  if(!confirm('âš ï¸ ADMIN: Reset ALL tracking data? This will delete labels, scans, and records.')) return;
   state.labels=[]; state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[]; state.dispatchRecs=[];
   localStorage.removeItem('sunloc_tracking');
   renderPage(currentPage); alert('App data reset.');
@@ -3025,9 +3187,9 @@ function loadDemoData(){
   }
 }
 
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // INIT
-// ═══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 // Auto-focus scan input when dept page loads
 document.addEventListener('click',e=>{
@@ -3046,43 +3208,17 @@ setInterval(()=>{
   buildSidebar();
 },5*60*1000);
 
-// Auto sync every 2 minutes
+// Auto sync every 5 minutes â€” only when user is idle
 setInterval(()=>{
-  if(serverUrl) pullFromServer();
-},2*60*1000);
+  if(serverUrl && (Date.now() - _trkLastInput) > 10000) pullFromServer();
+}, 5*60*1000);
 
-// Check TEMP batch alerts every 5 minutes
-setInterval(checkTrackingTempAlerts, 5*60*1000);
-setTimeout(checkTrackingTempAlerts, 3000);
-
-async function checkTrackingTempAlerts(){
-  if(!serverUrl) return;
-  try{
-    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
-    const j = await r.json();
-    let banner = document.getElementById('trk-temp-banner');
-    if(!banner){
-      banner = document.createElement('div');
-      banner.id = 'trk-temp-banner';
-      banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-top:2px solid var(--accent3);padding:8px 16px;font-size:12px;text-align:center';
-      document.body.appendChild(banner);
-    }
-    if(j.ok && j.count > 0){
-      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
-      banner.style.display = 'block';
-      banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} active</strong> on machines: ${machines.join(', ')} — Labels will show <span style="color:#ff4060;font-weight:600">⚠️ TEMP</span> badge (red border) until reconciled. &nbsp;|&nbsp; W/O orders show <span style="color:#C55A11;font-weight:600">🔶 W/O</span> badge (orange border) until customer assigned.`;
-    } else {
-      banner.style.display = 'none';
-    }
-  }catch(e){}
-}
-
-// ══════════════════════════════════════════════════════
-// TRACKING — Audit log (admin role already handled by currentDept)
-// ══════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// TRACKING â€” Audit log (admin role already handled by currentDept)
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 async function trkAuditLog(action, details) {
   if (!serverUrl || !currentDept) return;
-  const token = sessionStorage.getItem('trk_token');
+  const token = localStorage.getItem('trk_token');
   if (!token) return;
   try {
     await fetch(serverUrl + '/api/audit/log', {
@@ -3093,15 +3229,15 @@ async function trkAuditLog(action, details) {
   } catch(e) {}
 }
 
-// Audit logging — called after successful login in doLogin()
-// No monkey-patching needed — tracking uses doLogin() directly
+// Audit logging â€” called after successful login in doLogin()
+// No monkey-patching needed â€” tracking uses doLogin() directly
 
 // Audit log view for tracking admin
 async function renderTrackingAuditLog() {
   const el = document.getElementById('page-settings');
   if (!el || currentDept !== 'admin') return;
 
-  const token = sessionStorage.getItem('trk_token');
+  const token = localStorage.getItem('trk_token');
   if (!serverUrl || !token) {
     el.innerHTML += '<div style="margin-top:16px;color:var(--text3)">Audit log requires server connection and admin login.</div>';
     return;
@@ -3121,7 +3257,7 @@ async function renderTrackingAuditLog() {
           <span style="color:var(--text3);font-family:var(--mono)">${l.ts}</span>
           <span style="color:var(--accent)">${l.username}</span>
           <span style="color:${l.action==='LOGIN'?'var(--accent2)':'var(--text)'}">${l.action}</span>
-          <span style="color:var(--text2)">${l.details||'—'}</span>
+          <span style="color:var(--text2)">${l.details||'â€”'}</span>
         </div>`).join('')}
       </div>`;
     el.appendChild(auditSection);
@@ -3140,56 +3276,127 @@ window.addEventListener('beforeunload', e => {
 
 // Audit key save actions
 // saveLocal audit is handled inside the original saveLocal function above
-
-// ── Mobile Navigation ─────────────────────────────────────────
-function initMobileNav() {
-  // Show mobile nav after login
-  const mobileNav = document.getElementById('mobile-nav');
-  if (mobileNav) mobileNav.style.display = 'flex';
-  // Set active based on current dept
-  const defaultPage = DEPT_INFO[currentDept]?.defaultPage || 'scan';
-  updateMobileNavActive(defaultPage);
-}
-
-function mobileNavTo(page) {
-  // 'scan' navigates to the dept's own scan page
-  if (page === 'scan') {
-    const deptPage = currentDept === 'admin' ? 'batch-tracker' : currentDept === 'planning' ? 'batch-tracker' : currentDept;
-    navigate(deptPage);
-    updateMobileNavActive('scan');
-  } else {
-    navigate(page);
-    updateMobileNavActive(page);
-  }
-}
-
-function updateMobileNavActive(page) {
-  document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active'));
-  const map = { 'scan': 'mnav-scan', 'batch-tracker': 'mnav-tracker', 'labels': 'mnav-labels', 'label-gen': 'mnav-labels', 'search': 'mnav-search' };
-  const activeId = map[page] || 'mnav-more';
-  document.getElementById(activeId)?.classList.add('active');
-}
-
-function toggleMobileMenu() {
-  const sb = document.getElementById('sidebar');
-  if (sb) sb.classList.toggle('open');
-}
-
-// Close sidebar when a nav item is tapped on mobile
-function mobileCloseSidebar() {
-  const sb = document.getElementById('sidebar');
-  if (sb && window.innerWidth <= 768) sb.classList.remove('open');
-}
-
-// Auto-focus scan input on mobile after page load for quick scanning
-function autoFocusScanInput(dept, type) {
-  const isMobile = window.innerWidth <= 768;
-  if (isMobile) {
-    setTimeout(() => {
-      document.getElementById(`scan-${type}-${dept}`)?.focus();
-    }, 300);
-  }
-}
 </script>
+
+<script>
+// â”€â”€ REAL-TIME SYNC (SSE) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// SAFE: Only syncs when user has been idle 10+ seconds â€” never interrupts active work
+let _sseTrk = null;
+let _trkLastInput = 0;
+let _trkPendingSync = false;
+
+document.addEventListener('input', () => { _trkLastInput = Date.now(); });
+document.addEventListener('change', () => { _trkLastInput = Date.now(); });
+document.addEventListener('click', () => { _trkLastInput = Date.now(); });
+
+function connectTrackingSSE() {
+  if (!serverUrl || _sseTrk) return;
+  _sseTrk = new EventSource(serverUrl + "/api/sync/events?app=tracking");
+  _sseTrk.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "planning_updated") {
+        _trkPendingSync = true; // Defer until idle
+      }
+    } catch(err) {}
+  };
+  _sseTrk.onerror = () => {
+    if (_sseTrk) { _sseTrk.close(); _sseTrk = null; }
+    setTimeout(connectTrackingSSE, 15000);
+  };
+}
+
+// Every 5 seconds: if planning updated AND user idle 10+ seconds â†’ refresh batch list ONLY
+setInterval(async () => {
+  if (!_trkPendingSync || !serverUrl) return;
+  if ((Date.now() - _trkLastInput) < 10000) return; // user still active
+  _trkPendingSync = false;
+  try {
+    // Only refresh the batch/order list â€” never re-render active scan forms
+    const pr = await fetch(serverUrl + '/api/planning/state', {signal: AbortSignal.timeout(5000)});
+    if (!pr.ok) return;
+    const pj = await pr.json();
+    if (pj.ok && pj.state?.orders) {
+      const batches = pj.state.orders.filter(o => !o.deleted);
+      if (batches.length > 0) {
+        state.batches = batches;
+        // Silently update only batch <select> dropdowns â€” never touch scan inputs or forms
+        document.querySelectorAll('select.batch-select, select[id*="batch"]').forEach(sel => {
+          const cur = sel.value;
+          sel.innerHTML = '<option value="">-- Select Batch --</option>' +
+            batches.map(b => `<option value="${b.batchNumber||b.id}" ${(b.batchNumber||b.id)===cur?'selected':''}>${b.batchNumber||b.id} â€” ${b.customer||''}</option>`).join('');
+          sel.value = cur;
+        });
+      }
+    }
+  } catch(e) {}
+}, 5000);
+
+setTimeout(connectTrackingSSE, 2000);
+setInterval(() => { if (!_sseTrk) connectTrackingSSE(); }, 30000);
+
+// â”€â”€ LABEL TABLE FILTER + SORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+let _lblSortCol = '', _lblSortDir = 1;
+
+function sortLabelsTable(col) {
+  if (_lblSortCol === col) _lblSortDir *= -1; else { _lblSortCol = col; _lblSortDir = 1; }
+  // Update sort indicators
+  ['batch','customer','size','grossqty','maxlabels','generated','printed','remaining'].forEach(c => {
+    const el = document.getElementById('sort-'+c);
+    if (el) el.textContent = c === col ? (_lblSortDir === 1 ? 'â†‘' : 'â†“') : 'â†•';
+  });
+  const tbody = document.querySelector('#labels-table tbody');
+  if (!tbody) return;
+  const rows = [...tbody.querySelectorAll('tr.lbl-row')];
+  rows.sort((a, b) => {
+    const av = (a.dataset[col] || '').toLowerCase();
+    const bv = (b.dataset[col] || '').toLowerCase();
+    const an = parseFloat(av), bn = parseFloat(bv);
+    if (!isNaN(an) && !isNaN(bn)) return (an - bn) * _lblSortDir;
+    return av.localeCompare(bv) * _lblSortDir;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+  filterLabelsTable();
+}
+
+function filterLabelsTable() {
+  const fBatch = (document.getElementById('f-batch')?.value || '').toLowerCase();
+  const fCustomer = (document.getElementById('f-customer')?.value || '').toLowerCase();
+  const fSize = document.getElementById('f-size')?.value || '';
+  const fGenerated = document.getElementById('f-generated')?.value || '';
+  const fPrinted = document.getElementById('f-printed')?.value || '';
+  const fRemaining = document.getElementById('f-remaining')?.value || '';
+  const rows = document.querySelectorAll('.lbl-row');
+  let visible = 0;
+  rows.forEach(row => {
+    const d = row.dataset;
+    const gen = parseInt(d.generated)||0, maxl = parseInt(d.maxlabels)||0;
+    const prt = parseInt(d.printed)||0, rem = parseInt(d.remaining)||0;
+    const matchBatch = !fBatch || (d.batch||'').toLowerCase().includes(fBatch);
+    const matchCustomer = !fCustomer || (d.customer||'').toLowerCase().includes(fCustomer);
+    const matchSize = !fSize || d.size === fSize;
+    const matchGen = !fGenerated ||
+      (fGenerated==='none' && gen===0) ||
+      (fGenerated==='partial' && gen>0 && gen<maxl) ||
+      (fGenerated==='full' && gen>=maxl && maxl>0);
+    const matchPrinted = !fPrinted ||
+      (fPrinted==='none' && prt===0) ||
+      (fPrinted==='partial' && prt>0 && prt<gen) ||
+      (fPrinted==='all' && prt>=gen && gen>0);
+    const matchRemaining = !fRemaining ||
+      (fRemaining==='yes' && rem>0) ||
+      (fRemaining==='no' && rem===0);
+    const show = matchBatch && matchCustomer && matchSize && matchGen && matchPrinted && matchRemaining;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  const countEl = document.getElementById('lbl-filter-count');
+  if (countEl) countEl.textContent = `Showing ${visible} of ${rows.length} batches`;
+}
+
+</script>
+
 </body>
 </html>
+<!-- v2 -->
+<!-- v2 -->

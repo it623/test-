@@ -897,8 +897,8 @@ function normLabel(l){
     isOrange:      !!l.is_orange,
     parentLabelId: l.parent_label_id || null,
     customer:      l.customer || '',
-    shipTo:        l.ship_to || l.customer || '',
-    billTo:        l.bill_to || '',
+    shipTo:        l.ship_to || l.shipTo || l.customer || '',
+    billTo:        l.bill_to || l.billTo || '',
     colour:        l.colour || '',
     pcCode:        l.pc_code || '',
     poNumber:      l.po_number || '',
@@ -1259,119 +1259,92 @@ function updatePlanningStageStatus(batchNo){
 // ═══════════════════════════════════════════════════════
 
 function generateZPL(label, batch){
-  const colourParts = (label.colour||'').split('/');
-  const colourCap   = (colourParts[0]||'').trim() || (label.colour||'');
-  const colourBody  = (colourParts[1]||'').trim() || '';
+  const cp = (label.colour||'').split('/');
+  const colourCap  = (cp[0]||'').trim() || (label.colour||'');
+  const colourBody = (cp[1]||'').trim() || '';
 
   const packSizeL   = PACK_SIZES[String(label.size)] || 1;
-  const standardPcs = Math.round(packSizeL * 100000);
-  const actualPcs   = Math.round(label.qty * 100000);
-  const pieces      = label.isPartial ? actualPcs : standardPcs;
+  const pieces      = label.isPartial ? Math.round(label.qty*100000) : Math.round(packSizeL*100000);
 
   const mfgRaw  = batch?.startDate ? new Date(batch.startDate) : new Date();
   const mfgDate = mfgRaw.toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
 
   const batchNo = label.batchNumber || '';
 
-  // Container No: normal = "N/Total", excess = "E-N/M"
-  const _batch2      = getBatch(batchNo);
-  const normalTotal  = label.normalTotal
-    || (_batch2 ? lakhToBox(_batch2.qty || _batch2.grossQty, label.size) : null)
-    || '?';
-  const _labelNum    = Math.abs(label.labelNumber || 0);
-  const containerNo  = label.isExcess
+  // Container No
+  const _b       = getBatch(batchNo);
+  const normTot  = label.normalTotal || (_b ? lakhToBox(_b.qty||_b.grossQty, label.size) : null) || '?';
+  const _num     = Math.abs(label.labelNumber || 0);
+  const containerNo = label.isExcess
     ? `E-${label.excessNum}/${label.excessTotal}`
-    : (normalTotal !== '?' ? `${_labelNum}/${normalTotal}` : String(_labelNum));
+    : (normTot !== '?' ? `${_num}/${normTot}` : String(_num));
 
-  // Label type flags
+  // Label type
   const isTemp = batchNo.startsWith('TEMP-');
   const isWO   = label.woStatus === 'wo';
 
-  // Customer: resolve Ship To / Bill To with live fallback
-  const liveBatch        = getBatch(batchNo);
-  const resolvedShipTo   = label.shipTo || label.customer || liveBatch?.shipTo || liveBatch?.customer || '';
-  const resolvedBillTo   = label.billTo || liveBatch?.billTo || '';
-  const resolvedCustomer = resolvedShipTo && resolvedBillTo && resolvedBillTo !== resolvedShipTo
-    ? resolvedShipTo + ' (' + resolvedBillTo + ')'
-    : resolvedShipTo;
+  // Customer
+  const lb           = getBatch(batchNo);
+  const shipTo       = label.shipTo || label.customer || lb?.shipTo || lb?.customer || '';
+  const billTo       = label.billTo || lb?.billTo || '';
   const customerText = isTemp ? '*** TEMP BATCH - REPLACEMENT REQUIRED ***'
                      : isWO   ? 'W/O - WITHOUT ORDER - CUSTOMER PENDING'
-                     :          resolvedCustomer;
+                     : (shipTo && billTo && billTo !== shipTo ? shipTo+' ('+billTo+')' : shipTo);
 
-  // ── ORANGE LABEL — Portrait 100mm W x 50mm H ──────────────────
+  // ── ORANGE LABEL (100mm x 50mm) ─────────────────────────────
   if(label.isOrange){
-    const pm     = label.printingMatter || batch?.printMatter || '';
-    const pmP    = pm.split('/');
-    const pmCap  = (pmP[0]||'').trim() || pm;
-    const pmBody = (pmP[1]||'').trim() || '';
-    return `^XA
-^CI28
-^PW800
-^LL400
-^MMT
-^PON
-^LH0,0
-
+    const pm = label.printingMatter || batch?.printMatter || '';
+    const pmP = pm.split('/');
+    const pmCap = (pmP[0]||'').trim()||pm, pmBody=(pmP[1]||'').trim()||'';
+    return `^XA^CI28^PW800^LL400^MMT^PON^LH0,0
 ^FO10,10^GB780,378,2^FS
 ^FO560,10^GB2,378,2^FS
-
-^CF0,30
-^FO20,20^FB530,1,0,C^FDPRINTING DETAILS^FS
+^CF0,30^FO20,20^FB530,1,0,C^FDPRINTING DETAILS^FS
 ^FO20,55^GB540,2,2^FS
-
-^CF0,26
-^FO25,65^FDCAP   :  ${pmCap}^FS
+^CF0,26^FO25,65^FDCAP   :  ${pmCap}^FS
 ^FO25,105^FDBODY :  ${pmBody}^FS
-
 ^FO20,148^GB540,2,2^FS
-^CF0,22
-^FO25,158^FDBatch :  ${batchNo}^FS
+^CF0,22^FO25,158^FDBatch :  ${batchNo}^FS
 ^FO25,190^FDContainer :  ${containerNo}^FS
 ^FO25,222^FDSize :  ${label.size}^FS
-
 ^FO20,264^GB540,2,2^FS
-^CF0,18
-^FO25,272^FDExpiry: 5 yrs from Mfg Date. RAJ-867, Dt 08.12.1981^FS
-
+^CF0,18^FO25,272^FDExpiry: 5 yrs from Mfg Date. RAJ-867, Dt 08.12.1981^FS
 ^FO574,15^BQN,2,4^FDLA,${label.qrData}^FS
 ^XZ`;
   }
 
-  // ── MAIN WHITE LABEL — Portrait 100mm W x 150mm H ─────────────
-  // 203 DPI: PW=800 (100mm), LL=1200 (150mm)
-  // Label stock loaded portrait (100mm wide, 150mm feed direction)
+  // ── MAIN WHITE LABEL (100mm x 150mm portrait) ───────────────
+  // PW=800 (100mm), LL=1200 (150mm) at 203 DPI
   //
-  // Layout (top to bottom within 100mm width):
-  //   Y   0-100: Header (company name x2)
-  //   Y 100-140: Customer Name
-  //   Y 140-580: Data table (two columns, 5 rows x 88 dots)
-  //   Y 580-630: PRINTED row
-  //   Y 630-680: Expiry text
-  //   Y 680-980: QR + Q RELEASED + SIGNATURE
-  //   Y 980-990: Bottom rule
+  // Dot layout (verified against 150mm stock):
+  //  Y  14: Company name
+  //  Y  62: Sub-header
+  //  Y  92: rule
+  //  Y  96: Customer Name
+  //  Y 132: rule  
+  //  Y 136: Table top (5 rows x 66 dots = 330 dots)
+  //  Y 466: Table bottom / rule
+  //  Y 470: PRINTED row
+  //  Y 510: rule
+  //  Y 514: Expiry
+  //  Y 548: rule
+  //  Y 554: QR code (BQN module size 6 = ~144 dots)
+  //  Y 700: Q RELEASED + SIGNATURE line
+  //  Y 756: rule (signature)
+  //  Y 960: bottom rule
 
-  const isSpecial = isTemp || isWO;
-  const D = isSpecial ? 44 : 0;
+  const D = isTemp||isWO ? 42 : 0;
 
-  const headerBand = isTemp
-    ? `^FO10,100^GB780,44,44^FS\n^CF0,22\n^FR^FO10,110^FB780,1,0,C^FD** TEMP BATCH - REPLACEMENT REQUIRED **^FS\n`
+  const outerBorder = isTemp ? `^FO4,4^GB792,1192,5^FS^FO10,10^GB780,1180,2^FS` : isWO ? `^FO4,4^GB792,1192,4^FS` : '';
+  const headerBand  = isTemp
+    ? `^FO10,${92+D}^GB780,42,42^FS\n^CF0,22^FR^FO10,${100+D}^FB780,1,0,C^FD** TEMP BATCH - REPLACEMENT REQUIRED **^FS`
     : isWO
-    ? `^FO10,100^GB780,44,44^FS\n^CF0,22\n^FR^FO10,110^FB780,1,0,C^FDWITHOUT ORDER - CUSTOMER TO BE ASSIGNED^FS\n`
+    ? `^FO10,${92+D}^GB780,42,42^FS\n^CF0,22^FR^FO10,${100+D}^FB780,1,0,C^FDWITHOUT ORDER - CUSTOMER TO BE ASSIGNED^FS`
     : '';
 
-  const outerBorder = isTemp ? `^FO4,4^GB792,1192,5^FS\n^FO10,10^GB780,1180,2^FS\n` : isWO ? `^FO4,4^GB792,1192,4^FS\n` : '';
-
-  const custY  = 106 + D;
-  const tTop   = 148 + D;
-  const RH     = 88;
-  const rows   = [tTop+8, tTop+RH+8, tTop+RH*2+8, tTop+RH*3+8, tTop+RH*4+8];
-  const tBot   = tTop + RH*5;
-  const prtY   = tBot + 8;
-  const rule1  = tBot + 52;
-  const expY   = rule1 + 10;
-  const rule2  = expY + 42;
-  const qrY    = rule2 + 10;
-  const botY   = 1186;
+  const tTop = 136 + D;
+  const RH   = 66;
+  const tBot = tTop + RH*5;
 
   return `^XA
 ^CI28
@@ -1381,57 +1354,54 @@ function generateZPL(label, batch){
 ^PON
 ^LH0,0
 
-${outerBorder}^CF0,46
-^FO10,8^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
-^CF0,30
-^FO10,60^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
-^FO10,98^GB780,2,2^FS
-${headerBand}
+${outerBorder}
+^CF0,44
+^FO10,14^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
 ^CF0,28
-^FO10,${custY}^FDCUSTOMER NAME :  ${customerText}^FS
-^FO10,${tTop-2}^GB780,2,2^FS
-
-^FO10,${tTop}^GB380,${RH*5+2},2^FS
-^FO394,${tTop}^GB396,${RH*5+2},2^FS
-^FO10,${tTop+RH}^GB380,2,2^FS
-^FO10,${tTop+RH*2}^GB380,2,2^FS
-^FO10,${tTop+RH*3}^GB380,2,2^FS
-^FO10,${tTop+RH*4}^GB380,2,2^FS
-^FO394,${tTop+RH}^GB396,2,2^FS
-^FO394,${tTop+RH*2}^GB396,2,2^FS
-^FO394,${tTop+RH*3}^GB396,2,2^FS
-^FO394,${tTop+RH*4}^GB396,2,2^FS
-
-^CF0,26
-^FO18,${rows[0]}^FDQUANTITY    :  ${pieces}^FS
-^FO18,${rows[1]}^FDSIZE              :  ${label.size}^FS
-^FO18,${rows[2]}^FDCOLOUR CAP :  ${colourCap}^FS
-^FO18,${rows[3]}^FDCOLOUR BODY:  ${colourBody}^FS
-^FO18,${rows[4]}^FD^FS
-
-^FO402,${rows[0]}^FDBATCH NO.    :  ${batchNo}^FS
-^FO402,${rows[1]}^FDCONTAINER :  ${containerNo}^FS
-^FO402,${rows[2]}^FDGROSS WT.  :^FS
-^FO402,${rows[3]}^FDNETT WT.    :^FS
-^FO402,${rows[4]}^FDMFG DATE  :  ${mfgDate}^FS
-
-^FO10,${rule1-2}^GB780,2,2^FS
-^CF0,26
-^FO18,${prtY}^FDPRINTED :^FS
-^FO10,${rule1}^GB780,2,2^FS
-
-^CF0,20
-^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
-^FO10,${rule2}^GB780,2,2^FS
-
-^FO10,${qrY}^BQN,2,5^FDLA,${label.qrData}^FS
-^CF0,30
-^FO250,${qrY+80}^FB320,1,0,C^FDQ RELEASED^FS
-^FO560,${qrY+20}^GB220,2,2^FS
+^FO10,62^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
+^FO10,${92+D}^GB780,2,2^FS
+${headerBand}
 ^CF0,24
-^FO560,${qrY+28}^FB220,1,0,C^FDSIGNATURE^FS
+^FO10,${96+D}^FDCUSTOMER NAME :  ${customerText}^FS
+^FO10,${132+D}^GB780,2,2^FS
 
-^FO10,${botY}^GB780,3,3^FS
+^FO10,${tTop}^GB390,${RH*5+2},2^FS
+^FO404,${tTop}^GB386,${RH*5+2},2^FS
+^FO10,${tTop+RH}^GB390,2,2^FS
+^FO10,${tTop+RH*2}^GB390,2,2^FS
+^FO10,${tTop+RH*3}^GB390,2,2^FS
+^FO10,${tTop+RH*4}^GB390,2,2^FS
+^FO404,${tTop+RH}^GB386,2,2^FS
+^FO404,${tTop+RH*2}^GB386,2,2^FS
+^FO404,${tTop+RH*3}^GB386,2,2^FS
+^FO404,${tTop+RH*4}^GB386,2,2^FS
+
+^CF0,24
+^FO18,${tTop+8}^FDQUANTITY    :  ${pieces}^FS
+^FO18,${tTop+RH+8}^FDSIZE              :  ${label.size}^FS
+^FO18,${tTop+RH*2+8}^FDCOLOUR CAP :  ${colourCap}^FS
+^FO18,${tTop+RH*3+8}^FDCOLOUR BODY:  ${colourBody}^FS
+^FO18,${tTop+RH*4+8}^FDPRINTED       :^FS
+
+^FO412,${tTop+8}^FDBATCH NO.   :  ${batchNo}^FS
+^FO412,${tTop+RH+8}^FDCONTAINER:  ${containerNo}^FS
+^FO412,${tTop+RH*2+8}^FDGROSS WT. :^FS
+^FO412,${tTop+RH*3+8}^FDNETT WT.   :^FS
+^FO412,${tTop+RH*4+8}^FDMFG DATE :  ${mfgDate}^FS
+
+^FO10,${tBot}^GB780,2,2^FS
+^CF0,20
+^FO10,${tBot+8}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
+^FO10,${tBot+46}^GB780,2,2^FS
+
+^FO10,${tBot+52}^BQN,2,6^FDLA,${label.qrData}^FS
+^CF0,26
+^FO240,${tBot+182}^FB320,1,0,C^FDQ RELEASED^FS
+^FO560,${tBot+120}^GB210,2,2^FS
+^CF0,22
+^FO560,${tBot+128}^FB210,1,0,C^FDSIGNATURE^FS
+
+^FO10,${tBot+320}^GB780,3,3^FS
 ^XZ`;
 }
 
@@ -1910,7 +1880,8 @@ function renderDeptScan(dept){
   const activeBatches=getActiveBatchesForDept(dept);
 
   document.getElementById('tb-actions').innerHTML=`
-    <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">📊 View All Batches</button>`;
+    <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">📊 View All Batches</button>
+    <button class="btn btn-secondary btn-sm" onclick="pullFromServer().then(()=>renderPage(currentPage))">🔄 Sync</button>`;
 
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid ${cfg.color}">

@@ -1049,6 +1049,16 @@ function renderProduction() {
   content.innerHTML = html;
 }
 
+// ── Customer display helper ───────────────────────────────────
+// Returns "Ship To (Bill To)" or just "Ship To" if same/blank
+function fmtCustomer(obj) {
+  const shipTo = obj.shipTo || obj.customer || '';
+  const billTo = obj.billTo || '';
+  if (!shipTo) return '-';
+  if (!billTo || billTo === shipTo) return shipTo;
+  return shipTo + ' (' + billTo + ')';
+}
+
 function renderOrderRow(ord, idx, mc) {
   const isClosed = ord.status === 'closed';
   const isRunning = ord.status === 'running';
@@ -1071,7 +1081,12 @@ function renderOrderRow(ord, idx, mc) {
       ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}${ord.poNumber||'-'}
       ${ord.batchNumber?`<br><span class="text-dim text-sm">${ord.batchNumber}</span>`:''}
     </td>
-    <td style="font-weight:500">${isWO?'<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>':ord.customer||'-'}</td>
+    <td style="font-weight:500">${isWO
+      ? '<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>'
+      : (ord.shipTo||ord.customer||'-') + (ord.billTo && ord.billTo !== (ord.shipTo||ord.customer)
+          ? '<br><span style="font-size:11px;color:var(--text3);font-weight:400">Bill To: ' + ord.billTo + '</span>'
+          : '')
+    }</td>
     <td class="text-mono">${ord.size||'-'}</td>
     <td class="text-mono text-accent">${ord.pcCode||'-'}</td>
     <td style="white-space:nowrap;font-size:12px">${ord.colour||'-'}</td>
@@ -1221,8 +1236,12 @@ function showAddOrderModal(machineId, existingOrder) {
         <input class="form-control" id="fo-batch" value="${ord.batchNumber||''}" placeholder="e.g. 26U17">
       </div>
       <div class="form-group">
-        <label>Customer Name ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
-        <input class="form-control" id="fo-customer" value="${ord.customer||''}" placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'e.g. ALKEM'}" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
+        <label>Ship To (Customer Name) ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
+        <input class="form-control" id="fo-customer" value="${ord.shipTo||ord.customer||''}" placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'e.g. M/S ACME LIFETECH LLP'}" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
+      </div>
+      <div class="form-group">
+        <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span> ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
+        <input class="form-control" id="fo-billto" value="${ord.billTo||''}" placeholder="e.g. M/S ACME PHARMA PVT LTD — leave blank if same as Ship To" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
       </div>
       <div class="form-group">
         <label>Machine</label>
@@ -1327,13 +1346,19 @@ function updatePoType(sel) {
 function toggleWOMode(isWO) {
   const notice = document.getElementById('fo-wo-notice');
   const custInput = document.getElementById('fo-customer');
+  const billtoInput = document.getElementById('fo-billto');
   const ponumInput = document.getElementById('fo-ponum');
   if (notice) notice.style.display = isWO ? 'block' : 'none';
   if (custInput) {
     custInput.disabled = isWO;
     custInput.style.opacity = isWO ? '0.5' : '1';
-    custInput.placeholder = isWO ? 'Will be assigned via Reconciliation' : 'e.g. ALKEM';
+    custInput.placeholder = isWO ? 'Will be assigned via Reconciliation' : 'e.g. M/S ACME LIFETECH LLP';
     if (isWO) custInput.value = '';
+  }
+  if (billtoInput) {
+    billtoInput.disabled = isWO;
+    billtoInput.style.opacity = isWO ? '0.5' : '1';
+    if (isWO) billtoInput.value = '';
   }
   if (ponumInput) {
     ponumInput.disabled = isWO;
@@ -1424,7 +1449,9 @@ function saveOrderModal(existingId, defaultMachine) {
     poType: document.getElementById('fo-potype')?.value,
     poNumber: document.getElementById('fo-ponum')?.value,
     batchNumber: document.getElementById('fo-batch')?.value || autoGenBatchNumber(machineId),
-    customer: document.getElementById('fo-customer')?.value,
+    shipTo: document.getElementById('fo-customer')?.value,
+    billTo: document.getElementById('fo-billto')?.value || '',
+    customer: document.getElementById('fo-customer')?.value,  // kept for backward compat
     size,
     pcCode,
     colour: document.getElementById('fo-colour')?.value,
@@ -3933,7 +3960,7 @@ function viewArchive(ym) {
     return `<tr>
       <td class="text-mono text-accent">${ord.machineId||'-'}</td>
       <td class="text-mono">${ord.batchNumber||'-'}</td>
-      <td style="font-size:12px;font-weight:500">${ord.customer||'-'}</td>
+      <td style="font-size:12px;font-weight:500">${fmtCustomer(ord)}</td>
       <td class="text-mono">${ord.pcCode||'-'}</td>
       <td class="text-mono">${ord.size||'-'}</td>
       <td>${ord.isPrinted?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
@@ -4182,7 +4209,7 @@ function renderOrderTracker() {
                   return `<tr style="${rowStyle}">
                     <td class="text-mono text-accent">${ord.machineId||'-'}</td>
                     <td class="text-mono">${ord.batchNumber||'-'}</td>
-                    <td style="font-size:12px;font-weight:500">${ord.customer||'-'}</td>
+                    <td style="font-size:12px;font-weight:500">${fmtCustomer(ord)}</td>
                     <td class="text-mono">${ord.pcCode||'-'}</td>
                     <td class="text-mono">${ord.size||'-'}</td>
                     <td>${ord.isPrinted?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
@@ -4448,8 +4475,12 @@ function openAssignCustomerModal(orderId) {
       </div>
       <div class="form-grid">
         <div class="form-group">
-          <label>Customer Name <span style="color:var(--accent4)">*</span></label>
-          <input class="form-control" id="woc-customer" placeholder="e.g. ALKEM LABORATORIES">
+          <label>Ship To (Customer Name) <span style="color:var(--accent4)">*</span></label>
+          <input class="form-control" id="woc-customer" placeholder="e.g. M/S ACME LIFETECH LLP">
+        </div>
+        <div class="form-group">
+          <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span></label>
+          <input class="form-control" id="woc-billto" placeholder="Leave blank if same as Ship To">
         </div>
         <div class="form-group">
           <label>PO / Reference Number</label>
@@ -4479,7 +4510,8 @@ function openAssignCustomerModal(orderId) {
 
 async function proposeWOReconciliation(orderId) {
   const customer = document.getElementById('woc-customer')?.value?.trim();
-  if (!customer) { alert('Customer name is required'); return; }
+  if (!customer) { alert('Ship To name is required'); return; }
+  const billTo = document.getElementById('woc-billto')?.value?.trim() || '';
   const poNumber = document.getElementById('woc-ponum')?.value?.trim();
   const zone = document.getElementById('woc-zone')?.value;
   const qtyConfirmed = parseFloat(document.getElementById('woc-qty')?.value) || null;
@@ -4488,7 +4520,7 @@ async function proposeWOReconciliation(orderId) {
   try {
     const r = await fetch(serverUrl + '/api/wo/propose-reconciliation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: currentUser?.token||'', orderId, customer, poNumber, zone, qtyConfirmed }),
+      body: JSON.stringify({ token: currentUser?.token||'', orderId, customer, billTo, poNumber, zone, qtyConfirmed }),
       signal: AbortSignal.timeout(8000)
     });
     const j = await r.json();

@@ -1303,10 +1303,27 @@ function printBatchLabels(batchNo){
   if(!labels.length){alert('No unprinted labels for this batch.');return;}
   const batch = getBatch(batchNo);
   const zpl = labels.map(l=>generateZPL(l,batch)).join('\n');
-  downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
-  labels.forEach(l=>{l.printed=true;l.printedAt=now();});
-  saveLocal();
-  renderPage(currentPage);
+  const printerUrl = localStorage.getItem('sunloc_printer_url');
+  const markAllPrinted = () => {
+    labels.forEach(l=>{
+      l.printed=true;
+      l.printedAt=now();
+      if(serverUrl){
+        pushToServer('/api/tracking/label-printed',{labelId:l.id,printed:true,printedAt:l.printedAt});
+        pushToServer('/api/tracking/labels',{labels:[{...l,customer:batch?.customer||'',colour:batch?.colour||'',pcCode:batch?.pcCode||'',poNumber:batch?.poNumber||'',machineId:batch?.machineId||''}]});
+      }
+    });
+    saveLocal();
+    renderPage(currentPage);
+  };
+  if(printerUrl){
+    fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
+      .then(r=>{ if(r.ok){ markAllPrinted(); toast('✅ All labels sent to printer!','var(--success)'); } else { downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'}); markAllPrinted(); } })
+      .catch(()=>{ downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'}); markAllPrinted(); });
+  } else {
+    downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
+    markAllPrinted();
+  }
 }
 
 // ═══════════════════════════════════════════════════════

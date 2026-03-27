@@ -1262,108 +1262,101 @@ function generateZPL(label, batch){
   const cp = (label.colour||'').split('/');
   const colourCap  = (cp[0]||'').trim() || (label.colour||'');
   const colourBody = (cp[1]||'').trim() || '';
-
-  const packSizeL   = PACK_SIZES[String(label.size)] || 1;
-  const pieces      = label.isPartial ? Math.round(label.qty*100000) : Math.round(packSizeL*100000);
-
-  const mfgRaw  = batch?.startDate ? new Date(batch.startDate) : new Date();
-  const mfgDate = mfgRaw.toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
-
-  const batchNo = label.batchNumber || '';
+  const packSizeL  = PACK_SIZES[String(label.size)] || 1;
+  const pieces     = label.isPartial ? Math.round(label.qty*100000) : Math.round(packSizeL*100000);
+  const mfgRaw     = batch?.startDate ? new Date(batch.startDate) : new Date();
+  const mfgDate    = mfgRaw.toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
+  const batchNo    = label.batchNumber || '';
 
   // Container No
-  const _b       = getBatch(batchNo);
-  const normTot  = label.normalTotal || (_b ? lakhToBox(_b.qty||_b.grossQty, label.size) : null) || '?';
-  const _num     = Math.abs(label.labelNumber || 0);
+  const _b      = getBatch(batchNo);
+  const normTot = label.normalTotal || (_b ? lakhToBox(_b.qty||_b.grossQty, label.size) : null) || '?';
+  const _num    = Math.abs(label.labelNumber || 0);
   const containerNo = label.isExcess
     ? `E-${label.excessNum}/${label.excessTotal}`
     : (normTot !== '?' ? `${_num}/${normTot}` : String(_num));
 
-  // Label type
   const isTemp = batchNo.startsWith('TEMP-');
   const isWO   = label.woStatus === 'wo';
-
-  // Customer
-  const lb           = getBatch(batchNo);
-  const shipTo       = label.shipTo || label.customer || lb?.shipTo || lb?.customer || '';
-  const billTo       = label.billTo || lb?.billTo || '';
+  const lb     = getBatch(batchNo);
+  const shipTo = label.shipTo || label.customer || lb?.shipTo || lb?.customer || '';
+  const billTo = label.billTo || lb?.billTo || '';
   const customerText = isTemp ? '*** TEMP BATCH - REPLACEMENT REQUIRED ***'
-                     : isWO   ? 'W/O - WITHOUT ORDER - CUSTOMER PENDING'
-                     : (shipTo && billTo && billTo !== shipTo ? shipTo+' ('+billTo+')' : shipTo);
+    : isWO ? 'W/O - WITHOUT ORDER - CUSTOMER PENDING'
+    : (shipTo && billTo && billTo !== shipTo ? shipTo+' ('+billTo+')' : shipTo);
 
-  // ── ORANGE LABEL (100mm x 50mm) ─────────────────────────────
+  // ── ORANGE LABEL 100mm x 50mm ────────────────────────────────
   if(label.isOrange){
-    const pm = label.printingMatter || batch?.printMatter || '';
-    const pmP = pm.split('/');
-    const pmCap = (pmP[0]||'').trim()||pm, pmBody=(pmP[1]||'').trim()||'';
+    const pm=label.printingMatter||batch?.printMatter||'', pmP=pm.split('/');
+    const pmCap=(pmP[0]||'').trim()||pm, pmBody=(pmP[1]||'').trim()||'';
     return `^XA^CI28^PW800^LL400^MMT^PON^LH0,0
-^FO10,10^GB780,378,2^FS
-^FO560,10^GB2,378,2^FS
-^CF0,30^FO20,20^FB530,1,0,C^FDPRINTING DETAILS^FS
-^FO20,55^GB540,2,2^FS
-^CF0,26^FO25,65^FDCAP   :  ${pmCap}^FS
-^FO25,105^FDBODY :  ${pmBody}^FS
-^FO20,148^GB540,2,2^FS
-^CF0,22^FO25,158^FDBatch :  ${batchNo}^FS
-^FO25,190^FDContainer :  ${containerNo}^FS
-^FO25,222^FDSize :  ${label.size}^FS
-^FO20,264^GB540,2,2^FS
-^CF0,18^FO25,272^FDExpiry: 5 yrs from Mfg Date. RAJ-867, Dt 08.12.1981^FS
-^FO574,15^BQN,2,4^FDLA,${label.qrData}^FS
+^FO10,10^GB780,378,2^FS^FO560,10^GB2,378,2^FS
+^CF0,30^FO20,18^FB530,1,0,C^FDPRINTING DETAILS^FS
+^FO20,52^GB540,2,2^FS
+^CF0,26^FO25,60^FDCAP   :  ${pmCap}^FS
+^FO25,98^FDBODY :  ${pmBody}^FS
+^FO20,142^GB540,2,2^FS
+^CF0,22^FO25,150^FDBatch :  ${batchNo}^FS
+^FO25,182^FDContainer :  ${containerNo}^FS
+^FO25,214^FDSize :  ${label.size}^FS
+^FO20,256^GB540,2,2^FS
+^CF0,18^FO25,264^FDExpiry: 5 yrs from Mfg. RAJ-867, Dt 08.12.1981^FS
+^FO574,10^BQN,2,5^FDLA,${label.qrData}^FS
 ^XZ`;
   }
 
-  // ── MAIN WHITE LABEL (100mm x 150mm portrait) ───────────────
-  // PW=800 (100mm), LL=1200 (150mm) at 203 DPI
+  // ── MAIN WHITE LABEL ─────────────────────────────────────────
+  // PW=800 (100mm wide), LL=800 (100mm tall) at 203 DPI
+  // This makes ^LL exactly match the content height
+  // Printer feeds one label length = 100mm = the printable zone
+  // Physical label stock gap sensor handles actual cut/feed
   //
-  // Dot layout (verified against 150mm stock):
-  //  Y  14: Company name
-  //  Y  62: Sub-header
-  //  Y  92: rule
-  //  Y  96: Customer Name
-  //  Y 132: rule  
-  //  Y 136: Table top (5 rows x 66 dots = 330 dots)
-  //  Y 466: Table bottom / rule
-  //  Y 470: PRINTED row
-  //  Y 510: rule
-  //  Y 514: Expiry
-  //  Y 548: rule
-  //  Y 554: QR code (BQN module size 6 = ~144 dots)
-  //  Y 700: Q RELEASED + SIGNATURE line
-  //  Y 756: rule (signature)
-  //  Y 960: bottom rule
+  // Total content layout (800 dots = 100mm):
+  //  Y   6: SUNIL HEALTHCARE (^CF0,42)
+  //  Y  52: HARD GELATIN... (^CF0,26)
+  //  Y  80: rule
+  //  Y  84: CUSTOMER NAME (^CF0,22)
+  //  Y 110: rule
+  //  Y 114: Table (5 rows x 56 = 280 dots -> ends at Y=394)
+  //  Y 394: rule
+  //  Y 398: EXPIRY text (^CF0,17)
+  //  Y 428: rule
+  //  Y 434: QR (BQN,2,7 = ~168 dots tall) + SIGNATURE + Q RELEASED
+  //  Y 602: bottom rule
+  //  LL = 620 (fits in 100mm with some margin)
 
-  const D = isTemp||isWO ? 42 : 0;
-
-  const outerBorder = isTemp ? `^FO4,4^GB792,1192,5^FS^FO10,10^GB780,1180,2^FS` : isWO ? `^FO4,4^GB792,1192,4^FS` : '';
-  const headerBand  = isTemp
-    ? `^FO10,${92+D}^GB780,42,42^FS\n^CF0,22^FR^FO10,${100+D}^FB780,1,0,C^FD** TEMP BATCH - REPLACEMENT REQUIRED **^FS`
+  const D  = isTemp||isWO ? 38 : 0;
+  const hBand = isTemp
+    ? `^FO10,${80+D}^GB780,38,38^FS\n^CF0,20^FR^FO10,${88+D}^FB780,1,0,C^FD** TEMP BATCH - REPLACEMENT REQUIRED **^FS`
     : isWO
-    ? `^FO10,${92+D}^GB780,42,42^FS\n^CF0,22^FR^FO10,${100+D}^FB780,1,0,C^FDWITHOUT ORDER - CUSTOMER TO BE ASSIGNED^FS`
+    ? `^FO10,${80+D}^GB780,38,38^FS\n^CF0,20^FR^FO10,${88+D}^FB780,1,0,C^FDWITHOUT ORDER - CUSTOMER TO BE ASSIGNED^FS`
     : '';
+  const oBorder = isTemp ? `^FO4,4^GB792,612,5^FS^FO9,9^GB782,602,2^FS` : isWO ? `^FO4,4^GB792,612,4^FS` : '';
 
-  const tTop = 136 + D;
-  const RH   = 66;
-  const tBot = tTop + RH*5;
+  const tTop = 114 + D;
+  const RH   = 56;
+  const tBot = tTop + RH*5;  // 114+280 = 394 (normal) / 432 (special)
+  const expY = tBot + 6;
+  const qrY  = tBot + 40;
+  const botY = tBot + 218;
 
   return `^XA
 ^CI28
 ^PW800
-^LL1200
+^LL${botY + 12}
 ^MMT
 ^PON
 ^LH0,0
-
-${outerBorder}
-^CF0,44
-^FO10,14^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
-^CF0,28
-^FO10,62^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
-^FO10,${92+D}^GB780,2,2^FS
-${headerBand}
-^CF0,24
-^FO10,${96+D}^FDCUSTOMER NAME :  ${customerText}^FS
-^FO10,${132+D}^GB780,2,2^FS
+${oBorder}
+^CF0,42
+^FO10,6^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
+^CF0,26
+^FO10,52^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
+^FO10,${80+D}^GB780,2,2^FS
+${hBand}
+^CF0,22
+^FO10,${84+D}^FDCUSTOMER NAME :  ${customerText}^FS
+^FO10,${110+D}^GB780,2,2^FS
 
 ^FO10,${tTop}^GB390,${RH*5+2},2^FS
 ^FO404,${tTop}^GB386,${RH*5+2},2^FS
@@ -1376,32 +1369,32 @@ ${headerBand}
 ^FO404,${tTop+RH*3}^GB386,2,2^FS
 ^FO404,${tTop+RH*4}^GB386,2,2^FS
 
-^CF0,24
-^FO18,${tTop+8}^FDQUANTITY    :  ${pieces}^FS
-^FO18,${tTop+RH+8}^FDSIZE              :  ${label.size}^FS
-^FO18,${tTop+RH*2+8}^FDCOLOUR CAP :  ${colourCap}^FS
-^FO18,${tTop+RH*3+8}^FDCOLOUR BODY:  ${colourBody}^FS
-^FO18,${tTop+RH*4+8}^FDPRINTED       :^FS
+^CF0,22
+^FO16,${tTop+6}^FDQUANTITY    :  ${pieces}^FS
+^FO16,${tTop+RH+6}^FDSIZE              :  ${label.size}^FS
+^FO16,${tTop+RH*2+6}^FDCOLOUR CAP :  ${colourCap}^FS
+^FO16,${tTop+RH*3+6}^FDCOLOUR BODY:  ${colourBody}^FS
+^FO16,${tTop+RH*4+6}^FDPRINTED       :^FS
 
-^FO412,${tTop+8}^FDBATCH NO.   :  ${batchNo}^FS
-^FO412,${tTop+RH+8}^FDCONTAINER:  ${containerNo}^FS
-^FO412,${tTop+RH*2+8}^FDGROSS WT. :^FS
-^FO412,${tTop+RH*3+8}^FDNETT WT.   :^FS
-^FO412,${tTop+RH*4+8}^FDMFG DATE :  ${mfgDate}^FS
+^FO410,${tTop+6}^FDBATCH NO.  :  ${batchNo}^FS
+^FO410,${tTop+RH+6}^FDCONTAINER:  ${containerNo}^FS
+^FO410,${tTop+RH*2+6}^FDGROSS WT.:^FS
+^FO410,${tTop+RH*3+6}^FDNETT WT.  :^FS
+^FO410,${tTop+RH*4+6}^FDMFG DATE:  ${mfgDate}^FS
 
 ^FO10,${tBot}^GB780,2,2^FS
+^CF0,17
+^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
+^FO10,${tBot+36}^GB780,2,2^FS
+
+^FO10,${qrY}^BQN,2,8^FDLA,${label.qrData}^FS
+^CF0,24
+^FO230,${qrY+90}^FB340,1,0,C^FDQ RELEASED^FS
+^FO560,${qrY+30}^GB210,2,2^FS
 ^CF0,20
-^FO10,${tBot+8}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
-^FO10,${tBot+46}^GB780,2,2^FS
+^FO560,${qrY+38}^FB210,1,0,C^FDSIGNATURE^FS
 
-^FO10,${tBot+52}^BQN,2,6^FDLA,${label.qrData}^FS
-^CF0,26
-^FO240,${tBot+182}^FB320,1,0,C^FDQ RELEASED^FS
-^FO560,${tBot+120}^GB210,2,2^FS
-^CF0,22
-^FO560,${tBot+128}^FB210,1,0,C^FDSIGNATURE^FS
-
-^FO10,${tBot+320}^GB780,3,3^FS
+^FO10,${botY}^GB780,3,3^FS
 ^XZ`;
 }
 
@@ -1467,27 +1460,69 @@ function stopCamera(){
 
 async function scanQRFromVideo(video){
   if(!camStream) return;
-  // Use BarcodeDetector if available, else canvas pixel check
+
+  // Try BarcodeDetector first (Chrome on Android, Edge)
   if('BarcodeDetector' in window){
-    const detector=new BarcodeDetector({formats:['qr_code','code_128','code_39']});
-    const detect=async()=>{
-      if(!camStream) return;
-      try{
-        const barcodes=await detector.detect(video);
-        if(barcodes.length){
-          const raw=barcodes[0].rawValue;
-          stopCamera();
-          if(scanCallback) scanCallback(raw);
-          return;
-        }
-      }catch{}
-      requestAnimationFrame(detect);
-    };
-    video.addEventListener('loadedmetadata',detect);
-  } else {
-    document.getElementById('cam-result').innerHTML='<strong>BarcodeDetector not supported.</strong> Use the manual entry field.';
-    document.getElementById('cam-result').classList.remove('hidden');
+    try{
+      const detector = new BarcodeDetector({formats:['qr_code','code_128','code_39']});
+      const detect = async()=>{
+        if(!camStream) return;
+        try{
+          const codes = await detector.detect(video);
+          if(codes.length){
+            const raw = codes[0].rawValue;
+            stopCamera();
+            if(scanCallback) scanCallback(raw);
+            return;
+          }
+        }catch(e){}
+        requestAnimationFrame(detect);
+      };
+      video.addEventListener('loadedmetadata', ()=>{ setTimeout(detect, 500); });
+      return;
+    }catch(e){}
   }
+
+  // Fallback: canvas + jsQR (loaded dynamically if needed)
+  const resultEl = document.getElementById('cam-result');
+  const loadAndScan = ()=>{
+    if(typeof jsQR !== 'undefined'){
+      startCanvasScan(video);
+      return;
+    }
+    // Load jsQR from CDN
+    const script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+    script.onload = ()=>startCanvasScan(video);
+    script.onerror = ()=>{
+      if(resultEl){ resultEl.innerHTML='<strong style="color:#ff4060">Camera decode unavailable.</strong> Please type the label ID manually.'; resultEl.classList.remove('hidden'); }
+    };
+    document.head.appendChild(script);
+  };
+  video.addEventListener('loadedmetadata', ()=>{ setTimeout(loadAndScan, 500); });
+}
+
+function startCanvasScan(video){
+  if(!camStream) return;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const scan = ()=>{
+    if(!camStream) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width  = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:'dontInvert'});
+      if(code && code.data){
+        stopCamera();
+        if(scanCallback) scanCallback(code.data);
+        return;
+      }
+    }
+    requestAnimationFrame(scan);
+  };
+  requestAnimationFrame(scan);
 }
 
 // ═══════════════════════════════════════════════════════

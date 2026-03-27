@@ -405,11 +405,31 @@ function runMigrations() {
   const applied = new Set(
     db.prepare('SELECT version FROM schema_migrations').all().map(r => r.version)
   );
+  
+  // Sort migrations by version number to ensure correct order
+  const sortedMigrations = [...MIGRATIONS].sort((a, b) => a.version - b.version);
+  
   let ran = 0;
-  for (const m of MIGRATIONS) {
+  for (const m of sortedMigrations) {
     if (applied.has(m.version)) continue;
     console.log(`[Migration] Running v${m.version}: ${m.name}`);
-    db.exec(m.sql);
+    
+    // Run each SQL statement separately to handle ALTER TABLE errors gracefully
+    const statements = m.sql.split(';').map(s => s.trim()).filter(s => s.length > 0);
+    for (const stmt of statements) {
+      try {
+        db.exec(stmt + ';');
+      } catch(e) {
+        // Ignore duplicate column errors — column already exists from previous migration
+        if (e.message.includes('duplicate column name') || 
+            e.message.includes('already exists')) {
+          console.log(`[Migration] v${m.version} skip (already exists): ${e.message}`);
+        } else {
+          throw e; // Re-throw other errors
+        }
+      }
+    }
+    
     db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(m.version, m.name);
     console.log(`[Migration] v${m.version} applied successfully`);
     ran++;

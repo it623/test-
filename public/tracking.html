@@ -961,6 +961,18 @@ async function pullFromServer(){
     saveLocal();
     setSyncBadge('synced');
     if(currentPage) renderPage(currentPage);
+    // Auto-sync local labels to server so they can be scanned from any device
+    if(state.labels && state.labels.length > 0){
+      const labelsToSync = state.labels.filter(l=>!l.voided).map(l=>({
+        id:l.id, batchNumber:l.batchNumber, labelNumber:l.labelNumber,
+        size:l.size, qty:l.qty, printed:l.printed||false, printedAt:l.printedAt||null,
+        voided:l.voided||false, voidReason:l.voidReason||'', voidedBy:l.voidedBy||'',
+        customer:l.customer||'', colour:l.colour||'', pcCode:l.pcCode||'',
+        poNumber:l.poNumber||'', machineId:l.machineId||'', qrData:l.qrData||'',
+        isPartial:l.isPartial||false, isOrange:l.isOrange||false
+      }));
+      if(labelsToSync.length > 0) pushToServer('/api/tracking/labels',{labels:labelsToSync});
+    }
   }catch(e){ setSyncBadge('offline'); }
 }
 
@@ -1164,7 +1176,7 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
   saveLocal();
   // Save via state sync (labels stored in saveLocal above)
   // Trigger immediate state push to ensure persistence
-  if(serverUrl){ fetch(serverUrl+'/api/tracking/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),signal:AbortSignal.timeout(8000)}).catch(()=>{}); }
+  if(serverUrl){ pushToServer('/api/tracking/labels',{labels:newLabels.map(l=>({...l,customer:l.customer||'',colour:l.colour||'',pcCode:l.pcCode||'',poNumber:l.poNumber||'',machineId:l.machineId||''}))}); }
   return newLabels;
 }
 

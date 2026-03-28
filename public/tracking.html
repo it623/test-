@@ -595,7 +595,9 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+const DEFAULT_SERVER = 'https://sunloc.up.railway.app';
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || DEFAULT_SERVER);
+if(!localStorage.getItem('sunloc_server_url')) localStorage.setItem('sunloc_server_url', DEFAULT_SERVER);
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;
@@ -941,7 +943,9 @@ async function pullFromServer(){
       const normLabels = (j.state.labels||[]).map(normLabel);
       const serverLabelIds = new Set(normLabels.map(l=>l.id));
       const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-      Object.assign(state, j.state);
+      // Merge server state but preserve our normalised labels array (not raw DB format)
+      const {labels:_rawLabels, ...serverStateWithoutLabels} = j.state;
+      Object.assign(state, serverStateWithoutLabels);
       state.labels = normLabels;
       // Re-add any local-only labels (generated but not yet confirmed saved on server)
       if(localOnlyLabels.length>0){

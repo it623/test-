@@ -995,8 +995,16 @@ function loadState(){
 // SCAN ENGINE
 // ═══════════════════════════════════════════════════════
 
-function recordScan(labelId, dept, type, operator){
-  const label = state.labels.find(l=>l.id===labelId);
+function recordScan(labelId, dept, type, operator, parsed){
+  // Primary lookup: by exact id
+  let label = state.labels.find(l=>l.id===labelId);
+  // Secondary lookup: by batchNumber + labelNumber (handles sync edge cases)
+  if(!label && parsed?.batchNumber && parsed?.boxNumber!=null){
+    label = state.labels.find(l=>
+      l.batchNumber===parsed.batchNumber &&
+      Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
+    );
+  }
   if(!label) return {ok:false,msg:'Label not found'};
   if(label.voided) return {ok:false,msg:'Label has been voided'};
 
@@ -2118,7 +2126,7 @@ function processScanInput(dept,type){
   el.value='';
 
   const doScan = ()=>{
-    const result=recordScan(parsed.labelId,dept,type,currentDept);
+    const result=recordScan(parsed.labelId,dept,type,currentDept,parsed);
     if(result.ok){
       zoneEl.className='scan-zone success';
       const warnHtml = result.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${result.warning}</div>` : '';
@@ -2134,7 +2142,7 @@ function processScanInput(dept,type){
   };
 
   // First attempt
-  const firstResult = recordScan(parsed.labelId, dept, type, currentDept);
+  const firstResult = recordScan(parsed.labelId, dept, type, currentDept, parsed);
   if(firstResult.ok){
     // Success on first try
     zoneEl.className='scan-zone success';
@@ -2147,8 +2155,26 @@ function processScanInput(dept,type){
     // Label not in local state — sync from server then retry once
     zoneEl.className='scan-zone';
     resultEl.innerHTML=`<div class="alert" style="background:rgba(255,171,0,0.1);border:1px solid rgba(255,171,0,0.4);padding:8px 12px">🔄 Syncing labels from server...</div>`;
-    pullFromServer().then(()=>{
-      const retry = recordScan(parsed.labelId, dept, type, currentDept);
+    pullFromServer().then(async ()=>{
+      let retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
+      // If still not found, try direct server label lookup
+      if(!retry.ok && retry.msg==='Label not found' && serverUrl){
+        try{
+          const params = new URLSearchParams();
+          if(parsed.labelId) params.set('id', parsed.labelId);
+          if(parsed.batchNumber) params.set('batchNumber', parsed.batchNumber);
+          if(parsed.boxNumber!=null) params.set('labelNumber', parsed.boxNumber);
+          const r = await fetch(serverUrl+'/api/tracking/label?'+params, {signal:AbortSignal.timeout(5000)});
+          const j = await r.json();
+          if(j.ok && j.label){
+            // Add this label to local state and retry
+            const nl = normLabel(j.label);
+            if(!state.labels.find(l=>l.id===nl.id)) state.labels.push(nl);
+            saveLocal();
+            retry = recordScan(nl.id, dept, type, currentDept, parsed);
+          }
+        }catch(e){}
+      }
       if(retry.ok){
         zoneEl.className='scan-zone success';
         const warnHtml = retry.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${retry.warning}</div>` : '';

@@ -6,9 +6,6 @@
 <title>Sunloc Tracking Suite v1.0</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<!-- ZXing: supports QR codes, Data Matrix, barcodes — loaded eagerly so it's ready when camera opens -->
-<!-- ZXing browser barcode/QR/DataMatrix scanner -->
-<script src="https://unpkg.com/@zxing/browser@0.1.4/umd/index.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
 
@@ -508,20 +505,12 @@ input[type=number]{font-family:var(--mono)}
 
 <!-- CAMERA SCAN MODAL -->
 <div class="modal-overlay" id="cam-overlay">
-  <div class="modal" style="max-width:440px">
+  <div class="modal" style="max-width:420px">
     <div class="modal-title">📷 Camera Scan</div>
-    <div class="modal-sub">Point camera at QR code or Data Matrix barcode</div>
-    <div style="position:relative;background:#000;border-radius:8px;overflow:hidden;margin-bottom:12px">
-      <video id="cam-video" style="width:100%;display:block;min-height:260px" autoplay playsinline muted></video>
-      <!-- Scanning crosshair overlay -->
-      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200px;height:200px;pointer-events:none">
-        <div style="position:absolute;top:0;left:0;width:40px;height:40px;border-top:3px solid #f6c90e;border-left:3px solid #f6c90e;border-radius:4px 0 0 0"></div>
-        <div style="position:absolute;top:0;right:0;width:40px;height:40px;border-top:3px solid #f6c90e;border-right:3px solid #f6c90e;border-radius:0 4px 0 0"></div>
-        <div style="position:absolute;bottom:0;left:0;width:40px;height:40px;border-bottom:3px solid #f6c90e;border-left:3px solid #f6c90e;border-radius:0 0 0 4px"></div>
-        <div style="position:absolute;bottom:0;right:0;width:40px;height:40px;border-bottom:3px solid #f6c90e;border-right:3px solid #f6c90e;border-radius:0 0 4px 0"></div>
-      </div>
+    <div class="modal-sub">Point camera at QR code — hold phone 20-30cm away</div>
+    <div style="background:#000;border-radius:8px;overflow:hidden;margin-bottom:12px">
+      <video id="cam-video" style="width:100%;display:block" autoplay playsinline></video>
     </div>
-    <div style="text-align:center;font-size:12px;color:#666;margin-bottom:10px">🔍 Scanning... hold label steady inside the frame</div>
     <div id="cam-result" class="alert alert-info hidden"></div>
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="stopCamera()">Cancel</button>
@@ -604,9 +593,7 @@ function sanitizeServerUrl(url) {
   }
 }
 
-const DEFAULT_SERVER = 'https://sunloc.up.railway.app';
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || DEFAULT_SERVER);
-if(!localStorage.getItem('sunloc_server_url')) localStorage.setItem('sunloc_server_url', DEFAULT_SERVER);
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;
@@ -952,9 +939,7 @@ async function pullFromServer(){
       const normLabels = (j.state.labels||[]).map(normLabel);
       const serverLabelIds = new Set(normLabels.map(l=>l.id));
       const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-      // Merge server state but preserve our normalised labels array (not raw DB format)
-      const {labels:_rawLabels, ...serverStateWithoutLabels} = j.state;
-      Object.assign(state, serverStateWithoutLabels);
+      Object.assign(state, j.state);
       state.labels = normLabels;
       // Re-add any local-only labels (generated but not yet confirmed saved on server)
       if(localOnlyLabels.length>0){
@@ -1016,37 +1001,17 @@ function loadState(){
 // ═══════════════════════════════════════════════════════
 
 function recordScan(labelId, dept, type, operator, parsed){
-  // Primary lookup: by exact system id
+  // Primary lookup: by exact id
   let label = state.labels.find(l=>l.id===labelId);
-  // Secondary lookup: by batchNumber + labelNumber (handles sync edge cases and manual type-in with box number)
+  // Secondary lookup: by batchNumber + labelNumber (handles sync edge cases)
   if(!label && parsed?.batchNumber && parsed?.boxNumber!=null){
     label = state.labels.find(l=>
       l.batchNumber===parsed.batchNumber &&
-      Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber) &&
-      !l.voided
+      Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
     );
-  }
-  // Tertiary lookup: batch number only typed — find next unscanned active box for this dept
-  if(!label && parsed?.batchOnly && parsed?.batchNumber){
-    const batchLabels = state.labels.filter(l=>l.batchNumber===parsed.batchNumber && !l.voided);
-    if(type==='in'){
-      // Find first box not yet scanned IN at this dept
-      label = batchLabels.find(l=>{
-        const scans = getScansForBox(l.id).filter(s=>s.dept===dept);
-        return !scans.some(s=>s.type==='in');
-      });
-    } else {
-      // Find first box scanned IN but not yet scanned OUT at this dept
-      label = batchLabels.find(l=>{
-        const scans = getScansForBox(l.id).filter(s=>s.dept===dept);
-        return scans.some(s=>s.type==='in') && scans.filter(s=>s.type==='out').length < scans.filter(s=>s.type==='in').length;
-      });
-    }
   }
   if(!label) return {ok:false,msg:'Label not found'};
   if(label.voided) return {ok:false,msg:'Label has been voided'};
-  // Always use the real system label ID — not the manually typed batch string
-  labelId = label.id;
 
   const batch = getBatch(label.batchNumber);
   if(!batch) return {ok:false,msg:'Batch not found'};
@@ -1109,8 +1074,7 @@ function autoGenerateOrangeLabel(label, batch){
 }
 
 function parseScanInput(raw){
-  const trimmed = raw.trim();
-  const parts = trimmed.split('|');
+  const parts = raw.trim().split('|');
   if(parts[0]==='SUNLOC'){
     if(parts.length>=6){
       // New format: SUNLOC|BatchNo|BoxNo|Size|Qty|SystemID
@@ -1121,17 +1085,17 @@ function parseScanInput(raw){
       return { labelId:parts[1], batchNumber:parts[2], size:parts[3], qty:parseFloat(parts[4])||0 };
     }
   }
-  // Manual type-in: "26ZH061-3" → batch + specific box number
-  const dashMatch = trimmed.match(/^([A-Z0-9]+)-(\d+)$/i);
-  if(dashMatch){
-    return { labelId: trimmed, batchNumber: dashMatch[1].toUpperCase(), boxNumber: parseInt(dashMatch[2]) };
-  }
-  // Manual type-in: "26ZH061" alone → find next unscanned box for this batch
-  if(/^[A-Z0-9]{5,12}$/i.test(trimmed)){
-    return { labelId: trimmed, batchNumber: trimmed.toUpperCase(), batchOnly: true };
+  // Check for BatchNo-LabelNo format (e.g. "26ZH061-5")
+  const dashIdx = raw.lastIndexOf('-');
+  if(dashIdx > 0){
+    const maybeBatch = raw.slice(0, dashIdx).trim();
+    const maybeNum   = parseInt(raw.slice(dashIdx+1));
+    if(maybeBatch.length > 2 && !isNaN(maybeNum)){
+      return { labelId:raw.trim(), batchNumber:maybeBatch, boxNumber:maybeNum };
+    }
   }
   // Fallback: treat raw string as labelId directly
-  return { labelId: trimmed };
+  return { labelId:raw.trim() };
 }
 
 function generateQRData(label){
@@ -1452,7 +1416,7 @@ ${hBand}
 ^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
 ^FO10,${ruleY}^GB780,2,2^FS
 
-^FO10,${qrY}^BQN,2,14^FDLA,${label.qrData}^FS
+^FO10,${qrY}^BQN,2,9^FDLA,${label.qrData}^FS
 ^CF0,28
 ^FO260,${qRelY}^FB300,1,0,C^FDQ RELEASED^FS
 ^FO580,${sigY}^GB200,2,2^FS
@@ -1532,84 +1496,96 @@ function printBatchLabels(batchNo){
 // CAMERA SCAN
 // ═══════════════════════════════════════════════════════
 
-// ── CAMERA / BARCODE SCANNER ──────────────────────────────
-// Uses @zxing/browser BrowserMultiFormatReader
-// Supports: QR Code, Data Matrix, PDF417, Code128, EAN, Aztec, and more
-let zxingReader = null;
-
 async function startCamera(callback){
-  scanCallback = callback;
-  const overlay = document.getElementById('cam-overlay');
-  const resultEl = document.getElementById('cam-result');
-  const video = document.getElementById('cam-video');
-  overlay.classList.add('show');
-  resultEl.innerHTML = '';
-  resultEl.classList.add('hidden');
-
-  // Stop any previous reader
-  if(zxingReader){ try{ zxingReader.reset(); }catch(e){} zxingReader = null; }
-
-  // Check ZXing browser library loaded
-  const ZXingBrowser = window.ZXingBrowser || (window.ZXing && window.ZXing.BrowserMultiFormatReader ? window.ZXing : null);
-
-  if(ZXingBrowser && ZXingBrowser.BrowserMultiFormatReader){
-    try{
-      zxingReader = new ZXingBrowser.BrowserMultiFormatReader();
-      // Get rear camera device
-      const devices = await ZXingBrowser.BrowserMultiFormatReader.listVideoInputDevices();
-      // Prefer rear/environment camera
-      const rearCam = devices.find(d => /back|rear|environment/i.test(d.label)) || devices[devices.length - 1];
-      const deviceId = rearCam ? rearCam.deviceId : undefined;
-
-      zxingReader.decodeFromVideoDevice(deviceId, video, (result, err) => {
-        if(result){
-          stopCamera();
-          if(scanCallback) scanCallback(result.getText());
-        }
-        // err is NotFoundException on every empty frame — normal, ignore
-      });
-      return;
-    }catch(e){
-      console.warn('ZXing BrowserMultiFormatReader failed:', e);
-      // fall through to manual canvas approach
-    }
-  }
-
-  // Fallback: manual canvas scan with jsQR (QR only)
+  scanCallback=callback;
+  document.getElementById('cam-overlay').classList.add('show');
   try{
-    camStream = await navigator.mediaDevices.getUserMedia({
-      video:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:720} }
-    });
-    video.srcObject = camStream;
-    video.setAttribute('playsinline','true');
-    video.muted = true;
-    await video.play().catch(()=>{});
-    loadJsQRAndScan(video);
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const video=document.getElementById('cam-video');
+    video.srcObject=camStream;
+    video.setAttribute('playsinline','true'); // required for iOS
+    video.muted=true;
+    await video.play().catch(()=>{}); // must call play() for Android Chrome
+    scanQRFromVideo(video);
   }catch(e){
-    resultEl.textContent = 'Camera not available: ' + e.message;
-    resultEl.classList.remove('hidden');
+    document.getElementById('cam-result').textContent='Camera not available: '+e.message;
+    document.getElementById('cam-result').classList.remove('hidden');
   }
 }
 
 function stopCamera(){
-  if(zxingReader){ try{ zxingReader.reset(); }catch(e){} zxingReader = null; }
-  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream = null; }
-  const video = document.getElementById('cam-video');
-  if(video){ video.srcObject = null; }
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
   document.getElementById('cam-overlay').classList.remove('show');
 }
 
-function loadJsQRAndScan(video){
-  if(typeof jsQR !== 'undefined'){ startCanvasScan(video); return; }
-  const s = document.createElement('script');
-  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
-  s.onload = ()=>{ if(camStream) startCanvasScan(video); };
-  s.onerror = ()=>{
-    document.getElementById('cam-result').innerHTML =
-      '<span style="color:#e53e3e">⚠️ Scanner unavailable — please type label ID manually.</span>';
-    document.getElementById('cam-result').classList.remove('hidden');
-  };
-  document.head.appendChild(s);
+async function scanQRFromVideo(video){
+  if(!camStream) return;
+
+  // Pre-load jsQR from our own server in background (fallback if BarcodeDetector fails)
+  if(typeof jsQR === 'undefined' && !window._jsqrLoading){
+    window._jsqrLoading = true;
+    const s = document.createElement('script');
+    s.src = (serverUrl || window.location.origin) + '/jsqr.min.js';
+    s.onload = ()=>{ window._jsqrLoading = false; };
+    document.head.appendChild(s);
+  }
+
+  // PRIMARY: BarcodeDetector — native, fast, no library needed
+  // This was working before and is the correct first approach
+  if('BarcodeDetector' in window){
+    try{
+      const detector = new BarcodeDetector({formats:['qr_code']});
+      let consecutiveFails = 0;
+      const detect = async()=>{
+        if(!camStream) return;
+        try{
+          const codes = await detector.detect(video);
+          if(codes.length){
+            stopCamera();
+            if(scanCallback) scanCallback(codes[0].rawValue);
+            return;
+          }
+          consecutiveFails = 0; // empty result is NOT a failure — reset counter
+        }catch(e){
+          consecutiveFails++;
+          if(consecutiveFails >= 10){
+            // BarcodeDetector is broken on this device — switch to jsQR
+            startCanvasScanWhenReady(video);
+            return;
+          }
+        }
+        requestAnimationFrame(detect);
+      };
+      setTimeout(()=>{ if(camStream) requestAnimationFrame(detect); }, 400);
+      return;
+    }catch(e){
+      // BarcodeDetector construction failed — fall through to jsQR
+    }
+  }
+
+  // FALLBACK: jsQR canvas scan
+  startCanvasScanWhenReady(video);
+}
+
+function startCanvasScanWhenReady(video){
+  if(typeof jsQR !== 'undefined'){
+    startCanvasScan(video);
+    return;
+  }
+  // Wait for jsQR to load (up to 5 seconds)
+  const wait = setInterval(()=>{
+    if(typeof jsQR !== 'undefined'){
+      clearInterval(wait);
+      if(camStream) startCanvasScan(video);
+    }
+  }, 100);
+  setTimeout(()=>{
+    clearInterval(wait);
+    if(camStream){
+      const r = document.getElementById('cam-result');
+      if(r){ r.innerHTML='<span style="color:#ff4060">Scanner unavailable — type label ID manually.</span>'; r.classList.remove('hidden'); }
+    }
+  }, 5000);
 }
 
 function startCanvasScan(video){
@@ -1619,12 +1595,16 @@ function startCanvasScan(video){
   const scan = ()=>{
     if(!camStream) return;
     if(video.readyState === video.HAVE_ENOUGH_DATA){
-      canvas.width = video.videoWidth;
+      canvas.width  = video.videoWidth;
       canvas.height = video.videoHeight;
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:'dontInvert'});
-      if(code && code.data){ stopCamera(); if(scanCallback) scanCallback(code.data); return; }
+      if(code && code.data){
+        stopCamera();
+        if(scanCallback) scanCallback(code.data);
+        return;
+      }
     }
     requestAnimationFrame(scan);
   };
@@ -2203,56 +2183,22 @@ function processScanInput(dept,type){
       try{
         // Direct targeted fetch — get this specific label from server
         // More reliable than full pullFromServer which may re-render page
-        const params = new URLSearchParams();
-        if(parsed.labelId) params.set('id', parsed.labelId);
-        if(parsed.batchNumber) params.set('batchNumber', parsed.batchNumber);
-        if(parsed.boxNumber!=null) params.set('labelNumber', parsed.boxNumber);
-
-        const r = await fetch(serverUrl+'/api/tracking/label?'+params,
+        // Fetch labels directly from server — no page re-render
+        const r = await fetch(serverUrl+'/api/tracking/state',
           {signal:AbortSignal.timeout(8000)});
         const j = await r.json();
 
-        if(j.ok && j.label){
-          // Add label to local state
-          const nl = normLabel(j.label);
-          const existing = state.labels.findIndex(l=>l.id===nl.id);
-          if(existing>=0) state.labels[existing]=nl;
-          else state.labels.push(nl);
+        if(j.ok && j.state){
+          // Merge server labels into local state without triggering page re-render
+          const normLabels = (j.state.labels||[]).map(normLabel);
+          const serverIds = new Set(normLabels.map(l=>l.id));
+          const localOnly = state.labels.filter(l=>!serverIds.has(l.id));
+          state.labels = [...normLabels, ...localOnly];
           saveLocal();
-          retry = recordScan(nl.id, dept, type, currentDept, parsed);
-        } else {
-          // Label not on server either — also try full sync as last resort
-          const sr = await fetch(serverUrl+'/api/tracking/state',
-            {signal:AbortSignal.timeout(8000)});
-          const sj = await sr.json();
-          if(sj.ok && sj.state){
-            const normLabels = (sj.state.labels||[]).map(normLabel);
-            const serverIds = new Set(normLabels.map(l=>l.id));
-            const localOnly = state.labels.filter(l=>!serverIds.has(l.id));
-            state.labels = [...normLabels, ...localOnly];
-            saveLocal();
-            retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
-          }
+          retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
         }
       }catch(e){
-        // Auto-retry once with longer timeout before giving up
-        try{
-          await new Promise(r=>setTimeout(r,2000)); // wait 2s then retry
-          const sr2 = await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(15000)});
-          const sj2 = await sr2.json();
-          if(sj2.ok && sj2.state){
-            const normLabels2 = (sj2.state.labels||[]).map(normLabel);
-            const serverIds2 = new Set(normLabels2.map(l=>l.id));
-            const localOnly2 = state.labels.filter(l=>!serverIds2.has(l.id));
-            state.labels = [...normLabels2,...localOnly2];
-            saveLocal();
-            retry = recordScan(parsed.labelId,dept,type,currentDept,parsed);
-          } else {
-            retry = {ok:false, msg:'Cannot reach server — check connection'};
-          }
-        }catch(e2){
-          retry = {ok:false, msg:'Cannot reach server — check connection'};
-        }
+        retry = {ok:false, msg:'Cannot reach server — check connection'};
       }
       // Always update UI — never stuck
       if(retry.ok){

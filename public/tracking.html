@@ -6,6 +6,8 @@
 <title>Sunloc Tracking Suite v1.0</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- ZXing: supports QR codes, Data Matrix, barcodes — loaded eagerly so it's ready when camera opens -->
+<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
 
@@ -1487,17 +1489,21 @@ function printBatchLabels(batchNo){
 // CAMERA SCAN
 // ═══════════════════════════════════════════════════════
 
+let zxingReader = null; // ZXing multi-format reader instance
+
 async function startCamera(callback){
   scanCallback=callback;
   document.getElementById('cam-overlay').classList.add('show');
+  document.getElementById('cam-result').innerHTML='';
+  document.getElementById('cam-result').classList.add('hidden');
   try{
-    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
     const video=document.getElementById('cam-video');
     video.srcObject=camStream;
-    video.setAttribute('playsinline','true'); // required for iOS
+    video.setAttribute('playsinline','true');
     video.muted=true;
-    await video.play().catch(()=>{}); // must call play() for Android Chrome
-    scanQRFromVideo(video);
+    await video.play().catch(()=>{});
+    startZXingScan(video);
   }catch(e){
     document.getElementById('cam-result').textContent='Camera not available: '+e.message;
     document.getElementById('cam-result').classList.remove('hidden');
@@ -1505,57 +1511,94 @@ async function startCamera(callback){
 }
 
 function stopCamera(){
+  // Stop ZXing reader if running
+  if(zxingReader){ try{ zxingReader.reset(); }catch(e){} zxingReader=null; }
   if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
   document.getElementById('cam-overlay').classList.remove('show');
 }
 
-async function scanQRFromVideo(video){
-  if(!camStream) return;
-
-  // Always use jsQR canvas scanning — reliable across all Android browsers
-  // Load jsQR from CDN if not already loaded
-  const doScan = ()=>{
-    if(typeof jsQR !== 'undefined'){
-      startCanvasScan(video);
-    } else {
-      document.getElementById('cam-result').innerHTML=
-        '<span style="color:#ff4060">Camera decode unavailable — please type label ID manually.</span>';
-      document.getElementById('cam-result').classList.remove('hidden');
-    }
-  };
-
-  if(typeof jsQR !== 'undefined'){
-    // Already loaded — start immediately after short stabilise delay
-    setTimeout(()=>{ if(camStream) startCanvasScan(video); }, 400);
-  } else {
-    // Load jsQR then start
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
-    s.onload = ()=>{ if(camStream) startCanvasScan(video); };
-    s.onerror = ()=>{ doScan(); }; // shows error if CDN unreachable
-    document.head.appendChild(s);
+function startZXingScan(video){
+  // ZXing supports: QR Code, Data Matrix, PDF417, Code128, EAN, and more
+  if(typeof ZXing !== 'undefined'){
+    try{
+      const hints = new Map();
+      // Enable all formats including Data Matrix
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.QR_CODE,
+        ZXing.BarcodeFormat.DATA_MATRIX,
+        ZXing.BarcodeFormat.PDF_417,
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.CODE_39,
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+      zxingReader = new ZXing.MultiFormatReader();
+      zxingReader.setHints(hints);
+      scanFrameWithZXing(video);
+      return;
+    }catch(e){ /* fall through to jsQR */ }
   }
+  // Fallback: jsQR (QR codes only)
+  fallbackJsQRScan(video);
 }
 
-// beginDetection removed — using jsQR directly via startCanvasScan
-
-function startCanvasScan(video){
-  if(!camStream) return;
+function scanFrameWithZXing(video){
+  if(!camStream || !zxingReader) return;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   const scan = ()=>{
-    if(!camStream) return;
+    if(!camStream || !zxingReader) return;
     if(video.readyState === video.HAVE_ENOUGH_DATA){
-      canvas.width  = video.videoWidth;
+      canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const code = jsQR(imageData.data, imageData.width, imageData.height, {inversionAttempts:'dontInvert'});
-      if(code && code.data){
-        stopCamera();
-        if(scanCallback) scanCallback(code.data);
-        return;
-      }
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      try{
+        const imageData = ctx.getImageData(0,0,canvas.width,canvas.height);
+        const luminance = new ZXing.RGBLuminanceSource(imageData.data, canvas.width, canvas.height);
+        const bitmap = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminance));
+        const result = zxingReader.decode(bitmap);
+        if(result && result.getText()){
+          stopCamera();
+          if(scanCallback) scanCallback(result.getText());
+          return;
+        }
+      }catch(e){ /* NotFoundException on every frame with no code — expected */ }
+    }
+    requestAnimationFrame(scan);
+  };
+  requestAnimationFrame(scan);
+}
+
+function fallbackJsQRScan(video){
+  // Load jsQR dynamically as last-resort fallback (QR only, no Data Matrix)
+  const load = ()=>{
+    if(typeof jsQR !== 'undefined'){ startCanvasScan(video); return; }
+    const s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+    s.onload=()=>{ if(camStream) startCanvasScan(video); };
+    s.onerror=()=>{
+      document.getElementById('cam-result').innerHTML=
+        '<span style="color:#ff4060">Camera decode unavailable — please type label ID manually.</span>';
+      document.getElementById('cam-result').classList.remove('hidden');
+    };
+    document.head.appendChild(s);
+  };
+  load();
+}
+
+function startCanvasScan(video){
+  if(!camStream) return;
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d');
+  const scan=()=>{
+    if(!camStream) return;
+    if(video.readyState===video.HAVE_ENOUGH_DATA){
+      canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);
+      const code=jsQR(imageData.data,imageData.width,imageData.height,{inversionAttempts:'dontInvert'});
+      if(code&&code.data){ stopCamera(); if(scanCallback) scanCallback(code.data); return; }
     }
     requestAnimationFrame(scan);
   };
@@ -2166,7 +2209,24 @@ function processScanInput(dept,type){
           }
         }
       }catch(e){
-        retry = {ok:false, msg:'Cannot reach server — check connection'};
+        // Auto-retry once with longer timeout before giving up
+        try{
+          await new Promise(r=>setTimeout(r,2000)); // wait 2s then retry
+          const sr2 = await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(15000)});
+          const sj2 = await sr2.json();
+          if(sj2.ok && sj2.state){
+            const normLabels2 = (sj2.state.labels||[]).map(normLabel);
+            const serverIds2 = new Set(normLabels2.map(l=>l.id));
+            const localOnly2 = state.labels.filter(l=>!serverIds2.has(l.id));
+            state.labels = [...normLabels2,...localOnly2];
+            saveLocal();
+            retry = recordScan(parsed.labelId,dept,type,currentDept,parsed);
+          } else {
+            retry = {ok:false, msg:'Cannot reach server — check connection'};
+          }
+        }catch(e2){
+          retry = {ok:false, msg:'Cannot reach server — check connection'};
+        }
       }
       // Always update UI — never stuck
       if(retry.ok){

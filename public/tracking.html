@@ -951,7 +951,12 @@ async function pullFromServer(){
     if(pr.ok){
       const pj=await pr.json();
       if(pj.ok && pj.state?.orders){
-        const batches = pj.state.orders.filter(o=>!o.deleted);
+        const batches = pj.state.orders.filter(o=>!o.deleted).map(b=>({
+          ...b,
+          // Normalise: server returns actualProd from DPR; tracking also uses actualQty
+          actualQty: b.actualQty || b.actualProd || 0,
+          actualProd: b.actualProd || b.actualQty || 0,
+        }));
         if(batches.length > 0 || state.batches.length === 0){
           state.batches = batches;
         }
@@ -1489,6 +1494,9 @@ async function startCamera(callback){
     camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
     const video=document.getElementById('cam-video');
     video.srcObject=camStream;
+    video.setAttribute('playsinline','true'); // required for iOS
+    video.muted=true;
+    await video.play().catch(()=>{}); // must call play() for Android Chrome
     scanQRFromVideo(video);
   }catch(e){
     document.getElementById('cam-result').textContent='Camera not available: '+e.message;
@@ -2152,29 +2160,37 @@ function processScanInput(dept,type){
     renderDeptScan(dept);
     el.focus();
   } else if(firstResult.msg === 'Label not found' && serverUrl){
-    // Label not in local state — sync from server then retry once
+    // Label not in local state — sync from server then retry
     zoneEl.className='scan-zone';
     resultEl.innerHTML=`<div class="alert" style="background:rgba(255,171,0,0.1);border:1px solid rgba(255,171,0,0.4);padding:8px 12px">🔄 Syncing labels from server...</div>`;
-    pullFromServer().then(async ()=>{
-      let retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
-      // If still not found, try direct server label lookup
-      if(!retry.ok && retry.msg==='Label not found' && serverUrl){
-        try{
+    // Use async IIFE so errors are always caught and UI always updates
+    (async ()=>{
+      let retry = {ok:false, msg:'Label not found'};
+      try{
+        // Step 1: full server sync
+        await pullFromServer();
+        retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
+
+        // Step 2: if still not found, direct label fetch by id + batchNumber+labelNumber
+        if(!retry.ok && retry.msg==='Label not found'){
           const params = new URLSearchParams();
           if(parsed.labelId) params.set('id', parsed.labelId);
           if(parsed.batchNumber) params.set('batchNumber', parsed.batchNumber);
           if(parsed.boxNumber!=null) params.set('labelNumber', parsed.boxNumber);
-          const r = await fetch(serverUrl+'/api/tracking/label?'+params, {signal:AbortSignal.timeout(5000)});
+          const r = await fetch(serverUrl+'/api/tracking/label?'+params,{signal:AbortSignal.timeout(5000)});
           const j = await r.json();
           if(j.ok && j.label){
-            // Add this label to local state and retry
             const nl = normLabel(j.label);
             if(!state.labels.find(l=>l.id===nl.id)) state.labels.push(nl);
             saveLocal();
             retry = recordScan(nl.id, dept, type, currentDept, parsed);
           }
-        }catch(e){}
+        }
+      }catch(e){
+        // Network or other error — show whatever result we have
+        retry = retry.ok ? retry : {ok:false, msg:'Sync failed — check connection and try again'};
       }
+      // Always update UI — never leave stuck on "Syncing..."
       if(retry.ok){
         zoneEl.className='scan-zone success';
         const warnHtml = retry.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${retry.warning}</div>` : '';
@@ -2187,7 +2203,7 @@ function processScanInput(dept,type){
         setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
       }
       el.focus();
-    });
+    })();
   } else {
     zoneEl.className='scan-zone error';
     resultEl.innerHTML=`<div class="alert alert-danger">❌ ${firstResult.msg}</div>`;

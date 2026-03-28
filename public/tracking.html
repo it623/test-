@@ -961,18 +961,6 @@ async function pullFromServer(){
     saveLocal();
     setSyncBadge('synced');
     if(currentPage) renderPage(currentPage);
-    // Auto-sync local labels to server so they can be scanned from any device
-    if(state.labels && state.labels.length > 0){
-      const labelsToSync = state.labels.filter(l=>!l.voided).map(l=>({
-        id:l.id, batchNumber:l.batchNumber, labelNumber:l.labelNumber,
-        size:l.size, qty:l.qty, printed:l.printed||false, printedAt:l.printedAt||null,
-        voided:l.voided||false, voidReason:l.voidReason||'', voidedBy:l.voidedBy||'',
-        customer:l.customer||'', colour:l.colour||'', pcCode:l.pcCode||'',
-        poNumber:l.poNumber||'', machineId:l.machineId||'', qrData:l.qrData||'',
-        isPartial:l.isPartial||false, isOrange:l.isOrange||false
-      }));
-      if(labelsToSync.length > 0) pushToServer('/api/tracking/labels',{labels:labelsToSync});
-    }
   }catch(e){ setSyncBadge('offline'); }
 }
 
@@ -1176,7 +1164,7 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
   saveLocal();
   // Save via state sync (labels stored in saveLocal above)
   // Trigger immediate state push to ensure persistence
-  if(serverUrl){ pushToServer('/api/tracking/labels',{labels:newLabels.map(l=>({...l,customer:l.customer||'',colour:l.colour||'',pcCode:l.pcCode||'',poNumber:l.poNumber||'',machineId:l.machineId||''}))}); }
+  if(serverUrl){ fetch(serverUrl+'/api/tracking/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),signal:AbortSignal.timeout(8000)}).catch(()=>{}); }
   return newLabels;
 }
 
@@ -1508,45 +1496,66 @@ function stopCamera(){
 async function scanQRFromVideo(video){
   if(!camStream) return;
 
-  // Try BarcodeDetector first (Chrome on Android, Edge)
+  // Pre-load jsQR immediately in background regardless of BarcodeDetector
+  if(typeof jsQR === 'undefined' && !window._jsqrLoading){
+    window._jsqrLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+    s.onload = ()=>{ window._jsqrLoading = false; };
+    document.head.appendChild(s);
+  }
+
+  // Wait for video to be ready, then start scanning
+  const startWhenReady = ()=>{
+    if(!camStream) return;
+    if(video.readyState >= 2){ // HAVE_CURRENT_DATA or better
+      beginDetection(video);
+    } else {
+      video.addEventListener('canplay', ()=>{ if(camStream) beginDetection(video); }, {once:true});
+    }
+  };
+
+  // Small delay to let camera stabilise
+  setTimeout(startWhenReady, 600);
+}
+
+function beginDetection(video){
+  if(!camStream) return;
+
+  // Try BarcodeDetector — but only if it actually works (test with a quick probe)
   if('BarcodeDetector' in window){
     try{
-      const detector = new BarcodeDetector({formats:['qr_code','code_128','code_39']});
+      const detector = new BarcodeDetector({formats:['qr_code']});
+      let failCount = 0;
       const detect = async()=>{
         if(!camStream) return;
         try{
           const codes = await detector.detect(video);
           if(codes.length){
-            const raw = codes[0].rawValue;
             stopCamera();
-            if(scanCallback) scanCallback(raw);
+            if(scanCallback) scanCallback(codes[0].rawValue);
             return;
           }
-        }catch(e){}
+          failCount = 0; // reset on successful (but empty) detection
+        }catch(e){
+          failCount++;
+          // If BarcodeDetector throws 5 times, it's broken on this device — switch to jsQR
+          if(failCount >= 5){
+            startCanvasScan(video);
+            return;
+          }
+        }
         requestAnimationFrame(detect);
       };
-      video.addEventListener('loadedmetadata', ()=>{ setTimeout(detect, 500); });
+      requestAnimationFrame(detect);
       return;
-    }catch(e){}
+    }catch(e){
+      // BarcodeDetector construction failed — fall through to jsQR
+    }
   }
 
-  // Fallback: canvas + jsQR (loaded dynamically if needed)
-  const resultEl = document.getElementById('cam-result');
-  const loadAndScan = ()=>{
-    if(typeof jsQR !== 'undefined'){
-      startCanvasScan(video);
-      return;
-    }
-    // Load jsQR from CDN
-    const script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
-    script.onload = ()=>startCanvasScan(video);
-    script.onerror = ()=>{
-      if(resultEl){ resultEl.innerHTML='<strong style="color:#ff4060">Camera decode unavailable.</strong> Please type the label ID manually.'; resultEl.classList.remove('hidden'); }
-    };
-    document.head.appendChild(script);
-  };
-  video.addEventListener('loadedmetadata', ()=>{ setTimeout(loadAndScan, 500); });
+  // jsQR canvas fallback
+  startCanvasScan(video);
 }
 
 function startCanvasScan(video){

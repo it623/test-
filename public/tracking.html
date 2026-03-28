@@ -958,18 +958,6 @@ async function pullFromServer(){
         state.machineMaster = pj.state.machineMaster||[];
       }
     }
-    // Auto-sync all local labels to server
-    if(state.labels && state.labels.length > 0){
-      const toSync = state.labels.filter(l=>!l.voided).map(l=>({
-        id:l.id, batchNumber:l.batchNumber, labelNumber:l.labelNumber,
-        size:l.size, qty:l.qty, printed:l.printed||false, printedAt:l.printedAt||null,
-        voided:l.voided||false, voidReason:l.voidReason||'', voidedBy:l.voidedBy||'',
-        customer:l.customer||'', colour:l.colour||'', pcCode:l.pcCode||'',
-        poNumber:l.poNumber||'', machineId:l.machineId||'', qrData:l.qrData||'',
-        isPartial:l.isPartial||false, isOrange:l.isOrange||false
-      }));
-      if(toSync.length > 0) pushToServer('/api/tracking/labels',{labels:toSync});
-    }
     saveLocal();
     setSyncBadge('synced');
     if(currentPage) renderPage(currentPage);
@@ -1008,23 +996,8 @@ function loadState(){
 // ═══════════════════════════════════════════════════════
 
 function recordScan(labelId, dept, type, operator){
-  // Try multiple lookup methods
-  let label = state.labels.find(l=>l.id===labelId);
-  
-  // Try QR data match
-  if(!label) label = state.labels.find(l=>l.qrData===labelId);
-  
-  // Try SUNLOC format: SUNLOC|BatchNo|BoxNo|Size|Qty|SystemID
-  if(!label && labelId && labelId.includes('|')) {
-    const parts = labelId.split('|');
-    if(parts[0]==='SUNLOC' && parts.length>=3) {
-      const batchNo = parts[1];
-      const labelNo = parseInt(parts[2]);
-      label = state.labels.find(l=>l.batchNumber===batchNo && l.labelNumber===labelNo && !l.voided);
-    }
-  }
-  
-  if(!label) return {ok:false,msg:`Label not found (${state.labels.length} labels loaded)`};
+  const label = state.labels.find(l=>l.id===labelId);
+  if(!label) return {ok:false,msg:'Label not found'};
   if(label.voided) return {ok:false,msg:'Label has been voided'};
 
   const batch = getBatch(label.batchNumber);
@@ -1191,7 +1164,7 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
   saveLocal();
   // Save via state sync (labels stored in saveLocal above)
   // Trigger immediate state push to ensure persistence
-  if(serverUrl){ pushToServer('/api/tracking/labels',{labels:newLabels.map(l=>({id:l.id,batchNumber:l.batchNumber,labelNumber:l.labelNumber,size:l.size,qty:l.qty,printed:l.printed||false,printedAt:l.printedAt||null,voided:l.voided||false,voidReason:l.voidReason||'',voidedBy:l.voidedBy||'',customer:l.customer||'',colour:l.colour||'',pcCode:l.pcCode||'',poNumber:l.poNumber||'',machineId:l.machineId||'',qrData:l.qrData||'',isPartial:l.isPartial||false,isOrange:l.isOrange||false}))}); }
+  if(serverUrl){ fetch(serverUrl+'/api/tracking/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),signal:AbortSignal.timeout(8000)}).catch(()=>{}); }
   return newLabels;
 }
 
@@ -2142,21 +2115,59 @@ function processScanInput(dept,type){
   const raw=el.value.trim();
   if(!raw) return;
   const parsed=parseScanInput(raw);
-  const result=recordScan(parsed.labelId,dept,type,currentDept);
   el.value='';
 
-  if(result.ok){
+  const doScan = ()=>{
+    const result=recordScan(parsed.labelId,dept,type,currentDept);
+    if(result.ok){
+      zoneEl.className='scan-zone success';
+      const warnHtml = result.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${result.warning}</div>` : '';
+      resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>${warnHtml}`;
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, result.warning ? 6000 : 3000);
+      renderDeptScan(dept);
+    } else {
+      zoneEl.className='scan-zone error';
+      resultEl.innerHTML=`<div class="alert alert-danger">❌ ${result.msg}</div>`;
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+    }
+    el.focus();
+  };
+
+  // First attempt
+  const firstResult = recordScan(parsed.labelId, dept, type, currentDept);
+  if(firstResult.ok){
+    // Success on first try
     zoneEl.className='scan-zone success';
-    const warnHtml = result.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${result.warning}</div>` : '';
-    resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>${warnHtml}`;
-    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, result.warning ? 6000 : 3000);
-    renderDeptScan(dept); // refresh stats
+    const warnHtml = firstResult.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${firstResult.warning}</div>` : '';
+    resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${firstResult.label.batchNumber} Label #${firstResult.label.labelNumber} (${fmt(firstResult.label.qty)}L)</div>${warnHtml}`;
+    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, firstResult.warning ? 6000 : 3000);
+    renderDeptScan(dept);
+    el.focus();
+  } else if(firstResult.msg === 'Label not found' && serverUrl){
+    // Label not in local state — sync from server then retry once
+    zoneEl.className='scan-zone';
+    resultEl.innerHTML=`<div class="alert" style="background:rgba(255,171,0,0.1);border:1px solid rgba(255,171,0,0.4);padding:8px 12px">🔄 Syncing labels from server...</div>`;
+    pullFromServer().then(()=>{
+      const retry = recordScan(parsed.labelId, dept, type, currentDept);
+      if(retry.ok){
+        zoneEl.className='scan-zone success';
+        const warnHtml = retry.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${retry.warning}</div>` : '';
+        resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${retry.label.batchNumber} Label #${retry.label.labelNumber} (${fmt(retry.label.qty)}L)</div>${warnHtml}`;
+        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, retry.warning ? 6000 : 3000);
+        renderDeptScan(dept);
+      } else {
+        zoneEl.className='scan-zone error';
+        resultEl.innerHTML=`<div class="alert alert-danger">❌ ${retry.msg}</div>`;
+        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+      }
+      el.focus();
+    });
   } else {
     zoneEl.className='scan-zone error';
-    resultEl.innerHTML=`<div class="alert alert-danger">❌ ${result.msg}</div>`;
+    resultEl.innerHTML=`<div class="alert alert-danger">❌ ${firstResult.msg}</div>`;
     setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+    el.focus();
   }
-  el.focus();
 }
 
 function saveWastage(dept){

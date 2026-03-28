@@ -1033,7 +1033,7 @@ function renderProduction() {
               <thead>
                 <tr>
                   <th>#</th><th>PO / Batch</th><th>Customer</th><th>Size</th><th>PC Code</th><th>Colour</th>
-                  <th>PTD/UP</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
+                  <th>PTD/UP</th><th>Print Matter Cap</th><th>Print Matter Body</th><th>Ink Cap</th><th>Ink Body</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
                   <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>Status</th><th>Remarks</th><th>Actions</th>
                 </tr>
               </thead>
@@ -1091,6 +1091,10 @@ function renderOrderRow(ord, idx, mc) {
     <td class="text-mono text-accent">${ord.pcCode||'-'}</td>
     <td style="white-space:nowrap;font-size:12px">${ord.colour||'-'}</td>
     <td>${ptdBadge}</td>
+    <td style="font-size:11px">${(ord.printMatter||'').split('/')[0]?.trim()||'-'}</td>
+    <td style="font-size:11px">${(ord.printMatter||'').split('/')[1]?.trim()||'-'}</td>
+    <td style="font-size:11px;color:var(--accent3)">${ord.inkCap||'-'}</td>
+    <td style="font-size:11px;color:var(--accent3)">${ord.inkBody||'-'}</td>
     <td class="text-mono fw-bold">${fmt(ord.qty)}</td>
     <td class="text-mono text-blue">${grossQty}</td>
     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.startDate)}</td>
@@ -1164,13 +1168,15 @@ function closeOrder(ordId, machineId) {
   const planned = ord.qty || 0;
   const actual = ord.actualQty || 0;
   if (actual === 0) {
-    if (!confirm(`No actual production recorded for this order (Planned: ${fmt(planned)}L).\n\nClose anyway?`)) return;
-  } else if (actual !== planned) {
+    alert('⚠️ Cannot close order — no actual production has been recorded in DPR.\n\nPlease enter production data in DPR first, then close this order.');
+    return;
+  }
+  if (Math.abs(actual - planned) > 0.01) {
     const diff = actual - planned;
-    const msg = diff > 0
-      ? `Actual production (${fmt(actual)}L) is MORE than planned (${fmt(planned)}L) by ${fmt(diff)}L.\n\nPlease amend the planned quantity to match actuals before closing, or click OK to close as-is.`
-      : `Actual production (${fmt(actual)}L) is LESS than planned (${fmt(planned)}L) by ${fmt(Math.abs(diff))}L.\n\nPlease amend the planned quantity to match actuals before closing, or click OK to close as-is.`;
-    if (!confirm(msg)) return;
+    const direction = diff > 0 ? 'MORE' : 'LESS';
+    const absDiff = fmt(Math.abs(diff));
+    alert(`⚠️ Cannot close order — quantities do not match.\n\nPlanned: ${fmt(planned)}L\nActual:  ${fmt(actual)}L\nDifference: ${absDiff}L ${direction} than planned.\n\nPlease amend the Planned Quantity in the order form to match actual production (${fmt(actual)}L), then close.`);
+    return;
   }
   ord.status = 'closed';
   ord.closedDate = new Date();
@@ -1276,6 +1282,14 @@ function showAddOrderModal(machineId, existingOrder) {
       <div class="form-group">
         <label>Printing Matter</label>
         <input class="form-control" id="fo-ptdmatter" value="${ord.printMatter||''}" placeholder="e.g. OMEE D">
+      </div>
+      <div class="form-group">
+        <label>Printing Ink — Cap</label>
+        <input class="form-control" id="fo-inkcap" value="${ord.inkCap||''}" placeholder="e.g. White / Black / Red">
+      </div>
+      <div class="form-group">
+        <label>Printing Ink — Body</label>
+        <input class="form-control" id="fo-inkbody" value="${ord.inkBody||''}" placeholder="e.g. White / Black / Red">
       </div>
       <div class="form-group">
         <label>Order Qty (Lakhs)</label>
@@ -1457,6 +1471,8 @@ function saveOrderModal(existingId, defaultMachine) {
     colour: document.getElementById('fo-colour')?.value,
     isPrinted,
     printMatter: document.getElementById('fo-ptdmatter')?.value,
+    inkCap:  document.getElementById('fo-inkcap')?.value || '',
+    inkBody: document.getElementById('fo-inkbody')?.value || '',
     qty,
     aGrade: ag,
     grossQty,

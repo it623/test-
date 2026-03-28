@@ -535,6 +535,8 @@ const WIP_FLOW = {
   unprinted: ['production','aim','packing','dispatch'],
   printed:   ['production','aim','printing','pi','packing','dispatch']
 };
+// Stages that have physical scanners — production is tracked via DPR, not scanned
+const SCANNABLE_STAGES = ['aim','printing','pi','packing','dispatch'];
 
 const DEPT_LABELS = {
   production:'Production', aim:'AIM Inspection', printing:'Printing',
@@ -682,19 +684,23 @@ function canScanDept(batchNo, dept){
   if(!batch) return false;
   const flow = getBatchFlow(batch);
   const idx = flow.indexOf(dept);
-  if(idx<=0) return true; // first stage always open
+  if(idx < 0) return false;
 
-  const prevDept = flow[idx-1];
+  // Find the previous SCANNABLE stage (skip 'production' — tracked via DPR not scanner)
+  let prevScannable = null;
+  for(let i = idx-1; i >= 0; i--){
+    if(SCANNABLE_STAGES.includes(flow[i])){ prevScannable = flow[i]; break; }
+  }
 
-  // Count how many boxes were scanned OUT of the previous department
-  const prevOut = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===prevDept&&s.type==='out').length;
-  if(prevOut === 0) return false; // nothing cleared previous dept yet
+  // No previous scannable stage = this is the first scannable dept (AIM) — always open
+  if(!prevScannable) return true;
+
+  // Count how many boxes were scanned OUT of the previous scannable department
+  const prevOut = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===prevScannable&&s.type==='out').length;
+  if(prevOut === 0) return false;
 
   // Count how many boxes already scanned IN to this department
   const thisIn = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
-
-  // Allow scan-in as long as this dept has not received more than prev dept has sent out
-  // Previous dept does NOT need to be closed — boxes flow in real time
   return thisIn < prevOut;
 }
 
@@ -1002,6 +1008,7 @@ function recordScan(labelId, dept, type, operator){
     return {ok:false,msg:'Previous department has not closed this batch yet'};
   }
 
+
   // Check not already scanned in without out
   if(type==='in'){
     const lastScan = getScansForBox(labelId).filter(s=>s.dept===dept).pop();
@@ -1027,7 +1034,17 @@ function recordScan(labelId, dept, type, operator){
   // Update planning app stage status
   updatePlanningStageStatus(label.batchNumber);
 
-  return {ok:true, scan, label, batch};
+  // ── Level 1 soft warning: scan count vs DPR production ──
+  let scanWarning = null;
+  if(type==='in' && dept==='aim'){
+    const aimScansIn = state.scans.filter(s=>s.batchNumber===label.batchNumber&&s.dept==='aim'&&s.type==='in').length + 1;
+    const dprBoxes   = batch.actualQty ? lakhToBox(batch.actualQty, batch.size) : null;
+    if(dprBoxes !== null && aimScansIn > dprBoxes){
+      scanWarning = `⚠️ Scan count (${aimScansIn} boxes) exceeds DPR gross production (${batch.actualQty}L = ${dprBoxes} boxes). Please verify DPR entry.`;
+    }
+  }
+
+  return {ok:true, scan, label, batch, warning: scanWarning};
 }
 
 function autoGenerateOrangeLabel(label, batch){
@@ -1418,11 +1435,39 @@ function printBatchLabels(batchNo){
   const labels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.printed&&!l.voided&&!l.isOrange);
   if(!labels.length){alert('No unprinted labels for this batch.');return;}
   const batch = getBatch(batchNo);
+  // Concatenate all ZPL — each ^XA...^XZ is one label, printer handles sequence
   const zpl = labels.map(l=>generateZPL(l,batch)).join('\n');
-  downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
-  labels.forEach(l=>{l.printed=true;l.printedAt=now();});
-  saveLocal();
-  renderPage(currentPage);
+  const printerUrl = localStorage.getItem('sunloc_printer_url');
+  if(printerUrl){
+    // Send to printer bridge (same as individual label)
+    fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
+      .then(r=>{
+        if(r.ok){
+          labels.forEach(l=>{l.printed=true;l.printedAt=now();});
+          saveLocal();
+          renderPage(currentPage);
+          toast(`✅ ${labels.length} labels sent to printer`,'var(--green)');
+        } else {
+          // Printer returned error — fall back to download
+          downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
+          labels.forEach(l=>{l.printed=true;l.printedAt=now();});
+          saveLocal();
+        }
+      })
+      .catch(()=>{
+        // Printer not reachable — download as file
+        downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
+        labels.forEach(l=>{l.printed=true;l.printedAt=now();});
+        saveLocal();
+        renderPage(currentPage);
+      });
+  } else {
+    // No printer configured — download ZPL file
+    downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
+    labels.forEach(l=>{l.printed=true;l.printedAt=now();});
+    saveLocal();
+    renderPage(currentPage);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2054,8 +2099,9 @@ function processScanInput(dept,type){
 
   if(result.ok){
     zoneEl.className='scan-zone success';
-    resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>`;
-    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },3000);
+    const warnHtml = result.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${result.warning}</div>` : '';
+    resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>${warnHtml}`;
+    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, result.warning ? 6000 : 3000);
     renderDeptScan(dept); // refresh stats
   } else {
     zoneEl.className='scan-zone error';
@@ -2507,9 +2553,144 @@ function renderReports(){
       <div class="text-sm text-muted">Replaces the current Excel tracking sheet. Per machine, per batch: production, AIM output (shift-wise), manual inspection, printing, packing, dispatch with floor subtotals (GF/FF/SF).</div>
       <button class="btn btn-sm mt-12" style="background:#0891b2;color:#fff">Generate →</button>
     </div>
+    <div class="card cursor-pointer" onclick="renderReportF()" style="border-left:4px solid #dc2626;grid-column:span 2">
+      <div class="card-title" style="color:#dc2626">🚨 Report F — End-of-Day Production vs Scan Reconciliation</div>
+      <div class="fw-bold mb-4">Daily Exception Report (Run at End of C Shift)</div>
+      <div class="text-sm text-muted">Compares DPR gross production against AIM scan counts for each batch. Flags discrepancies, missing entries, and over-scans. Run at close of C shift (10pm–6am) for daily sign-off.</div>
+      <button class="btn btn-sm mt-12" style="background:#dc2626;color:#fff">Generate Daily Report →</button>
+    </div>
   </div>
   <div id="report-output" class="mt-20"></div>`;
 }
+
+function renderReportF(){
+  // End-of-day production vs scan reconciliation
+  // Compares DPR actualQty (gross production) vs AIM scan IN count per batch per day
+  const todayStr = today();
+
+  // Get all batches that had ANY scan activity today
+  const todayScans  = state.scans.filter(s => s.ts?.slice(0,10) === todayStr);
+  const todayBatches = [...new Set([
+    ...todayScans.map(s=>s.batchNumber),
+    ...state.batches.filter(b=>b.startDate?.slice(0,10)===todayStr).map(b=>b.batchNumber)
+  ])].filter(Boolean);
+
+  // Also include batches with DPR entry today (actualQty > 0)
+  const allRelevantBatches = [...new Set([
+    ...todayBatches,
+    ...state.batches.filter(b=>b.actualQty>0).map(b=>b.batchNumber)
+  ])];
+
+  let exceptions = 0;
+  let rows = '';
+
+  allRelevantBatches.forEach(batchNo => {
+    const batch = getBatch(batchNo);
+    if(!batch) return;
+
+    const dprQtyL   = batch.actualQty || 0;
+    const dprBoxes  = dprQtyL > 0 ? lakhToBox(dprQtyL, batch.size) : 0;
+
+    // AIM scans IN for today
+    const aimInToday  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
+    // AIM scans IN total (all time)
+    const aimInTotal  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
+    // Packing scans OUT today
+    const packOutToday = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
+
+    const diff        = aimInToday - dprBoxes;
+    const hasException = dprBoxes === 0 && aimInToday > 0  ? 'NO_DPR'
+                       : aimInToday > dprBoxes             ? 'OVER_SCAN'
+                       : aimInToday < dprBoxes && dprBoxes > 0 ? 'UNDER_SCAN'
+                       : 'OK';
+
+    if(hasException !== 'OK') exceptions++;
+
+    const statusBadge = hasException === 'OK'
+      ? '<span class="badge badge-green">✅ Matched</span>'
+      : hasException === 'NO_DPR'
+      ? '<span class="badge" style="background:rgba(220,38,38,0.12);color:#dc2626;border:1px solid rgba(220,38,38,0.3)">❌ No DPR Entry</span>'
+      : hasException === 'OVER_SCAN'
+      ? `<span class="badge" style="background:rgba(255,171,0,0.12);color:#C55A11;border:1px solid rgba(255,171,0,0.3)">⚠️ Over-scan (+${diff} boxes)</span>`
+      : `<span class="badge" style="background:rgba(59,130,246,0.12);color:#2563eb;border:1px solid rgba(59,130,246,0.3)">📋 Under-scan (${diff} boxes)</span>`;
+
+    rows += `<tr style="${hasException!=='OK'?'background:rgba(220,38,38,0.04)':''}">
+      <td class="td-bold td-mono">${batchNo}</td>
+      <td class="text-sm">${batch.customer||'-'}</td>
+      <td class="td-mono">${batch.size}</td>
+      <td class="td-mono">${dprQtyL>0?fmt(dprQtyL)+'L':'<span style="color:var(--red)">—</span>'}</td>
+      <td class="td-mono">${dprBoxes>0?dprBoxes:'<span style="color:var(--red)">—</span>'}</td>
+      <td class="td-mono fw-bold">${aimInToday}</td>
+      <td class="td-mono">${aimInTotal}</td>
+      <td class="td-mono">${packOutToday}</td>
+      <td>${statusBadge}</td>
+    </tr>`;
+  });
+
+  if(!rows){
+    rows = '<tr><td colspan="9" class="text-center text-muted" style="padding:32px">No batch activity found for today</td></tr>';
+  }
+
+  const summaryColor = exceptions === 0 ? 'var(--green)' : '#dc2626';
+  const html = `<div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div>
+        <div class="section-title" style="color:#dc2626">🚨 Report F — End-of-Day Production vs Scan Reconciliation</div>
+        <div class="text-sm text-muted">Date: ${fmtDate(todayStr)} &nbsp;|&nbsp; Run at close of C Shift</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:28px;font-weight:700;color:${summaryColor}">${exceptions === 0 ? '✅ All Clear' : exceptions+' Exception'+(exceptions>1?'s':'')}</div>
+        <div class="text-sm text-muted">${allRelevantBatches.length} batches reviewed</div>
+      </div>
+    </div>
+
+    ${exceptions > 0 ? `<div class="alert" style="background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.3);border-left:4px solid #dc2626;padding:10px 14px;margin-bottom:16px;font-size:13px">
+      <strong>⚠️ Action Required:</strong> ${exceptions} batch(es) have discrepancies between DPR production entry and AIM scan counts.
+      Please verify DPR entries and scan records before shift sign-off.
+    </div>` : `<div class="alert alert-success" style="margin-bottom:16px">✅ All batch scan counts match DPR production entries.</div>`}
+
+    <div class="tbl-wrap"><table>
+      <thead><tr>
+        <th>Batch No.</th><th>Customer</th><th>Size</th>
+        <th>DPR Qty (L)</th><th>DPR Boxes</th>
+        <th>AIM Scans Today</th><th>AIM Total</th><th>Packed Out Today</th>
+        <th>Status</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+
+    <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="window.print()">🖨️ Print Report</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportReportF()">📥 Export Excel</button>
+      <button class="btn btn-ghost btn-sm" onclick="renderReportF()" style="margin-left:auto">🔄 Refresh</button>
+    </div>
+  </div>`;
+
+  document.getElementById('report-output').innerHTML = html;
+  document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+}
+
+function exportReportF(){
+  const rows = [['Batch No.','Customer','Size','DPR Qty (L)','DPR Boxes','AIM Scans Today','AIM Total','Packed Out Today','Status']];
+  const todayStr = today();
+  const todayScans = state.scans.filter(s=>s.ts?.slice(0,10)===todayStr);
+  const batchNos = [...new Set(todayScans.map(s=>s.batchNumber).concat(state.batches.filter(b=>b.actualQty>0).map(b=>b.batchNumber)))];
+  batchNos.forEach(batchNo=>{
+    const b = getBatch(batchNo); if(!b) return;
+    const dprL = b.actualQty||0, dprBox = dprL>0?lakhToBox(dprL,b.size):0;
+    const aimToday = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
+    const aimTotal = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
+    const packOut  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
+    const status   = dprBox===0&&aimToday>0?'No DPR Entry':aimToday>dprBox?'Over-scan':aimToday<dprBox&&dprBox>0?'Under-scan':'Matched';
+    rows.push([batchNo,b.customer||'',b.size,dprL,dprBox,aimToday,aimTotal,packOut,status]);
+  });
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv,' + encodeURIComponent(csv);
+  a.download = `report_f_${todayStr}.csv`;
+  a.click();
+}
+
 
 function renderReportB(){
   const depts=['aim','printing','pi','packing'];

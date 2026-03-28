@@ -1901,12 +1901,30 @@ async function renderDprAuditLog() {
 // Patch saveToServer to include audit + back-date check
 const _origSaveToServer = saveToServer;
 async function saveToServer() {
-  // Back-date lock for non-admin
+  // Back-date lock for non-admin — with 2-hour shift grace window
   if (dprUser && dprUser.role !== 'admin') {
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
     const selected = document.getElementById('ndate')?.value;
-    if (selected && selected !== today) {
-      alert('⚠️ Back-date editing is not allowed for your role.\nOnly Admin can edit past records.\nYou can view past records but not save changes.');
+    if (selected && selected !== todayStr) {
+      // Check 2-hour grace window for shift changeover
+      // Shifts: A=06:00-14:00, B=14:00-22:00, C=22:00-06:00
+      const h = now.getHours();
+      const yesterdayStr = new Date(now - 86400000).toISOString().split('T')[0];
+      // Grace periods: A shift starts 06:00 — allow B shift (prev day C) edits until 08:00
+      //                B shift starts 14:00 — allow A shift edits until 16:00
+      //                C shift starts 22:00 — allow B shift edits until 00:00
+      // For previous calendar day: only allowed during 22:00-00:00 (C shift grace for yesterday)
+      const isPrevDay = selected === yesterdayStr;
+      const inCShiftGrace = isPrevDay && h >= 0 && h < 2; // midnight to 2am = C shift carrying over
+      if (!inCShiftGrace) {
+        alert('⚠️ Back-date editing is not allowed for your role.\nOnly Admin can edit past records.\nNote: Entries for the previous shift can be made within 2 hours of shift changeover.');
+        return;
+      }
+    }
+    // Also check: non-admin cannot edit future dates
+    if (selected && selected > todayStr) {
+      alert('⚠️ Cannot enter data for future dates.');
       return;
     }
   }

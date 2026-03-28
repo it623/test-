@@ -1003,14 +1003,32 @@ function loadState(){
 // ═══════════════════════════════════════════════════════
 
 function recordScan(labelId, dept, type, operator, parsed){
-  // Primary lookup: by exact id
+  // Primary lookup: by exact system id
   let label = state.labels.find(l=>l.id===labelId);
-  // Secondary lookup: by batchNumber + labelNumber (handles sync edge cases)
+  // Secondary lookup: by batchNumber + labelNumber (handles sync edge cases and manual type-in with box number)
   if(!label && parsed?.batchNumber && parsed?.boxNumber!=null){
     label = state.labels.find(l=>
       l.batchNumber===parsed.batchNumber &&
-      Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
+      Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber) &&
+      !l.voided
     );
+  }
+  // Tertiary lookup: batch number only typed — find next unscanned active box for this dept
+  if(!label && parsed?.batchOnly && parsed?.batchNumber){
+    const batchLabels = state.labels.filter(l=>l.batchNumber===parsed.batchNumber && !l.voided);
+    if(type==='in'){
+      // Find first box not yet scanned IN at this dept
+      label = batchLabels.find(l=>{
+        const scans = getScansForBox(l.id).filter(s=>s.dept===dept);
+        return !scans.some(s=>s.type==='in');
+      });
+    } else {
+      // Find first box scanned IN but not yet scanned OUT at this dept
+      label = batchLabels.find(l=>{
+        const scans = getScansForBox(l.id).filter(s=>s.dept===dept);
+        return scans.some(s=>s.type==='in') && scans.filter(s=>s.type==='out').length < scans.filter(s=>s.type==='in').length;
+      });
+    }
   }
   if(!label) return {ok:false,msg:'Label not found'};
   if(label.voided) return {ok:false,msg:'Label has been voided'};
@@ -1076,7 +1094,8 @@ function autoGenerateOrangeLabel(label, batch){
 }
 
 function parseScanInput(raw){
-  const parts = raw.trim().split('|');
+  const trimmed = raw.trim();
+  const parts = trimmed.split('|');
   if(parts[0]==='SUNLOC'){
     if(parts.length>=6){
       // New format: SUNLOC|BatchNo|BoxNo|Size|Qty|SystemID
@@ -1087,8 +1106,17 @@ function parseScanInput(raw){
       return { labelId:parts[1], batchNumber:parts[2], size:parts[3], qty:parseFloat(parts[4])||0 };
     }
   }
-  // Fallback: treat raw string as labelId directly (manual type-in)
-  return { labelId:raw.trim() };
+  // Manual type-in: "26ZH061-3" → batch + specific box number
+  const dashMatch = trimmed.match(/^([A-Z0-9]+)-(\d+)$/i);
+  if(dashMatch){
+    return { labelId: trimmed, batchNumber: dashMatch[1].toUpperCase(), boxNumber: parseInt(dashMatch[2]) };
+  }
+  // Manual type-in: "26ZH061" alone → find next unscanned box for this batch
+  if(/^[A-Z0-9]{5,12}$/i.test(trimmed)){
+    return { labelId: trimmed, batchNumber: trimmed.toUpperCase(), batchOnly: true };
+  }
+  // Fallback: treat raw string as labelId directly
+  return { labelId: trimmed };
 }
 
 function generateQRData(label){

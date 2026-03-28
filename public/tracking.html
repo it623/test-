@@ -1512,67 +1512,32 @@ function stopCamera(){
 async function scanQRFromVideo(video){
   if(!camStream) return;
 
-  // Pre-load jsQR immediately in background regardless of BarcodeDetector
-  if(typeof jsQR === 'undefined' && !window._jsqrLoading){
-    window._jsqrLoading = true;
-    const s = document.createElement('script');
-    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
-    s.onload = ()=>{ window._jsqrLoading = false; };
-    document.head.appendChild(s);
-  }
-
-  // Wait for video to be ready, then start scanning
-  const startWhenReady = ()=>{
-    if(!camStream) return;
-    if(video.readyState >= 2){ // HAVE_CURRENT_DATA or better
-      beginDetection(video);
+  // Always use jsQR canvas scanning — reliable across all Android browsers
+  // Load jsQR from CDN if not already loaded
+  const doScan = ()=>{
+    if(typeof jsQR !== 'undefined'){
+      startCanvasScan(video);
     } else {
-      video.addEventListener('canplay', ()=>{ if(camStream) beginDetection(video); }, {once:true});
+      document.getElementById('cam-result').innerHTML=
+        '<span style="color:#ff4060">Camera decode unavailable — please type label ID manually.</span>';
+      document.getElementById('cam-result').classList.remove('hidden');
     }
   };
 
-  // Small delay to let camera stabilise
-  setTimeout(startWhenReady, 600);
-}
-
-function beginDetection(video){
-  if(!camStream) return;
-
-  // Try BarcodeDetector — but only if it actually works (test with a quick probe)
-  if('BarcodeDetector' in window){
-    try{
-      const detector = new BarcodeDetector({formats:['qr_code']});
-      let failCount = 0;
-      const detect = async()=>{
-        if(!camStream) return;
-        try{
-          const codes = await detector.detect(video);
-          if(codes.length){
-            stopCamera();
-            if(scanCallback) scanCallback(codes[0].rawValue);
-            return;
-          }
-          failCount = 0; // reset on successful (but empty) detection
-        }catch(e){
-          failCount++;
-          // If BarcodeDetector throws 5 times, it's broken on this device — switch to jsQR
-          if(failCount >= 5){
-            startCanvasScan(video);
-            return;
-          }
-        }
-        requestAnimationFrame(detect);
-      };
-      requestAnimationFrame(detect);
-      return;
-    }catch(e){
-      // BarcodeDetector construction failed — fall through to jsQR
-    }
+  if(typeof jsQR !== 'undefined'){
+    // Already loaded — start immediately after short stabilise delay
+    setTimeout(()=>{ if(camStream) startCanvasScan(video); }, 400);
+  } else {
+    // Load jsQR then start
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+    s.onload = ()=>{ if(camStream) startCanvasScan(video); };
+    s.onerror = ()=>{ doScan(); }; // shows error if CDN unreachable
+    document.head.appendChild(s);
   }
-
-  // jsQR canvas fallback
-  startCanvasScan(video);
 }
+
+// beginDetection removed — using jsQR directly via startCanvasScan
 
 function startCanvasScan(video){
   if(!camStream) return;
@@ -2167,30 +2132,43 @@ function processScanInput(dept,type){
     (async ()=>{
       let retry = {ok:false, msg:'Label not found'};
       try{
-        // Step 1: full server sync
-        await pullFromServer();
-        retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
+        // Direct targeted fetch — get this specific label from server
+        // More reliable than full pullFromServer which may re-render page
+        const params = new URLSearchParams();
+        if(parsed.labelId) params.set('id', parsed.labelId);
+        if(parsed.batchNumber) params.set('batchNumber', parsed.batchNumber);
+        if(parsed.boxNumber!=null) params.set('labelNumber', parsed.boxNumber);
 
-        // Step 2: if still not found, direct label fetch by id + batchNumber+labelNumber
-        if(!retry.ok && retry.msg==='Label not found'){
-          const params = new URLSearchParams();
-          if(parsed.labelId) params.set('id', parsed.labelId);
-          if(parsed.batchNumber) params.set('batchNumber', parsed.batchNumber);
-          if(parsed.boxNumber!=null) params.set('labelNumber', parsed.boxNumber);
-          const r = await fetch(serverUrl+'/api/tracking/label?'+params,{signal:AbortSignal.timeout(5000)});
-          const j = await r.json();
-          if(j.ok && j.label){
-            const nl = normLabel(j.label);
-            if(!state.labels.find(l=>l.id===nl.id)) state.labels.push(nl);
+        const r = await fetch(serverUrl+'/api/tracking/label?'+params,
+          {signal:AbortSignal.timeout(8000)});
+        const j = await r.json();
+
+        if(j.ok && j.label){
+          // Add label to local state
+          const nl = normLabel(j.label);
+          const existing = state.labels.findIndex(l=>l.id===nl.id);
+          if(existing>=0) state.labels[existing]=nl;
+          else state.labels.push(nl);
+          saveLocal();
+          retry = recordScan(nl.id, dept, type, currentDept, parsed);
+        } else {
+          // Label not on server either — also try full sync as last resort
+          const sr = await fetch(serverUrl+'/api/tracking/state',
+            {signal:AbortSignal.timeout(8000)});
+          const sj = await sr.json();
+          if(sj.ok && sj.state){
+            const normLabels = (sj.state.labels||[]).map(normLabel);
+            const serverIds = new Set(normLabels.map(l=>l.id));
+            const localOnly = state.labels.filter(l=>!serverIds.has(l.id));
+            state.labels = [...normLabels, ...localOnly];
             saveLocal();
-            retry = recordScan(nl.id, dept, type, currentDept, parsed);
+            retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
           }
         }
       }catch(e){
-        // Network or other error — show whatever result we have
-        retry = retry.ok ? retry : {ok:false, msg:'Sync failed — check connection and try again'};
+        retry = {ok:false, msg:'Cannot reach server — check connection'};
       }
-      // Always update UI — never leave stuck on "Syncing..."
+      // Always update UI — never stuck
       if(retry.ok){
         zoneEl.className='scan-zone success';
         const warnHtml = retry.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${retry.warning}</div>` : '';

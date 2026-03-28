@@ -707,51 +707,6 @@ app.get('/api/tracking/state', (req, res) => {
 });
 
 /**
- * GET /api/tracking/label
- * Direct label lookup by id OR by batchNumber+labelNumber
- * Used by scanning to find labels from QR code data
- */
-app.get('/api/tracking/label', (req, res) => {
-  const { id, batchNumber, labelNumber } = req.query;
-  if (!USE_POSTGRES) {
-    let label = null;
-    if (id) {
-      label = db.prepare('SELECT * FROM tracking_labels WHERE id = ?').get(id);
-    }
-    if (!label && batchNumber && labelNumber != null) {
-      label = db.prepare(
-        'SELECT * FROM tracking_labels WHERE batch_number = ? AND ABS(label_number) = ABS(?)'
-      ).get(batchNumber, parseInt(labelNumber));
-    }
-    res.json({ ok: true, label: label || null });
-  } else {
-    if (id) {
-      db.query('SELECT * FROM tracking_labels WHERE id = $1', [id], (err, result) => {
-        if (!err && result?.rows[0]) return res.json({ ok: true, label: result.rows[0] });
-        // Try by batchNumber+labelNumber if id not found
-        if (batchNumber && labelNumber != null) {
-          db.query(
-            'SELECT * FROM tracking_labels WHERE batch_number = $1 AND ABS(label_number) = ABS($2)',
-            [batchNumber, parseInt(labelNumber)],
-            (err2, result2) => res.json({ ok: true, label: result2?.rows[0] || null })
-          );
-        } else {
-          res.json({ ok: true, label: null });
-        }
-      });
-    } else if (batchNumber && labelNumber != null) {
-      db.query(
-        'SELECT * FROM tracking_labels WHERE batch_number = $1 AND ABS(label_number) = ABS($2)',
-        [batchNumber, parseInt(labelNumber)],
-        (err, result) => res.json({ ok: true, label: result?.rows[0] || null })
-      );
-    } else {
-      res.json({ ok: true, label: null });
-    }
-  }
-});
-
-/**
  * GET /api/tracking/wip-summary
  * Returns WIP counts per batch for Planning app dashboard
  */

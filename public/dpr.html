@@ -372,6 +372,7 @@ input[type=number]{font-family:var(--mono);text-align:right}
   <div class="card"><div class="card-title">Shift Incharge Scorecard</div><div id="perfTable"></div></div>
   <div class="card"><div class="card-title">Incharge vs Efficiency (last 30 days)</div><div class="chart-wrap-lg"><canvas id="ch-perf"></canvas></div></div>
   <div class="card"><div class="card-title">👤 Operator-wise Performance</div><div id="operatorPerfSection"><p style="color:var(--t3);font-size:12px">Loading...</p></div></div>
+  <div class="card"><div class="card-title">🏭 Shift Personnel Performance</div><div id="shiftPersonnelSection"><p style="color:var(--t3);font-size:12px">Loading...</p></div></div>
 </div>
 
 <!-- ═══ HISTORY ═══════════════════════════════════════════ -->
@@ -420,6 +421,12 @@ input[type=number]{font-family:var(--mono);text-align:right}
     <div class="card-title">Machine Targets (per shift)</div>
     <div id="targetSettings"></div>
   </div>
+  <div class="card" id="machine-mgmt-card">
+    <div class="section-title" style="margin-bottom:12px">Machine Management</div>
+    <div class="section-sub" style="margin-bottom:12px">Enable or disable machines per floor. Disabled machines are hidden from entry and analytics. Admin only.</div>
+    <div id="machine-settings-area"></div>
+  </div>
+
   <div class="card">
     <div class="card-title">Data Management</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -461,12 +468,36 @@ const FLOORS = {
     {id:'MC26',sz:'#0'},{id:'MC27',sz:'#1'},{id:'MC28',sz:'#2'}
   ]}
 };
+
+// Machine operator groups — one operator entry covers all machines in a group
+// Multiple operators allowed per group
+const MC_GROUPS = {
+  GF: [
+    { label:'MC 29 & 30',     machines:['MC29','MC30'] },
+    { label:'MC 31, 32 & 33', machines:['MC31','MC32','MC33'] },
+    { label:'MC 34',          machines:['MC34'] },
+    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
+  ],
+  '1F': [
+    { label:'MC 14, 15 & 16', machines:['MC14','MC15','MC16'] },
+  ],
+  '2F': [
+    { label:'MC 23, 24 & 25', machines:['MC23','MC24','MC25'] },
+    { label:'MC 26, 27 & 28', machines:['MC26','MC27','MC28'] },
+  ],
+};
+
 const SHIFTS = ['A','B','C'];
 const DT_CATS = ['proc','mech','elec','gpr','hvac','dw'];
 const DT_LABELS = {proc:'Process',mech:'Mech',elec:'Elect',gpr:'GPR',hvac:'HVAC',dw:'Dish Wash'};
-const RESORT_REASONS = ['Colour Mismatch','Size Variation','Cap Body Separation','Dents/Deformity',
+const RESORT_REASONS = [
+  'Colour Mismatch','Size Variation','Cap Body Separation','Dents/Deformity',
   'Printing Defect','Fill Weight Deviation','Leakage','Contamination','Sealing Defect',
-  'Telescoping','Holes/Cracks','Moisture','Other'];
+  'Telescoping','Holes/Cracks','Moisture',
+  'Stripper','Pin Hole','Oil Hole','Loose Cap','Loose Body','Double Cap',
+  'Fibre Cut','Rough Cut','Uncut','Thin Body','Dent','Dot on Dome',
+  'Bubble','Oil Spot','Black Particle','Bad Dip',
+  'Other'];
 const CHART_COLORS = ['#00d4ff','#00e676','#ffab00','#ff4060','#b388ff','#1de9b6','#ff6d00','#80deea'];
 
 // ═══════════════════════════════════════════════════════
@@ -502,10 +533,70 @@ function tgt(fl,mcId){ return parseFloat(targets[`${fl}_${mcId}`]||8); }
 //   operator: string — operator name
 //   DT fields: proc, mech, elec, gpr, hvac, dw — stay at machine level
 function blankRun(){ return {orderId:'', batchNumber:'', qty:'', note:''}; }
+// Machine availability — admin managed per floor
+function getActiveMachines(fl){
+  try{
+    const saved=localStorage.getItem('dpr_active_machines');
+    const cfg=saved?JSON.parse(saved):{};
+    const all=FLOORS[fl]?FLOORS[fl].machines:[];
+    if(!cfg[fl]||cfg[fl].length===0) return all; // default: all active
+    return all.filter(m=>cfg[fl].includes(m.id));
+  }catch{ return FLOORS[fl]?FLOORS[fl].machines:[]; }
+}
+
+function setMachineActive(fl, mcId, active){
+  try{
+    const saved=localStorage.getItem('dpr_active_machines');
+    const cfg=saved?JSON.parse(saved):{};
+    if(!cfg[fl]) cfg[fl]=getActiveMachines(fl).map(m=>m.id);
+    if(active){ if(!cfg[fl].includes(mcId)) cfg[fl].push(mcId); }
+    else { cfg[fl]=cfg[fl].filter(id=>id!==mcId); }
+    localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
+  }catch{}
+}
+
+function resetAllMachinesActive(fl){
+  try{
+    const saved=localStorage.getItem('dpr_active_machines');
+    const cfg=saved?JSON.parse(saved):{};
+    cfg[fl]=getActiveMachines(fl).map(m=>m.id);
+    localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
+  }catch{}
+}
+
+function renderMachineSettings(){
+  const container=document.getElementById('machine-settings-area');
+  if(!container) return;
+  let html='';
+  Object.entries(FLOORS).forEach(([fl,flData])=>{
+    const active=getActiveMachines(fl).map(m=>m.id);
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">
+        ${flData.label}
+        <button onclick="resetAllMachinesActive('${fl}');renderMachineSettings();renderEntry()"
+          style="margin-left:8px;font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${flData.machines.map(m=>{
+          const on=active.includes(m.id);
+          return `<label style="display:flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid ${on?'var(--accent)':'var(--b2)'};border-radius:4px;cursor:pointer;background:${on?'rgba(0,212,255,0.08)':'transparent'}">
+            <input type="checkbox" ${on?'checked':''} onchange="setMachineActive('${fl}','${m.id}',this.checked);renderMachineSettings();renderEntry()" style="accent-color:var(--accent)">
+            <span style="font-family:var(--mono);font-size:12px;color:${on?'var(--accent)':'var(--t2)'}">${m.id}</span>
+            <span style="font-size:10px;color:var(--t3)">${m.sz}</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`;
+  });
+  container.innerHTML=html;
+}
+
 function blankMachine(){ return {runs:[blankRun()], aim:'', operator:'', proc:'', mech:'', elec:'', gpr:'', hvac:'', dw:''}; }
 function blankShift(fl){
-  const s={incharge:'',fitter:'',chemist:'',machines:{}};
-  FLOORS[fl].machines.forEach(m=>s.machines[m.id]=blankMachine());
+  const s={incharge:'',fitter:'',chemist:'',
+    electrical:[],utility:[],aim_staff:[],gpr_staff:[],
+    machines:{}};
+  getActiveMachines(fl).forEach(m=>s.machines[m.id]=blankMachine());
   return s;
 }
 
@@ -531,7 +622,7 @@ function loadDay(fl,d){
     // ensure all machines exist
     SHIFTS.forEach(s=>{
       if(!p.shifts[s]) p.shifts[s]=blankShift(fl);
-      FLOORS[fl].machines.forEach(m=>{
+      getActiveMachines(fl).forEach(m=>{
         if(!p.shifts[s].machines[m.id]) p.shifts[s].machines[m.id]=blankMachine();
       });
     });
@@ -556,10 +647,17 @@ function collectForm(){
     day.shifts[sh].incharge=v(`si-${sh}-incharge`)||'';
     day.shifts[sh].fitter=v(`si-${sh}-fitter`)||'';
     day.shifts[sh].chemist=v(`si-${sh}-chemist`)||'';
-    FLOORS[fl].machines.forEach(mc=>{
+    day.shifts[sh].electrical=getMultiStaff(sh,'electrical');
+    day.shifts[sh].utility=getMultiStaff(sh,'utility');
+    day.shifts[sh].aim_staff=getMultiStaff(sh,'aim_staff');
+    day.shifts[sh].gpr_staff=getMultiStaff(sh,'gpr_staff');
+    getActiveMachines(fl).forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       m.aim=v(`aim-${sh}-${mc.id}`)||'';
       m.operator=v(`op-${sh}-${mc.id}`)||'';
+      // Collect group operators (stored on each machine in the group)
+      const grpOps=collectGroupOperators(sh,fl,mc.id);
+      if(grpOps!==null) m.operators=grpOps;
       DT_CATS.forEach(c=>{ m[c]=v(`dt-${sh}-${mc.id}-${c}`)||''; });
       // Collect all runs from DOM
       const runEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
@@ -587,7 +685,7 @@ function v(id){ const el=document.getElementById(id); return el?el.value:''; }
 // ═══════════════════════════════════════════════════════
 function calcDayStats(fl,d){
   const day=loadDay(fl,d);
-  const mcs=FLOORS[fl].machines;
+  const mcs=getActiveMachines(fl);
   let totTgt=0,totProd=0,totAim=0,totResort=0,totDT=0;
   SHIFTS.forEach(sh=>{
     mcs.forEach(mc=>{
@@ -607,11 +705,16 @@ function calcDayStats(fl,d){
 
 function calcShiftDT(fl,d,sh){
   const day=loadDay(fl,d);
-  const mcs=FLOORS[fl].machines;
+  const mcs=getActiveMachines(fl);
   const cats={proc:0,mech:0,elec:0,gpr:0,hvac:0,dw:0};
   mcs.forEach(mc=>{
-    const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-    DT_CATS.forEach(c=>cats[c]+=parseFloat(m[c]||0));
+    DT_CATS.forEach(c=>{
+      // Prefer live DOM value (unsaved entry), fall back to stored data
+      const liveEl=document.getElementById(`dt-${sh}-${mc.id}-${c}`);
+      const val=liveEl ? parseFloat(liveEl.value||0)
+                       : parseFloat((migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine()))[c]||0);
+      cats[c]+=val;
+    });
   });
   const total=Object.values(cats).reduce((a,b)=>a+b,0);
   const dtPct=mcs.length>0?(total/(480*mcs.length)*100):0;
@@ -857,6 +960,106 @@ function clearServerUrl(){
 // ═══════════════════════════════════════════════════════
 // RENDER — DATA ENTRY
 // ═══════════════════════════════════════════════════════
+// Build ordered list of all navigable qty/aim inputs in the shift table
+function getDprNavCells(sh){
+  const fl=curFloor;
+  const mcs=getActiveMachines(fl);
+  const cells=[];
+  mcs.forEach(mc=>{
+    const qty=document.querySelector(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"] input[id^="run-qty-"]`);
+    const aim=document.getElementById(`aim-${sh}-${mc.id}`);
+    if(qty) cells.push(qty);
+    if(aim) cells.push(aim);
+  });
+  return cells;
+}
+
+function dprTableNav(e, sh){
+  if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='Enter') return;
+  e.preventDefault();
+  const cells=getDprNavCells(sh);
+  const idx=cells.indexOf(e.target);
+  if(idx<0) return;
+  if((e.key==='ArrowDown'||e.key==='Enter') && idx<cells.length-1){
+    cells[idx+1].focus(); cells[idx+1].select();
+  }
+  if(e.key==='ArrowUp' && idx>0){
+    cells[idx-1].focus(); cells[idx-1].select();
+  }
+}
+
+function dprQtyNav(e, sh, mcId){
+  dprTableNav(e, sh);
+}
+
+function dprAimNav(e, sh, mcId){
+  dprTableNav(e, sh);
+}
+
+function getGroupForMachine(fl, mcId){
+  return (MC_GROUPS[fl]||[]).find(g=>g.machines.includes(mcId))||null;
+}
+
+function collectGroupOperators(sh, fl, mcId){
+  const grp = getGroupForMachine(fl, mcId);
+  if(!grp) return null;
+  const grpKey = grp.machines[0]; // use first MC as group key
+  if(mcId !== grpKey) return null; // only collect from first MC
+  const container = document.getElementById(`grp-ops-${sh}-${grpKey}`);
+  if(!container) return null;
+  return Array.from(container.querySelectorAll('.grp-op-input'))
+    .map(el=>el.value.trim()).filter(Boolean);
+}
+
+function addGroupOperator(sh, mcId){
+  const container = document.getElementById(`grp-ops-${sh}-${mcId}`);
+  if(!container) return;
+  const div = document.createElement('div');
+  div.style.cssText='display:flex;gap:3px;margin-bottom:2px';
+  div.innerHTML=`<input class="grp-op-input" type="text" placeholder="Operator name"
+    style="flex:1;font-size:11px" oninput="markUnsaved()">
+    <button onclick="this.parentElement.remove();markUnsaved()"
+      style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:12px">✕</button>`;
+  container.appendChild(div);
+  div.querySelector('input').focus();
+}
+
+function getMultiStaff(sh, role){
+  const container = document.getElementById(`ms-${sh}-${role}`);
+  if(!container) return [];
+  return Array.from(container.querySelectorAll('.ms-input'))
+    .map(el=>el.value.trim()).filter(Boolean);
+}
+
+function renderMultiStaff(sh, role, label, values){
+  const vals = (values&&values.length) ? values : [''];
+  return `<div class="field-grp" id="ms-${sh}-${role}">
+    <label>${label}</label>
+    ${vals.map((v,i)=>`<div style="display:flex;gap:4px;margin-bottom:3px">
+      <input class="ms-input" type="text" value="${esc(v)}" placeholder="Name"
+        style="flex:1" oninput="markUnsaved()">
+      ${i===0?`<button onclick="addStaffName('${sh}','${role}')" style="background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);font-size:11px;padding:2px 6px;cursor:pointer" title="Add another">+</button>`
+             :`<button onclick="removeStaffName(this)" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 4px">✕</button>`}
+    </div>`).join('')}
+  </div>`;
+}
+
+function addStaffName(sh, role){
+  const container = document.getElementById(`ms-${sh}-${role}`);
+  if(!container) return;
+  const div = document.createElement('div');
+  div.style.cssText='display:flex;gap:4px;margin-bottom:3px';
+  div.innerHTML=`<input class="ms-input" type="text" placeholder="Name" style="flex:1" oninput="markUnsaved()">
+    <button onclick="removeStaffName(this)" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 4px">✕</button>`;
+  container.appendChild(div);
+  div.querySelector('input').focus();
+}
+
+function removeStaffName(btn){
+  btn.parentElement.remove();
+  markUnsaved();
+}
+
 function renderEntry(){
   renderDayKpis();
   renderShifts();
@@ -885,7 +1088,7 @@ function renderDayKpis(){
 function renderShifts(){
   const fl=curFloor, d=getDate();
   const day=loadDay(fl,d);
-  const mcs=FLOORS[fl].machines;
+  const mcs=getActiveMachines(fl);
   let html='';
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
@@ -899,10 +1102,17 @@ function renderShifts(){
         <span class="shift-badge ${hasData?'done':'pending'}">${hasData?'DATA ENTERED':'PENDING'}</span>
       </div>
       <div class="shift-body open" id="sb-${sh}">
-        <div class="staff-row">
+        <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px">
           <div class="field-grp"><label>Process Incharge</label><input type="text" id="si-${sh}-incharge" value="${esc(sd.incharge||'')}" placeholder="Name" oninput="markUnsaved()"></div>
-          ${fl==='GF'?`<div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>`:`<div class="field-grp"></div>`}
           <div class="field-grp"><label>Shift Chemist</label><input type="text" id="si-${sh}-chemist" value="${esc(sd.chemist||'')}" placeholder="Name" oninput="markUnsaved()"></div>
+          ${fl==='GF'?`<div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>`:`<div class="field-grp"></div>`}
+          <div class="field-grp"></div>
+        </div>
+        <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px">
+          ${renderMultiStaff(sh,'electrical','Shift Electrical',sd.electrical||[])}
+          ${renderMultiStaff(sh,'utility','Shift Utility',sd.utility||[])}
+          ${renderMultiStaff(sh,'aim_staff','Shift AIM',sd.aim_staff||[])}
+          ${renderMultiStaff(sh,'gpr_staff','Shift GPR',sd.gpr_staff||[])}
         </div>
         <div class="mtable-wrap"><table class="mtable">
           <thead><tr>
@@ -927,7 +1137,7 @@ function renderShifts(){
       const p=mcTotalProd(m);
       const a=parseFloat(m.aim||0);
       const vs=p>0?p-t:null;
-      const bl=a>0?Math.max(0,a-p):null;
+      const bl=p>0?Math.max(0,p-a):null;
       shTgt+=t; shProd+=p; shAim+=a;
       const mcResort=(day.resort||[]).filter(r=>r.mc===mc.id&&r.shift===sh).reduce((s,r)=>s+parseFloat(r.qty||0),0);
       shResort+=mcResort;
@@ -946,16 +1156,41 @@ function renderShifts(){
               ${ordOpts}
             </select>
             <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" title="Type batch number if not in dropdown" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
-            <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:54px;font-size:11px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" title="Production in Lakhs">
+            <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" step="0.01" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprQtyNav(event,'${sh}','${mc.id}')" title="Production in Lakhs">
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
           </div>`;
       });
 
-      html+=`<tr id="mcrow-${sh}-${mc.id}">
+      // Group operator row — rendered before first machine in group
+      const grp = getGroupForMachine(fl, mc.id);
+      const isFirstInGrp = grp && grp.machines[0]===mc.id;
+      const isInGrp = !!grp;
+      if(isFirstInGrp){
+        const grpOps = (m.operators&&m.operators.length) ? m.operators : [''];
+        html+=`<tr style="background:rgba(30,200,255,0.04);border-top:2px solid var(--b2)">
+          <td colspan="3" style="padding:6px 8px">
+            <div style="font-family:var(--fc);font-size:10px;letter-spacing:.6px;color:var(--accent);margin-bottom:4px">
+              OPERATORS — ${grp.label}
+            </div>
+            <div id="grp-ops-${sh}-${mc.id}">
+              ${grpOps.map((op,oi)=>`<div style="display:flex;gap:3px;margin-bottom:2px">
+                <input class="grp-op-input" type="text" value="${esc(op)}" placeholder="Operator name"
+                  style="flex:1;font-size:11px" oninput="markUnsaved()">
+                ${oi===0?`<button onclick="addGroupOperator('${sh}','${mc.id}')"
+                  style="background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);font-size:11px;padding:2px 6px;cursor:pointer">+</button>`
+                 :`<button onclick="this.parentElement.remove();markUnsaved()"
+                  style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:12px">✕</button>`}
+              </div>`).join('')}
+            </div>
+          </td>
+          <td colspan="7"></td>
+        </tr>`;
+      }
+      html+=`<tr id="mcrow-${sh}-${mc.id}" ${isInGrp&&!isFirstInGrp?'style="border-top:1px dashed rgba(30,38,56,.6)"':''}>
         <td><span class="mc-num">${mc.id.replace('MC','')}</span></td>
         <td><span class="mc-sz">${mc.sz}</span></td>
-        <td><input type="text" id="op-${sh}-${mc.id}" value="${esc(m.operator||'')}" placeholder="Operator" style="width:90px;font-size:11px" oninput="markUnsaved()"></td>
+        <td style="color:var(--t3);font-size:10px">${isInGrp?'↑ group':''}</td>
         <td>
           <div id="runs-${sh}-${mc.id}">${runsHtml}</div>
           <button onclick="addRun('${sh}','${mc.id}')" style="margin-top:5px;padding:2px 8px;background:transparent;border:1px dashed var(--b2);border-radius:3px;color:var(--t3);font-size:10px;font-family:var(--fc);letter-spacing:.5px;cursor:pointer" title="Add another batch/colour change run">+ Add Run</button>
@@ -963,7 +1198,7 @@ function renderShifts(){
         <td class="r" style="font-family:var(--mono);color:var(--t2)">${t}</td>
         <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${p||'—'}</td>
         <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`}</td>
-        <td><input type="number" id="aim-${sh}-${mc.id}" value="${m.aim||''}" placeholder="0" min="0" style="width:52px" oninput="markUnsaved();updateBacklog('${sh}','${mc.id}')"></td>
+        <td><input type="number" id="aim-${sh}-${mc.id}" value="${m.aim||''}" placeholder="0" min="0" style="width:52px" step="0.01" oninput="markUnsaved();updateBacklog('${sh}','${mc.id}');updateShiftTotals('${sh}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprAimNav(event,'${sh}','${mc.id}')">  </td>
         <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);color:var(--amber)">${bl===null?'—':bl}</td>
         <td class="r" style="font-family:var(--mono);color:var(--red)">${mcResort||`<span style="color:var(--t3)">0</span>`}</td>
       </tr>`;
@@ -975,7 +1210,7 @@ function renderShifts(){
       <td class="r" style="font-family:var(--mono)">${shTgt}</td>
       <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
       <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
-      <td class="r" style="font-family:var(--mono)">${shAim||'—'}</td>
+      <td class="r" id="shaim-${sh}" style="font-family:var(--mono)">${shAim||'—'}</td>
       <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
       <td></td>
     </tr></tfoot></table></div></div></div>`;
@@ -1009,7 +1244,7 @@ function addRun(sh, mcId){
       ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
       <select id="run-ord-${sh}-${mcId}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mcId}',${ri})" title="Select active order">${ordOpts}</select>
       <input type="text" id="run-batch-${sh}-${mcId}-${ri}" placeholder="Batch #" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
-      <input type="number" id="run-qty-${sh}-${mcId}-${ri}" placeholder="Qty" min="0" style="width:54px;font-size:11px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved();updateMcTotals('${sh}','${mcId}')" title="Production in Lakhs">
+      <input type="number" id="run-qty-${sh}-${mcId}-${ri}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" oninput="markUnsaved();updateMcTotals('${sh}','${mcId}')" title="Production in Lakhs">
       <input type="text" id="run-note-${sh}-${mcId}-${ri}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()">
       <button onclick="removeRun('${sh}','${mcId}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>
     `;
@@ -1081,7 +1316,25 @@ function updateMcTotals(sh, mcId){
   }
   if(vsEl) vsEl.innerHTML=vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`;
   updateBacklog(sh, mcId);
+  // Update shift total live
+  updateShiftTotals(sh);
   renderDayKpis();
+}
+
+function updateShiftTotals(sh){
+  const fl=curFloor;
+  const mcs=getActiveMachines(fl);
+  let shProd=0, shAim=0;
+  mcs.forEach(mc=>{
+    const runEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"] input[id^="run-qty-"]`);
+    runEls.forEach(el=>shProd+=parseFloat(el.value||0));
+    const aimEl=document.getElementById(`aim-${sh}-${mc.id}`);
+    shAim+=parseFloat(aimEl?.value||0);
+  });
+  const totEl=document.getElementById(`shtot-${sh}`);
+  if(totEl) totEl.textContent=shProd||'—';
+  const aimEl=document.getElementById(`shaim-${sh}`);
+  if(aimEl) aimEl.textContent=shAim||'—';
 }
 
 function updateBacklog(sh,mcId){
@@ -1090,7 +1343,7 @@ function updateBacklog(sh,mcId){
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
   const a=parseFloat(document.getElementById(`aim-${sh}-${mcId}`)?.value||0);
-  // Backlog = production - AIM (positive means capsules still pending AIM)
+  // Backlog = Production - AIM (positive = capsules still waiting for AIM)
   const bl=total>0?Math.max(0,total-a):null;
   const el=document.getElementById(`bl-${sh}-${mcId}`);
   if(el){
@@ -1101,7 +1354,7 @@ function updateBacklog(sh,mcId){
 
 function renderDTTable(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  const mcs=FLOORS[fl].machines;
+  const mcs=getActiveMachines(fl);
   let html=`<table class="dttable"><thead><tr><th>Machine</th>`;
   SHIFTS.forEach(sh=>DT_CATS.forEach(c=>html+=`<th>${sh}/${DT_LABELS[c].substring(0,4)}</th>`));
   html+=`</tr></thead><tbody>`;
@@ -1120,44 +1373,86 @@ function renderDTTable(){
 
 function renderDTSummary(){
   const fl=curFloor, d=getDate();
-  const mcs=FLOORS[fl].machines;
-  let html=`<table class="dttable"><thead><tr><th>Shift</th>`;
-  DT_CATS.forEach(c=>html+=`<th>${DT_LABELS[c]}</th>`);
-  html+=`<th style="color:var(--amber)">Total</th><th style="color:var(--amber)">DT %</th></tr></thead><tbody>`;
+  const mcs=getActiveMachines(fl);
   let dayTotals={proc:0,mech:0,elec:0,gpr:0,hvac:0,dw:0,total:0};
-  SHIFTS.forEach(sh=>{
+  // Render one card per shift + a day total card
+  let html='<div style="display:flex;flex-direction:column;gap:0">';
+  SHIFTS.forEach((sh,si)=>{
     const s=calcShiftDT(fl,d,sh);
     DT_CATS.forEach(c=>dayTotals[c]+=s[c]);
     dayTotals.total+=s.total;
-    html+=`<tr><td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>`;
-    DT_CATS.forEach(c=>html+=`<td><input type="number" id="dts-${sh}-${c}" value="${s[c]||''}" placeholder="0" style="width:55px" oninput="markUnsaved()"></td>`);
-    html+=`<td class="dt-pct">${s.total||'—'}</td><td class="dt-pct">${s.total>0?s.dtPct.toFixed(1)+'%':'—'}</td></tr>`;
+    const clr=s.total===0?'var(--t3)':s.dtPct<5?'var(--green)':s.dtPct<10?'var(--amber)':'var(--red)';
+    html+=`<div style="border:2px solid var(--b2);${si>0?'border-top:3px solid var(--b1)':'border-radius:6px 6px 0 0'};padding:0;overflow:hidden">
+      <div style="background:var(--s2);padding:6px 12px;display:flex;align-items:center;gap:12px;border-bottom:2px solid var(--b1)">
+        <span style="font-family:var(--fc);font-size:13px;font-weight:700;color:var(--cyan);letter-spacing:.8px">SHIFT ${sh}</span>
+        <span style="font-family:var(--mono);font-size:12px;color:${clr}">Total: ${s.total||'0'} min</span>
+        <span style="font-family:var(--mono);font-size:12px;color:${clr}">${s.total>0?s.dtPct.toFixed(1)+'% DT':''}</span>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr>${DT_CATS.map(c=>`<th style="padding:5px 8px;font-size:10px;letter-spacing:.5px;color:var(--t3);font-family:var(--fc);border-right:1px solid var(--b1);text-align:center">${DT_LABELS[c]}</th>`).join('')}</tr></thead>
+        <tbody><tr>${DT_CATS.map(c=>`<td style="padding:4px 6px;border-right:1px solid var(--b1);text-align:center">
+          <input type="number" id="dts-${sh}-${c}" value="${s[c]||''}" placeholder="0"
+            style="width:60px;font-size:13px;font-family:var(--mono);text-align:center"
+            oninput="markUnsaved();updateDTSummary()">
+        </td>`).join('')}</tr></tbody>
+      </table>
+    </div>`;
   });
+  // Day total
   const dayDtPct=mcs.length>0?(dayTotals.total/(480*mcs.length*3)*100):0;
-  html+=`<tr class="tot-row"><td>DAY TOTAL</td>`;
-  DT_CATS.forEach(c=>html+=`<td style="color:var(--amber);font-family:var(--mono)">${dayTotals[c]||'—'}</td>`);
-  html+=`<td style="color:var(--amber);font-family:var(--mono)">${dayTotals.total||'—'}</td><td style="color:var(--amber);font-family:var(--mono)">${dayTotals.total>0?dayDtPct.toFixed(1)+'%':'—'}</td></tr>`;
-  html+=`</tbody></table>`;
-  document.getElementById('dtSumTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
+  html+=`<div style="border:2px solid var(--accent);border-top:3px solid var(--accent);border-radius:0 0 6px 6px;padding:8px 12px;background:rgba(0,212,255,0.04)">
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <span style="font-family:var(--fc);font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.8px">DAY TOTAL</span>
+      ${DT_CATS.map(c=>`<span style="font-size:11px;color:var(--t2)"><span style="color:var(--t3);font-family:var(--fc);font-size:9px;letter-spacing:.5px">${DT_LABELS[c]}: </span><b style="font-family:var(--mono);color:var(--amber)">${dayTotals[c]||'0'}</b></span>`).join('')}
+      <span style="font-size:12px;font-family:var(--mono);color:var(--amber);font-weight:700">${dayTotals.total||'0'} min total</span>
+      <span style="font-size:12px;font-family:var(--mono);color:${dayDtPct>10?'var(--red)':dayDtPct>5?'var(--amber)':'var(--green)'}">${dayTotals.total>0?dayDtPct.toFixed(1)+'% DT':''}</span>
+    </div>
+  </div>`;
+  html+='</div>';
+  document.getElementById('dtSumTable').innerHTML=html;
 }
 function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
 
 function renderRemarks(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const rem=day.remarks||[];
-  if(rem.length===0){document.getElementById('remList').innerHTML=`<p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log issues.</p>`;return;}
+  if(rem.length===0){document.getElementById('remList').innerHTML=`<div style="color:var(--t3);font-size:12px;padding:8px">No remarks. Click "+ Add Remark" to log issues.</div>`;return;}
   let html='';
-  rem.forEach((r,i)=>html+=`<div class="remark-row"><span class="rem-shift">Shift ${r.shift}</span><span class="rem-text">${esc(r.text)}</span><button class="btn-sm danger" onclick="deleteRemark(${i})">✕</button></div>`);
+  rem.forEach((r,i)=>{
+    const mcLabel=r.mc?`<span style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:6px">${r.mc}</span>`:'';
+    html+=`<div class="remark-row" style="align-items:flex-start;gap:8px;padding:7px 10px;border-bottom:1px solid var(--b1)">
+      <span class="rem-shift" style="flex-shrink:0">Shift ${r.shift}</span>
+      ${mcLabel}
+      <div style="flex:1;min-width:0">
+        <textarea id="rem-edit-${i}" style="width:100%;min-height:48px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px 4px;color:var(--t1)" oninput="saveRemarkEdit(${i})" onfocus="this.style.borderColor='var(--cyan)'" onblur="this.style.borderColor='transparent'">${esc(r.text)}</textarea>
+      </div>
+      <button class="btn-sm danger" style="flex-shrink:0" onclick="deleteRemark(${i})">✕</button>
+    </div>`;
+  });
   document.getElementById('remList').innerHTML=html;
 }
+
+function saveRemarkEdit(i){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  const el=document.getElementById(`rem-edit-${i}`);
+  if(!el||!day.remarks[i]) return;
+  day.remarks[i].text=el.value;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  markUnsaved();
+}
 function addRemark(){
+  const fl=curFloor;
+  const mcOpts=`<option value="">— All Machines —</option>`+
+    getActiveMachines(fl).map(m=>`<option value="${m.id}">${m.id} (${m.sz})</option>`).join('');
   openModal('Add Remark',`
     <div class="modal-fgrp"><label>Shift</label><select id="rem-shift" style="width:100%"><option>A</option><option>B</option><option>C</option><option>General</option></select></div>
-    <div class="modal-fgrp"><label>Remark / Issue</label><input type="text" id="rem-text" placeholder="Describe the issue..." style="width:100%"></div>
+    <div class="modal-fgrp"><label>Machine (optional)</label><select id="rem-mc" style="width:100%">${mcOpts}</select></div>
+    <div class="modal-fgrp"><label>Remark / Issue</label><textarea id="rem-text" placeholder="Describe the issue..." style="width:100%;min-height:80px;resize:vertical"></textarea></div>
   `,[
     {label:'Add',cls:'primary',fn:()=>{
       const fl=curFloor,d=getDate(),day=loadDay(fl,d);
-      day.remarks.push({shift:v('rem-shift'),text:v('rem-text'),ts:new Date().toISOString()});
+      const mc=v('rem-mc')||'';
+      day.remarks.push({shift:v('rem-shift'),mc,text:v('rem-text'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
       closeModal();renderRemarks();markUnsaved();
     }},
@@ -1190,7 +1485,7 @@ function renderResort(){
 }
 function addResort(){
   const fl=curFloor;
-  const mcOpts=FLOORS[fl].machines.map(m=>`<option value="${m.id}">${m.id} (${m.sz})</option>`).join('');
+  const mcOpts=getActiveMachines(fl).map(m=>`<option value="${m.id}">${m.id} (${m.sz})</option>`).join('');
   const rsOpts=RESORT_REASONS.map(r=>`<option>${r}</option>`).join('');
   openModal('Add Re-Sort Entry',`
     <div class="modal-fgrp"><label>Machine</label><select id="rs-mc" style="width:100%">${mcOpts}</select></div>
@@ -1225,7 +1520,7 @@ function newChart(id,cfg){ destroyChart(id); const c=document.getElementById(id)
 
 function renderAnalytics(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  const mcs=FLOORS[fl].machines;
+  const mcs=getActiveMachines(fl);
 
   // P vs T
   const pvtData=mcs.map(mc=>{
@@ -1341,7 +1636,7 @@ function renderTrends(){
 // ═══════════════════════════════════════════════════════
 function renderAIM(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  const mcs=FLOORS[fl].machines;
+  const mcs=getActiveMachines(fl);
   let html=`<table class="data-table"><thead><tr><th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th><th>Backlog</th><th>Status</th></tr></thead><tbody>`;
   mcs.forEach(mc=>{
     let prod=0,aim=0;
@@ -1380,13 +1675,168 @@ function renderAIM(){
 // ═══════════════════════════════════════════════════════
 // SHIFT PERFORMANCE
 // ═══════════════════════════════════════════════════════
+function renderShiftPersonnelPerf(){
+  const fl=curFloor;
+  const section=document.getElementById('shiftPersonnelSection');
+  if(!section) return;
+
+  // DT role mapping
+  const ROLE_MAP = {
+    electrical: { label:'Shift Electrical', dtCats:['elec'],       color:'#7FC8F8' },
+    utility:    { label:'Shift Utility',    dtCats:['hvac'],        color:'#A8E6CF' },
+    gpr_staff:  { label:'Shift GPR',        dtCats:['gpr','dw'],    color:'#FFD93D' },
+    aim_staff:  { label:'Shift AIM',        dtCats:[],              color:'#FF6B6B', isAIM:true },
+  };
+
+  // Aggregate stats per role per person across all saved days
+  const personStats = {}; // { name: { role, dtMins:0, dtShifts:0, aimBoxes:0, shiftsWorked:0 } }
+
+  const allKeys = Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
+  allKeys.forEach(k=>{
+    const parts=k.split('_');
+    if(parts[1]!==fl) return;
+    const date=parts[2];
+    const dy=loadDay(fl,date);
+    SHIFTS.forEach(sh=>{
+      const sd=dy.shifts[sh];
+      const dt=calcShiftDT(fl,date,sh);
+      Object.entries(ROLE_MAP).forEach(([roleKey, roleCfg])=>{
+        const names=(sd[roleKey]||[]).filter(n=>n.trim());
+        names.forEach(name=>{
+          if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
+          personStats[name].shiftsWorked++;
+          if(roleCfg.isAIM){
+            // AIM performance: count AIM boxes scanned — use tracking data if available
+            // Fall back to DPR AIM column sum for this shift
+            let aimSum=0;
+            getActiveMachines(fl).forEach(mc=>{
+              const m=migrateMachineData((sd.machines||{})[mc.id]||blankMachine());
+              aimSum+=parseFloat(m.aim||0);
+            });
+            personStats[name].aimBoxes+=aimSum;
+          } else {
+            // DT performance: lower DT = better
+            let roleDT=0;
+            roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
+            personStats[name].dtMins+=roleDT;
+            personStats[name].dtShifts++;
+          }
+        });
+      });
+    });
+  });
+
+  // Also include current day
+  const today=getDate(), todayDay=loadDay(fl,today);
+  SHIFTS.forEach(sh=>{
+    const sd=todayDay.shifts[sh];
+    const dt=calcShiftDT(fl,today,sh);
+    Object.entries(ROLE_MAP).forEach(([roleKey,roleCfg])=>{
+      const names=(sd[roleKey]||[]).filter(n=>n.trim());
+      names.forEach(name=>{
+        if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
+        const already=allKeys.some(k=>k.includes(`_${fl}_${today}`));
+        if(!already){ // avoid double-counting if already saved
+          personStats[name].shiftsWorked++;
+          if(roleCfg.isAIM){
+            let aimSum=0;
+            getActiveMachines(fl).forEach(mc=>{
+              const m=migrateMachineData((sd.machines||{})[mc.id]||blankMachine());
+              aimSum+=parseFloat(m.aim||0);
+            });
+            personStats[name].aimBoxes+=aimSum;
+          } else {
+            let roleDT=0;
+            roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
+            personStats[name].dtMins+=roleDT;
+            personStats[name].dtShifts++;
+          }
+        }
+      });
+    });
+  });
+
+  const entries=Object.entries(personStats);
+  if(entries.length===0){
+    section.innerHTML='<p style="color:var(--t3);font-size:12px">No shift personnel data yet. Add names in the shift staff fields.</p>';
+    return;
+  }
+
+  // Group by role for display
+  const byRole={};
+  entries.forEach(([name,s])=>{
+    if(!byRole[s.role]) byRole[s.role]=[];
+    byRole[s.role].push([name,s]);
+  });
+
+  let html='';
+  Object.entries(ROLE_MAP).forEach(([roleKey,roleCfg])=>{
+    const people=byRole[roleKey];
+    if(!people||people.length===0) return;
+    html+=`<div style="margin-bottom:20px">
+      <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:${roleCfg.color};margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--b2)">
+        ${roleCfg.label.toUpperCase()}
+        ${roleCfg.isAIM?'— scored on AIM lakhs inspected':'— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
+      </div>
+      <table class="data-table"><thead><tr>
+        <th>Name</th>
+        <th>Shifts Worked</th>
+        ${roleCfg.isAIM
+          ?'<th>Total AIM (L)</th><th>Avg AIM/Shift (L)</th>'
+          :'<th>Total DT (min)</th><th>Avg DT/Shift (min)</th><th>DT Score</th>'}
+        <th>Performance</th>
+      </tr></thead><tbody>`;
+
+    // Sort: AIM by most boxes desc, others by least DT asc
+    const sorted=roleCfg.isAIM
+      ? people.sort((a,b)=>b[1].aimBoxes-a[1].aimBoxes)
+      : people.sort((a,b)=>a[1].dtMins-b[1].dtMins);
+
+    sorted.forEach(([name,s])=>{
+      if(roleCfg.isAIM){
+        const avg=s.shiftsWorked>0?(s.aimBoxes/s.shiftsWorked):0;
+        // Score: >5L avg = excellent, >3L = good, else needs improvement
+        const cls=avg>=5?'g':avg>=3?'a':'r';
+        const barW=Math.min(100,avg/5*100).toFixed(0);
+        html+=`<tr>
+          <td style="font-weight:600;color:var(--cyan)">${name}</td>
+          <td class="mono">${s.shiftsWorked}</td>
+          <td class="mono">${s.aimBoxes.toFixed(2)}</td>
+          <td class="mono">${avg.toFixed(2)}</td>
+          <td><div style="background:var(--s3);border-radius:3px;height:8px;width:100px;display:inline-block;vertical-align:middle">
+            <div style="height:100%;width:${barW}%;background:${cls==='g'?'var(--green)':cls==='a'?'var(--amber)':'var(--red)'};border-radius:3px"></div>
+          </div> <span class="pill ${cls}" style="margin-left:4px">${avg>=5?'Excellent':avg>=3?'Good':'Needs Attention'}</span></td>
+        </tr>`;
+      } else {
+        const avgDT=s.dtShifts>0?(s.dtMins/s.dtShifts):0;
+        // Score: avg DT ≤15min = excellent, ≤30 = good, else needs attention
+        const cls=avgDT<=15?'g':avgDT<=30?'a':'r';
+        const barW=Math.min(100,Math.max(0,100-avgDT/60*100)).toFixed(0);
+        html+=`<tr>
+          <td style="font-weight:600;color:var(--cyan)">${name}</td>
+          <td class="mono">${s.shiftsWorked}</td>
+          <td class="mono">${s.dtMins}</td>
+          <td class="mono">${avgDT.toFixed(0)}</td>
+          <td><span class="pill ${cls}">${avgDT<=15?'Excellent':avgDT<=30?'Good':'Needs Attention'}</span>
+            <div style="background:var(--s3);border-radius:3px;height:8px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px">
+              <div style="height:100%;width:${barW}%;background:${cls==='g'?'var(--green)':cls==='a'?'var(--amber)':'var(--red)'};border-radius:3px"></div>
+            </div></td>
+        </tr>`;
+      }
+    });
+    html+=`</tbody></table></div>`;
+  });
+
+  section.innerHTML=html;
+}
+
 function renderPerf(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   let html=`<table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0;
-    const mcs=FLOORS[fl].machines;
+    const mcs=getActiveMachines(fl);
     mcs.forEach(mc=>{
       const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
       prod+=mcTotalProd(m);
@@ -1418,7 +1868,7 @@ function renderPerf(){
     const dy=loadDay(dayFl,dayDate);
     SHIFTS.forEach(sh=>{
       const sd2=dy.shifts[sh];
-      FLOORS[fl].machines.forEach(mc=>{
+      getActiveMachines(fl).forEach(mc=>{
         const m=migrateMachineData(sd2.machines[mc.id]||blankMachine());
         const op=(m.operator||'').trim();
         if(!op) return;
@@ -1464,6 +1914,9 @@ function renderPerf(){
   const opSection=document.getElementById('operatorPerfSection');
   if(opSection) opSection.innerHTML=`<div style="font-family:var(--fc);font-size:11px;letter-spacing:1px;color:var(--cyan);margin:16px 0 8px">OPERATOR-WISE PERFORMANCE (All Time)</div>${opHtml}`;
 
+  // Shift personnel performance
+  renderShiftPersonnelPerf();
+
   // trend chart — last 30 days incharge performance
   const dates=[];
   for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);dates.push(d2.toISOString().split('T')[0]);}
@@ -1473,7 +1926,7 @@ function renderPerf(){
     SHIFTS.forEach(sh=>{
       const sd2=dy.shifts[sh];
       let p=0,t2=0;
-      FLOORS[fl].machines.forEach(mc=>{
+      getActiveMachines(fl).forEach(mc=>{
         const m=migrateMachineData(sd2.machines[mc.id]||blankMachine());
         p+=mcTotalProd(m); t2+=tgt(fl,mc.id);
       });
@@ -1535,13 +1988,16 @@ function renderSettings(){
   Object.keys(FLOORS).forEach(fl=>{
     html+=`<div style="margin-bottom:16px"><div style="font-family:var(--fc);font-size:11px;letter-spacing:1px;color:var(--cyan);margin-bottom:8px">${FLOORS[fl].label}</div>`;
     html+=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">`;
-    FLOORS[fl].machines.forEach(mc=>{
+    getActiveMachines(fl).forEach(mc=>{
       const k=`${fl}_${mc.id}`;
       html+=`<div class="field-grp"><label>${mc.id} (${mc.sz})</label><input type="number" value="${targets[k]||8}" min="1" onchange="targets['${k}']=parseFloat(this.value)||8;localStorage.setItem('dpr_targets',JSON.stringify(targets));toast('Target updated','var(--green)')"></div>`;
     });
     html+=`</div></div>`;
   });
   document.getElementById('targetSettings').innerHTML=html;
+
+  // Machine settings
+  renderMachineSettings();
 }
 
 // ═══════════════════════════════════════════════════════

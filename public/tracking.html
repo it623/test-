@@ -593,7 +593,9 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+const DEFAULT_SERVER = 'https://sunloc.up.railway.app';
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || DEFAULT_SERVER);
+if(!localStorage.getItem('sunloc_server_url')) localStorage.setItem('sunloc_server_url', DEFAULT_SERVER);
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;

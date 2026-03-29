@@ -2,6 +2,7 @@
  * SUNLOC INTEGRATED SERVER
  * Shared backend for Planning App + DPR App + Tracking App
  * Stack: Node.js + Express + PostgreSQL (Railway)
+ * All data safe — connects to existing Railway PostgreSQL database
  */
 
 const express = require('express');
@@ -17,7 +18,8 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
-  etag: false, maxAge: 0, setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); }
+  etag: false, maxAge: 0,
+  setHeaders: (res) => { res.setHeader('Cache-Control', 'no-store'); }
 }));
 
 // ─── PostgreSQL Database Setup ─────────────────────────────────
@@ -29,11 +31,8 @@ const pool = new Pool({
 // Helper: run a query
 async function query(text, params) {
   const client = await pool.connect();
-  try {
-    return await client.query(text, params);
-  } finally {
-    client.release();
-  }
+  try { return await client.query(text, params); }
+  finally { client.release(); }
 }
 
 // Helper: get first row
@@ -48,23 +47,25 @@ async function queryAll(text, params) {
   return res.rows;
 }
 
-// Wrap async route handlers
+// Wrap async route handlers — catches errors automatically
 function asyncRoute(fn) {
   return (req, res, next) => fn(req, res, next).catch(next);
 }
 
-console.log('[DB] PostgreSQL pool initialised');
+console.log('[DB] PostgreSQL pool initialised — connecting to Railway PostgreSQL');
 
-// ─── Schema Setup (PostgreSQL) ────────────────────────────────
+// ─── PostgreSQL Schema Setup ──────────────────────────────────
+// Safe migrations — each runs once, never drops existing data
 async function runMigrations() {
   const client = await pool.connect();
   try {
+    // Create migrations tracking table
     await client.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
+      )
     `);
 
     const applied = new Set(
@@ -72,235 +73,171 @@ async function runMigrations() {
     );
 
     const migrations = [
-      {
-        version: 1, name: 'initial_schema', sql: `
-          CREATE TABLE IF NOT EXISTS planning_state (
-            id INTEGER PRIMARY KEY DEFAULT 1,
-            state_json TEXT NOT NULL,
-            saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-          CREATE TABLE IF NOT EXISTS dpr_records (
-            id SERIAL PRIMARY KEY,
-            floor TEXT NOT NULL,
-            date TEXT NOT NULL,
-            data_json TEXT NOT NULL,
-            saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE(floor, date)
-          );
-          CREATE TABLE IF NOT EXISTS production_actuals (
-            id SERIAL PRIMARY KEY,
-            order_id TEXT,
-            batch_number TEXT,
-            machine_id TEXT NOT NULL,
-            date TEXT NOT NULL,
-            shift TEXT NOT NULL,
-            run_index INTEGER NOT NULL DEFAULT 0,
-            qty_lakhs REAL DEFAULT 0,
-            floor TEXT,
-            synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE(machine_id, date, shift, run_index)
-          );
-          CREATE INDEX IF NOT EXISTS idx_actuals_order ON production_actuals(order_id);
-          CREATE INDEX IF NOT EXISTS idx_actuals_batch ON production_actuals(batch_number);
-          CREATE INDEX IF NOT EXISTS idx_actuals_machine ON production_actuals(machine_id, date);
-          CREATE INDEX IF NOT EXISTS idx_dpr_date ON dpr_records(date);
-        `
-      },
-      {
-        version: 2, name: 'tracking_tables', sql: `
-          CREATE TABLE IF NOT EXISTS tracking_labels (
-            id TEXT PRIMARY KEY,
-            batch_number TEXT NOT NULL,
-            label_number INTEGER NOT NULL,
-            size TEXT NOT NULL,
-            qty REAL NOT NULL,
-            is_partial BOOLEAN DEFAULT FALSE,
-            is_orange BOOLEAN DEFAULT FALSE,
-            parent_label_id TEXT,
-            customer TEXT,
-            colour TEXT,
-            pc_code TEXT,
-            po_number TEXT,
-            machine_id TEXT,
-            printing_matter TEXT,
-            generated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            printed BOOLEAN DEFAULT FALSE,
-            printed_at TIMESTAMPTZ,
-            voided BOOLEAN DEFAULT FALSE,
-            void_reason TEXT,
-            voided_at TIMESTAMPTZ,
-            voided_by TEXT,
-            qr_data TEXT,
-            UNIQUE(batch_number, label_number, is_orange)
-          );
-          CREATE TABLE IF NOT EXISTS tracking_scans (
-            id TEXT PRIMARY KEY,
-            label_id TEXT NOT NULL,
-            batch_number TEXT NOT NULL,
-            dept TEXT NOT NULL,
-            type TEXT NOT NULL CHECK(type IN ('in','out')),
-            ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            operator TEXT,
-            size TEXT,
-            qty REAL
-          );
-          CREATE TABLE IF NOT EXISTS tracking_stage_closure (
-            id TEXT PRIMARY KEY,
-            batch_number TEXT NOT NULL,
-            dept TEXT NOT NULL,
-            closed BOOLEAN DEFAULT TRUE,
-            closed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            closed_by TEXT,
-            UNIQUE(batch_number, dept)
-          );
-          CREATE TABLE IF NOT EXISTS tracking_wastage (
-            id TEXT PRIMARY KEY,
-            batch_number TEXT NOT NULL,
-            dept TEXT NOT NULL,
-            type TEXT NOT NULL CHECK(type IN ('salvage','remelt')),
-            qty REAL NOT NULL,
-            ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            by TEXT
-          );
-          CREATE TABLE IF NOT EXISTS tracking_dispatch_records (
-            id TEXT PRIMARY KEY,
-            batch_number TEXT NOT NULL,
-            customer TEXT,
-            qty REAL NOT NULL,
-            boxes INTEGER NOT NULL,
-            vehicle_no TEXT,
-            invoice_no TEXT,
-            remarks TEXT,
-            ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            by TEXT
-          );
-          CREATE TABLE IF NOT EXISTS tracking_alerts (
-            id TEXT PRIMARY KEY,
-            label_id TEXT NOT NULL,
-            batch_number TEXT NOT NULL,
-            dept TEXT NOT NULL,
-            scan_in_ts TIMESTAMPTZ NOT NULL,
-            hours_stuck REAL,
-            resolved BOOLEAN DEFAULT FALSE,
-            msg TEXT,
-            UNIQUE(label_id, dept)
-          );
-          CREATE INDEX IF NOT EXISTS idx_scans_batch ON tracking_scans(batch_number, dept);
-          CREATE INDEX IF NOT EXISTS idx_labels_batch ON tracking_labels(batch_number);
-          CREATE INDEX IF NOT EXISTS idx_wastage_batch ON tracking_wastage(batch_number, dept);
-        `
-      },
-      {
-        version: 3, name: 'auth_and_audit', sql: `
-          CREATE TABLE IF NOT EXISTS app_users (
-            id SERIAL PRIMARY KEY,
-            username TEXT NOT NULL UNIQUE,
-            pin_hash TEXT NOT NULL,
-            role TEXT NOT NULL,
-            app TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-          CREATE TABLE IF NOT EXISTS app_sessions (
-            token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            username TEXT NOT NULL,
-            role TEXT NOT NULL,
-            app TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            expires_at TIMESTAMPTZ NOT NULL
-          );
-          CREATE TABLE IF NOT EXISTS audit_log (
-            id SERIAL PRIMARY KEY,
-            username TEXT NOT NULL,
-            role TEXT NOT NULL,
-            app TEXT NOT NULL,
-            action TEXT NOT NULL,
-            details TEXT,
-            ip TEXT,
-            ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
-          );
-          CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
-          CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username);
-        `
-      },
-      {
-        version: 4, name: 'temp_batch_system', sql: `
-          CREATE TABLE IF NOT EXISTS temp_batches (
-            id TEXT PRIMARY KEY,
-            machine_id TEXT NOT NULL,
-            machine_size TEXT NOT NULL,
-            date TEXT NOT NULL,
-            daily_cap_lakhs REAL NOT NULL,
-            label_count INTEGER NOT NULL,
-            pack_size_lakhs REAL NOT NULL,
-            status TEXT NOT NULL DEFAULT 'active',
-            reconciled_order_id TEXT,
-            reconciled_at TIMESTAMPTZ,
-            reconciled_by TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE(machine_id, date)
-          );
-          CREATE TABLE IF NOT EXISTS reconciliation_requests (
-            id TEXT PRIMARY KEY,
-            proposed_by TEXT NOT NULL,
-            proposed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            approved_by TEXT,
-            approved_at TIMESTAMPTZ,
-            status TEXT NOT NULL DEFAULT 'pending',
-            order_id TEXT NOT NULL,
-            order_details TEXT NOT NULL,
-            back_date TEXT NOT NULL,
-            temp_batch_mappings TEXT NOT NULL,
-            total_boxes INTEGER NOT NULL,
-            rejection_reason TEXT
-          );
-          CREATE TABLE IF NOT EXISTS temp_batch_alerts (
-            id SERIAL PRIMARY KEY,
-            machine_id TEXT NOT NULL,
-            temp_batch_id TEXT NOT NULL,
-            alert_date TEXT NOT NULL,
-            sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE(machine_id, alert_date)
-          );
-          CREATE INDEX IF NOT EXISTS idx_temp_batches_machine ON temp_batches(machine_id, date);
-          CREATE INDEX IF NOT EXISTS idx_temp_batches_status ON temp_batches(status);
-          CREATE INDEX IF NOT EXISTS idx_recon_status ON reconciliation_requests(status);
-        `
-      },
-      {
-        version: 5, name: 'temp_colour_and_wo_support', sql: `
-          ALTER TABLE temp_batches ADD COLUMN IF NOT EXISTS colour TEXT;
-          ALTER TABLE temp_batches ADD COLUMN IF NOT EXISTS pc_code TEXT;
-          ALTER TABLE temp_batches ADD COLUMN IF NOT EXISTS colour_confirmed BOOLEAN DEFAULT FALSE;
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS wo_status TEXT;
-          CREATE TABLE IF NOT EXISTS wo_reconciliation_requests (
-            id TEXT PRIMARY KEY,
-            proposed_by TEXT NOT NULL,
-            proposed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            approved_by TEXT,
-            approved_at TIMESTAMPTZ,
-            status TEXT NOT NULL DEFAULT 'pending',
-            order_id TEXT NOT NULL,
-            customer TEXT NOT NULL,
-            po_number TEXT,
-            zone TEXT,
-            qty_confirmed REAL,
-            rejection_reason TEXT
-          );
-          CREATE INDEX IF NOT EXISTS idx_wo_recon_status ON wo_reconciliation_requests(status);
-        `
-      },
-      {
-        version: 6, name: 'tracking_labels_extended_fields', sql: `
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS ship_to TEXT;
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS bill_to TEXT;
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS is_excess BOOLEAN DEFAULT FALSE;
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS excess_num INTEGER;
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS excess_total INTEGER;
-          ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS normal_total INTEGER;
-        `
-      }
+      { version: 1, name: 'initial_schema', sql: `
+        CREATE TABLE IF NOT EXISTS planning_state (
+          id INTEGER PRIMARY KEY DEFAULT 1,
+          state_json TEXT NOT NULL,
+          saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS dpr_records (
+          id SERIAL PRIMARY KEY,
+          floor TEXT NOT NULL,
+          date TEXT NOT NULL,
+          data_json TEXT NOT NULL,
+          saved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(floor, date)
+        );
+        CREATE TABLE IF NOT EXISTS production_actuals (
+          id SERIAL PRIMARY KEY,
+          order_id TEXT,
+          batch_number TEXT,
+          machine_id TEXT NOT NULL,
+          date TEXT NOT NULL,
+          shift TEXT NOT NULL,
+          run_index INTEGER NOT NULL DEFAULT 0,
+          qty_lakhs REAL DEFAULT 0,
+          floor TEXT,
+          synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(machine_id, date, shift, run_index)
+        );
+        CREATE INDEX IF NOT EXISTS idx_actuals_order ON production_actuals(order_id);
+        CREATE INDEX IF NOT EXISTS idx_actuals_batch ON production_actuals(batch_number);
+        CREATE INDEX IF NOT EXISTS idx_actuals_machine ON production_actuals(machine_id, date);
+        CREATE INDEX IF NOT EXISTS idx_dpr_date ON dpr_records(date);
+      `},
+      { version: 2, name: 'tracking_tables', sql: `
+        CREATE TABLE IF NOT EXISTS tracking_labels (
+          id TEXT PRIMARY KEY,
+          batch_number TEXT NOT NULL,
+          label_number INTEGER NOT NULL,
+          size TEXT NOT NULL,
+          qty REAL NOT NULL,
+          is_partial BOOLEAN DEFAULT FALSE,
+          is_orange BOOLEAN DEFAULT FALSE,
+          parent_label_id TEXT,
+          customer TEXT, colour TEXT, pc_code TEXT,
+          po_number TEXT, machine_id TEXT, printing_matter TEXT,
+          generated TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          printed BOOLEAN DEFAULT FALSE, printed_at TIMESTAMPTZ,
+          voided BOOLEAN DEFAULT FALSE, void_reason TEXT,
+          voided_at TIMESTAMPTZ, voided_by TEXT, qr_data TEXT,
+          UNIQUE(batch_number, label_number, is_orange)
+        );
+        CREATE TABLE IF NOT EXISTS tracking_scans (
+          id TEXT PRIMARY KEY,
+          label_id TEXT NOT NULL, batch_number TEXT NOT NULL,
+          dept TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('in','out')),
+          ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          operator TEXT, size TEXT, qty REAL
+        );
+        CREATE TABLE IF NOT EXISTS tracking_stage_closure (
+          id TEXT PRIMARY KEY,
+          batch_number TEXT NOT NULL, dept TEXT NOT NULL,
+          closed BOOLEAN DEFAULT TRUE,
+          closed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          closed_by TEXT, UNIQUE(batch_number, dept)
+        );
+        CREATE TABLE IF NOT EXISTS tracking_wastage (
+          id TEXT PRIMARY KEY,
+          batch_number TEXT NOT NULL, dept TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('salvage','remelt')),
+          qty REAL NOT NULL, ts TIMESTAMPTZ NOT NULL DEFAULT NOW(), by TEXT
+        );
+        CREATE TABLE IF NOT EXISTS tracking_dispatch_records (
+          id TEXT PRIMARY KEY,
+          batch_number TEXT NOT NULL, customer TEXT,
+          qty REAL NOT NULL, boxes INTEGER NOT NULL,
+          vehicle_no TEXT, invoice_no TEXT, remarks TEXT,
+          ts TIMESTAMPTZ NOT NULL DEFAULT NOW(), by TEXT
+        );
+        CREATE TABLE IF NOT EXISTS tracking_alerts (
+          id TEXT PRIMARY KEY,
+          label_id TEXT NOT NULL, batch_number TEXT NOT NULL,
+          dept TEXT NOT NULL, scan_in_ts TIMESTAMPTZ NOT NULL,
+          hours_stuck REAL, resolved BOOLEAN DEFAULT FALSE,
+          msg TEXT, UNIQUE(label_id, dept)
+        );
+        CREATE INDEX IF NOT EXISTS idx_scans_batch ON tracking_scans(batch_number, dept);
+        CREATE INDEX IF NOT EXISTS idx_labels_batch ON tracking_labels(batch_number);
+        CREATE INDEX IF NOT EXISTS idx_wastage_batch ON tracking_wastage(batch_number, dept);
+      `},
+      { version: 3, name: 'auth_and_audit', sql: `
+        CREATE TABLE IF NOT EXISTS app_users (
+          id SERIAL PRIMARY KEY,
+          username TEXT NOT NULL UNIQUE,
+          pin_hash TEXT NOT NULL, role TEXT NOT NULL, app TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS app_sessions (
+          token TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL, username TEXT NOT NULL,
+          role TEXT NOT NULL, app TEXT NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          expires_at TIMESTAMPTZ NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS audit_log (
+          id SERIAL PRIMARY KEY,
+          username TEXT NOT NULL, role TEXT NOT NULL, app TEXT NOT NULL,
+          action TEXT NOT NULL, details TEXT, ip TEXT,
+          ts TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts DESC);
+        CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(username);
+      `},
+      { version: 4, name: 'temp_batch_system', sql: `
+        CREATE TABLE IF NOT EXISTS temp_batches (
+          id TEXT PRIMARY KEY,
+          machine_id TEXT NOT NULL, machine_size TEXT NOT NULL,
+          date TEXT NOT NULL, daily_cap_lakhs REAL NOT NULL,
+          label_count INTEGER NOT NULL, pack_size_lakhs REAL NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          reconciled_order_id TEXT, reconciled_at TIMESTAMPTZ,
+          reconciled_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(machine_id, date)
+        );
+        CREATE TABLE IF NOT EXISTS reconciliation_requests (
+          id TEXT PRIMARY KEY, proposed_by TEXT NOT NULL,
+          proposed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          approved_by TEXT, approved_at TIMESTAMPTZ,
+          status TEXT NOT NULL DEFAULT 'pending',
+          order_id TEXT NOT NULL, order_details TEXT NOT NULL,
+          back_date TEXT NOT NULL, temp_batch_mappings TEXT NOT NULL,
+          total_boxes INTEGER NOT NULL, rejection_reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS temp_batch_alerts (
+          id SERIAL PRIMARY KEY, machine_id TEXT NOT NULL,
+          temp_batch_id TEXT NOT NULL, alert_date TEXT NOT NULL,
+          sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          UNIQUE(machine_id, alert_date)
+        );
+        CREATE INDEX IF NOT EXISTS idx_temp_batches_machine ON temp_batches(machine_id, date);
+        CREATE INDEX IF NOT EXISTS idx_temp_batches_status ON temp_batches(status);
+        CREATE INDEX IF NOT EXISTS idx_recon_status ON reconciliation_requests(status);
+      `},
+      { version: 5, name: 'temp_colour_and_wo_support', sql: `
+        ALTER TABLE temp_batches ADD COLUMN IF NOT EXISTS colour TEXT;
+        ALTER TABLE temp_batches ADD COLUMN IF NOT EXISTS pc_code TEXT;
+        ALTER TABLE temp_batches ADD COLUMN IF NOT EXISTS colour_confirmed BOOLEAN DEFAULT FALSE;
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS wo_status TEXT;
+        CREATE TABLE IF NOT EXISTS wo_reconciliation_requests (
+          id TEXT PRIMARY KEY, proposed_by TEXT NOT NULL,
+          proposed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          approved_by TEXT, approved_at TIMESTAMPTZ,
+          status TEXT NOT NULL DEFAULT 'pending',
+          order_id TEXT NOT NULL, customer TEXT NOT NULL,
+          po_number TEXT, zone TEXT, qty_confirmed REAL, rejection_reason TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_wo_recon_status ON wo_reconciliation_requests(status);
+      `},
+      { version: 6, name: 'tracking_labels_extended_fields', sql: `
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS ship_to TEXT;
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS bill_to TEXT;
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS is_excess BOOLEAN DEFAULT FALSE;
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS excess_num INTEGER;
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS excess_total INTEGER;
+        ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS normal_total INTEGER;
+      `},
     ];
 
     for (const m of migrations) {
@@ -308,16 +245,14 @@ async function runMigrations() {
       console.log(`[Migration] Running v${m.version}: ${m.name}`);
       await client.query(m.sql);
       await client.query('INSERT INTO schema_migrations (version, name) VALUES ($1, $2)', [m.version, m.name]);
-      console.log(`[Migration] v${m.version} applied`);
+      console.log(`[Migration] v${m.version} applied successfully`);
     }
     console.log('[Migration] All migrations up to date');
-  } finally {
-    client.release();
-  }
+  } finally { client.release(); }
 }
 
 
-// ─── Seed default users if none exist ─────────────────────────
+// ─── Seed default users + helpers ────────────────────────────
 const crypto = require('crypto');
 function hashPin(pin) { return crypto.createHash('sha256').update(pin + 'sunloc_salt').digest('hex'); }
 
@@ -335,12 +270,10 @@ const DEFAULT_USERS = [
 async function seedUsers() {
   for (const u of DEFAULT_USERS) {
     await query(
-      `INSERT INTO app_users (username, pin_hash, role, app)
-       VALUES ($1,$2,$3,$4) ON CONFLICT (username) DO NOTHING`,
+      `INSERT INTO app_users (username, pin_hash, role, app) VALUES ($1,$2,$3,$4) ON CONFLICT (username) DO NOTHING`,
       [u.username, hashPin(u.pin), u.role, u.app]
     );
   }
-  // Clean expired sessions
   await query(`DELETE FROM app_sessions WHERE expires_at < NOW()`);
   console.log('[Seed] Default users ready');
 }
@@ -353,32 +286,29 @@ async function getPlanningState() {
 }
 
 async function savePlanningState(state) {
-  // Safety guard: never overwrite existing orders with an empty array
-  if(state && Array.isArray(state.orders) && state.orders.length === 0){
+  // SAFETY GUARD: never overwrite existing orders with empty array
+  if (state && Array.isArray(state.orders) && state.orders.length === 0) {
     const existing = await queryOne('SELECT state_json FROM planning_state WHERE id=1');
-    if(existing){
-      try{
+    if (existing) {
+      try {
         const existingState = JSON.parse(existing.state_json);
-        if(existingState.orders && existingState.orders.length > 0){
-          console.log('[savePlanningState] Blocked: refusing to overwrite existing orders with empty array');
-          // Only update non-orders fields (machineMaster, packSizes etc)
+        if (existingState.orders && existingState.orders.length > 0) {
+          console.log('[savePlanningState] BLOCKED: refusing to overwrite existing orders with empty array');
           const merged = { ...existingState, ...state, orders: existingState.orders };
-          const json = JSON.stringify(merged);
           await query(
             `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
              ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
-            [json]
+            [JSON.stringify(merged)]
           );
           return;
         }
-      }catch(e){ console.error('savePlanningState merge error:', e.message); }
+      } catch(e) { console.error('savePlanningState merge error:', e.message); }
     }
   }
-  const json = JSON.stringify(state);
   await query(
     `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
      ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
-    [json]
+    [JSON.stringify(state)]
   );
 }
 
@@ -388,8 +318,9 @@ async function getActiveOrdersForMachine(machineId) {
   return (state.orders || [])
     .filter(o => o.machineId === machineId && o.status !== 'closed' && !o.deleted)
     .map(o => ({
-      id: o.id, batchNumber: o.batchNumber || '', poNumber: o.poNumber || '',
-      customer: o.customer || '', size: o.size || '', colour: o.colour || '',
+      id: o.id, batchNumber: o.batchNumber || '',
+      poNumber: o.poNumber || '', customer: o.customer || '',
+      size: o.size || '', colour: o.colour || '',
       qty: o.qty || 0, isPrinted: o.isPrinted || false,
       status: o.status || 'pending', zone: o.zone || '',
     }));
@@ -400,14 +331,34 @@ async function getOrderActuals(orderId, batchNumber) {
   let row;
   if (orderId) {
     row = await queryOne('SELECT SUM(qty_lakhs) as total FROM production_actuals WHERE order_id = $1', [orderId]);
-    if (!row?.total && batchNumber) {
+    if (!row?.total && batchNumber)
       row = await queryOne('SELECT SUM(qty_lakhs) as total FROM production_actuals WHERE batch_number = $1', [batchNumber]);
-    }
   } else if (batchNumber) {
     row = await queryOne('SELECT SUM(qty_lakhs) as total FROM production_actuals WHERE batch_number = $1', [batchNumber]);
   }
   return parseFloat(row?.total) || 0;
 }
+
+// Auth helpers
+function generateToken() { return crypto.randomBytes(32).toString('hex'); }
+
+async function verifyToken(token) {
+  if (!token) return null;
+  return await queryOne(`SELECT * FROM app_sessions WHERE token=$1 AND expires_at > NOW()`, [token]);
+}
+
+async function logAudit(username, role, app, action, details, ip) {
+  try {
+    await query(
+      `INSERT INTO audit_log (username,role,app,action,details,ip) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [username, role, app, action, details||null, ip||null]
+    );
+  } catch(e) { console.error('Audit log error:', e.message); }
+}
+
+// Helper: temp batch ID
+function calcTempLabelCount(capLakhs, packSizeLakhs) { return Math.ceil(capLakhs / packSizeLakhs); }
+function tempBatchId(machineId, date) { return `TEMP-${machineId}-${date.replace(/-/g,'')}`; }
 
 // ═══════════════════════════════════════════════════════════════
 // PLANNING APP ROUTES
@@ -435,13 +386,13 @@ app.post('/api/planning/state', asyncRoute(async (req, res) => {
   res.json({ ok: true, savedAt: new Date().toISOString() });
 }));
 
-// GET active orders for a machine (used by DPR dropdown)
+// GET active orders for a machine
 app.get('/api/orders/machine/:machineId', asyncRoute(async (req, res) => {
   const orders = await getActiveOrdersForMachine(req.params.machineId);
   res.json({ ok: true, orders });
 }));
 
-// GET all active orders (summary for DPR to cache on load)
+// GET all active orders
 app.get('/api/orders/active', asyncRoute(async (req, res) => {
   const state = await getPlanningState();
   const orders = (state.orders || [])
@@ -459,10 +410,10 @@ app.get('/api/orders/active', asyncRoute(async (req, res) => {
 // DPR APP ROUTES
 // ═══════════════════════════════════════════════════════════════
 
-// GET DPR record for a floor + date
+// GET DPR record
 app.get('/api/dpr/:floor/:date', asyncRoute(async (req, res) => {
   const { floor, date } = req.params;
-  const row = await queryOne('SELECT data_json, saved_at FROM dpr_records WHERE floor = $1 AND date = $2', [floor, date]);
+  const row = await queryOne('SELECT data_json, saved_at FROM dpr_records WHERE floor=$1 AND date=$2', [floor, date]);
   if (!row) return res.json({ ok: true, data: null });
   res.json({ ok: true, data: JSON.parse(row.data_json), savedAt: row.saved_at });
 }));
@@ -471,7 +422,6 @@ app.get('/api/dpr/:floor/:date', asyncRoute(async (req, res) => {
 app.post('/api/dpr/save', asyncRoute(async (req, res) => {
   const { floor, date, data, actuals } = req.body;
   if (!floor || !date || !data) return res.status(400).json({ ok: false, error: 'Missing floor, date, or data' });
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -483,7 +433,7 @@ app.post('/api/dpr/save', asyncRoute(async (req, res) => {
     );
     // Delete old runs for this floor+date first (clean re-sync)
     await client.query('DELETE FROM production_actuals WHERE floor=$1 AND date=$2', [floor, date]);
-    // Insert actuals
+    // Upsert actuals — supports multi-run
     if (actuals && actuals.length > 0) {
       for (const a of actuals) {
         if (!a.qty || a.qty <= 0) continue;
@@ -497,6 +447,7 @@ app.post('/api/dpr/save', asyncRoute(async (req, res) => {
         );
       }
     } else {
+      // Fallback: parse from data.shifts for old single-run format
       const shifts = data.shifts || {};
       for (const [shiftName, shiftData] of Object.entries(shifts)) {
         if (!shiftData.machines) continue;
@@ -522,12 +473,12 @@ app.post('/api/dpr/save', asyncRoute(async (req, res) => {
   } catch(e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
 
-  // Two-way sync: update actualQty on planning orders
+  // Two-way sync: update actualQty on planning orders (DPR → Planning)
   try {
     const planningState = await getPlanningState();
     if (planningState && planningState.orders) {
       const byOrderId = await queryAll(
-        `SELECT order_id, SUM(qty_lakhs) as total_qty FROM production_actuals WHERE order_id IS NOT NULL AND order_id != '' GROUP BY order_id`
+        `SELECT order_id, SUM(qty_lakhs) as total_qty FROM production_actuals WHERE order_id IS NOT NULL AND order_id!='' GROUP BY order_id`
       );
       const byBatch = await queryAll(
         `SELECT batch_number, SUM(qty_lakhs) as total_qty FROM production_actuals WHERE (order_id IS NULL OR order_id='') AND batch_number IS NOT NULL AND batch_number!='' GROUP BY batch_number`
@@ -544,18 +495,18 @@ app.post('/api/dpr/save', asyncRoute(async (req, res) => {
       }
       if (changed) await savePlanningState(planningState);
     }
-  } catch(syncErr) { console.error('Planning actualQty sync error:', syncErr.message); }
+  } catch (syncErr) { console.error('Planning actualQty sync error:', syncErr.message); }
 
   res.json({ ok: true, savedAt: new Date().toISOString() });
 }));
 
-// GET all DPR dates (for history navigation)
+// GET DPR dates
 app.get('/api/dpr/dates/:floor', asyncRoute(async (req, res) => {
   const rows = await queryAll('SELECT DISTINCT date FROM dpr_records WHERE floor=$1 ORDER BY date DESC', [req.params.floor]);
   res.json({ ok: true, dates: rows.map(r => r.date) });
 }));
 
-// GET actuals summary for a machine (for DPR to show cumulative vs planned)
+// GET actuals for a machine
 app.get('/api/actuals/machine/:machineId', asyncRoute(async (req, res) => {
   const rows = await queryAll(
     `SELECT date,shift,qty_lakhs,order_id,batch_number FROM production_actuals WHERE machine_id=$1 ORDER BY date DESC,shift LIMIT 90`,
@@ -564,7 +515,7 @@ app.get('/api/actuals/machine/:machineId', asyncRoute(async (req, res) => {
   res.json({ ok: true, actuals: rows });
 }));
 
-// GET actuals for a specific order
+// GET actuals for an order
 app.get('/api/actuals/order/:orderId', asyncRoute(async (req, res) => {
   const rows = await queryAll(
     `SELECT date,shift,qty_lakhs,machine_id FROM production_actuals WHERE order_id=$1 OR batch_number=$1 ORDER BY date,shift`,
@@ -578,25 +529,7 @@ app.get('/api/actuals/order/:orderId', asyncRoute(async (req, res) => {
 // HEALTH CHECK + INFO
 // ═══════════════════════════════════════════════════════════════
 
-// ─── Auth helpers ─────────────────────────────────────────────
-function generateToken() { return crypto.randomBytes(32).toString('hex'); }
-
-async function verifyToken(token) {
-  if (!token) return null;
-  const session = await queryOne(
-    `SELECT * FROM app_sessions WHERE token=$1 AND expires_at > NOW()`, [token]
-  );
-  return session || null;
-}
-
-async function logAudit(username, role, app, action, details, ip) {
-  try {
-    await query(
-      `INSERT INTO audit_log (username,role,app,action,details,ip) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [username, role, app, action, details||null, ip||null]
-    );
-  } catch(e) { console.error('Audit log error:', e.message); }
-}
+// ─── Auth helpers defined above ──────────────────────────────
 
 // POST /api/auth/login
 app.post('/api/auth/login', asyncRoute(async (req, res) => {
@@ -607,10 +540,8 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   if (user.pin_hash !== hashPin(pin)) return res.status(401).json({ ok: false, error: 'Invalid PIN' });
   const token = generateToken();
   const expires = new Date(Date.now() + 8*60*60*1000).toISOString();
-  await query(
-    `INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
-    [token, user.id, user.username, user.role, appName, expires]
-  );
+  await query(`INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+    [token, user.id, user.username, user.role, appName, expires]);
   await logAudit(user.username, user.role, appName, 'LOGIN', 'Successful login', req.ip);
   res.json({ ok: true, token, username: user.username, role: user.role });
 }));
@@ -659,8 +590,7 @@ app.post('/api/audit/log', asyncRoute(async (req, res) => {
 
 // GET /api/audit/view
 app.get('/api/audit/view', asyncRoute(async (req, res) => {
-  const token = req.headers['x-session-token'] || req.query.token;
-  const session = await verifyToken(token);
+  const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
   if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
   if (session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
   const limit = parseInt(req.query.limit) || 200;
@@ -671,13 +601,10 @@ app.get('/api/audit/view', asyncRoute(async (req, res) => {
 
 // GET /api/auth/users
 app.get('/api/auth/users', asyncRoute(async (req, res) => {
-  const token = req.headers['x-session-token'] || req.query.token;
-  const session = await verifyToken(token);
+  const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
   if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
-  const users = await queryAll(
-    `SELECT id,username,role,app,created_at,updated_at FROM app_users WHERE app=$1`,
-    [req.query.app || session.app]
-  );
+  const users = await queryAll(`SELECT id,username,role,app,created_at,updated_at FROM app_users WHERE app=$1`,
+    [req.query.app || session.app]);
   res.json({ ok: true, users });
 }));
 
@@ -709,14 +636,14 @@ app.post('/api/wo/assign-customer', asyncRoute(async (req, res) => {
   const ord = (planState.orders||[]).find(o=>o.id===orderId);
   if (!ord) return res.status(404).json({ ok: false, error: 'Order not found' });
   if (ord.woStatus !== 'wo') return res.status(400).json({ ok: false, error: 'Order is not a W/O order' });
-  ord.customer = customer; ord.poNumber = poNumber||ord.poNumber; ord.zone = zone||ord.zone;
-  if (qtyConfirmed) ord.qty = qtyConfirmed;
-  ord.woCustomerAssignedAt = new Date().toISOString(); ord.woCustomerAssignedBy = session.username;
+  ord.customer=customer; ord.poNumber=poNumber||ord.poNumber; ord.zone=zone||ord.zone;
+  if (qtyConfirmed) ord.qty=qtyConfirmed;
+  ord.woCustomerAssignedAt=new Date().toISOString(); ord.woCustomerAssignedBy=session.username;
   (planState.dispatchPlans||[]).forEach(d=>{
-    if(d.productionOrderId===orderId){ d.customer=customer; d.poNumber=poNumber||d.poNumber; d.zone=zone||d.zone; }
+    if(d.productionOrderId===orderId){d.customer=customer;d.poNumber=poNumber||d.poNumber;d.zone=zone||d.zone;}
   });
   await savePlanningState(planState);
-  await logAudit(session.username, session.role, 'planning', 'WO_CUSTOMER_ASSIGNED', `W/O order ${orderId} → ${customer}`);
+  await logAudit(session.username,session.role,'planning','WO_CUSTOMER_ASSIGNED',`W/O order ${orderId} → ${customer}`);
   res.json({ ok: true });
 }));
 
@@ -735,7 +662,7 @@ app.post('/api/wo/propose-reconciliation', asyncRoute(async (req, res) => {
     `INSERT INTO wo_reconciliation_requests (id,proposed_by,status,order_id,customer,po_number,zone,qty_confirmed) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [id, session.username, 'pending', orderId, finalCustomer, poNumber||null, zone||null, qtyConfirmed||null]
   );
-  await logAudit(session.username, session.role, 'planning', 'WO_RECON_PROPOSED', `W/O recon ${id} → order ${orderId} → ${customer}`);
+  await logAudit(session.username,session.role,'planning','WO_RECON_PROPOSED',`W/O recon ${id} → order ${orderId} → ${customer}`);
   res.json({ ok: true, requestId: id, status: 'pending' });
 }));
 
@@ -745,17 +672,17 @@ app.get('/api/wo/pending', asyncRoute(async (req, res) => {
   if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
   const requests = await queryAll(`SELECT * FROM wo_reconciliation_requests WHERE status='pending' ORDER BY proposed_at DESC`);
   const planState = await getPlanningState();
-  const enriched = requests.map(r => ({ ...r, orderDetails: (planState.orders||[]).find(o=>o.id===r.order_id)||{} }));
+  const enriched = requests.map(r=>({...r, orderDetails:(planState.orders||[]).find(o=>o.id===r.order_id)||{}}));
   res.json({ ok: true, requests: enriched });
 }));
 
 // POST /api/wo/approve/:id
 app.post('/api/wo/approve/:id', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token']);
-  if (!session || session.role !== 'admin') return res.status(403).json({ ok:false, error:'Admin only' });
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
   const request = await queryOne('SELECT * FROM wo_reconciliation_requests WHERE id=$1', [req.params.id]);
-  if (!request) return res.status(404).json({ ok:false, error:'Request not found' });
-  if (request.status !== 'pending') return res.status(400).json({ ok:false, error:'Already processed' });
+  if (!request) return res.status(404).json({ ok: false, error: 'Request not found' });
+  if (request.status !== 'pending') return res.status(400).json({ ok: false, error: 'Already processed' });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -769,7 +696,7 @@ app.post('/api/wo/approve/:id', asyncRoute(async (req, res) => {
       if (request.qty_confirmed) ord.qty=request.qty_confirmed;
       ord.woStatus='wo-reconciled'; ord.woReconciledAt=now; ord.woReconciledBy=session.username;
       (planState.dispatchPlans||[]).forEach(d=>{
-        if(d.productionOrderId===request.order_id){ d.customer=request.customer; d.poNumber=request.po_number||d.poNumber; d.zone=request.zone||d.zone; }
+        if(d.productionOrderId===request.order_id){d.customer=request.customer;d.poNumber=request.po_number||d.poNumber;d.zone=request.zone||d.zone;}
       });
       await savePlanningState(planState);
       await client.query(`UPDATE tracking_labels SET customer=$1, wo_status='wo-reconciled' WHERE batch_number=$2`,
@@ -780,27 +707,27 @@ app.post('/api/wo/approve/:id', asyncRoute(async (req, res) => {
     await client.query('COMMIT');
   } catch(e) { await client.query('ROLLBACK'); throw e; }
   finally { client.release(); }
-  await logAudit(session.username, session.role, 'planning', 'WO_RECON_APPROVED', `W/O recon ${req.params.id} approved`);
-  res.json({ ok:true, message:'W/O reconciliation complete. Replacement labels ready for printing.' });
+  await logAudit(session.username,session.role,'planning','WO_RECON_APPROVED',`W/O recon ${req.params.id} approved`);
+  res.json({ ok: true, message: 'W/O reconciliation complete. Replacement labels ready for printing.' });
 }));
 
 // POST /api/wo/reject/:id
 app.post('/api/wo/reject/:id', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token']);
-  if (!session || session.role !== 'admin') return res.status(403).json({ ok:false, error:'Admin only' });
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
   const { reason } = req.body;
   await query(`UPDATE wo_reconciliation_requests SET status='rejected',approved_by=$1,approved_at=NOW(),rejection_reason=$2 WHERE id=$3`,
     [session.username, reason||'No reason given', req.params.id]);
-  await logAudit(session.username, session.role, 'planning', 'WO_RECON_REJECTED', `Rejected ${req.params.id}: ${reason}`);
-  res.json({ ok:true });
+  await logAudit(session.username,session.role,'planning','WO_RECON_REJECTED',`Rejected ${req.params.id}: ${reason}`);
+  res.json({ ok: true });
 }));
 
 // GET /api/wo/history
 app.get('/api/wo/history', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token']);
-  if (!session) return res.status(401).json({ ok:false, error:'Not authenticated' });
+  if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
   const rows = await queryAll(`SELECT * FROM wo_reconciliation_requests ORDER BY proposed_at DESC LIMIT 50`);
-  res.json({ ok:true, requests: rows });
+  res.json({ ok: true, requests: rows });
 }));
 
 // ─── Data Export / Import (Admin — for safe migrations) ────────
@@ -810,18 +737,19 @@ app.get('/api/admin/export', asyncRoute(async (req, res) => {
   const exportKey = process.env.EXPORT_KEY || 'sunloc-export-2024';
   if (req.query.key !== exportKey) {
     const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
-    if (!session || session.role !== 'admin') return res.status(403).json({ ok:false, error:'Admin access required' });
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin access required' });
   }
   const tables = ['planning_state','dpr_records','production_actuals','tracking_labels','tracking_scans',
-    'tracking_stage_closure','tracking_wastage','tracking_dispatch_records','tracking_alerts','app_users','audit_log','schema_migrations'];
-  const exportData = { exported_at: new Date().toISOString(), db: 'PostgreSQL', version:'sunloc-v9', tables:{} };
+    'tracking_stage_closure','tracking_wastage','tracking_dispatch_records','tracking_alerts',
+    'app_users','audit_log','schema_migrations'];
+  const exportData = { exported_at: new Date().toISOString(), db: 'PostgreSQL (Railway)', version: 'sunloc-v9', tables: {} };
   for (const table of tables) {
     try { exportData.tables[table] = await queryAll(`SELECT * FROM ${table}`); }
     catch(e) { exportData.tables[table] = []; }
   }
   const json = JSON.stringify(exportData, null, 2);
-  res.setHeader('Content-Type','application/json');
-  res.setHeader('Content-Disposition',`attachment; filename="sunloc-backup-${new Date().toISOString().slice(0,10)}.json"`);
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="sunloc-backup-${new Date().toISOString().slice(0,10)}.json"`);
   res.send(json);
   console.log(`[Export] ${Object.values(exportData.tables).reduce((s,t)=>s+t.length,0)} rows exported`);
 }));
@@ -831,15 +759,15 @@ app.post('/api/admin/import', asyncRoute(async (req, res) => {
   const exportKey = process.env.EXPORT_KEY || 'sunloc-export-2024';
   if (req.query.key !== exportKey) {
     const session = await verifyToken(req.headers['x-session-token']);
-    if (!session || session.role !== 'admin') return res.status(403).json({ ok:false, error:'Admin access required' });
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin access required' });
   }
   const { tables, confirm } = req.body;
-  if (confirm !== 'IMPORT_CONFIRMED') return res.status(400).json({ ok:false, error:'Must include confirm: "IMPORT_CONFIRMED"' });
-  if (!tables) return res.status(400).json({ ok:false, error:'No tables data provided' });
+  if (confirm !== 'IMPORT_CONFIRMED') return res.status(400).json({ ok: false, error: 'Must include confirm: "IMPORT_CONFIRMED"' });
+  if (!tables) return res.status(400).json({ ok: false, error: 'No tables data provided' });
   await runMigrations();
-  const results = {};
   const importableTables = ['planning_state','dpr_records','production_actuals','tracking_labels',
     'tracking_scans','tracking_stage_closure','tracking_wastage','tracking_dispatch_records','tracking_alerts'];
+  const results = {};
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -852,7 +780,7 @@ app.post('/api/admin/import', asyncRoute(async (req, res) => {
         for (const row of rows) {
           const vals = cols.map(c => row[c]);
           const placeholders = cols.map((_,i) => `$${i+1}`).join(',');
-          const updateSet = cols.filter(c=>c!=='id').map((c,i)=>`${c}=EXCLUDED.${c}`).join(',');
+          const updateSet = cols.filter(c=>c!=='id').map(c=>`${c}=EXCLUDED.${c}`).join(',');
           await client.query(
             `INSERT INTO ${table} (${cols.join(',')}) VALUES (${placeholders}) ON CONFLICT DO UPDATE SET ${updateSet}`,
             vals
@@ -867,7 +795,7 @@ app.post('/api/admin/import', asyncRoute(async (req, res) => {
   finally { client.release(); }
   const totalRows = Object.values(results).reduce((s,v)=>typeof v==='number'?s+v:s, 0);
   console.log(`[Import] Restored ${totalRows} rows`);
-  res.json({ ok:true, results, totalRows });
+  res.json({ ok: true, results, totalRows });
 }));
 
 // GET /api/admin/db-status
@@ -881,20 +809,12 @@ app.get('/api/admin/db-status', asyncRoute(async (req, res) => {
     try { const r = await queryOne(`SELECT COUNT(*) as c FROM ${t}`); tableRowCounts[t] = parseInt(r.c); }
     catch(e) { tableRowCounts[t] = 'N/A'; }
   }
-  res.json({ ok:true, db:'PostgreSQL (Railway)', migrations_applied:migrations.length, migrations, table_row_counts:tableRowCounts });
+  res.json({ ok: true, db: 'PostgreSQL (Railway)', migrations_applied: migrations.length, migrations, table_row_counts: tableRowCounts });
 }));
 
 // ─── TEMP Batch System ─────────────────────────────────────────
 
-// Helper: calculate label count from daily cap and pack size
-function calcTempLabelCount(capLakhs, packSizeLakhs) {
-  return Math.ceil(capLakhs / packSizeLakhs);
-}
-
-// Helper: generate TEMP batch ID
-function tempBatchId(machineId, date) {
-  return `TEMP-${machineId}-${date.replace(/-/g,'')}`;
-}
+// calcTempLabelCount and tempBatchId defined above
 
 // GET /api/temp-batches/check/:machineId
 app.get('/api/temp-batches/check/:machineId', asyncRoute(async (req, res) => {
@@ -944,8 +864,8 @@ app.post('/api/temp-batches/create', asyncRoute(async (req, res) => {
 app.get('/api/temp-batches/active', asyncRoute(async (req, res) => {
   const batches = await queryAll(`SELECT * FROM temp_batches WHERE status='active' ORDER BY machine_id, date DESC`);
   const today = new Date().toISOString().split('T')[0];
-  const enriched = batches.map(b=>({ ...b, daysActive: Math.floor((new Date(today)-new Date(b.date))/86400000)+1 }));
-  res.json({ ok:true, batches:enriched, count:enriched.length });
+  const enriched = batches.map(b=>({...b, daysActive: Math.floor((new Date(today)-new Date(b.date))/86400000)+1}));
+  res.json({ ok:true, batches: enriched, count: enriched.length });
 }));
 
 // POST /api/reconciliation/propose
@@ -969,7 +889,7 @@ app.post('/api/reconciliation/propose', asyncRoute(async (req, res) => {
     `INSERT INTO reconciliation_requests (id,proposed_by,status,order_id,order_details,back_date,temp_batch_mappings,total_boxes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [id, session.username, 'pending', orderDetails.id||`ORDER-${Date.now()}`, JSON.stringify(orderDetails), backDate, JSON.stringify(tempBatchMappings), totalBoxes]
   );
-  await logAudit(session.username, session.role, 'planning', 'RECON_PROPOSED', `Recon proposed: ${id} — ${tempBatchMappings.length} batches, ${totalBoxes} boxes`);
+  await logAudit(session.username,session.role,'planning','RECON_PROPOSED',`Recon proposed: ${id} — ${tempBatchMappings.length} batches, ${totalBoxes} boxes`);
   res.json({ ok:true, requestId:id, status:'pending', message:'Awaiting Admin approval' });
 }));
 
@@ -978,7 +898,7 @@ app.get('/api/reconciliation/pending', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token']);
   if (!session || session.role !== 'admin') return res.status(403).json({ ok:false, error:'Admin only' });
   const rows = await queryAll(`SELECT * FROM reconciliation_requests WHERE status='pending' ORDER BY proposed_at DESC`);
-  const requests = rows.map(r=>({ ...r, order_details:JSON.parse(r.order_details), temp_batch_mappings:JSON.parse(r.temp_batch_mappings) }));
+  const requests = rows.map(r=>({...r, order_details:JSON.parse(r.order_details), temp_batch_mappings:JSON.parse(r.temp_batch_mappings)}));
   res.json({ ok:true, requests });
 }));
 
@@ -1027,11 +947,15 @@ app.post('/api/reconciliation/approve/:id', asyncRoute(async (req, res) => {
         if (newId !== label.id) await client.query(`DELETE FROM tracking_labels WHERE id=$1`, [label.id]);
         results.migratedLabels++;
       }
-      // 2-5. Migrate related records
+      // 2. Migrate wastage
       const wq = await client.query(`UPDATE tracking_wastage SET batch_number=$1 WHERE batch_number=$2 RETURNING id`,[orderId,tbId]);
       results.migratedWastage += wq.rowCount;
+      // 3. Migrate stage closures
       await client.query(`UPDATE tracking_stage_closure SET batch_number=$1 WHERE batch_number=$2`,[orderId,tbId]);
-      await client.query(`UPDATE production_actuals SET order_id=$1,batch_number=$2 WHERE batch_number=$3`,[orderId,orderDetails.batchNumber||orderId,tbId]);
+      // 4. Migrate DPR actuals
+      await client.query(`UPDATE production_actuals SET order_id=$1,batch_number=$2 WHERE batch_number=$3`,
+        [orderId, orderDetails.batchNumber||orderId, tbId]);
+      // 5. Migrate dispatch records
       await client.query(`UPDATE tracking_dispatch_records SET batch_number=$1 WHERE batch_number=$2`,[orderId,tbId]);
       // 6. Mark TEMP batch reconciled
       const status = startLabelNumber ? 'partial' : 'reconciled';
@@ -1077,7 +1001,7 @@ app.get('/api/reconciliation/history', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token']);
   if (!session) return res.status(401).json({ ok:false, error:'Not authenticated' });
   const rows = await queryAll(`SELECT * FROM reconciliation_requests ORDER BY proposed_at DESC LIMIT 100`);
-  const requests = rows.map(r=>({ ...r, order_details:JSON.parse(r.order_details), temp_batch_mappings:JSON.parse(r.temp_batch_mappings) }));
+  const requests = rows.map(r=>({...r, order_details:JSON.parse(r.order_details), temp_batch_mappings:JSON.parse(r.temp_batch_mappings)}));
   res.json({ ok:true, requests });
 }));
 
@@ -1100,7 +1024,7 @@ app.get('/api/health', asyncRoute(async (req, res) => {
 app.get('*', (req, res) => {
   const idx = path.join(__dirname, 'public', 'index.html');
   if (fs.existsSync(idx)) res.sendFile(idx);
-  else res.json({ ok: false, error: 'No frontend found. Place Planning App and DPR App in /public folder.' });
+  else res.json({ ok: false, error: 'No frontend found. Place files in /public folder.' });
 });
 
 
@@ -1115,13 +1039,10 @@ app.get('/api/tracking/label', asyncRoute(async (req, res) => {
   const { id, batchNumber, labelNumber } = req.query;
   let label = null;
   if (id) label = await queryOne('SELECT * FROM tracking_labels WHERE id=$1', [id]);
-  if (!label && batchNumber && labelNumber != null) {
-    label = await queryOne(
-      'SELECT * FROM tracking_labels WHERE batch_number=$1 AND ABS(label_number)=ABS($2)',
-      [batchNumber, parseInt(labelNumber)]
-    );
-  }
-  res.json({ ok:true, label: label||null });
+  if (!label && batchNumber && labelNumber != null)
+    label = await queryOne('SELECT * FROM tracking_labels WHERE batch_number=$1 AND ABS(label_number)=ABS($2)',
+      [batchNumber, parseInt(labelNumber)]);
+  res.json({ ok: true, label: label || null });
 }));
 
 app.get('/api/tracking/state', asyncRoute(async (req, res) => {
@@ -1147,14 +1068,13 @@ app.post('/api/tracking/state', asyncRoute(async (req, res) => {
         await client.query(
           `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
-           ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,label_number=EXCLUDED.label_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,voided=EXCLUDED.voided,qr_data=EXCLUDED.qr_data,customer=EXCLUDED.customer,colour=EXCLUDED.colour,wo_status=EXCLUDED.wo_status`,
+           ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,voided=EXCLUDED.voided,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status`,
           [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,!!l.isPartial,!!l.isOrange,
            l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
            l.poNumber||null,l.machineId||null,l.printingMatter||null,
            l.generated||new Date().toISOString(),!!l.printed,l.printedAt||null,
            !!l.voided,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,
-           l.woStatus||null,l.shipTo||null,l.billTo||null,
-           !!l.isExcess,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
+           l.woStatus||null,l.shipTo||null,l.billTo||null,!!l.isExcess,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
         );
       }
     }
@@ -1227,7 +1147,6 @@ app.get('/api/tracking/wip-summary', asyncRoute(async (req, res) => {
   res.json({ ok:true, scanSummary:summary });
 }));
 
-
 // GET /api/tracking/labels
 app.get('/api/tracking/labels', asyncRoute(async (req, res) => {
   const { batchNumber } = req.query;
@@ -1247,7 +1166,7 @@ app.post('/api/tracking/scan', asyncRoute(async (req, res) => {
   res.json({ok:true});
 }));
 
-// ── jsQR proxy — serves jsQR to factory phones without CDN access ──
+// jsQR proxy — serves jsQR to factory phones without CDN access
 let jsqrCache = null;
 app.get('/jsqr.min.js', (req, res) => {
   if (jsqrCache) {
@@ -1268,13 +1187,13 @@ app.get('/jsqr.min.js', (req, res) => {
   }).on('error', () => res.status(503).send('// jsQR fetch failed'));
 });
 
-// ── Error handler ─────────────────────────────────────────────
+// Error handler
 app.use((err, req, res, next) => {
   console.error('[Error]', err.message);
   res.status(500).json({ ok: false, error: err.message });
 });
 
-// ── Start server ──────────────────────────────────────────────
+// Start server
 async function startServer() {
   try {
     await runMigrations();
@@ -1282,6 +1201,7 @@ async function startServer() {
     app.listen(PORT, () => {
       console.log(`[Sunloc] Server running on port ${PORT}`);
       console.log(`[Sunloc] Database: PostgreSQL (Railway)`);
+      console.log(`[Sunloc] Data protection: ACTIVE — orders will never be overwritten`);
     });
   } catch(err) {
     console.error('[Startup] Fatal error:', err.message);

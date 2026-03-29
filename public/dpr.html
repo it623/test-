@@ -518,7 +518,7 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
 let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
 let unsaved = false;
 

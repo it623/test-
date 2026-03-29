@@ -593,9 +593,7 @@ function sanitizeServerUrl(url) {
   }
 }
 
-const DEFAULT_SERVER = 'https://sunloc.up.railway.app';
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || DEFAULT_SERVER);
-if(!localStorage.getItem('sunloc_server_url')) localStorage.setItem('sunloc_server_url', DEFAULT_SERVER);
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;
@@ -936,21 +934,16 @@ async function pullFromServer(){
     if(!r.ok) return;
     const j=await r.json();
     if(j.ok && j.state){
-      // Normalise DB snake_case fields to camelCase
+      // Merge labels: keep local labels not yet on server (by id), then overlay server labels
+      // Normalise DB snake_case fields to camelCase expected by client
       const normLabels = (j.state.labels||[]).map(normLabel);
       const serverLabelIds = new Set(normLabels.map(l=>l.id));
       const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
       Object.assign(state, j.state);
       state.labels = normLabels;
-      // Re-add local-only labels
-      if(localOnlyLabels.length > 0){
+      // Re-add any local-only labels (generated but not yet confirmed saved on server)
+      if(localOnlyLabels.length>0){
         state.labels = [...state.labels, ...localOnlyLabels];
-        // Push local-only labels to server so other devices can find them
-        fetch(serverUrl+'/api/tracking/state',{
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
-          signal:AbortSignal.timeout(8000)
-        }).catch(()=>{});
       }
     }
     // Also pull planning orders for batch data
@@ -2203,44 +2196,9 @@ function processScanInput(dept,type){
           state.labels = [...normLabels, ...localOnly];
           saveLocal();
           retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
-          // If still not found, try matching by batchNumber+labelNumber from QR
-          if(!retry.ok && parsed.batchNumber && parsed.boxNumber != null){
-            const byBatch = state.labels.find(l =>
-              l.batchNumber === parsed.batchNumber &&
-              Math.abs(l.labelNumber) === Math.abs(parsed.boxNumber)
-            );
-            if(byBatch) retry = recordScan(byBatch.id, dept, type, currentDept,
-              {...parsed, labelId: byBatch.id});
-          }
         }
       }catch(e){
-        // Network error on full state sync — try batch-specific label fetch as last resort
-        if(parsed.batchNumber){
-          try{
-            const br = await fetch(
-              serverUrl+'/api/tracking/labels?batchNumber='+encodeURIComponent(parsed.batchNumber),
-              {signal:AbortSignal.timeout(5000)}
-            );
-            const bj = await br.json();
-            if(bj.ok && bj.labels && bj.labels.length){
-              const normBatch = bj.labels.map(normLabel);
-              normBatch.forEach(nl => {
-                if(!state.labels.find(l=>l.id===nl.id)) state.labels.push(nl);
-              });
-              saveLocal();
-              retry = recordScan(parsed.labelId, dept, type, currentDept, parsed);
-              if(!retry.ok && parsed.boxNumber != null){
-                const byBatch = state.labels.find(l =>
-                  l.batchNumber===parsed.batchNumber &&
-                  Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
-                );
-                if(byBatch) retry = recordScan(byBatch.id, dept, type, currentDept,
-                  {...parsed, labelId:byBatch.id});
-              }
-            }
-          }catch(e2){ /* ignore */ }
-        }
-        if(!retry.ok) retry = {ok:false, msg:'Cannot reach server — check connection'};
+        retry = {ok:false, msg:'Cannot reach server — check connection'};
       }
       // Always update UI — never stuck
       if(retry.ok){

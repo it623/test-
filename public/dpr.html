@@ -377,26 +377,7 @@ input[type=number]{font-family:var(--mono);text-align:right}
 
 <!-- ═══ HISTORY ═══════════════════════════════════════════ -->
 <div id="page-history" class="page">
-  <div class="card">
-    <div class="card-title">All Saved Records</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-      <div class="field-grp" style="margin:0">
-        <label style="font-size:10px;color:var(--t3);font-family:var(--fc);letter-spacing:.8px">DATE</label>
-        <input type="date" id="hist-filter-date" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px" oninput="renderHistory()">
-      </div>
-      <div class="field-grp" style="margin:0">
-        <label style="font-size:10px;color:var(--t3);font-family:var(--fc);letter-spacing:.8px">FLOOR</label>
-        <select id="hist-filter-floor" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px" onchange="renderHistory()">
-          <option value="">All Floors</option>
-          <option value="GF">Ground Floor</option>
-          <option value="1F">First Floor (FF)</option>
-          <option value="2F">Second Floor (SF)</option>
-        </select>
-      </div>
-      <button class="btn-sm" style="margin-top:14px" onclick="document.getElementById('hist-filter-date').value='';document.getElementById('hist-filter-floor').value='';renderHistory()">Clear</button>
-    </div>
-    <div id="historyList"></div>
-  </div>
+  <div class="card"><div class="card-title">All Saved Records</div><div id="historyList"></div></div>
 </div>
 
 <!-- ═══ SETTINGS ══════════════════════════════════════════ -->
@@ -1965,25 +1946,14 @@ function renderHistory(){
     const parts=k.split('_');
     return{key:k,floor:parts[1],date:parts[2]};
   }).sort((a,b)=>b.date.localeCompare(a.date));
-
-  // Date filter controls
-  const filterDate=document.getElementById('hist-filter-date')?.value||'';
-  const filterFloor=document.getElementById('hist-filter-floor')?.value||'';
-  const filtered=entries.filter(e=>{
-    if(filterDate && e.date!==filterDate) return false;
-    if(filterFloor && e.floor!==filterFloor) return false;
-    return true;
-  });
-
   if(!entries.length){document.getElementById('historyList').innerHTML=`<p style="color:var(--t3);padding:10px">No saved records yet.</p>`;return;}
-
-  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   let html=`<table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
-  (filtered.length?filtered:entries).forEach(e=>{
+  entries.forEach(e=>{
     const s=calcDayStats(e.floor,e.date);
-    const[y,mo,dy]=e.date.split('-');
+    const[y,m,d]=e.date.split('-');
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     html+=`<tr>
-      <td class="mono">${parseInt(dy)} ${months[parseInt(mo)-1]} ${y}</td>
+      <td class="mono">${parseInt(d)} ${months[parseInt(m)-1]} ${y}</td>
       <td style="color:var(--t2)">${FLOORS[e.floor]?.label||e.floor}</td>
       <td class="mono">${s.totProd||'—'}</td>
       <td><span class="pill ${s.eff>=90?'g':s.eff>=75?'a':'r'}">${s.totProd>0?s.eff.toFixed(1)+'%':'—'}</span></td>
@@ -1992,7 +1962,6 @@ function renderHistory(){
       <td><button class="btn-sm" onclick="loadRecord('${e.floor}','${e.date}')">Load</button></td>
     </tr>`;
   });
-  if(filtered.length===0 && filterDate) html+=`<tr><td colspan="7" style="color:var(--t3);text-align:center;padding:12px">No records for selected date/floor.</td></tr>`;
   html+=`</tbody></table>`;
   document.getElementById('historyList').innerHTML=html;
 }

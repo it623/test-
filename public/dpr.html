@@ -733,6 +733,44 @@ async function checkServer(){
     setSyncBadge('offline'); return false;
   }catch{ setSyncBadge('offline'); return false; }
 }
+
+// ── DPR OFFLINE RETRY QUEUE ──────────────────────────────────────
+const DPR_QUEUE_KEY = 'sunloc_dpr_push_queue';
+function dprQueuePush(fl, d, data, actuals) {
+  try {
+    const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
+    const idx = q.findIndex(e=>e.fl===fl&&e.d===d);
+    const entry = { ts: Date.now(), fl, d, data, actuals };
+    if (idx>=0) q[idx]=entry; else q.push(entry);
+    localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(q));
+  } catch(e) {}
+}
+async function dprQueueFlush() {
+  const url = localStorage.getItem('sunloc_server_url')||'';
+  if (!url) return;
+  try {
+    const raw = localStorage.getItem(DPR_QUEUE_KEY);
+    if (!raw) return;
+    const q = JSON.parse(raw);
+    if (!q.length) return;
+    const hR = await fetch(url+'/api/health',{signal:AbortSignal.timeout(3000)});
+    if (!hR.ok) return;
+    const remaining = [];
+    for (const entry of q) {
+      try {
+        const r = await fetch(url+'/api/dpr/save',{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({floor:entry.fl, date:entry.d, data:entry.data, actuals:entry.actuals}),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!r.ok) remaining.push(entry);
+      } catch(e) { remaining.push(entry); }
+    }
+    if (remaining.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
+    else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(remaining));
+  } catch(e) {}
+}
+
 async function pushToServer(fl,d,data){
   if(!serverUrl) return;
   // Flatten runs into actuals array for server to process
@@ -751,6 +789,8 @@ async function pushToServer(fl,d,data){
       });
     });
   });
+  // Always queue first so data is never lost if push fails
+  dprQueuePush(fl, d, data, actuals);
   try{
     await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
@@ -759,6 +799,13 @@ async function pushToServer(fl,d,data){
       signal:AbortSignal.timeout(6000)
     });
     setSyncBadge('synced');
+    // Push succeeded — remove this entry from the queue
+    try{
+      const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
+      const filtered = q.filter(e=>!(e.fl===fl&&e.d===d));
+      if(filtered.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
+      else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(filtered));
+    }catch(e){}
   }catch{ setSyncBadge('offline'); }
 }
 async function fetchActiveOrders(){
@@ -2431,13 +2478,29 @@ function showDprAuditPage() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// Auto-refresh active orders from Planning every 5 minutes
-// Keeps DPR in sync when planning adds/closes orders on another device
+// Auto-refresh active orders from Planning every 60 seconds (was 5 min)
 setInterval(async () => {
   if (dprUser) {
     try { await fetchActiveOrders(); } catch(e) {}
   }
-}, 5 * 60 * 1000);
+}, 60*1000);
+
+setInterval(dprQueueFlush, 30*1000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') dprQueueFlush(); });
+
+// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
+window.addEventListener('beforeunload', () => {
+  const url = localStorage.getItem('sunloc_server_url')||'';
+  if (!url || !curFloor) return;
+  try {
+    const d = getDate();
+    const data = collectForm();
+    localStorage.setItem(skey(curFloor,d), JSON.stringify(data));
+    dprQueuePush(curFloor, d, data, []);
+    const blob = new Blob([JSON.stringify({floor:curFloor,date:d,data,actuals:[]})], {type:'application/json'});
+    navigator.sendBeacon && navigator.sendBeacon(url+'/api/dpr/save', blob);
+  } catch(e) {}
+});
 
 // ── TEMP Batch PC Code Prompt (one-time per TEMP batch) ────────
 const _tempPromptShown = new Set();

@@ -436,7 +436,8 @@ input[type=number]{font-family:var(--mono)}
       <label>PIN</label>
       <input type="password" id="login-pin" placeholder="Enter PIN" maxlength="6" style="text-align:center;letter-spacing:4px;font-size:18px">
     </div>
-    <button class="btn btn-primary w-full mt-12" style="justify-content:center;padding:12px" onclick="doLogin()" id="login-btn" disabled>Login</button>
+    <div id="dept-hint" class="alert alert-info mt-8" style="display:none;font-size:12px">👆 Select a department above to continue</div>
+    <button class="btn btn-primary w-full mt-12" style="justify-content:center;padding:12px" onclick="doLogin()" id="login-btn">Login</button>
     <div id="login-err" class="alert alert-danger mt-8 hidden">Incorrect PIN. Please try again.</div>
   </div>
 </div>
@@ -569,7 +570,7 @@ const NAV_ITEMS = [
 ];
 
 const DEPT_PINS = {
-  admin:'000000', planning:'1111', labels:'2222',
+  admin:'9999', planning:'1111', labels:'2222',
   aim:'3333', printing:'4444', pi:'5555', packing:'6666', dispatch:'7777'
 };
 
@@ -737,29 +738,39 @@ function selectDept(dept){
   document.querySelectorAll('.dept-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('dept-'+dept).classList.add('active');
   document.getElementById('pin-group').style.display='block';
+  document.getElementById('dept-hint').style.display='none';
   document.getElementById('login-btn').disabled=false;
+  document.getElementById('login-err').classList.add('hidden');
   document.getElementById('login-pin').value='';
-  document.getElementById('login-pin').focus();
+  setTimeout(()=>document.getElementById('login-pin').focus(), 50);
 }
 
 function doLogin(){
-  const pin = document.getElementById('login-pin').value;
+  if(!selectedDeptForLogin){
+    document.getElementById('dept-hint').style.display='block';
+    return;
+  }
+  const pin = document.getElementById('login-pin').value.trim();
+  if(!pin){
+    document.getElementById('login-pin').focus();
+    return;
+  }
   const expected = DEPT_PINS[selectedDeptForLogin];
   if(pin===expected){
     currentDept = selectedDeptForLogin;
     document.getElementById('login-page').style.display='none';
     document.getElementById('app').style.display='flex';
     initApp();
-    // Audit: log login after successful PIN match
+    // Audit: log login to server using Track_Admin token
     if(serverUrl) {
       fetch(serverUrl + '/api/auth/login', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username: 'Track_Admin', pin, app: 'tracking' }),
+        body: JSON.stringify({ username: 'Track_Admin', pin: '9999', app: 'tracking' }),
         signal: AbortSignal.timeout(3000)
       }).then(r=>r.json()).then(j=>{
         if(j.ok) {
           sessionStorage.setItem('trk_token', j.token);
-          trkAuditLog('LOGIN', `Logged into Tracking as: ${currentDept}`);
+          trkAuditLog('LOGIN', `Dept: ${currentDept}`);
         }
       }).catch(()=>{});
     }
@@ -778,6 +789,7 @@ function doLogout(){
   document.getElementById('app').style.display='none';
   document.getElementById('login-page').style.display='flex';
   document.getElementById('login-err').classList.add('hidden');
+  document.getElementById('dept-hint').style.display='none';
   document.getElementById('pin-group').style.display='none';
   document.getElementById('login-btn').disabled=true;
   document.querySelectorAll('.dept-btn').forEach(b=>b.classList.remove('active'));
@@ -974,11 +986,57 @@ async function pullFromServer(){
   }catch(e){ setSyncBadge('offline'); }
 }
 
+// ── TRACKING OFFLINE RETRY QUEUE ────────────────────────────────
+const TRK_QUEUE_KEY = 'sunloc_trk_push_queue';
+function trkQueuePush(endpoint, payload) {
+  try {
+    const q = JSON.parse(localStorage.getItem(TRK_QUEUE_KEY)||'[]');
+    q.push({ ts: Date.now(), endpoint, payload });
+    if (q.length > 500) q.splice(0, q.length - 500);
+    localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(q));
+  } catch(e) {}
+}
+async function trkQueueFlush() {
+  if (!serverUrl) return;
+  try {
+    const raw = localStorage.getItem(TRK_QUEUE_KEY);
+    if (!raw) return;
+    const q = JSON.parse(raw);
+    if (!q.length) return;
+    const hR = await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(3000)});
+    if (!hR.ok) return;
+    const remaining = [];
+    for (const entry of q) {
+      try {
+        const r = await fetch(serverUrl+entry.endpoint,{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(entry.payload),
+          signal: AbortSignal.timeout(8000)
+        });
+        if (!r.ok) remaining.push(entry);
+      } catch(e) { remaining.push(entry); }
+    }
+    if (remaining.length===0) localStorage.removeItem(TRK_QUEUE_KEY);
+    else localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(remaining));
+    if (remaining.length < q.length) console.log(`[Tracking] Queue flushed ${q.length-remaining.length} entries`);
+  } catch(e) {}
+}
+
 async function pushToServer(endpoint, data){
   if(!serverUrl) return;
+  // Always queue so data is never lost if push fails
+  trkQueuePush(endpoint, data);
   try{
     await fetch(serverUrl+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(8000)});
     setSyncBadge('synced');
+    // Remove successfully pushed entry from queue
+    try{
+      const q = JSON.parse(localStorage.getItem(TRK_QUEUE_KEY)||'[]');
+      const str = JSON.stringify(data);
+      const filtered = q.filter(e=>!(e.endpoint===endpoint&&JSON.stringify(e.payload)===str));
+      if(filtered.length===0) localStorage.removeItem(TRK_QUEUE_KEY);
+      else localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(filtered));
+    }catch(e){}
   }catch{ setSyncBadge('offline'); }
 }
 
@@ -3391,7 +3449,6 @@ function resetApp(){
   pullFromServer();
   renderPage(currentPage);
 }
-}
 
 function exportAllData(){
   const data={exportedAt:now(),labels:state.labels,scans:state.scans,stageClosure:state.stageClosure,wastage:state.wastage,dispatchRecs:state.dispatchRecs,alerts:state.alerts};
@@ -3437,10 +3494,38 @@ setInterval(()=>{
   buildSidebar();
 },5*60*1000);
 
-// Auto sync every 2 minutes
+setInterval(trkQueueFlush, 30*1000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && currentDept) { trkQueueFlush(); pullFromServer(); } });
+
+// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
+window.addEventListener('beforeunload', () => {
+  if (!serverUrl || !currentDept) return;
+  try {
+    const toSave = {
+      labels: state.labels, scans: state.scans,
+      stageClosure: state.stageClosure, wastage: state.wastage,
+      dispatchRecs: state.dispatchRecs, alerts: state.alerts
+    };
+    localStorage.setItem('sunloc_tracking', JSON.stringify(toSave));
+    const blob = new Blob([JSON.stringify(toSave)], {type:'application/json'});
+    navigator.sendBeacon && navigator.sendBeacon(serverUrl+'/api/tracking/state', blob);
+  } catch(e) {}
+});
+
+// Auto sync every 30 seconds
 setInterval(()=>{
-  if(serverUrl) pullFromServer();
-},2*60*1000);
+  if(serverUrl && currentDept) pullFromServer();
+},30*1000);
+
+// Cross-tab / cross-page sync: when another tab (planning/DPR) writes to localStorage, re-pull
+window.addEventListener('storage', (e) => {
+  if(e.key === 'sunloc_server_url' && e.newValue) {
+    serverUrl = sanitizeServerUrl(e.newValue);
+  }
+  if((e.key === 'sunloc_tracking' || e.key === 'sunloc_planning') && currentDept) {
+    pullFromServer();
+  }
+});
 
 // Check TEMP batch alerts every 5 minutes
 setInterval(checkTrackingTempAlerts, 5*60*1000);

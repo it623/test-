@@ -537,6 +537,38 @@ function sanitizeServerUrl(url) {
   }
 }
 
+// ── OFFLINE RETRY QUEUE (defined before SYNC so SYNC.push can reference it) ──
+const PLAN_QUEUE_KEY = 'sunloc_plan_push_queue';
+function planQueuePush(stateObj) {
+  try {
+    const q = JSON.parse(localStorage.getItem(PLAN_QUEUE_KEY)||'[]');
+    q.splice(0, q.length, { ts: Date.now(), state: stateObj });
+    localStorage.setItem(PLAN_QUEUE_KEY, JSON.stringify(q));
+  } catch(e) {}
+}
+async function planQueueFlush() {
+  try {
+    const raw = localStorage.getItem(PLAN_QUEUE_KEY);
+    if (!raw) return;
+    const q = JSON.parse(raw);
+    if (!q.length) return;
+    const url = localStorage.getItem('sunloc_server_url')||'';
+    if (!url) return;
+    const r = await fetch(url+'/api/health',{signal:AbortSignal.timeout(3000)});
+    if (!r.ok) return;
+    const latest = q[q.length-1];
+    const resp = await fetch(url+'/api/planning/state',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({state: latest.state}),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (resp.ok) {
+      localStorage.removeItem(PLAN_QUEUE_KEY);
+      console.log('[Plan] Offline queue flushed');
+    }
+  } catch(e) {}
+}
+
 const SYNC = (() => {
   let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
   let _online = false, _lastCheck = 0;
@@ -565,6 +597,8 @@ const SYNC = (() => {
 
   async function push(stateObj) {
     if (!_url) return;
+    // Always queue first — survives if push fails or page closes mid-request
+    planQueuePush(stateObj);
     // Force fresh connectivity check on every push attempt
     _lastCheck = 0;
     if (!(await online())) return;
@@ -576,6 +610,8 @@ const SYNC = (() => {
         signal: AbortSignal.timeout(6000)
       });
       _online = true; updateBadge();
+      // Push succeeded — clear the queue
+      localStorage.removeItem(PLAN_QUEUE_KEY);
     } catch { _online = false; updateBadge(); }
   }
 
@@ -5157,13 +5193,28 @@ setTimeout(() => SYNC.online().then(() => SYNC.updateBadge()), 800);
 // Refresh tracking WIP every 3 minutes
 setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},180000);
 
-// Auto-refresh planning state from server every 5 minutes
-// Ensures multi-device use stays in sync (e.g. two planning tabs open)
+// Auto-refresh planning state from server every 60 seconds (was 5 min)
 setInterval(async()=>{
   if(currentUser && _serverDataLoaded){
     try{ await SYNC.loadFromServer(); }catch(e){}
   }
-}, 5*60*1000);
+}, 60*1000);
+
+setInterval(planQueueFlush, 30*1000);
+
+// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
+window.addEventListener('beforeunload', () => {
+  if (!_serverDataLoaded) return;
+  const url = localStorage.getItem('sunloc_server_url')||'';
+  if (!url) return;
+  try {
+    const toSave = {...state};
+    delete toSave.pcCodes; delete toSave.zoneMap;
+    planQueuePush(toSave);
+    const blob = new Blob([JSON.stringify({state:toSave})], {type:'application/json'});
+    navigator.sendBeacon && navigator.sendBeacon(url+'/api/planning/state', blob);
+  } catch(e) {}
+});
 
 // Check TEMP batch alerts every 5 minutes
 setInterval(checkPlanningTempAlerts, 5*60*1000);

@@ -803,10 +803,23 @@ function initApp(){
   document.getElementById('sb-avatar').textContent=info.label[0];
   document.getElementById('sb-avatar').style.background=info.color;
   buildSidebar();
-  loadState();
+  loadState(); // triggers pullFromServer internally
   const defaultPage = info.pages[0];
   navigate(defaultPage);
-  checkServer();
+  // checkServer result drives a pull — retry up to 3x if first pull fails
+  checkServer().then(ok=>{
+    if(ok) pullFromServer();
+    else {
+      // Retry with backoff if server check failed
+      let attempts=0;
+      const retry=setInterval(async()=>{
+        attempts++;
+        const up=await checkServer();
+        if(up){ pullFromServer(); clearInterval(retry); }
+        if(attempts>=3) clearInterval(retry);
+      },5000);
+    }
+  });
   initMobileNav();
 }
 
@@ -886,11 +899,16 @@ function setSyncBadge(status){
 async function checkServer(){
   if(!serverUrl){ setSyncBadge('offline'); return false; }
   setSyncBadge('syncing');
-  try{
-    const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
-    if(r.ok){ setSyncBadge('synced'); return true; }
-    setSyncBadge('offline'); return false;
-  }catch{ setSyncBadge('offline'); return false; }
+  // Try up to 2 times before declaring offline
+  for(let attempt=0; attempt<2; attempt++){
+    try{
+      const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(5000)});
+      if(r.ok){ setSyncBadge('synced'); return true; }
+    }catch(e){
+      if(attempt===0) await new Promise(r=>setTimeout(r,1000)); // wait 1s before retry
+    }
+  }
+  setSyncBadge('offline'); return false;
 }
 
 function configureServer(){
@@ -942,59 +960,108 @@ function normLabel(l){
 async function pullFromServer(){
   if(!serverUrl) return;
 
-  // ── Pull planning orders FIRST (most critical — batches must always be current) ──
   try{
-    const pr=await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
-    if(pr.ok){
-      const pj=await pr.json();
-      if(pj.ok && pj.state?.orders){
-        const batches = pj.state.orders
-          .filter(o=>!o.deleted && o.status!=='closed')
-          .map(b=>({
-            ...b,
-            actualQty: b.actualQty || b.actualProd || 0,
-            actualProd: b.actualProd || b.actualQty || 0,
-          }));
-        // Always update — planning is the source of truth for batches
-        state.batches = batches;
-        state.machineMaster = pj.state.machineMaster||[];
+    // ── Single snapshot call — gets planning orders + tracking state atomically ──
+    // This eliminates race conditions from multiple sequential fetches
+    const r = await fetch(serverUrl+'/api/sync/snapshot', {signal:AbortSignal.timeout(10000)});
+    if(r.ok){
+      const snap = await r.json();
+      if(snap.ok){
+        // Load planning orders (always overwrite — server is source of truth)
+        if(snap.orders){
+          state.batches = snap.orders;
+          state.machineMaster = snap.machineMaster || [];
+        }
+        // Load tracking state
+        if(snap.tracking){
+          const normLabels = (snap.tracking.labels||[]).map(normLabel);
+          const serverLabelIds = new Set(normLabels.map(l=>l.id));
+          const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
+          state.labels = normLabels;
+          state.scans = snap.tracking.scans || [];
+          state.stageClosure = snap.tracking.stageClosure || [];
+          state.wastage = snap.tracking.wastage || [];
+          state.dispatchRecs = snap.tracking.dispatchRecs || [];
+          state.alerts = snap.tracking.alerts || [];
+          // Push any local-only labels back to server
+          if(localOnlyLabels.length > 0){
+            state.labels = [...state.labels, ...localOnlyLabels];
+            fetch(serverUrl+'/api/tracking/state',{
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+              signal:AbortSignal.timeout(8000)
+            }).catch(()=>{});
+          }
+        }
+        saveLocal();
+        setSyncBadge('synced');
+        // Notify other tabs that tracking data refreshed
+        try{ sunlocChannel.postMessage({type:'TRACKING_SYNCED',ts:Date.now()}); }catch(e){}
+        if(currentPage) renderPage(currentPage);
+        return;
       }
     }
-  }catch(e){ console.warn('[Tracking] Planning pull failed:', e.message); }
+  }catch(e){ console.warn('[Tracking] Snapshot failed, trying fallback:', e.message); }
 
-  // ── Pull tracking state (labels, scans, etc.) ──
+  // ── Fallback: try individual endpoints if snapshot not available ──
+  let gotAny = false;
   try{
-    const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)});
-    if(r.ok){
-      const j=await r.json();
-      if(j.ok && j.state){
-        const normLabels = (j.state.labels||[]).map(normLabel);
+    const pr = await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
+    if(pr.ok){
+      const pj = await pr.json();
+      if(pj.ok && pj.state?.orders){
+        state.batches = pj.state.orders.filter(o=>!o.deleted&&o.status!=='closed').map(b=>({
+          ...b, actualQty:b.actualQty||b.actualProd||0, actualProd:b.actualProd||b.actualQty||0,
+        }));
+        state.machineMaster = pj.state.machineMaster||[];
+        gotAny = true;
+      }
+    }
+  }catch(e){ console.warn('[Tracking] Planning fallback failed:', e.message); }
+
+  try{
+    const tr = await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)});
+    if(tr.ok){
+      const tj = await tr.json();
+      if(tj.ok && tj.state){
+        const normLabels = (tj.state.labels||[]).map(normLabel);
         const serverLabelIds = new Set(normLabels.map(l=>l.id));
         const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-        // Merge server state but preserve batches (already loaded from planning above)
-        const savedBatches = state.batches;
-        const savedMachineMaster = state.machineMaster;
-        Object.assign(state, j.state);
-        state.labels = normLabels;
-        state.batches = savedBatches;
-        state.machineMaster = savedMachineMaster;
-        // Push local-only labels back to server
-        if(localOnlyLabels.length > 0){
-          state.labels = [...state.labels, ...localOnlyLabels];
-          fetch(serverUrl+'/api/tracking/state',{
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
-            signal:AbortSignal.timeout(8000)
-          }).catch(()=>{});
-        }
+        state.labels = [...normLabels, ...localOnlyLabels];
+        state.scans = tj.state.scans||[];
+        state.stageClosure = tj.state.stageClosure||[];
+        state.wastage = tj.state.wastage||[];
+        state.dispatchRecs = tj.state.dispatchRecs||[];
+        state.alerts = tj.state.alerts||[];
+        gotAny = true;
       }
     }
-  }catch(e){ console.warn('[Tracking] Tracking state pull failed:', e.message); setSyncBadge('offline'); return; }
+  }catch(e){ console.warn('[Tracking] Tracking fallback failed:', e.message); }
 
-  saveLocal();
-  setSyncBadge('synced');
-  if(currentPage) renderPage(currentPage);
+  if(gotAny){
+    saveLocal();
+    setSyncBadge('synced');
+    if(currentPage) renderPage(currentPage);
+  } else {
+    setSyncBadge('offline');
+  }
 }
+
+// ── BROADCAST CHANNEL — instant cross-tab sync ─────────────────
+// When Planning saves an order or DPR saves data, tracking pulls instantly
+const sunlocChannel = (() => {
+  try {
+    const ch = new BroadcastChannel('sunloc_sync');
+    ch.onmessage = (e) => {
+      const msg = e.data;
+      if (!currentDept) return;
+      if (msg.type === 'PLANNING_SAVED' || msg.type === 'DPR_SAVED' || msg.type === 'FORCE_SYNC') {
+        pullFromServer();
+      }
+    };
+    return ch;
+  } catch(e) { return { postMessage: ()=>{} }; }
+})();
 
 // ── TRACKING OFFLINE RETRY QUEUE ────────────────────────────────
 const TRK_QUEUE_KEY = 'sunloc_trk_push_queue';

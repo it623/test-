@@ -436,8 +436,7 @@ input[type=number]{font-family:var(--mono)}
       <label>PIN</label>
       <input type="password" id="login-pin" placeholder="Enter PIN" maxlength="6" style="text-align:center;letter-spacing:4px;font-size:18px">
     </div>
-    <div id="dept-hint" class="alert alert-info mt-8" style="display:none;font-size:12px">👆 Select a department above to continue</div>
-    <button class="btn btn-primary w-full mt-12" style="justify-content:center;padding:12px" onclick="doLogin()" id="login-btn">Login</button>
+    <button class="btn btn-primary w-full mt-12" style="justify-content:center;padding:12px" onclick="doLogin()" id="login-btn" disabled>Login</button>
     <div id="login-err" class="alert alert-danger mt-8 hidden">Incorrect PIN. Please try again.</div>
   </div>
 </div>
@@ -570,7 +569,7 @@ const NAV_ITEMS = [
 ];
 
 const DEPT_PINS = {
-  admin:'9999', planning:'1111', labels:'2222',
+  admin:'000000', planning:'1111', labels:'2222',
   aim:'3333', printing:'4444', pi:'5555', packing:'6666', dispatch:'7777'
 };
 
@@ -738,39 +737,29 @@ function selectDept(dept){
   document.querySelectorAll('.dept-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById('dept-'+dept).classList.add('active');
   document.getElementById('pin-group').style.display='block';
-  document.getElementById('dept-hint').style.display='none';
   document.getElementById('login-btn').disabled=false;
-  document.getElementById('login-err').classList.add('hidden');
   document.getElementById('login-pin').value='';
-  setTimeout(()=>document.getElementById('login-pin').focus(), 50);
+  document.getElementById('login-pin').focus();
 }
 
 function doLogin(){
-  if(!selectedDeptForLogin){
-    document.getElementById('dept-hint').style.display='block';
-    return;
-  }
-  const pin = document.getElementById('login-pin').value.trim();
-  if(!pin){
-    document.getElementById('login-pin').focus();
-    return;
-  }
+  const pin = document.getElementById('login-pin').value;
   const expected = DEPT_PINS[selectedDeptForLogin];
   if(pin===expected){
     currentDept = selectedDeptForLogin;
     document.getElementById('login-page').style.display='none';
     document.getElementById('app').style.display='flex';
     initApp();
-    // Audit: log login to server using Track_Admin token
+    // Audit: log login after successful PIN match
     if(serverUrl) {
       fetch(serverUrl + '/api/auth/login', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username: 'Track_Admin', pin: '9999', app: 'tracking' }),
+        body: JSON.stringify({ username: 'Track_Admin', pin, app: 'tracking' }),
         signal: AbortSignal.timeout(3000)
       }).then(r=>r.json()).then(j=>{
         if(j.ok) {
           sessionStorage.setItem('trk_token', j.token);
-          trkAuditLog('LOGIN', `Dept: ${currentDept}`);
+          trkAuditLog('LOGIN', `Logged into Tracking as: ${currentDept}`);
         }
       }).catch(()=>{});
     }
@@ -789,7 +778,6 @@ function doLogout(){
   document.getElementById('app').style.display='none';
   document.getElementById('login-page').style.display='flex';
   document.getElementById('login-err').classList.add('hidden');
-  document.getElementById('dept-hint').style.display='none';
   document.getElementById('pin-group').style.display='none';
   document.getElementById('login-btn').disabled=true;
   document.querySelectorAll('.dept-btn').forEach(b=>b.classList.remove('active'));
@@ -941,112 +929,56 @@ function normLabel(l){
 
 async function pullFromServer(){
   if(!serverUrl) return;
-
-  // ── Pull planning orders FIRST (most critical — batches must always be current) ──
   try{
+    const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j.ok && j.state){
+      // Normalise DB snake_case fields to camelCase
+      const normLabels = (j.state.labels||[]).map(normLabel);
+      const serverLabelIds = new Set(normLabels.map(l=>l.id));
+      const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
+      Object.assign(state, j.state);
+      state.labels = normLabels;
+      // Re-add local-only labels
+      if(localOnlyLabels.length > 0){
+        state.labels = [...state.labels, ...localOnlyLabels];
+        // Push local-only labels to server so other devices can find them
+        fetch(serverUrl+'/api/tracking/state',{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+          signal:AbortSignal.timeout(8000)
+        }).catch(()=>{});
+      }
+    }
+    // Also pull planning orders for batch data
     const pr=await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
     if(pr.ok){
       const pj=await pr.json();
       if(pj.ok && pj.state?.orders){
-        const batches = pj.state.orders
-          .filter(o=>!o.deleted && o.status!=='closed')
-          .map(b=>({
-            ...b,
-            actualQty: b.actualQty || b.actualProd || 0,
-            actualProd: b.actualProd || b.actualQty || 0,
-          }));
-        // Always update — planning is the source of truth for batches
-        state.batches = batches;
+        const batches = pj.state.orders.filter(o=>!o.deleted).map(b=>({
+          ...b,
+          // Normalise: server returns actualProd from DPR; tracking also uses actualQty
+          actualQty: b.actualQty || b.actualProd || 0,
+          actualProd: b.actualProd || b.actualQty || 0,
+        }));
+        if(batches.length > 0 || state.batches.length === 0){
+          state.batches = batches;
+        }
         state.machineMaster = pj.state.machineMaster||[];
       }
     }
-  }catch(e){ console.warn('[Tracking] Planning pull failed:', e.message); }
-
-  // ── Pull tracking state (labels, scans, etc.) ──
-  try{
-    const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)});
-    if(r.ok){
-      const j=await r.json();
-      if(j.ok && j.state){
-        const normLabels = (j.state.labels||[]).map(normLabel);
-        const serverLabelIds = new Set(normLabels.map(l=>l.id));
-        const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-        // Merge server state but preserve batches (already loaded from planning above)
-        const savedBatches = state.batches;
-        const savedMachineMaster = state.machineMaster;
-        Object.assign(state, j.state);
-        state.labels = normLabels;
-        state.batches = savedBatches;
-        state.machineMaster = savedMachineMaster;
-        // Push local-only labels back to server
-        if(localOnlyLabels.length > 0){
-          state.labels = [...state.labels, ...localOnlyLabels];
-          fetch(serverUrl+'/api/tracking/state',{
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
-            signal:AbortSignal.timeout(8000)
-          }).catch(()=>{});
-        }
-      }
-    }
-  }catch(e){ console.warn('[Tracking] Tracking state pull failed:', e.message); setSyncBadge('offline'); return; }
-
-  saveLocal();
-  setSyncBadge('synced');
-  if(currentPage) renderPage(currentPage);
-}
-
-// ── TRACKING OFFLINE RETRY QUEUE ────────────────────────────────
-const TRK_QUEUE_KEY = 'sunloc_trk_push_queue';
-function trkQueuePush(endpoint, payload) {
-  try {
-    const q = JSON.parse(localStorage.getItem(TRK_QUEUE_KEY)||'[]');
-    q.push({ ts: Date.now(), endpoint, payload });
-    if (q.length > 500) q.splice(0, q.length - 500);
-    localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(q));
-  } catch(e) {}
-}
-async function trkQueueFlush() {
-  if (!serverUrl) return;
-  try {
-    const raw = localStorage.getItem(TRK_QUEUE_KEY);
-    if (!raw) return;
-    const q = JSON.parse(raw);
-    if (!q.length) return;
-    const hR = await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(3000)});
-    if (!hR.ok) return;
-    const remaining = [];
-    for (const entry of q) {
-      try {
-        const r = await fetch(serverUrl+entry.endpoint,{
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(entry.payload),
-          signal: AbortSignal.timeout(8000)
-        });
-        if (!r.ok) remaining.push(entry);
-      } catch(e) { remaining.push(entry); }
-    }
-    if (remaining.length===0) localStorage.removeItem(TRK_QUEUE_KEY);
-    else localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(remaining));
-    if (remaining.length < q.length) console.log(`[Tracking] Queue flushed ${q.length-remaining.length} entries`);
-  } catch(e) {}
+    saveLocal();
+    setSyncBadge('synced');
+    if(currentPage) renderPage(currentPage);
+  }catch(e){ setSyncBadge('offline'); }
 }
 
 async function pushToServer(endpoint, data){
   if(!serverUrl) return;
-  // Always queue so data is never lost if push fails
-  trkQueuePush(endpoint, data);
   try{
     await fetch(serverUrl+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(8000)});
     setSyncBadge('synced');
-    // Remove successfully pushed entry from queue
-    try{
-      const q = JSON.parse(localStorage.getItem(TRK_QUEUE_KEY)||'[]');
-      const str = JSON.stringify(data);
-      const filtered = q.filter(e=>!(e.endpoint===endpoint&&JSON.stringify(e.payload)===str));
-      if(filtered.length===0) localStorage.removeItem(TRK_QUEUE_KEY);
-      else localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(filtered));
-    }catch(e){}
   }catch{ setSyncBadge('offline'); }
 }
 
@@ -1711,9 +1643,7 @@ function renderPage(page){
 function renderDashboard(){
   const el=document.getElementById('page-dashboard');
   checkAlerts();
-  // Show all non-closed batches (pending + running + export-pending)
-  const activeBatches=state.batches.filter(b=>b.status!=='closed');
-  const totalBatches=activeBatches.length;
+  const totalBatches=state.batches.filter(b=>b.status!=='closed').length;
   const totalLabels=state.labels.filter(l=>!l.voided&&!l.isOrange).length;
   const totalAlerts=state.alerts.length;
   const packedBoxes=state.scans.filter(s=>s.dept==='packing'&&s.type==='out').length;
@@ -1765,7 +1695,7 @@ function renderDashboard(){
     <table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Machine</th><th>Size</th><th>Printed</th><th>Stage</th><th>WIP Days</th><th>Dispatch Est.</th><th>Status</th></tr></thead>
       <tbody>
-      ${activeBatches.slice(0,15).map(b=>{
+      ${state.batches.filter(b=>b.status!=='closed').slice(0,15).map(b=>{
         const wipDays=getBatchWIPDays(b.batchNumber);
         const dispDate=calcDispatchDate(b);
         const std=b.isPrinted?3:2;
@@ -3372,13 +3302,27 @@ function renderSettings(){
       <button class="btn btn-primary btn-sm" onclick="saveServerUrl()">Save & Test</button>
     </div>
     <div class="card">
-      <div class="card-title">🖨️ Label Printer</div>
-      <div class="form-group">
-        <label>Zebra Printer Bridge URL</label>
-        <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:9100">
+      <div class="card-title">🖨️ Label Printer — HPRT HT800</div>
+      <div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.8">
+        <strong style="color:var(--accent2)">Setup Steps:</strong><br>
+        1️⃣ Copy <code>sunloc-print-bridge.js</code> + <code>sunloc-print-bridge.bat</code> to SHCL computer<br>
+        2️⃣ Double-click <strong>sunloc-print-bridge.bat</strong> — keep that window open<br>
+        3️⃣ Enter <code>http://localhost:9100</code> below and click Save<br>
+        4️⃣ Click <strong>Test Printer</strong> — should print a test label
       </div>
-      <div class="text-sm text-muted mb-8">Leave blank to download ZPL files. Install Zebra Browser Print for direct printing.</div>
-      <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
+      <div class="form-group">
+        <label>Print Bridge URL</label>
+        <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:9100">
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">
+          Bridge must be running on the SHCL computer. Leave blank to download ZPL files instead.
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">💾 Save URL</button>
+        <button class="btn btn-secondary btn-sm" onclick="testPrinter()">🖨️ Test Printer</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadBridgeFiles()">⬇️ Download Bridge Files</button>
+      </div>
+      <div id="printer-status" style="margin-top:8px;font-size:12px"></div>
     </div>
     <div class="card">
       <div class="card-title">📦 Pack Size Master</div>
@@ -3442,7 +3386,189 @@ function saveServerUrl(){
 function savePrinterUrl(){
   const url=document.getElementById('s-printer')?.value.trim()||'';
   localStorage.setItem('sunloc_printer_url',url);
-  alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
+  const el=document.getElementById('printer-status');
+  if(el) el.innerHTML = url
+    ? '<span style="color:var(--green)">✅ URL saved. Click Test Printer to verify.</span>'
+    : '<span style="color:var(--text3)">✅ ZPL download mode activated.</span>';
+}
+
+async function testPrinter(){
+  const url = (document.getElementById('s-printer')?.value.trim() || localStorage.getItem('sunloc_printer_url') || '').trim();
+  const el = document.getElementById('printer-status');
+  if(!url){ if(el) el.innerHTML='<span style="color:var(--accent4)">❌ No printer URL set. Enter URL first.</span>'; return; }
+  if(el) el.innerHTML='<span style="color:var(--accent2)">⏳ Connecting to printer bridge...</span>';
+  // Generate a test ZPL label
+  const testZPL = `^XA^CI28^PW800^LL400^MMT^PON^LH0,0
+^CF0,40^FO10,30^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
+^CF0,28^FO10,80^FB780,1,0,C^FDTEST LABEL - HPRT HT800^FS
+^FO10,120^GB780,2,2^FS
+^CF0,24^FO10,135^FB780,1,0,C^FDPrint bridge working correctly^FS
+^CF0,20^FO10,175^FB780,1,0,C^FD${new Date().toLocaleString('en-IN')}^FS
+^FO10,210^GB780,2,2^FS
+^CF0,18^FO10,225^FB780,1,0,C^FDSunloc Tracking Suite v1.0^FS
+^XZ`;
+  try {
+    const r = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body: testZPL,
+      signal: AbortSignal.timeout(6000)
+    });
+    if(r.ok){
+      const j = await r.json().catch(()=>({}));
+      if(el) el.innerHTML='<span style="color:var(--green)">✅ Test label sent! Check if it printed on HPRT HT800.</span>';
+      localStorage.setItem('sunloc_printer_url', url);
+    } else {
+      if(el) el.innerHTML=`<span style="color:var(--accent4)">❌ Bridge responded with error ${r.status}. Check bridge window for details.</span>`;
+    }
+  } catch(e){
+    if(el) el.innerHTML='<span style="color:var(--accent4)">❌ Cannot reach bridge. Make sure sunloc-print-bridge.bat is running on SHCL computer.</span>';
+  }
+}
+
+function downloadBridgeFiles(){
+  // Bridge JS file content
+  const bridgeJS = `/**
+ * Sunloc Label Print Bridge v1.0
+ * Run this on the SHCL computer connected to HPRT HT800 ZPL printer.
+ * Usage: double-click sunloc-print-bridge.bat
+ */
+const http = require('http');
+const net  = require('net');
+const { exec } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const BRIDGE_PORT  = 9100;
+const PRINTER_NAME = 'HPRT HT800 - ZPL';
+const PRINTER_IP   = '127.0.0.1';
+const PRINTER_TCP_PORT = 9100;
+
+function printViaWindowsPrinter(zplData, callback) {
+  const tmpFile = path.join(os.tmpdir(), 'sunloc_label_' + Date.now() + '.zpl');
+  fs.writeFile(tmpFile, zplData, 'binary', (err) => {
+    if (err) return callback(new Error('Temp file error: ' + err.message));
+    const cmd = 'copy /b "' + tmpFile + '" "\\\\\\\\%COMPUTERNAME%\\\\' + PRINTER_NAME + '"';
+    exec(cmd, (err2, stdout, stderr) => {
+      fs.unlink(tmpFile, () => {});
+      if (err2) callback(new Error('Print failed: ' + (stderr || err2.message)));
+      else callback(null);
+    });
+  });
+}
+
+function printViaTCP(zplData, callback) {
+  const client = new net.Socket();
+  const timeout = setTimeout(() => { client.destroy(); callback(new Error('TCP timeout')); }, 5000);
+  client.connect(PRINTER_TCP_PORT, PRINTER_IP, () => {
+    client.write(zplData, 'binary', () => { clearTimeout(timeout); client.end(); callback(null); });
+  });
+  client.on('error', (err) => { clearTimeout(timeout); callback(err); });
+}
+
+const server = http.createServer((req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.writeHead(200); res.end(); return; }
+
+  if (req.method === 'GET' && req.url === '/status') {
+    res.writeHead(200, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({ok:true,bridge:'Sunloc Print Bridge v1.0',printer:PRINTER_NAME}));
+    return;
+  }
+
+  if (req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      if (!body.trim()) { res.writeHead(400); res.end(JSON.stringify({ok:false,error:'Empty ZPL'})); return; }
+      const count = (body.match(/\\^XA/g)||[]).length;
+      console.log('[' + new Date().toLocaleTimeString() + '] Printing ' + count + ' label(s)...');
+      const done = (err) => {
+        if (err) {
+          console.error('  ERROR:', err.message);
+          // Try Windows printer as fallback
+          printViaWindowsPrinter(body, (err2) => {
+            if (err2) {
+              console.error('  FALLBACK ERROR:', err2.message);
+              res.writeHead(500); res.end(JSON.stringify({ok:false,error:err2.message}));
+            } else {
+              console.log('  OK via Windows printer');
+              res.writeHead(200); res.end(JSON.stringify({ok:true,labels:count}));
+            }
+          });
+        } else {
+          console.log('  OK - printed ' + count + ' label(s)');
+          res.writeHead(200); res.end(JSON.stringify({ok:true,labels:count}));
+        }
+      };
+      printViaTCP(body, done);
+    });
+    return;
+  }
+  res.writeHead(404); res.end();
+});
+
+server.listen(BRIDGE_PORT, '127.0.0.1', () => {
+  console.log('');
+  console.log('=================================================');
+  console.log('  SUNLOC LABEL PRINT BRIDGE v1.0');
+  console.log('=================================================');
+  console.log('  Bridge URL: http://localhost:' + BRIDGE_PORT);
+  console.log('  Printer:    ' + PRINTER_NAME);
+  console.log('-------------------------------------------------');
+  console.log('  In Tracking App Settings:');
+  console.log('  Printer URL = http://localhost:9100');
+  console.log('=================================================');
+  console.log('  Keep this window open while printing.');
+  console.log('  Press Ctrl+C to stop.');
+  console.log('');
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error('Port 9100 already in use. Another bridge may be running.');
+  } else { console.error('Error:', err.message); }
+  process.exit(1);
+});
+`;
+
+  const bridgeBAT = `@echo off
+title Sunloc Print Bridge
+echo.
+echo  Starting Sunloc Label Print Bridge...
+echo  DO NOT CLOSE THIS WINDOW while printing labels.
+echo.
+node --version >nul 2>&1
+if errorlevel 1 (
+    echo  ERROR: Node.js not found! Download from https://nodejs.org
+    pause
+    exit /b 1
+)
+node "%~dp0sunloc-print-bridge.js"
+pause
+`;
+
+  // Download JS file
+  const blobJS = new Blob([bridgeJS], {type:'text/plain'});
+  const aJS = document.createElement('a');
+  aJS.href = URL.createObjectURL(blobJS);
+  aJS.download = 'sunloc-print-bridge.js';
+  aJS.click();
+
+  setTimeout(()=>{
+    const blobBAT = new Blob([bridgeBAT], {type:'text/plain'});
+    const aBAT = document.createElement('a');
+    aBAT.href = URL.createObjectURL(blobBAT);
+    aBAT.download = 'sunloc-print-bridge.bat';
+    aBAT.click();
+  }, 500);
+
+  const el = document.getElementById('printer-status');
+  if(el) el.innerHTML='<span style="color:var(--green)">✅ Downloaded 2 files. Copy both to SHCL computer, then double-click the .bat file.</span>';
+}
 }
 
 function clearAllScans(){
@@ -3460,6 +3586,7 @@ function resetApp(){
   alert('Browser cache cleared.\nServer data is SAFE — reloading from server now...');
   pullFromServer();
   renderPage(currentPage);
+}
 }
 
 function exportAllData(){
@@ -3506,38 +3633,10 @@ setInterval(()=>{
   buildSidebar();
 },5*60*1000);
 
-setInterval(trkQueueFlush, 30*1000);
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && currentDept) { trkQueueFlush(); pullFromServer(); } });
-
-// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
-window.addEventListener('beforeunload', () => {
-  if (!serverUrl || !currentDept) return;
-  try {
-    const toSave = {
-      labels: state.labels, scans: state.scans,
-      stageClosure: state.stageClosure, wastage: state.wastage,
-      dispatchRecs: state.dispatchRecs, alerts: state.alerts
-    };
-    localStorage.setItem('sunloc_tracking', JSON.stringify(toSave));
-    const blob = new Blob([JSON.stringify(toSave)], {type:'application/json'});
-    navigator.sendBeacon && navigator.sendBeacon(serverUrl+'/api/tracking/state', blob);
-  } catch(e) {}
-});
-
-// Auto sync every 30 seconds
+// Auto sync every 2 minutes
 setInterval(()=>{
-  if(serverUrl && currentDept) pullFromServer();
-},30*1000);
-
-// Cross-tab / cross-page sync: when another tab (planning/DPR) writes to localStorage, re-pull
-window.addEventListener('storage', (e) => {
-  if(e.key === 'sunloc_server_url' && e.newValue) {
-    serverUrl = sanitizeServerUrl(e.newValue);
-  }
-  if((e.key === 'sunloc_tracking' || e.key === 'sunloc_planning') && currentDept) {
-    pullFromServer();
-  }
-});
+  if(serverUrl) pullFromServer();
+},2*60*1000);
 
 // Check TEMP batch alerts every 5 minutes
 setInterval(checkTrackingTempAlerts, 5*60*1000);

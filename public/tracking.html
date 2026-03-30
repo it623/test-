@@ -962,30 +962,46 @@ async function pullFromServer(){
 
   try{
     // ── Single snapshot call — gets planning orders + tracking state atomically ──
-    // This eliminates race conditions from multiple sequential fetches
     const r = await fetch(serverUrl+'/api/sync/snapshot', {signal:AbortSignal.timeout(10000)});
     if(r.ok){
       const snap = await r.json();
       if(snap.ok){
-        // Load planning orders (always overwrite — server is source of truth)
-        if(snap.orders){
+        // Load planning orders — always overwrite, server is source of truth
+        // snap.orders is always an array (may be empty if no orders yet)
+        if(Array.isArray(snap.orders)){
           state.batches = snap.orders;
           state.machineMaster = snap.machineMaster || [];
         }
-        // Load tracking state
+        // Load tracking state (labels from server are snake_case — normalise)
         if(snap.tracking){
-          const normLabels = (snap.tracking.labels||[]).map(normLabel);
+          const normLabels = (snap.tracking.labels||[]).map(l=>
+            // Server returns snake_case; normLabel handles both cases
+            l.batchNumber ? l : normLabel(l)
+          );
           const serverLabelIds = new Set(normLabels.map(l=>l.id));
           const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-          state.labels = normLabels;
-          state.scans = snap.tracking.scans || [];
-          state.stageClosure = snap.tracking.stageClosure || [];
+          state.labels = [...normLabels, ...localOnlyLabels];
+          state.scans = (snap.tracking.scans||[]).map(s=>({
+            id:s.id, labelId:s.label_id||s.labelId,
+            batchNumber:s.batch_number||s.batchNumber,
+            dept:s.dept, type:s.type, ts:s.ts,
+            operator:s.operator||null, size:s.size||null, qty:s.qty||null
+          }));
+          state.stageClosure = (snap.tracking.stageClosure||[]).map(s=>({
+            id:s.id, batchNumber:s.batch_number||s.batchNumber,
+            dept:s.dept, closed:!!s.closed,
+            closedAt:s.closed_at||s.closedAt, closedBy:s.closed_by||s.closedBy||null
+          }));
           state.wastage = snap.tracking.wastage || [];
           state.dispatchRecs = snap.tracking.dispatchRecs || [];
-          state.alerts = snap.tracking.alerts || [];
+          state.alerts = (snap.tracking.alerts||[]).map(a=>({
+            id:a.id, labelId:a.label_id||a.labelId,
+            batchNumber:a.batch_number||a.batchNumber,
+            dept:a.dept, scanInTs:a.scan_in_ts||a.scanInTs,
+            hoursStuck:a.hours_stuck||a.hoursStuck, resolved:!!a.resolved, msg:a.msg
+          }));
           // Push any local-only labels back to server
           if(localOnlyLabels.length > 0){
-            state.labels = [...state.labels, ...localOnlyLabels];
             fetch(serverUrl+'/api/tracking/state',{
               method:'POST', headers:{'Content-Type':'application/json'},
               body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
@@ -995,7 +1011,6 @@ async function pullFromServer(){
         }
         saveLocal();
         setSyncBadge('synced');
-        // Notify other tabs that tracking data refreshed
         try{ sunlocChannel.postMessage({type:'TRACKING_SYNCED',ts:Date.now()}); }catch(e){}
         if(currentPage) renderPage(currentPage);
         return;
@@ -1003,7 +1018,7 @@ async function pullFromServer(){
     }
   }catch(e){ console.warn('[Tracking] Snapshot failed, trying fallback:', e.message); }
 
-  // ── Fallback: try individual endpoints if snapshot not available ──
+  // ── Fallback: individual endpoints if snapshot not available ──
   let gotAny = false;
   try{
     const pr = await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});

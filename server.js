@@ -1083,13 +1083,13 @@ app.get('/api/health', asyncRoute(async (req, res) => {
 }));
 
 // ─── CROSS-APP SYNC SNAPSHOT ──────────────────────────────────
-// Single endpoint that returns everything all 3 apps need — eliminates
-// the race condition of multiple sequential fetches in the client.
-// GET /api/sync/snapshot — returns planning orders + tracking state in one call
+// Single endpoint that returns everything all 3 apps need in one call.
+// GET /api/sync/snapshot
 app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
-  const [planningRow, labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
-    queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1'),
-    queryAll('SELECT id,batch_number,label_number,size,qty,is_partial,is_orange,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,qr_data,wo_status,is_excess,excess_num,excess_total,normal_total FROM tracking_labels ORDER BY generated DESC'),
+  const [planningState, savedAtRow, labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
+    getPlanningState(),
+    queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1'),
+    queryAll('SELECT * FROM tracking_labels ORDER BY generated DESC'),
     queryAll('SELECT * FROM tracking_scans ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_stage_closure'),
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
@@ -1097,33 +1097,40 @@ app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
     queryAll('SELECT * FROM tracking_alerts WHERE resolved=FALSE'),
   ]);
 
-  let planningState = null;
-  let orders = [];
-  if (planningRow) {
-    try {
-      planningState = JSON.parse(planningRow.state_json);
-      orders = (planningState.orders || [])
-        .filter(o => !o.deleted && o.status !== 'closed')
-        .map(o => ({
-          id: o.id, batchNumber: o.batchNumber || '', poNumber: o.poNumber || '',
-          customer: o.customer || '', machineId: o.machineId || '',
-          size: o.size || '', colour: o.colour || '', pcCode: o.pcCode || '',
-          qty: o.qty || 0, actualQty: o.actualQty || o.actualProd || 0,
-          actualProd: o.actualProd || o.actualQty || 0,
-          status: o.status || 'pending', isPrinted: !!o.isPrinted,
-          startDate: o.startDate || null, endDate: o.endDate || null,
-          batchNumber: o.batchNumber || '', grossQty: o.grossQty || 0,
-          printingMatter: o.printingMatter || '', zone: o.zone || '',
-          dispatchedQty: o.dispatchedQty || 0,
-        }));
-    } catch(e) {}
+  // Enrich orders with actual production (same as /api/planning/state does)
+  const rawOrders = planningState.orders || [];
+  const orders = [];
+  for (const o of rawOrders) {
+    if (o.deleted || o.status === 'closed') continue;
+    const actual = await getOrderActuals(o.id, o.batchNumber);
+    orders.push({
+      id: o.id,
+      batchNumber: o.batchNumber || '',
+      poNumber: o.poNumber || '',
+      customer: o.customer || '',
+      machineId: o.machineId || '',
+      size: o.size || '',
+      colour: o.colour || '',
+      pcCode: o.pcCode || '',
+      qty: o.qty || 0,
+      grossQty: o.grossQty || 0,
+      actualQty: actual || o.actualQty || 0,
+      actualProd: actual || o.actualProd || 0,
+      status: (actual > 0 && o.status === 'pending') ? 'running' : (o.status || 'pending'),
+      isPrinted: !!o.isPrinted,
+      startDate: o.startDate || null,
+      endDate: o.endDate || null,
+      printingMatter: o.printingMatter || '',
+      zone: o.zone || '',
+      dispatchedQty: o.dispatchedQty || 0,
+    });
   }
 
   res.json({
     ok: true,
-    planningSavedAt: planningRow?.saved_at || null,
+    planningSavedAt: savedAtRow?.saved_at || null,
     orders,
-    machineMaster: planningState?.machineMaster || [],
+    machineMaster: planningState.machineMaster || [],
     tracking: { labels, scans, stageClosure: closure, wastage, dispatchRecs: dispatch, alerts },
   });
 }));

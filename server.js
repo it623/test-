@@ -247,6 +247,9 @@ async function runMigrations() {
         );
         CREATE INDEX IF NOT EXISTS idx_backups_ts ON planning_state_backups(backed_up_at DESC);
       `},
+    ];
+
+    for (const m of migrations) {
       if (applied.has(m.version)) continue;
       console.log(`[Migration] Running v${m.version}: ${m.name}`);
       await client.query(m.sql);

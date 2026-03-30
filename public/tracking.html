@@ -1982,7 +1982,7 @@ function confirmDamagedReprint(labelId){
 
 function configurePrinter(){
   const current=localStorage.getItem('sunloc_printer_url')||'';
-  const url=prompt('Enter Zebra Printer Bridge URL:\n(e.g. http://localhost:9100 or http://printer-ip:9100)\n\nLeave blank to download ZPL files instead.',current);
+  const url=prompt('Enter Zebra Printer Bridge URL:\n(e.g. http://localhost:8181 or http://printer-ip:9100)\n\nLeave blank to download ZPL files instead.',current);
   if(url===null) return;
   localStorage.setItem('sunloc_printer_url',url.trim());
   alert(url.trim()?'Printer URL saved. Labels will be sent directly to printer.':'ZPL download mode activated.');
@@ -3307,12 +3307,12 @@ function renderSettings(){
         <strong style="color:var(--accent2)">Setup Steps:</strong><br>
         1️⃣ Copy <code>sunloc-print-bridge.js</code> + <code>sunloc-print-bridge.bat</code> to SHCL computer<br>
         2️⃣ Double-click <strong>sunloc-print-bridge.bat</strong> — keep that window open<br>
-        3️⃣ Enter <code>http://localhost:9100</code> below and click Save<br>
+        3️⃣ Enter <code>http://localhost:8181</code> below and click Save<br>
         4️⃣ Click <strong>Test Printer</strong> — should print a test label
       </div>
       <div class="form-group">
         <label>Print Bridge URL</label>
-        <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:9100">
+        <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:8181">
         <div style="font-size:11px;color:var(--text3);margin-top:4px">
           Bridge must be running on the SHCL computer. Leave blank to download ZPL files instead.
         </div>
@@ -3440,10 +3440,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const BRIDGE_PORT  = 9100;
+const BRIDGE_PORT  = 8181;
 const PRINTER_NAME = 'HPRT HT800 - ZPL';
 const PRINTER_IP   = '127.0.0.1';
-const PRINTER_TCP_PORT = 9100;
+const PRINTER_TCP_PORT = 9100; // printer raw port (not bridge port)
 
 function printViaWindowsPrinter(zplData, callback) {
   const tmpFile = path.join(os.tmpdir(), 'sunloc_label_' + Date.now() + '.zpl');
@@ -3520,7 +3520,7 @@ server.listen(BRIDGE_PORT, '127.0.0.1', () => {
   console.log('  Printer:    ' + PRINTER_NAME);
   console.log('-------------------------------------------------');
   console.log('  In Tracking App Settings:');
-  console.log('  Printer URL = http://localhost:9100');
+  console.log('  Printer URL = http://localhost:8181');
   console.log('=================================================');
   console.log('  Keep this window open while printing.');
   console.log('  Press Ctrl+C to stop.');
@@ -3529,7 +3529,7 @@ server.listen(BRIDGE_PORT, '127.0.0.1', () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error('Port 9100 already in use. Another bridge may be running.');
+    console.error('Port 8181 already in use. Another bridge may be running.');
   } else { console.error('Error:', err.message); }
   process.exit(1);
 });
@@ -3569,7 +3569,6 @@ pause
   const el = document.getElementById('printer-status');
   if(el) el.innerHTML='<span style="color:var(--green)">✅ Downloaded 2 files. Copy both to SHCL computer, then double-click the .bat file.</span>';
 }
-}
 
 function clearAllScans(){
   if(!confirm('⚠️ ADMIN: Clear ALL scan data? This cannot be undone.')) return;
@@ -3586,7 +3585,6 @@ function resetApp(){
   alert('Browser cache cleared.\nServer data is SAFE — reloading from server now...');
   pullFromServer();
   renderPage(currentPage);
-}
 }
 
 function exportAllData(){

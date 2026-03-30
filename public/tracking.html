@@ -460,7 +460,10 @@ input[type=number]{font-family:var(--mono)}
     </div>
     <div id="sidebar-nav"></div>
     <div class="sb-sync">
-      <div class="sync-badge offline" id="syncBadge" onclick="configureServer()">⚙ Server</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <div class="sync-badge offline" id="syncBadge" onclick="configureServer()" style="flex:1">⚙ Server</div>
+        <button onclick="syncFromPlanning()" title="Sync orders from Planning App" style="background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.3);color:var(--accent2);border-radius:20px;padding:5px 10px;font-size:11px;cursor:pointer;white-space:nowrap">🔄 Sync</button>
+      </div>
     </div>
   </div>
 
@@ -784,18 +787,35 @@ function doLogout(){
   selectedDeptForLogin=null;
 }
 
-function initApp(){
+async function initApp(){
   const info = DEPT_INFO[currentDept];
   document.getElementById('sb-username').textContent=info.label;
   document.getElementById('sb-userrole').textContent=info.role;
   document.getElementById('sb-avatar').textContent=info.label[0];
   document.getElementById('sb-avatar').style.background=info.color;
   buildSidebar();
-  loadState();
+
+  // Load localStorage first (instant, offline fallback)
+  try{
+    const saved=localStorage.getItem('sunloc_tracking');
+    if(saved){ const p=JSON.parse(saved); Object.assign(state,p); }
+  }catch{}
+
+  // Navigate immediately so user sees something
   const defaultPage = info.pages[0];
   navigate(defaultPage);
-  checkServer();
   initMobileNav();
+
+  // Now pull from server — await it so batches are loaded before re-render
+  if(serverUrl){
+    setSyncBadge('syncing');
+    try{
+      await pullFromServer();
+    }catch(e){
+      setSyncBadge('offline');
+    }
+  }
+  checkServer();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1658,7 +1678,15 @@ function renderDashboard(){
     stageBoxes[dept]=Math.max(0,inn-out);
   });
 
+  // Show sync notice if no batches loaded
+  const noBatchesNotice = totalBatches === 0 ? `
+    <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <span style="font-size:13px;color:var(--accent3)">⚠️ No batches loaded from Planning App. Orders added in Planning will appear here.</span>
+      <button class="btn btn-sm btn-warning" onclick="syncFromPlanning()" style="white-space:nowrap">🔄 Sync Now</button>
+    </div>` : '';
+
   el.innerHTML=`
+  ${noBatchesNotice}
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Active Batches</div><div class="kpi-val blue">${totalBatches}</div><div class="kpi-sub">In production/WIP</div></div>
     <div class="kpi"><div class="kpi-label">Labels Generated</div><div class="kpi-val">${totalLabels}</div><div class="kpi-sub">Total active labels</div></div>
@@ -3364,6 +3392,32 @@ function renderSettings(){
       </div>
     </div>
   </div>`;
+}
+
+async function syncFromPlanning(){
+  if(!serverUrl){ toast('No server configured','var(--accent4)'); return; }
+  toast('⏳ Syncing from Planning App...','var(--accent2)');
+  try{
+    const pr = await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(10000)});
+    if(!pr.ok) throw new Error('Server error '+pr.status);
+    const pj = await pr.json();
+    if(pj.ok && pj.state?.orders){
+      const batches = pj.state.orders.filter(o=>!o.deleted).map(b=>({
+        ...b,
+        actualQty: b.actualQty||b.actualProd||0,
+        actualProd: b.actualProd||b.actualQty||0,
+      }));
+      state.batches = batches;
+      state.machineMaster = pj.state.machineMaster||[];
+      saveLocal();
+      renderPage(currentPage);
+      toast(`✅ Synced — ${batches.length} orders loaded from Planning App`,'var(--green)');
+    } else {
+      toast('⚠️ No orders found in Planning App','var(--accent3)');
+    }
+  }catch(e){
+    toast('❌ Sync failed: '+e.message,'var(--accent4)');
+  }
 }
 
 function saveServerUrl(){

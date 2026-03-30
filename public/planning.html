@@ -538,7 +538,7 @@ function sanitizeServerUrl(url) {
 }
 
 const SYNC = (() => {
-  let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+  let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
   let _online = false, _lastCheck = 0;
 
   async function online() {
@@ -591,7 +591,7 @@ const SYNC = (() => {
   }
 
   function configure() {
-    const newUrl = prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.', _url);
+    const newUrl = prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.', _url || 'https://sunloc.up.railway.app');
     if (newUrl === null) return;
     _url = sanitizeServerUrl(newUrl);
     localStorage.setItem('sunloc_server_url', _url);
@@ -602,10 +602,14 @@ const SYNC = (() => {
   async function loadFromServer() {
     const serverState = await pull();
     if (!serverState) return;
+    // Stamp when we last loaded from server
+    serverState._serverSavedAt = Date.now();
     Object.assign(state, serverState);
     state.pcCodes = PC_CODES_RAW;
     state.zoneMap = ZONE_MAP_RAW;
-    // Persist locally too
+    // Mark server data as confirmed loaded — saveState() will now allow pushes
+    _serverDataLoaded = true;
+    // Persist locally
     try { const s = {...serverState}; delete s.pcCodes; delete s.zoneMap; localStorage.setItem('sunloc_state', JSON.stringify(s)); } catch {}
     await loadTrackingStatus();
     render();
@@ -636,6 +640,9 @@ const SYNC = (() => {
 
 // Load from localStorage (with server enrichment on init)
 function loadState() {
+  // SAFETY: Load localStorage as a temporary offline fallback only.
+  // We NEVER render from localStorage if server is reachable.
+  // Server is the single source of truth — localStorage is just a cache.
   try {
     const saved = localStorage.getItem('sunloc_state');
     if (saved) {
@@ -645,12 +652,19 @@ function loadState() {
       state.zoneMap = ZONE_MAP_RAW;
     }
   } catch(e) {}
-  // Async: try server (enriches actuals from DPR)
-  setTimeout(() => SYNC.loadFromServer(), 500);
-  // Push local state to server immediately on load — ensures server is always up to date
-  setTimeout(() => { if (state.orders && state.orders.length > 0) { const toSave = {...state}; delete toSave.pcCodes; delete toSave.zoneMap; SYNC.push(toSave); } }, 1500);
+
+  // Always pull from server immediately — this overwrites any stale localStorage.
+  // If server pull succeeds → render with server data (orders always current).
+  // If server pull fails (offline) → localStorage data is already in state, render that.
+  SYNC.loadFromServer().then(() => {
+    // Server pull done — render() was called inside loadFromServer
+  }).catch(() => {
+    // Server unreachable — render with whatever is in state (localStorage fallback)
+    render();
+  });
+
   // Check for month rollover after state is loaded
-  setTimeout(() => initMonthlyArchive(), 800);
+  setTimeout(() => initMonthlyArchive(), 1000);
 }
 
 function openTrackingApp() {
@@ -665,7 +679,27 @@ function saveState() {
     delete toSave.pcCodes;
     delete toSave.zoneMap;
     localStorage.setItem('sunloc_state', JSON.stringify(toSave));
-    SYNC.push(toSave); // async push to server — non-blocking
+
+    // CRITICAL GUARD: never push to server until confirmed server data is loaded.
+    // Prevents empty/stale state from overwriting DB after history clear or fresh login.
+    if (!_serverDataLoaded) {
+      console.log('[saveState] push blocked — waiting for server data to load first');
+      return;
+    }
+
+    // Stale-push guard: if not synced from server in >10 min, pull first then push
+    const lastSync = state._serverSavedAt || 0;
+    const staleThreshold = 10 * 60 * 1000;
+    if (Date.now() - lastSync > staleThreshold) {
+      SYNC.loadFromServer().then(() => {
+        const fresh = {...state};
+        delete fresh.pcCodes;
+        delete fresh.zoneMap;
+        SYNC.push(fresh);
+      });
+    } else {
+      SYNC.push(toSave);
+    }
     auditLog('SAVE', `Saved planning state — page: ${state.currentPage}`);
   } catch(e) {}
 }
@@ -5087,11 +5121,14 @@ function importAllData(input) {
 }
 
 function clearAllData() {
-  if (!confirm('⚠️ This will delete ALL planning data. Are you sure?')) return;
-  if (!confirm('This action cannot be undone. Confirm again to proceed.')) return;
-  state.orders=[];state.printOrders=[];state.dailyPrinting=[];state.dispatchPlans=[];
+  if (!confirm('⚠️ This clears the LOCAL browser cache only. Server data is safe. Continue?')) return;
+  if (!confirm('Confirm: only browser cache will be cleared. Server is NOT affected.')) return;
+  // Clear local cache only — server data remains intact
   localStorage.removeItem('sunloc_state');
-  alert('All data cleared');
+  state.orders=[];state.printOrders=[];state.dailyPrinting=[];state.dispatchPlans=[];
+  alert('Browser cache cleared.\nServer data is SAFE — reloading from server now...');
+  // Reload from server immediately so data comes back
+  loadState();
   render();
 }
 
@@ -5119,6 +5156,14 @@ setTimeout(() => SYNC.online().then(() => SYNC.updateBadge()), 800);
 
 // Refresh tracking WIP every 3 minutes
 setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},180000);
+
+// Auto-refresh planning state from server every 5 minutes
+// Ensures multi-device use stays in sync (e.g. two planning tabs open)
+setInterval(async()=>{
+  if(currentUser && _serverDataLoaded){
+    try{ await SYNC.loadFromServer(); }catch(e){}
+  }
+}, 5*60*1000);
 
 // Check TEMP batch alerts every 5 minutes
 setInterval(checkPlanningTempAlerts, 5*60*1000);
@@ -5176,23 +5221,27 @@ const PLAN_ROLE_NAV = {
   admin: null // null = all pages
 };
 
+// ── Server-load state guard ───────────────────────────────────
+// Set to false until we have confirmed server data — blocks saveState from pushing empty data
+let _serverDataLoaded = false;
+
 async function doLogin() {
   const role = document.getElementById('auth-role').value;
   const pin = document.getElementById('auth-pin').value;
   const errEl = document.getElementById('auth-error');
   errEl.textContent = '';
   if (!pin) { errEl.textContent = 'Please enter your PIN'; return; }
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app';
   if (!serverUrl) {
     // Offline fallback — simple hardcoded check
     const defaults = {Planning_Manager:'3333',Printing_Manager:'4444',Dispatch_Manager:'5555',Plan_Admin:'9999'};
     if (defaults[role] !== pin) { errEl.textContent = 'Invalid PIN'; return; }
-    // Normalise role key to match PLAN_ROLE_NAV
     const roleMap = {Planning_Manager:'planning_manager', Printing_Manager:'printing_manager', Dispatch_Manager:'dispatch_manager', Plan_Admin:'admin'};
     currentUser = { username: role, role: roleMap[role] || 'planning_manager', token: null };
     applyRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
+    _serverDataLoaded = true; // offline mode — localStorage is source of truth
     render();
     return;
   }
@@ -5209,7 +5258,12 @@ async function doLogin() {
     applyRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
-    render();
+    // Show loading state — do NOT render stale data yet
+    const content = document.getElementById('content');
+    if (content) content.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:300px;color:var(--text3);font-family:var(--mono);font-size:13px;">⟳ Loading orders from server...</div>';
+    // Pull from server FIRST — only render + allow saves after server data is confirmed
+    await SYNC.loadFromServer();
+    _serverDataLoaded = true;
     auditLog('LOGIN', 'Logged in to Planning Suite');
   } catch(e) {
     errEl.textContent = 'Cannot reach server — check connection';
@@ -5405,7 +5459,12 @@ function closePlanSidebar() {
       document.getElementById('auth-overlay').classList.add('hidden');
       applyRoleRestrictions();
       updateUserBadge();
-      render();
+      // Show loading state immediately — do NOT render stale localStorage data
+      // Always pull from server first, then render with fresh data
+      const content = document.getElementById('content');
+      if (content) content.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text3);font-family:var(--mono);font-size:13px;">⟳ Loading orders from server...</div>';
+      // loadState already calls SYNC.loadFromServer() which calls render() when done
+      loadState();
       return;
     } catch(e) {}
   }
@@ -5413,14 +5472,21 @@ function closePlanSidebar() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// Save prompt on close
-window.addEventListener('beforeunload', e => {
-  if (currentUser) {
-    auditLog('SESSION_CLOSE', 'Browser tab/window closed');
+// ── Page lifecycle: re-sync when tab becomes visible or page is shown from cache ──
+// This handles browser back/forward navigation and tab switching
+window.addEventListener('pageshow', (e) => {
+  // e.persisted = true means page was restored from browser cache (back/forward)
+  if (e.persisted && currentUser) {
+    // Pull latest from server to ensure we show current data
+    SYNC.loadFromServer();
   }
-  // Always prompt if there's unsaved state
-  e.preventDefault();
-  e.returnValue = 'You may have unsaved changes. Are you sure you want to leave?';
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentUser) {
+    // Re-pull when tab is re-focused (handles tab switch back)
+    SYNC.loadFromServer();
+  }
 });
 </script>
 </body>

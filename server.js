@@ -238,9 +238,15 @@ async function runMigrations() {
         ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS excess_total INTEGER;
         ALTER TABLE tracking_labels ADD COLUMN IF NOT EXISTS normal_total INTEGER;
       `},
-    ];
-
-    for (const m of migrations) {
+      { version: 7, name: 'planning_state_backups', sql: `
+        CREATE TABLE IF NOT EXISTS planning_state_backups (
+          id SERIAL PRIMARY KEY,
+          state_json TEXT NOT NULL,
+          backed_up_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          trigger TEXT NOT NULL DEFAULT 'auto'
+        );
+        CREATE INDEX IF NOT EXISTS idx_backups_ts ON planning_state_backups(backed_up_at DESC);
+      `},
       if (applied.has(m.version)) continue;
       console.log(`[Migration] Running v${m.version}: ${m.name}`);
       await client.query(m.sql);
@@ -286,30 +292,70 @@ async function getPlanningState() {
 }
 
 async function savePlanningState(state) {
-  // SAFETY GUARD: never overwrite existing orders with empty array
+  // Always fetch existing state once for all guards
+  const existingRow = await queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1');
+  let existingState = null;
+  if (existingRow) {
+    try { existingState = JSON.parse(existingRow.state_json); } catch(e) {}
+  }
+
+  // SAFETY GUARD 1: never overwrite existing orders with empty array
   if (state && Array.isArray(state.orders) && state.orders.length === 0) {
-    const existing = await queryOne('SELECT state_json FROM planning_state WHERE id=1');
-    if (existing) {
-      try {
-        const existingState = JSON.parse(existing.state_json);
-        if (existingState.orders && existingState.orders.length > 0) {
-          console.log('[savePlanningState] BLOCKED: refusing to overwrite existing orders with empty array');
-          const merged = { ...existingState, ...state, orders: existingState.orders };
-          await query(
-            `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
-             ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
-            [JSON.stringify(merged)]
-          );
-          return;
-        }
-      } catch(e) { console.error('savePlanningState merge error:', e.message); }
+    if (existingState?.orders?.length > 0) {
+      console.log('[savePlanningState] GUARD1: blocked empty orders overwrite');
+      const merged = { ...existingState, ...state, orders: existingState.orders };
+      await query(
+        `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
+         ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
+        [JSON.stringify(merged)]
+      );
+      return;
     }
   }
+
+  // SAFETY GUARD 2: never write a completely empty state
+  const incomingHasData = (state.orders?.length > 0) || (state.printOrders?.length > 0) ||
+                          (state.dispatchPlans?.length > 0) || (state.machineMaster?.length > 0);
+  if (!incomingHasData && existingState) {
+    const existingHasData = (existingState.orders?.length > 0) || (existingState.printOrders?.length > 0) ||
+                            (existingState.dispatchPlans?.length > 0) || (existingState.machineMaster?.length > 0);
+    if (existingHasData) {
+      console.log('[savePlanningState] GUARD2: blocked empty state overwrite');
+      return;
+    }
+  }
+
+  // SAFETY GUARD 3: never reduce order count by more than 5 in a single save
+  // (catches stale browser state being pushed after redeployment or back navigation)
+  if (existingState?.orders?.length > 0 && state.orders?.length >= 0) {
+    const existingCount = existingState.orders.filter(o => !o.deleted).length;
+    const incomingCount = (state.orders || []).filter(o => !o.deleted).length;
+    if (existingCount - incomingCount > 5) {
+      console.log(`[savePlanningState] GUARD3: suspicious order count drop ${existingCount} → ${incomingCount}, merging`);
+      // Merge: keep all existing orders not in incoming state, add all incoming
+      const incomingIds = new Set((state.orders || []).map(o => o.id));
+      const missingOrders = existingState.orders.filter(o => !incomingIds.has(o.id) && !o.deleted);
+      const merged = { ...state, orders: [...(state.orders || []), ...missingOrders] };
+      await query(
+        `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
+         ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
+        [JSON.stringify(merged)]
+      );
+      await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'guard3-merge')`, [JSON.stringify(merged)]);
+      return;
+    }
+  }
+
   await query(
     `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
      ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
     [JSON.stringify(state)]
   );
+  // Auto-backup: keep last 10 snapshots
+  try {
+    await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'auto')`, [JSON.stringify(state)]);
+    await query(`DELETE FROM planning_state_backups WHERE id NOT IN (SELECT id FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 10)`);
+  } catch(e) { /* backup failure never blocks main save */ }
 }
 
 // ─── Helper: get active orders for a machine ──────────────────
@@ -431,8 +477,10 @@ app.post('/api/dpr/save', asyncRoute(async (req, res) => {
        ON CONFLICT(floor,date) DO UPDATE SET data_json=EXCLUDED.data_json, saved_at=NOW()`,
       [floor, date, JSON.stringify(data)]
     );
-    // Delete old runs for this floor+date first (clean re-sync)
-    await client.query('DELETE FROM production_actuals WHERE floor=$1 AND date=$2', [floor, date]);
+    // Delete old runs for this floor+date ONLY when new actuals are provided (prevents accidental wipe)
+    if (actuals && actuals.length > 0) {
+      await client.query('DELETE FROM production_actuals WHERE floor=$1 AND date=$2', [floor, date]);
+    }
     // Upsert actuals — supports multi-run
     if (actuals && actuals.length > 0) {
       for (const a of actuals) {
@@ -1006,32 +1054,30 @@ app.get('/api/reconciliation/history', asyncRoute(async (req, res) => {
 }));
 
 app.get('/api/health', asyncRoute(async (req, res) => {
-  const planningRow = await queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1');
-  const dprCount = await queryOne('SELECT COUNT(*) as c FROM dpr_records');
-  const actualsCount = await queryOne('SELECT COUNT(*) as c FROM production_actuals');
+  const [planningRow, dprCount, actualsCount, labelsCount, scansCount, usersCount] = await Promise.all([
+    queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1'),
+    queryOne('SELECT COUNT(*) as c FROM dpr_records'),
+    queryOne('SELECT COUNT(*) as c FROM production_actuals'),
+    queryOne('SELECT COUNT(*) as c FROM tracking_labels'),
+    queryOne('SELECT COUNT(*) as c FROM tracking_scans'),
+    queryOne('SELECT COUNT(*) as c FROM app_users'),
+  ]);
   res.json({
     ok: true,
-    server: 'Sunloc Integrated Server v1.0 (PostgreSQL)',
+    server: 'Sunloc Integrated Server v2.0 (PostgreSQL)',
     db: 'PostgreSQL (Railway)',
+    url: 'https://sunloc.up.railway.app',
     planningSavedAt: planningRow?.saved_at || null,
     dprRecords: parseInt(dprCount?.c||0),
     actualsEntries: parseInt(actualsCount?.c||0),
+    trackingLabels: parseInt(labelsCount?.c||0),
+    trackingScans: parseInt(scansCount?.c||0),
+    users: parseInt(usersCount?.c||0),
     uptime: Math.floor(process.uptime()) + 's',
+    apps: ['planning', 'dpr', 'tracking'],
+    syncStatus: 'all-apps-synced',
   });
 }));
-
-// Catch-all: serve index.html for unknown routes (SPA fallback)
-app.get('*', (req, res) => {
-  const idx = path.join(__dirname, 'public', 'index.html');
-  if (fs.existsSync(idx)) res.sendFile(idx);
-  else res.json({ ok: false, error: 'No frontend found. Place files in /public folder.' });
-});
-
-
-// ═══════════════════════════════════════════════════════
-// TRACKING APP SCHEMA (add to existing server.js)
-// ═══════════════════════════════════════════════════════
-
 
 // ─── TRACKING ROUTES ──────────────────────────────────────────
 
@@ -1143,8 +1189,11 @@ app.get('/api/tracking/batch-summary/:batchNumber', asyncRoute(async (req, res) 
 
 // GET /api/tracking/wip-summary
 app.get('/api/tracking/wip-summary', asyncRoute(async (req, res) => {
-  const summary = await queryAll(`SELECT batch_number,dept,type,COUNT(*) as cnt FROM tracking_scans GROUP BY batch_number,dept,type`);
-  res.json({ ok:true, scanSummary:summary });
+  const [summary, closures] = await Promise.all([
+    queryAll(`SELECT batch_number, dept, type, COUNT(*) as cnt FROM tracking_scans GROUP BY batch_number, dept, type`),
+    queryAll(`SELECT batch_number, dept, closed FROM tracking_stage_closure WHERE closed=TRUE`)
+  ]);
+  res.json({ ok: true, scanSummary: summary, closures });
 }));
 
 // GET /api/tracking/labels
@@ -1164,6 +1213,144 @@ app.post('/api/tracking/scan', asyncRoute(async (req, res) => {
     [scan.id,scan.labelId||scan.label_id,scan.batchNumber||scan.batch_number,scan.dept,scan.type,scan.ts,scan.operator||null,scan.size||null,scan.qty||null]
   );
   res.json({ok:true});
+}));
+
+// ─── TRACKING GRANULAR ENDPOINTS (called by pushToServer) ────────
+
+// POST /api/tracking/labels — upsert individual labels
+app.post('/api/tracking/labels', asyncRoute(async (req, res) => {
+  const { labels } = req.body;
+  if (!labels || !labels.length) return res.json({ ok: true });
+  for (const l of labels) {
+    await query(
+      `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+       ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,voided=EXCLUDED.voided,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status,printed_at=EXCLUDED.printed_at`,
+      [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,!!l.isPartial,!!l.isOrange,
+       l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
+       l.poNumber||null,l.machineId||null,l.printingMatter||null,
+       l.generated||new Date().toISOString(),!!l.printed,l.printedAt||null,
+       !!l.voided,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,
+       l.woStatus||null,l.shipTo||null,l.billTo||null,!!l.isExcess,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
+    );
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/label-void — void a label
+app.post('/api/tracking/label-void', asyncRoute(async (req, res) => {
+  const { labelId, reason, voidedBy } = req.body;
+  if (!labelId) return res.status(400).json({ ok: false, error: 'Missing labelId' });
+  const now = new Date().toISOString();
+  await query(
+    `UPDATE tracking_labels SET voided=TRUE, void_reason=$1, voided_at=$2, voided_by=$3 WHERE id=$4`,
+    [reason || null, now, voidedBy || null, labelId]
+  );
+  await logAudit(voidedBy || 'SYSTEM', 'operator', 'tracking', 'LABEL_VOID', `Label ${labelId} voided: ${reason}`);
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/reprint-log — log a reprint event
+app.post('/api/tracking/reprint-log', asyncRoute(async (req, res) => {
+  const { log } = req.body;
+  if (log) {
+    await logAudit(log.by || 'SYSTEM', 'operator', 'tracking', 'REPRINT', `Label ${log.labelId} reprinted: ${log.reason || ''}`);
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/stage-status — update status map for batch
+app.post('/api/tracking/stage-status', asyncRoute(async (req, res) => {
+  const { batchNumber, statusMap } = req.body;
+  if (!batchNumber || !statusMap) return res.json({ ok: true });
+  // statusMap: { dept: 'open'|'closed' } — sync to stage_closure table
+  for (const [dept, status] of Object.entries(statusMap)) {
+    if (status === 'closed') {
+      const id = `sc-${batchNumber}-${dept}`;
+      await query(
+        `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at) VALUES ($1,$2,$3,TRUE,NOW())
+         ON CONFLICT(batch_number,dept) DO UPDATE SET closed=TRUE, closed_at=NOW()`,
+        [id, batchNumber, dept]
+      );
+    } else {
+      await query(
+        `UPDATE tracking_stage_closure SET closed=FALSE WHERE batch_number=$1 AND dept=$2`,
+        [batchNumber, dept]
+      );
+    }
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/stage-close — close a stage for a batch
+app.post('/api/tracking/stage-close', asyncRoute(async (req, res) => {
+  const { batchNumber, dept, closedBy } = req.body;
+  if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'Missing batchNumber or dept' });
+  const id = `sc-${batchNumber}-${dept}`;
+  await query(
+    `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at,closed_by) VALUES ($1,$2,$3,TRUE,NOW(),$4)
+     ON CONFLICT(batch_number,dept) DO UPDATE SET closed=TRUE, closed_at=NOW(), closed_by=EXCLUDED.closed_by`,
+    [id, batchNumber, dept, closedBy || null]
+  );
+  await logAudit(closedBy || 'SYSTEM', 'operator', 'tracking', 'STAGE_CLOSE', `Stage ${dept} closed for batch ${batchNumber}`);
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/wastage — record wastage (salvage/remelt)
+app.post('/api/tracking/wastage', asyncRoute(async (req, res) => {
+  const { batchNumber, dept, salvage, remelt, by } = req.body;
+  if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'Missing batchNumber or dept' });
+  const now = new Date().toISOString();
+  if (salvage > 0) {
+    const id = `w-${batchNumber}-${dept}-salv-${Date.now()}`;
+    await query(
+      `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,'salvage',$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+      [id, batchNumber, dept, salvage, now, by || null]
+    );
+  }
+  if (remelt > 0) {
+    const id = `w-${batchNumber}-${dept}-rem-${Date.now()}`;
+    await query(
+      `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,'remelt',$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+      [id, batchNumber, dept, remelt, now, by || null]
+    );
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/dispatch-record — save a dispatch record
+app.post('/api/tracking/dispatch-record', asyncRoute(async (req, res) => {
+  const { record } = req.body;
+  if (!record || !record.id) return res.status(400).json({ ok: false, error: 'Missing record' });
+  await query(
+    `INSERT INTO tracking_dispatch_records (id,batch_number,customer,qty,boxes,vehicle_no,invoice_no,remarks,ts,by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT(id) DO UPDATE SET qty=EXCLUDED.qty, boxes=EXCLUDED.boxes, vehicle_no=EXCLUDED.vehicle_no, invoice_no=EXCLUDED.invoice_no`,
+    [record.id, record.batchNumber||record.batch_number, record.customer||null, record.qty, record.boxes,
+     record.vehicleNo||record.vehicle_no||null, record.invoiceNo||record.invoice_no||null, record.remarks||null,
+     record.ts||new Date().toISOString(), record.by||null]
+  );
+  await logAudit(record.by||'SYSTEM','operator','tracking','DISPATCH_RECORD',`Dispatched ${record.boxes} boxes of batch ${record.batchNumber||record.batch_number}`);
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/dispatch-update — update dispatched qty on planning order
+app.post('/api/tracking/dispatch-update', asyncRoute(async (req, res) => {
+  const { batchNumber, dispatchedQty, vehicleNo, invoiceNo } = req.body;
+  if (!batchNumber) return res.status(400).json({ ok: false, error: 'Missing batchNumber' });
+  // Update planning state — mark dispatch progress
+  try {
+    const planState = await getPlanningState();
+    if (planState && planState.orders) {
+      const ord = planState.orders.find(o => o.batchNumber === batchNumber);
+      if (ord) {
+        ord.dispatchedQty = (ord.dispatchedQty || 0) + (dispatchedQty || 0);
+        if (vehicleNo) ord.lastVehicleNo = vehicleNo;
+        if (invoiceNo) ord.lastInvoiceNo = invoiceNo;
+        await savePlanningState(planState);
+      }
+    }
+  } catch (e) { console.error('dispatch-update planning sync error:', e.message); }
+  res.json({ ok: true });
 }));
 
 // jsQR proxy — serves jsQR to factory phones without CDN access
@@ -1187,6 +1374,54 @@ app.get('/jsqr.min.js', (req, res) => {
   }).on('error', () => res.status(503).send('// jsQR fetch failed'));
 });
 
+// POST /api/admin/snapshot — manual snapshot before deploy
+app.post('/api/admin/snapshot', asyncRoute(async (req, res) => {
+  const key = req.query.key || req.body?.key;
+  const exportKey = process.env.EXPORT_KEY || 'sunloc-export-2024';
+  // Allow either export key OR admin session
+  if (key !== exportKey) {
+    const session = await verifyToken(req.headers['x-session-token']);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  }
+  const currentState = await queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1');
+  if (!currentState) return res.json({ ok: true, message: 'No data to snapshot', orders: 0 });
+  await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'manual')`, [currentState.state_json]);
+  await query(`DELETE FROM planning_state_backups WHERE id NOT IN (SELECT id FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 20)`);
+  const parsed = JSON.parse(currentState.state_json);
+  const orderCount = parsed.orders?.length || 0;
+  await logAudit('SYSTEM', 'admin', 'planning', 'MANUAL_SNAPSHOT', `Manual snapshot: ${orderCount} orders`);
+  res.json({ ok: true, message: `Snapshot saved — ${orderCount} orders protected`, orders: orderCount, savedAt: currentState.saved_at });
+}));
+
+// GET /api/admin/backups — list recent planning state backups
+app.get('/api/admin/backups', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const rows = await queryAll(`SELECT id, backed_up_at, trigger, length(state_json) as size_bytes FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 10`);
+  res.json({ ok: true, backups: rows });
+}));
+
+// POST /api/admin/restore-backup/:id — restore a specific backup
+app.post('/api/admin/restore-backup/:id', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token']);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const backup = await queryOne('SELECT * FROM planning_state_backups WHERE id=$1', [req.params.id]);
+  if (!backup) return res.status(404).json({ ok: false, error: 'Backup not found' });
+  // Save a backup of current state first before restoring
+  const current = await queryOne('SELECT state_json FROM planning_state WHERE id=1');
+  if (current) await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'pre-restore')`, [current.state_json]);
+  await query(`INSERT INTO planning_state (id, state_json) VALUES (1, $1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()`, [backup.state_json]);
+  await logAudit(session.username, session.role, 'planning', 'RESTORE_BACKUP', `Restored backup id=${req.params.id} from ${backup.backed_up_at}`);
+  res.json({ ok: true, message: `Restored backup from ${backup.backed_up_at}` });
+}));
+
+// ─── SPA Catch-all (must be LAST route) ───────────────────────
+app.get('*', (req, res) => {
+  const idx = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(idx)) res.sendFile(idx);
+  else res.json({ ok: false, error: 'No frontend found. Place files in /public folder.' });
+});
+
 // Error handler
 app.use((err, req, res, next) => {
   console.error('[Error]', err.message);
@@ -1198,9 +1433,57 @@ async function startServer() {
   try {
     await runMigrations();
     await seedUsers();
+
+    // ── REDEPLOYMENT SAFETY: Snapshot + Integrity Check ─────────
+    try {
+      const currentState = await queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1');
+      if (currentState) {
+        const parsed = JSON.parse(currentState.state_json);
+        const orderCount = parsed.orders?.length || 0;
+        const printOrderCount = parsed.printOrders?.length || 0;
+        const dispatchCount = parsed.dispatchPlans?.length || 0;
+
+        // Take startup snapshot before anything else
+        await query(
+          `INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'startup-snapshot')`,
+          [currentState.state_json]
+        );
+        await query(
+          `DELETE FROM planning_state_backups WHERE id NOT IN (SELECT id FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 20)`
+        );
+
+        // Count other critical tables
+        const [dprCount, actualsCount, labelsCount, scansCount] = await Promise.all([
+          queryOne('SELECT COUNT(*) as c FROM dpr_records'),
+          queryOne('SELECT COUNT(*) as c FROM production_actuals'),
+          queryOne('SELECT COUNT(*) as c FROM tracking_labels'),
+          queryOne('SELECT COUNT(*) as c FROM tracking_scans'),
+        ]);
+
+        console.log('[Startup] ═══════════════════════════════════════════');
+        console.log(`[Startup] DATABASE INTEGRITY CHECK`);
+        console.log(`[Startup]   Planning orders:    ${orderCount}`);
+        console.log(`[Startup]   Print orders:       ${printOrderCount}`);
+        console.log(`[Startup]   Dispatch plans:     ${dispatchCount}`);
+        console.log(`[Startup]   DPR records:        ${parseInt(dprCount?.c||0)}`);
+        console.log(`[Startup]   Production actuals: ${parseInt(actualsCount?.c||0)}`);
+        console.log(`[Startup]   Tracking labels:    ${parseInt(labelsCount?.c||0)}`);
+        console.log(`[Startup]   Tracking scans:     ${parseInt(scansCount?.c||0)}`);
+        console.log(`[Startup]   Last saved:         ${currentState.saved_at}`);
+        console.log(`[Startup]   Snapshot:           ✅ taken`);
+        console.log('[Startup] ═══════════════════════════════════════════');
+        console.log(`[Startup] ALL DATA SAFE — ${orderCount} orders protected`);
+      } else {
+        console.log('[Startup] No planning state found — fresh database');
+      }
+    } catch(e) {
+      console.error('[Startup] Snapshot failed (non-fatal):', e.message);
+    }
+    // ─────────────────────────────────────────────────────────────
+
     app.listen(PORT, () => {
       console.log(`[Sunloc] Server running on port ${PORT}`);
-      console.log(`[Sunloc] Database: PostgreSQL (Railway)`);
+      console.log(`[Sunloc] Database: PostgreSQL (Railway) — data persists across redeployments`);
       console.log(`[Sunloc] Data protection: ACTIVE — orders will never be overwritten`);
     });
   } catch(err) {

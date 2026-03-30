@@ -593,7 +593,7 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
 let syncStatus = 'offline';
 let camStream = null;
 let scanCallback = null;
@@ -882,7 +882,7 @@ async function checkServer(){
 }
 
 function configureServer(){
-  const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl);
+  const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'https://sunloc.up.railway.app');
   if(url===null) return;
   serverUrl=sanitizeServerUrl(url);
   localStorage.setItem('sunloc_server_url',serverUrl);
@@ -3382,10 +3382,15 @@ function clearAllScans(){
 }
 
 function resetApp(){
-  if(!confirm('⚠️ ADMIN: Reset ALL tracking data? This will delete labels, scans, and records.')) return;
+  if(!confirm('⚠️ This clears LOCAL browser cache only. Server data (labels, scans, records) is safe. Continue?')) return;
+  if(!confirm('Confirm: server data is NOT deleted. Only local browser cache will be cleared.')) return;
+  // Clear local cache only — server retains all data
   state.labels=[]; state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[]; state.dispatchRecs=[];
   localStorage.removeItem('sunloc_tracking');
-  renderPage(currentPage); alert('App data reset.');
+  alert('Browser cache cleared.\nServer data is SAFE — reloading from server now...');
+  pullFromServer();
+  renderPage(currentPage);
+}
 }
 
 function exportAllData(){
@@ -3517,11 +3522,17 @@ async function renderTrackingAuditLog() {
 // Patch renderSettings to add audit log section for admin
 // renderSettings audit log is handled by appending to the existing function below
 
-// Save prompt on close
-window.addEventListener('beforeunload', e => {
-  trkAuditLog('SESSION_CLOSE', 'Browser tab closed');
-  e.preventDefault();
-  e.returnValue = 'You have unsaved tracking data. Are you sure you want to leave?';
+// ── Page lifecycle: re-sync on browser back/forward and tab focus ──
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && currentDept) {
+    pullFromServer();
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentDept) {
+    pullFromServer();
+  }
 });
 
 // Audit key save actions

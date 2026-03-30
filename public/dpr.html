@@ -518,7 +518,7 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
 let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
 let unsaved = false;
 
@@ -923,7 +923,7 @@ function openPlanningApp(){
   else alert('Please configure Server URL in Settings tab first.');
 }
 function configureServer(){
-  const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'');
+  const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'https://sunloc.up.railway.app');
   if(url===null) return;
   serverUrl=sanitizeServerUrl(url);
   localStorage.setItem('sunloc_server_url',serverUrl);
@@ -2176,6 +2176,20 @@ function postAuthServerInit() {
 
 window.addEventListener('beforeunload',e=>{ if(unsaved){e.preventDefault();e.returnValue='';} });
 
+// ── Re-sync when browser navigates back or tab refocused ──
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && dprUser) {
+    fetchActiveOrders();
+    if (currentDate) fetchDpr(currentFloor, currentDate);
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && dprUser) {
+    fetchActiveOrders();
+  }
+});
+
 // ══════════════════════════════════════════════════════
 // AUTH SYSTEM — DPR
 // ══════════════════════════════════════════════════════
@@ -2416,6 +2430,14 @@ function showDprAuditPage() {
   }
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
+
+// Auto-refresh active orders from Planning every 5 minutes
+// Keeps DPR in sync when planning adds/closes orders on another device
+setInterval(async () => {
+  if (dprUser) {
+    try { await fetchActiveOrders(); } catch(e) {}
+  }
+}, 5 * 60 * 1000);
 
 // ── TEMP Batch PC Code Prompt (one-time per TEMP batch) ────────
 const _tempPromptShown = new Set();

@@ -265,6 +265,7 @@ input[type=number]{font-family:var(--mono);text-align:right}
   <div class="nright">
     <div id="unsavedDot"></div>
     <span id="syncBadge" class="offline" onclick="configureServer()">⚙ Server</span>
+    <button class="nbtn" onclick="fetchActiveOrders().then(()=>toast('✓ Orders refreshed','var(--green)'))" title="Re-sync orders from Planning App" style="font-size:10px;padding:3px 8px">🔄 Sync</button>
     <input type="date" id="ndate" onchange="onDateChange()">
     <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:140px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
       <option value="">📅 History</option>
@@ -815,26 +816,54 @@ async function fetchActiveOrders(){
     return;
   }
   try{
-    const r=await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
-    if(!r.ok) return;
-    const j=await r.json();
-    if(j.ok && j.orders){
-      // Build map by machineId — only include orders that have a specific machineId assigned
+    // Try fast sync-batches endpoint first (returns planning orders pre-formatted)
+    let orders = null;
+    try{
+      const fr=await fetch(serverUrl+'/api/tracking/sync-batches',{signal:AbortSignal.timeout(5000)});
+      if(fr.ok){
+        const fj=await fr.json();
+        if(fj.ok && fj.batches){
+          orders = fj.batches.filter(b=>b.machineId).map(b=>({
+            id: b.id,
+            batchNumber: b.batchNumber||'',
+            poNumber: b.poNumber||'',
+            customer: b.customer||'',
+            machineId: b.machineId||'',
+            size: b.size||'',
+            colour: b.colour||'',
+            qty: b.qty||0,
+            actualQty: b.actualQty||0,
+            status: b.status||'pending',
+            isTemp: false,
+          }));
+        }
+      }
+    }catch(e){}
+
+    // Fallback to /api/orders/active
+    if(!orders){
+      const r=await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
+      if(!r.ok) throw new Error('orders/active failed');
+      const j=await r.json();
+      if(j.ok && j.orders) orders = j.orders.filter(o=>o.machineId);
+    }
+
+    if(orders){
       activeOrders={};
-      j.orders.filter(o => o.machineId).forEach(o=>{
+      orders.forEach(o=>{
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
       });
-      // Cache locally
       localStorage.setItem('dpr_active_orders',JSON.stringify(activeOrders));
-      toast('✓ Orders synced from Planning App','var(--green)');
+      const total = Object.values(activeOrders).flat().length;
+      if(total > 0) toast('✓ '+total+' orders synced from Planning App','var(--green)');
 
       // Check each machine on current floor — if no active order, ensure TEMP batch exists
       await checkAndCreateTempBatches();
 
       renderShifts(); // Re-render so dropdowns populate
     }
-  }catch{
+  }catch(e){
     const cached=localStorage.getItem('dpr_active_orders');
     if(cached) try{activeOrders=JSON.parse(cached);}catch{}
   }
@@ -2212,9 +2241,18 @@ document.getElementById('ndate').value=today();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
 function postAuthServerInit() {
-  checkServer().then(ok=>{
-    if(ok){ fetchActiveOrders(); }
-    else {
+  checkServer().then(async ok=>{
+    if(ok){
+      await fetchActiveOrders();
+      // Auto-retry: if still no orders after first fetch, wait 2s and try again
+      // (handles race where Planning app just saved and server is still propagating)
+      const total = Object.values(activeOrders||{}).flat().length;
+      if(total === 0){
+        setSyncBadge('syncing');
+        await new Promise(r=>setTimeout(r,2000));
+        await fetchActiveOrders();
+      }
+    } else {
       const cached=localStorage.getItem('dpr_active_orders');
       if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
     }
@@ -2226,14 +2264,18 @@ window.addEventListener('beforeunload',e=>{ if(unsaved){e.preventDefault();e.ret
 // ── Re-sync when browser navigates back or tab refocused ──
 window.addEventListener('pageshow', (e) => {
   if (e.persisted && dprUser) {
-    fetchActiveOrders();
-    if (currentDate) fetchDpr(currentFloor, currentDate);
+    // Flush any queued saves first, then reload
+    dprQueueFlush().then(() => {
+      fetchActiveOrders();
+      if (currentDate) fetchDpr(curFloor, currentDate);
+    });
   }
 });
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && dprUser) {
-    fetchActiveOrders();
+    // Flush queued saves whenever tab comes back into focus
+    dprQueueFlush().then(() => fetchActiveOrders());
   }
 });
 
@@ -2478,12 +2520,17 @@ function showDprAuditPage() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// Auto-refresh active orders from Planning every 60 seconds (was 5 min)
+// Auto-refresh active orders from Planning every 60 seconds
 setInterval(async () => {
-  if (dprUser) {
-    try { await fetchActiveOrders(); } catch(e) {}
+  if (dprUser && serverUrl) {
+    try {
+      await fetchActiveOrders();
+    } catch(e) {}
   }
 }, 60*1000);
+
+// Also flush offline queue every 30s and on tab focus
+
 
 setInterval(dprQueueFlush, 30*1000);
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') dprQueueFlush(); });
@@ -2496,8 +2543,13 @@ window.addEventListener('beforeunload', () => {
     const d = getDate();
     const data = collectForm();
     localStorage.setItem(skey(curFloor,d), JSON.stringify(data));
-    dprQueuePush(curFloor, d, data, []);
-    const blob = new Blob([JSON.stringify({floor:curFloor,date:d,data,actuals:[]})], {type:'application/json'});
+    // Re-use actuals from the most recent queued entry for this floor+date
+    // (avoids sending actuals:[] which would skip the actuals save on server)
+    const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
+    const existing = q.find(e => e.fl === curFloor && e.d === d);
+    const actuals = existing?.actuals || [];
+    dprQueuePush(curFloor, d, data, actuals);
+    const blob = new Blob([JSON.stringify({floor:curFloor, date:d, data, actuals})], {type:'application/json'});
     navigator.sendBeacon && navigator.sendBeacon(url+'/api/dpr/save', blob);
   } catch(e) {}
 });

@@ -811,11 +811,19 @@ async function initApp(){
     setSyncBadge('syncing');
     try{
       await pullFromServer();
+      // Auto-retry: if still no batches, try once more after a short delay
+      // (handles race where server is slow or planning state was just saved)
+      if(state.batches.length === 0){
+        setSyncBadge('syncing');
+        await new Promise(r=>setTimeout(r,2000));
+        await pullFromServer();
+      }
     }catch(e){
       setSyncBadge('offline');
     }
   }
   checkServer();
+  // Periodic auto-sync every 2 minutes — already set globally below
 }
 
 // ═══════════════════════════════════════════════════════
@@ -971,7 +979,23 @@ async function pullFromServer(){
         }).catch(()=>{});
       }
     }
-    // Also pull planning orders for batch data
+    // Also pull planning orders for batch data — try fast endpoint first
+    try{
+      const fr = await fetch(serverUrl+'/api/tracking/sync-batches',{signal:AbortSignal.timeout(6000)});
+      if(fr.ok){
+        const fj = await fr.json();
+        if(fj.ok && fj.batches){
+          if(fj.batches.length > 0 || state.batches.length === 0){
+            state.batches = fj.batches;
+          }
+          saveLocal();
+          setSyncBadge('synced');
+          if(currentPage) renderPage(currentPage);
+          return;
+        }
+      }
+    }catch(e){}
+    // Fallback to full planning state
     const pr=await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
     if(pr.ok){
       const pj=await pr.json();
@@ -994,11 +1018,64 @@ async function pullFromServer(){
   }catch(e){ setSyncBadge('offline'); }
 }
 
+// ── Tracking push retry queue ──────────────────────────────────
+const TRK_QUEUE_KEY = 'sunloc_trk_push_queue';
+function trkQueuePush(endpoint, data) {
+  try {
+    const q = JSON.parse(localStorage.getItem(TRK_QUEUE_KEY)||'[]');
+    // De-duplicate: replace existing entry for same endpoint+id if present
+    const key = endpoint + (data.scan?.id||data.record?.id||data.labelId||'');
+    const idx = q.findIndex(e => e.key === key);
+    const entry = { key, endpoint, data, ts: Date.now() };
+    if (idx >= 0) q[idx] = entry; else q.push(entry);
+    // Keep max 500 entries (prevent unbounded growth during long offline)
+    if (q.length > 500) q.splice(0, q.length - 500);
+    localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(q));
+  } catch(e) {}
+}
+async function trkQueueFlush() {
+  if (!serverUrl) return;
+  try {
+    const raw = localStorage.getItem(TRK_QUEUE_KEY);
+    if (!raw) return;
+    const q = JSON.parse(raw);
+    if (!q.length) return;
+    // Quick health check first
+    const hr = await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(3000)});
+    if (!hr.ok) return;
+    const failed = [];
+    for (const entry of q) {
+      try {
+        await fetch(serverUrl+entry.endpoint,{
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify(entry.data), signal:AbortSignal.timeout(6000)
+        });
+      } catch(e) { failed.push(entry); }
+    }
+    if (failed.length === 0) {
+      localStorage.removeItem(TRK_QUEUE_KEY);
+      setSyncBadge('synced');
+    } else {
+      localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(failed));
+    }
+  } catch(e) {}
+}
+
 async function pushToServer(endpoint, data){
   if(!serverUrl) return;
+  // Always queue first — survives page close or network blip
+  trkQueuePush(endpoint, data);
   try{
     await fetch(serverUrl+endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data),signal:AbortSignal.timeout(8000)});
     setSyncBadge('synced');
+    // Remove from queue on success
+    try{
+      const q = JSON.parse(localStorage.getItem(TRK_QUEUE_KEY)||'[]');
+      const key = endpoint + (data.scan?.id||data.record?.id||data.labelId||'');
+      const filtered = q.filter(e => e.key !== key);
+      if(filtered.length === 0) localStorage.removeItem(TRK_QUEUE_KEY);
+      else localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(filtered));
+    }catch(e){}
   }catch{ setSyncBadge('offline'); }
 }
 
@@ -1680,9 +1757,14 @@ function renderDashboard(){
 
   // Show sync notice if no batches loaded
   const noBatchesNotice = totalBatches === 0 ? `
-    <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <span style="font-size:13px;color:var(--accent3)">⚠️ No batches loaded from Planning App. Orders added in Planning will appear here.</span>
-      <button class="btn btn-sm btn-warning" onclick="syncFromPlanning()" style="white-space:nowrap">🔄 Sync Now</button>
+    <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:8px;padding:14px 16px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:13px;color:var(--accent3);font-weight:600;margin-bottom:4px">⚠️ No batches loaded from Planning App</div>
+          <div style="font-size:11px;color:var(--text3)">Orders added in Planning will appear here. Make sure Planning App is connected to the same server and orders are saved.</div>
+        </div>
+        <button class="btn btn-sm btn-warning" onclick="syncFromPlanning().then(()=>renderPage('dashboard'))" style="white-space:nowrap;min-width:100px">🔄 Sync Now</button>
+      </div>
     </div>` : '';
 
   el.innerHTML=`
@@ -3331,18 +3413,21 @@ function renderSettings(){
     </div>
     <div class="card">
       <div class="card-title">🖨️ Label Printer — HPRT HT800</div>
-      <div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.8">
-        <strong style="color:var(--accent2)">Setup Steps:</strong><br>
-        1️⃣ Copy <code>sunloc-print-bridge.js</code> + <code>sunloc-print-bridge.bat</code> to SHCL computer<br>
-        2️⃣ Double-click <strong>sunloc-print-bridge.bat</strong> — keep that window open<br>
-        3️⃣ Enter <code>http://localhost:8181</code> below and click Save<br>
-        4️⃣ Click <strong>Test Printer</strong> — should print a test label
+      <div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.2);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.9">
+        <strong style="color:var(--accent2)">Option A — USB (Local PC):</strong><br>
+        1️⃣ Download bridge files below<br>
+        2️⃣ Copy both files to the printing PC &amp; double-click <code>sunloc-print-bridge.bat</code><br>
+        3️⃣ Enter <code>http://localhost:8181</code> below → Save → Test<br><br>
+        <strong style="color:var(--accent2)">Option B — Network (TCP/IP direct):</strong><br>
+        1️⃣ Find the HPRT HT800 IP on your network (check printer LCD or router)<br>
+        2️⃣ Run bridge on any PC: edit <code>PRINTER_IP</code> in the .js file to the printer IP<br>
+        3️⃣ Enter <code>http://&lt;bridge-pc-ip&gt;:8181</code> below → Save → Test
       </div>
       <div class="form-group">
         <label>Print Bridge URL</label>
         <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:8181">
         <div style="font-size:11px;color:var(--text3);margin-top:4px">
-          Bridge must be running on the SHCL computer. Leave blank to download ZPL files instead.
+          Bridge must be running on the PC connected to HPRT HT800. Leave blank to download ZPL files instead.
         </div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -3398,20 +3483,39 @@ async function syncFromPlanning(){
   if(!serverUrl){ toast('No server configured','var(--accent4)'); return; }
   toast('⏳ Syncing from Planning App...','var(--accent2)');
   try{
-    const pr = await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(10000)});
-    if(!pr.ok) throw new Error('Server error '+pr.status);
-    const pj = await pr.json();
-    if(pj.ok && pj.state?.orders){
-      const batches = pj.state.orders.filter(o=>!o.deleted).map(b=>({
-        ...b,
-        actualQty: b.actualQty||b.actualProd||0,
-        actualProd: b.actualProd||b.actualQty||0,
-      }));
+    // Try fast dedicated endpoint first, fall back to full planning state
+    let batches = null;
+    let machineMaster = [];
+    try{
+      const fr = await fetch(serverUrl+'/api/tracking/sync-batches',{signal:AbortSignal.timeout(8000)});
+      if(fr.ok){
+        const fj = await fr.json();
+        if(fj.ok){ batches = fj.batches; }
+      }
+    }catch(e){}
+
+    if(!batches){
+      const pr = await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(10000)});
+      if(!pr.ok) throw new Error('Server error '+pr.status);
+      const pj = await pr.json();
+      if(pj.ok && pj.state?.orders){
+        batches = pj.state.orders.filter(o=>!o.deleted).map(b=>({
+          ...b,
+          actualQty: b.actualQty||b.actualProd||0,
+          actualProd: b.actualProd||b.actualQty||0,
+        }));
+        machineMaster = pj.state.machineMaster||[];
+      }
+    }
+
+    if(batches !== null){
       state.batches = batches;
-      state.machineMaster = pj.state.machineMaster||[];
+      if(machineMaster.length) state.machineMaster = machineMaster;
       saveLocal();
       renderPage(currentPage);
-      toast(`✅ Synced — ${batches.length} orders loaded from Planning App`,'var(--green)');
+      if(currentPage === 'dashboard') renderDashboard();
+      const active = batches.filter(b=>b.status!=='closed').length;
+      toast(`✅ Synced — ${active} active orders loaded from Planning App`,'var(--green)');
     } else {
       toast('⚠️ No orders found in Planning App','var(--accent3)');
     }
@@ -3483,9 +3587,11 @@ async function testPrinter(){
 function downloadBridgeFiles(){
   // Bridge JS file content
   const bridgeJS = `/**
- * Sunloc Label Print Bridge v1.0
- * Run this on the SHCL computer connected to HPRT HT800 ZPL printer.
+ * Sunloc Label Print Bridge v2.0
+ * Run this on the PC connected to HPRT HT800 ZPL printer.
  * Usage: double-click sunloc-print-bridge.bat
+ *
+ * CONFIGURATION — edit these lines if needed:
  */
 const http = require('http');
 const net  = require('net');
@@ -3494,10 +3600,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const BRIDGE_PORT  = 8181;
-const PRINTER_NAME = 'HPRT HT800 - ZPL';
-const PRINTER_IP   = '127.0.0.1';
-const PRINTER_TCP_PORT = 9100; // printer raw port (not bridge port)
+const BRIDGE_PORT      = 8181;                // port this bridge listens on
+const PRINTER_NAME     = 'HPRT HT800 - ZPL'; // Windows printer name (USB mode)
+const PRINTER_IP       = '127.0.0.1';         // set to printer IP for network mode (e.g. '192.168.1.50')
+const PRINTER_TCP_PORT = 9100;                // ZPL raw port on printer (almost always 9100)
+const BIND_ALL         = true;                // true = accept from any device on LAN
+
+// Auto-detect mode: if PRINTER_IP is 127.0.0.1 -> USB/Windows mode, else TCP/network mode
+const USE_TCP_MODE = PRINTER_IP !== '127.0.0.1';
 
 function printViaWindowsPrinter(zplData, callback) {
   const tmpFile = path.join(os.tmpdir(), 'sunloc_label_' + Date.now() + '.zpl');
@@ -3514,11 +3624,27 @@ function printViaWindowsPrinter(zplData, callback) {
 
 function printViaTCP(zplData, callback) {
   const client = new net.Socket();
-  const timeout = setTimeout(() => { client.destroy(); callback(new Error('TCP timeout')); }, 5000);
+  const timeout = setTimeout(() => { client.destroy(); callback(new Error('TCP timeout — check printer IP and port')); }, 8000);
   client.connect(PRINTER_TCP_PORT, PRINTER_IP, () => {
     client.write(zplData, 'binary', () => { clearTimeout(timeout); client.end(); callback(null); });
   });
   client.on('error', (err) => { clearTimeout(timeout); callback(err); });
+}
+
+function printAuto(zplData, callback) {
+  if (USE_TCP_MODE) {
+    printViaTCP(zplData, callback);
+  } else {
+    // USB mode: try Windows printer spooler, fall back to TCP 127.0.0.1:9100
+    printViaWindowsPrinter(zplData, (err) => {
+      if (err) {
+        console.log('  Windows spooler failed, trying USB TCP fallback...');
+        printViaTCP(zplData, callback);
+      } else {
+        callback(null);
+      }
+    });
+  }
 }
 
 const server = http.createServer((req, res) => {
@@ -3529,7 +3655,11 @@ const server = http.createServer((req, res) => {
 
   if (req.method === 'GET' && req.url === '/status') {
     res.writeHead(200, {'Content-Type':'application/json'});
-    res.end(JSON.stringify({ok:true,bridge:'Sunloc Print Bridge v1.0',printer:PRINTER_NAME}));
+    res.end(JSON.stringify({
+      ok: true, bridge: 'Sunloc Print Bridge v2.0',
+      printer: PRINTER_NAME, mode: USE_TCP_MODE ? 'TCP/Network' : 'USB/Windows',
+      printerIp: USE_TCP_MODE ? PRINTER_IP + ':' + PRINTER_TCP_PORT : 'USB'
+    }));
     return;
   }
 
@@ -3539,42 +3669,38 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       if (!body.trim()) { res.writeHead(400); res.end(JSON.stringify({ok:false,error:'Empty ZPL'})); return; }
       const count = (body.match(/\\^XA/g)||[]).length;
-      console.log('[' + new Date().toLocaleTimeString() + '] Printing ' + count + ' label(s)...');
+      console.log('[' + new Date().toLocaleTimeString() + '] Printing ' + count + ' label(s) via ' + (USE_TCP_MODE ? 'TCP' : 'USB') + '...');
       const done = (err) => {
         if (err) {
           console.error('  ERROR:', err.message);
-          // Try Windows printer as fallback
-          printViaWindowsPrinter(body, (err2) => {
-            if (err2) {
-              console.error('  FALLBACK ERROR:', err2.message);
-              res.writeHead(500); res.end(JSON.stringify({ok:false,error:err2.message}));
-            } else {
-              console.log('  OK via Windows printer');
-              res.writeHead(200); res.end(JSON.stringify({ok:true,labels:count}));
-            }
-          });
+          res.writeHead(500); res.end(JSON.stringify({ok:false,error:err.message}));
         } else {
           console.log('  OK - printed ' + count + ' label(s)');
           res.writeHead(200); res.end(JSON.stringify({ok:true,labels:count}));
         }
       };
-      printViaTCP(body, done);
+      printAuto(body, done);
     });
     return;
   }
   res.writeHead(404); res.end();
 });
 
-server.listen(BRIDGE_PORT, '127.0.0.1', () => {
+const bindHost = BIND_ALL ? '0.0.0.0' : '127.0.0.1';
+server.listen(BRIDGE_PORT, bindHost, () => {
+  const localIp = Object.values(os.networkInterfaces())
+    .flat().find(i => i.family === 'IPv4' && !i.internal)?.address || 'localhost';
   console.log('');
   console.log('=================================================');
-  console.log('  SUNLOC LABEL PRINT BRIDGE v1.0');
+  console.log('  SUNLOC LABEL PRINT BRIDGE v2.0');
   console.log('=================================================');
-  console.log('  Bridge URL: http://localhost:' + BRIDGE_PORT);
-  console.log('  Printer:    ' + PRINTER_NAME);
+  console.log('  Mode:       ' + (USE_TCP_MODE ? 'TCP/Network  (' + PRINTER_IP + ':' + PRINTER_TCP_PORT + ')' : 'USB/Windows  (' + PRINTER_NAME + ')'));
+  console.log('  Local URL:  http://localhost:' + BRIDGE_PORT);
+  console.log('  LAN URL:    http://' + localIp + ':' + BRIDGE_PORT);
   console.log('-------------------------------------------------');
-  console.log('  In Tracking App Settings:');
-  console.log('  Printer URL = http://localhost:8181');
+  console.log('  In Tracking App Settings -> Printer URL:');
+  console.log('    http://localhost:' + BRIDGE_PORT + '  (same PC)');
+  console.log('    http://' + localIp + ':' + BRIDGE_PORT + '  (from other devices)');
   console.log('=================================================');
   console.log('  Keep this window open while printing.');
   console.log('  Press Ctrl+C to stop.');
@@ -3583,25 +3709,39 @@ server.listen(BRIDGE_PORT, '127.0.0.1', () => {
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error('Port 8181 already in use. Another bridge may be running.');
-  } else { console.error('Error:', err.message); }
+    console.error('Port ' + BRIDGE_PORT + ' already in use. Close other bridge instances and retry.');
+  } else { console.error('Bridge error:', err.message); }
   process.exit(1);
 });
 `;
 
   const bridgeBAT = `@echo off
-title Sunloc Print Bridge
+title Sunloc Label Print Bridge v2.0
+color 0A
 echo.
-echo  Starting Sunloc Label Print Bridge...
-echo  DO NOT CLOSE THIS WINDOW while printing labels.
+echo  =====================================================
+echo   SUNLOC LABEL PRINT BRIDGE v2.0
+echo   HPRT HT800 - ZPL Printer
+echo  =====================================================
 echo.
+echo  Checking Node.js...
 node --version >nul 2>&1
 if errorlevel 1 (
-    echo  ERROR: Node.js not found! Download from https://nodejs.org
+    echo.
+    echo  ERROR: Node.js is NOT installed!
+    echo  Download from: https://nodejs.org  (LTS version)
+    echo  After installing, run this file again.
+    echo.
     pause
     exit /b 1
 )
+echo  Node.js found OK.
+echo.
+echo  Starting bridge... (DO NOT CLOSE THIS WINDOW)
+echo.
 node "%~dp0sunloc-print-bridge.js"
+echo.
+echo  Bridge stopped.
 pause
 `;
 
@@ -3624,10 +3764,20 @@ pause
   if(el) el.innerHTML='<span style="color:var(--green)">✅ Downloaded 2 files. Copy both to SHCL computer, then double-click the .bat file.</span>';
 }
 
-function clearAllScans(){
-  if(!confirm('⚠️ ADMIN: Clear ALL scan data? This cannot be undone.')) return;
+async function clearAllScans(){
+  const scanCount = state.scans.length;
+  const wastageCount = state.wastage.length;
+  if(!confirm(`⚠️ ADMIN: Clear ALL scan data?\n\nThis will delete:\n• ${scanCount} scan records\n• ${wastageCount} wastage records\n• All stage closures and alerts\n\nServer labels are NOT affected.\nThis cannot be undone.`)) return;
+  if(!confirm('Second confirmation: Are you sure? This clears scan history permanently.')) return;
+  // Snapshot to server before clearing
+  if(serverUrl){
+    try{
+      await fetch(serverUrl+'/api/admin/snapshot?key=sunloc-export-2024',{method:'POST',signal:AbortSignal.timeout(5000)});
+    }catch(e){}
+  }
   state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[];
-  saveLocal(); renderPage(currentPage); alert('Scans cleared.');
+  saveLocal(); renderPage(currentPage);
+  toast(`Scans cleared (${scanCount} records removed)`,'var(--accent3)');
 }
 
 function resetApp(){
@@ -3684,6 +3834,9 @@ setInterval(()=>{
   checkAlerts();
   buildSidebar();
 },5*60*1000);
+
+// Retry queue flush every 30 seconds — ensures failed pushes reach server
+setInterval(()=>{ if(serverUrl && currentDept) trkQueueFlush(); }, 30*1000);
 
 // Auto sync every 2 minutes
 setInterval(()=>{
@@ -3773,14 +3926,34 @@ async function renderTrackingAuditLog() {
 // ── Page lifecycle: re-sync on browser back/forward and tab focus ──
 window.addEventListener('pageshow', (e) => {
   if (e.persisted && currentDept) {
-    pullFromServer();
+    trkQueueFlush().then(() => pullFromServer());
   }
 });
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && currentDept) {
-    pullFromServer();
+    // Flush queued pushes first, then pull latest
+    trkQueueFlush().then(() => pullFromServer());
   }
+});
+
+window.addEventListener('beforeunload', () => {
+  // Best-effort: flush queue via beacon on page close
+  if (!serverUrl || !currentDept) return;
+  try {
+    const raw = localStorage.getItem(TRK_QUEUE_KEY);
+    if (!raw) return;
+    const q = JSON.parse(raw);
+    if (!q.length) return;
+    // Beacon the full local tracking state as a final safety net
+    const toSave = {
+      labels: state.labels, scans: state.scans,
+      stageClosure: state.stageClosure, wastage: state.wastage,
+      dispatchRecs: state.dispatchRecs, alerts: state.alerts
+    };
+    const blob = new Blob([JSON.stringify(toSave)], {type:'application/json'});
+    navigator.sendBeacon && navigator.sendBeacon(serverUrl+'/api/tracking/state', blob);
+  } catch(e) {}
 });
 
 // Audit key save actions

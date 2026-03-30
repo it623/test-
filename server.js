@@ -247,6 +247,32 @@ async function runMigrations() {
         );
         CREATE INDEX IF NOT EXISTS idx_backups_ts ON planning_state_backups(backed_up_at DESC);
       `},
+      { version: 8, name: 'data_loss_prevention', sql: `
+        -- Daily backup log: tracks when automated daily backups ran
+        CREATE TABLE IF NOT EXISTS daily_backup_log (
+          id SERIAL PRIMARY KEY,
+          backup_date DATE NOT NULL UNIQUE,
+          order_count INTEGER NOT NULL DEFAULT 0,
+          label_count INTEGER NOT NULL DEFAULT 0,
+          dpr_count INTEGER NOT NULL DEFAULT 0,
+          backup_id INTEGER REFERENCES planning_state_backups(id),
+          ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_daily_backup_date ON daily_backup_log(backup_date DESC);
+        -- Soft-delete log: tracks every order deletion for audit + recovery
+        CREATE TABLE IF NOT EXISTS order_delete_log (
+          id SERIAL PRIMARY KEY,
+          order_id TEXT NOT NULL,
+          order_json TEXT NOT NULL,
+          deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          deleted_by TEXT,
+          reason TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_del_log_order ON order_delete_log(order_id);
+        CREATE INDEX IF NOT EXISTS idx_del_log_ts ON order_delete_log(deleted_at DESC);
+        -- Add order_count column to planning_state_backups for quick inspection
+        ALTER TABLE planning_state_backups ADD COLUMN IF NOT EXISTS order_count INTEGER;
+      `},
     ];
 
     for (const m of migrations) {
@@ -285,6 +311,75 @@ async function seedUsers() {
   }
   await query(`DELETE FROM app_sessions WHERE expires_at < NOW()`);
   console.log('[Seed] Default users ready');
+}
+
+// ─── Daily Backup Job ─────────────────────────────────────────
+async function runDailyBackup() {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    // Check if already ran today
+    const existing = await queryOne('SELECT id FROM daily_backup_log WHERE backup_date=$1', [today]);
+    if (existing) return;
+
+    const planState = await getPlanningState();
+    const orderCount = (planState.orders || []).filter(o => !o.deleted).length;
+    if (orderCount === 0) return; // nothing to back up
+
+    // Count labels and DPR records
+    const [labelCount, dprCount] = await Promise.all([
+      queryOne('SELECT COUNT(*) as c FROM tracking_labels WHERE voided=FALSE'),
+      queryOne('SELECT COUNT(*) as c FROM dpr_records'),
+    ]);
+
+    // Save a daily backup snapshot
+    const stateJson = JSON.stringify(planState);
+    const backupRow = await queryOne(
+      `INSERT INTO planning_state_backups (state_json, trigger, order_count)
+       VALUES ($1, 'daily', $2) RETURNING id`,
+      [stateJson, orderCount]
+    );
+
+    // Log it
+    await query(
+      `INSERT INTO daily_backup_log (backup_date, order_count, label_count, dpr_count, backup_id)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (backup_date) DO NOTHING`,
+      [today, orderCount, parseInt(labelCount?.c||0), parseInt(dprCount?.c||0), backupRow?.id || null]
+    );
+
+    console.log(`[DailyBackup] ✅ ${today} — ${orderCount} orders, ${labelCount?.c||0} labels, ${dprCount?.c||0} DPR records`);
+  } catch(e) {
+    console.error('[DailyBackup] Failed:', e.message);
+  }
+}
+
+// Schedule daily backup: run immediately on startup, then every 6 hours
+async function scheduleDailyBackup() {
+  await runDailyBackup();
+  setInterval(runDailyBackup, 6 * 60 * 60 * 1000); // every 6 hours
+}
+
+// ─── Order Delete Logger ───────────────────────────────────────
+// Called by savePlanningState when orders disappear
+async function logDeletedOrders(existingOrders, incomingOrders, deletedBy) {
+  try {
+    const incomingIds = new Set(incomingOrders.map(o => o.id));
+    const nowDeleted = existingOrders.filter(o =>
+      !o.deleted &&
+      (!incomingIds.has(o.id) || incomingOrders.find(i => i.id === o.id)?.deleted)
+    );
+    for (const ord of nowDeleted) {
+      await query(
+        `INSERT INTO order_delete_log (order_id, order_json, deleted_by)
+         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [ord.id, JSON.stringify(ord), deletedBy || 'unknown']
+      );
+    }
+    if (nowDeleted.length > 0) {
+      console.log(`[DeleteLog] Logged ${nowDeleted.length} soft-deleted orders`);
+    }
+  } catch(e) {
+    console.error('[DeleteLog] Error:', e.message);
+  }
 }
 
 // ─── Helper: get latest planning state ────────────────────────
@@ -328,12 +423,19 @@ async function savePlanningState(state) {
     }
   }
 
-  // SAFETY GUARD 3: never reduce order count by more than 5 in a single save
-  // (catches stale browser state being pushed after redeployment or back navigation)
+  // SAFETY GUARD 3: never reduce ACTIVE order count by more than 10 in a single save
+  // (catches stale browser state pushed after redeployment or back navigation)
+  // Threshold is 10 to allow legitimate bulk deletes of up to 10 orders at once.
   if (existingState?.orders?.length > 0 && state.orders?.length >= 0) {
-    const existingCount = existingState.orders.filter(o => !o.deleted).length;
-    const incomingCount = (state.orders || []).filter(o => !o.deleted).length;
-    if (existingCount - incomingCount > 5) {
+    const existingActive = existingState.orders.filter(o => !o.deleted);
+    const incomingActive = (state.orders || []).filter(o => !o.deleted);
+    const existingCount = existingActive.length;
+    const incomingCount = incomingActive.length;
+
+    // Always log any orders that were soft-deleted (regardless of guard)
+    await logDeletedOrders(existingActive, state.orders || [], 'saveState');
+
+    if (existingCount - incomingCount > 10) {
       console.log(`[savePlanningState] GUARD3: suspicious order count drop ${existingCount} → ${incomingCount}, merging`);
       // Merge: keep all existing orders not in incoming state, add all incoming
       const incomingIds = new Set((state.orders || []).map(o => o.id));
@@ -344,20 +446,49 @@ async function savePlanningState(state) {
          ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
         [JSON.stringify(merged)]
       );
-      await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'guard3-merge')`, [JSON.stringify(merged)]);
+      await query(
+        `INSERT INTO planning_state_backups (state_json, trigger, order_count)
+         VALUES ($1, 'guard3-merge', $2)`,
+        [JSON.stringify(merged), merged.orders.filter(o=>!o.deleted).length]
+      );
       return;
     }
   }
 
+  const _writeOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
   await query(
     `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
      ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
     [JSON.stringify(state)]
   );
-  // Auto-backup: keep last 10 snapshots
+  // Auto-backup: keep last 50 rolling snapshots AND always keep the most recent
+  // snapshot for each of the last 30 calendar days (daily protection)
   try {
-    await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'auto')`, [JSON.stringify(state)]);
-    await query(`DELETE FROM planning_state_backups WHERE id NOT IN (SELECT id FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 10)`);
+    const _orderCount = (state.orders||[]).filter(o=>!o.deleted).length;
+    await query(`INSERT INTO planning_state_backups (state_json, trigger, order_count) VALUES ($1, 'auto', $2)`, [JSON.stringify(state), _orderCount]);
+    // Delete old auto snapshots — but NEVER delete:
+    //   1. The last 50 by time
+    //   2. The most recent snapshot per calendar day (last 30 days)
+    //   3. Manual / startup / guard snapshots (kept forever)
+    await query(`
+      DELETE FROM planning_state_backups
+      WHERE trigger = 'auto'
+        AND id NOT IN (
+          -- Keep last 50 auto snapshots
+          SELECT id FROM planning_state_backups
+          WHERE trigger = 'auto'
+          ORDER BY backed_up_at DESC
+          LIMIT 50
+        )
+        AND id NOT IN (
+          -- Keep the most recent auto snapshot per calendar day (last 30 days)
+          SELECT DISTINCT ON (DATE(backed_up_at)) id
+          FROM planning_state_backups
+          WHERE trigger = 'auto'
+            AND backed_up_at >= NOW() - INTERVAL '30 days'
+          ORDER BY DATE(backed_up_at), backed_up_at DESC
+        )
+    `);
   } catch(e) { /* backup failure never blocks main save */ }
 }
 
@@ -1056,7 +1187,35 @@ app.get('/api/reconciliation/history', asyncRoute(async (req, res) => {
   res.json({ ok:true, requests });
 }));
 
-app.get('/api/health', asyncRoute(async (req, res) => {
+// GET /api/tracking/sync-batches — fast endpoint for Tracking app to get active planning orders
+app.get('/api/tracking/sync-batches', asyncRoute(async (req, res) => {
+  const state = await getPlanningState();
+  const batches = (state.orders || [])
+    .filter(o => !o.deleted)
+    .map(o => ({
+      id: o.id,
+      batchNumber: o.batchNumber || '',
+      poNumber: o.poNumber || '',
+      customer: o.customer || '',
+      shipTo: o.shipTo || o.customer || '',
+      billTo: o.billTo || '',
+      machineId: o.machineId || '',
+      size: o.size || '',
+      colour: o.colour || '',
+      qty: o.qty || 0,
+      actualQty: o.actualQty || o.actualProd || 0,
+      actualProd: o.actualProd || o.actualQty || 0,
+      status: o.status || 'pending',
+      startDate: o.startDate || null,
+      zone: o.zone || '',
+      woStatus: o.woStatus || null,
+      printMatter: o.printMatter || '',
+      packSize: o.packSize || null,
+    }));
+  res.json({ ok: true, batches, count: batches.length, savedAt: new Date().toISOString() });
+}));
+
+
   const [planningRow, dprCount, actualsCount, labelsCount, scansCount, usersCount] = await Promise.all([
     queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1'),
     queryOne('SELECT COUNT(*) as c FROM dpr_records'),
@@ -1079,6 +1238,14 @@ app.get('/api/health', asyncRoute(async (req, res) => {
     uptime: Math.floor(process.uptime()) + 's',
     apps: ['planning', 'dpr', 'tracking'],
     syncStatus: 'all-apps-synced',
+    dataProtection: {
+      guards: ['GUARD1-empty-orders', 'GUARD2-empty-state', 'GUARD3-bulk-drop-10+'],
+      autoBackupEvery: 'every-save',
+      dailyBackupEvery: '6h',
+      backupRetention: '50-rolling + 1-per-day-for-30-days + manual-forever',
+      deletedOrderLog: true,
+      orderRecovery: 'POST /api/admin/recover-order',
+    },
   });
 }));
 
@@ -1396,6 +1563,52 @@ app.post('/api/admin/snapshot', asyncRoute(async (req, res) => {
   res.json({ ok: true, message: `Snapshot saved — ${orderCount} orders protected`, orders: orderCount, savedAt: currentState.saved_at });
 }));
 
+// GET /api/admin/daily-backup-log — view daily backup history
+app.get('/api/admin/daily-backup-log', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const rows = await queryAll(`SELECT * FROM daily_backup_log ORDER BY backup_date DESC LIMIT 90`);
+  res.json({ ok: true, log: rows });
+}));
+
+// GET /api/admin/deleted-orders — view soft-deleted order log (recovery aid)
+app.get('/api/admin/deleted-orders', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const rows = await queryAll(`SELECT id, order_id, deleted_at, deleted_by, reason,
+    (order_json::jsonb->>'batchNumber') as batch_number,
+    (order_json::jsonb->>'customer') as customer,
+    (order_json::jsonb->>'machineId') as machine_id,
+    (order_json::jsonb->>'qty') as qty
+    FROM order_delete_log ORDER BY deleted_at DESC LIMIT 200`);
+  res.json({ ok: true, deletedOrders: rows });
+}));
+
+// POST /api/admin/recover-order — restore a single deleted order back into planning state
+app.post('/api/admin/recover-order', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token']);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const { logId } = req.body;
+  if (!logId) return res.status(400).json({ ok: false, error: 'Missing logId' });
+  const logRow = await queryOne('SELECT * FROM order_delete_log WHERE id=$1', [logId]);
+  if (!logRow) return res.status(404).json({ ok: false, error: 'Log entry not found' });
+  const order = JSON.parse(logRow.order_json);
+  order.deleted = false;
+  order.recoveredAt = new Date().toISOString();
+  order.recoveredBy = session.username;
+  const planState = await getPlanningState();
+  const idx = (planState.orders||[]).findIndex(o => o.id === order.id);
+  if (idx >= 0) {
+    planState.orders[idx] = { ...planState.orders[idx], ...order };
+  } else {
+    planState.orders = [...(planState.orders||[]), order];
+  }
+  await savePlanningState(planState);
+  await logAudit(session.username, session.role, 'planning', 'ORDER_RECOVERED',
+    `Recovered order ${order.id} (${order.batchNumber||order.id}) from delete log entry ${logId}`);
+  res.json({ ok: true, message: `Order ${order.batchNumber||order.id} restored to Planning App` });
+}));
+
 // GET /api/admin/backups — list recent planning state backups
 app.get('/api/admin/backups', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
@@ -1489,6 +1702,9 @@ async function startServer() {
       console.log(`[Sunloc] Database: PostgreSQL (Railway) — data persists across redeployments`);
       console.log(`[Sunloc] Data protection: ACTIVE — orders will never be overwritten`);
     });
+
+    // Start daily backup scheduler (runs every 6h, logs to daily_backup_log)
+    scheduleDailyBackup().catch(e => console.error('[DailyBackup] Scheduler start error:', e.message));
   } catch(err) {
     console.error('[Startup] Fatal error:', err.message);
     process.exit(1);

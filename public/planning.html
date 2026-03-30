@@ -610,8 +610,11 @@ const SYNC = (() => {
         signal: AbortSignal.timeout(6000)
       });
       _online = true; updateBadge();
-      // Push succeeded — clear the queue
+      // Push succeeded — clear the queue and stamp the sync time
       localStorage.removeItem(PLAN_QUEUE_KEY);
+      // Update _serverSavedAt so the stale-push guard resets properly
+      state._serverSavedAt = Date.now();
+      try { localStorage.setItem('sunloc_state', JSON.stringify({...stateObj, _serverSavedAt: state._serverSavedAt})); } catch(e) {}
     } catch { _online = false; updateBadge(); }
   }
 
@@ -696,6 +699,12 @@ function loadState() {
     // Server pull done — render() was called inside loadFromServer
   }).catch(() => {
     // Server unreachable — render with whatever is in state (localStorage fallback)
+    // IMPORTANT: if we have local orders, allow saves so data isn't lost
+    const hasLocalOrders = (state.orders||[]).filter(o=>!o.deleted).length > 0;
+    if (hasLocalOrders) {
+      _serverDataLoaded = true;
+      console.log('[loadState] offline fallback — _serverDataLoaded=true, local orders will sync when server reconnects');
+    }
     render();
   });
 
@@ -723,15 +732,22 @@ function saveState() {
       return;
     }
 
-    // Stale-push guard: if not synced from server in >10 min, pull first then push
+    // Stale-push guard: if not synced from server in >10 min, merge then push
+    // We queue toSave FIRST (before any async work) so data is never lost
     const lastSync = state._serverSavedAt || 0;
     const staleThreshold = 10 * 60 * 1000;
     if (Date.now() - lastSync > staleThreshold) {
+      // Queue current state immediately so it survives page close during merge
+      planQueuePush(toSave);
       SYNC.loadFromServer().then(() => {
-        const fresh = {...state};
-        delete fresh.pcCodes;
-        delete fresh.zoneMap;
-        SYNC.push(fresh);
+        // After server pull, push the freshly merged state
+        const merged = {...state};
+        delete merged.pcCodes;
+        delete merged.zoneMap;
+        SYNC.push(merged);
+      }).catch(() => {
+        // Server unreachable — push queued state when connection returns
+        // planQueueFlush will handle it on next 30s tick
       });
     } else {
       SYNC.push(toSave);
@@ -5083,13 +5099,23 @@ function renderSettings() {
     </div>
     <div class="card mt-4">
       <div class="card-title">Data Management</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
         <button class="btn btn-secondary" onclick="exportAllData()">📤 Export All Data (JSON)</button>
         <label class="btn btn-secondary" style="cursor:pointer">📥 Import Data (JSON)<input type="file" accept=".json" onchange="importAllData(this)"></label>
-        <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear All Data</button>
+        <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Browser Cache</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted)">
+        ⚠️ "Clear Browser Cache" only removes your local browser copy. All data on the server is always safe.
+        Export regularly as an extra off-server backup.
       </div>
     </div>
+    <div class="card mt-4" id="data-protection-card">
+      <div class="card-title">🛡️ Data Protection Status</div>
+      <div id="dp-status" style="font-size:12px;color:var(--text3)">Loading...</div>
+    </div>
   `;
+  // Load data protection status asynchronously
+  loadDataProtectionStatus();
 }
 
 function updatePackSize(sz, val) {
@@ -5154,6 +5180,84 @@ function importAllData(input) {
     } catch(err) { alert('Error importing data: '+err.message); }
   };
   reader.readAsText(file);
+}
+
+async function loadDataProtectionStatus() {
+  const el = document.getElementById('dp-status');
+  if (!el) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app';
+  if (!serverUrl || !currentUser?.token) {
+    el.innerHTML = '<span style="color:var(--text3)">Login as admin to view protection status.</span>';
+    return;
+  }
+  try {
+    const [backupsR, dailyR, healthR] = await Promise.all([
+      fetch(serverUrl + '/api/admin/backups?token=' + currentUser.token, { signal: AbortSignal.timeout(5000) }),
+      fetch(serverUrl + '/api/admin/daily-backup-log?token=' + currentUser.token, { signal: AbortSignal.timeout(5000) }),
+      fetch(serverUrl + '/api/health', { signal: AbortSignal.timeout(5000) }),
+    ]);
+    const backupsJ = backupsR.ok ? await backupsR.json() : { backups: [] };
+    const dailyJ = dailyR.ok ? await dailyR.json() : { log: [] };
+    const healthJ = healthR.ok ? await healthR.json() : {};
+
+    const latest = backupsJ.backups?.[0];
+    const lastDaily = dailyJ.log?.[0];
+    const orderCount = (state.orders||[]).filter(o=>!o.deleted).length;
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:12px">
+        <div style="background:rgba(0,230,118,.07);border:1px solid rgba(0,230,118,.2);border-radius:6px;padding:10px">
+          <div style="font-weight:600;color:var(--success);margin-bottom:4px">✅ Active Orders</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text)">${orderCount}</div>
+          <div style="font-size:11px;color:var(--text3)">currently in Planning</div>
+        </div>
+        <div style="background:rgba(0,212,255,.07);border:1px solid rgba(0,212,255,.2);border-radius:6px;padding:10px">
+          <div style="font-weight:600;color:var(--accent2);margin-bottom:4px">🔄 Last Auto Backup</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">${latest ? new Date(latest.backed_up_at).toLocaleString('en-IN') : 'None'}</div>
+          <div style="font-size:11px;color:var(--text3)">${latest?.order_count != null ? latest.order_count + ' orders protected' : ''}</div>
+        </div>
+        <div style="background:rgba(255,171,0,.07);border:1px solid rgba(255,171,0,.2);border-radius:6px;padding:10px">
+          <div style="font-weight:600;color:var(--warning);margin-bottom:4px">📅 Last Daily Backup</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text)">${lastDaily ? lastDaily.backup_date : 'None yet'}</div>
+          <div style="font-size:11px;color:var(--text3)">${lastDaily ? lastDaily.order_count + ' orders, ' + lastDaily.label_count + ' labels' : 'Runs every 6 hours'}</div>
+        </div>
+        <div style="background:rgba(0,230,118,.07);border:1px solid rgba(0,230,118,.2);border-radius:6px;padding:10px">
+          <div style="font-weight:600;color:var(--success);margin-bottom:4px">🛡️ Guards Active</div>
+          <div style="font-size:12px;color:var(--text)">GUARD1 + GUARD2 + GUARD3</div>
+          <div style="font-size:11px;color:var(--text3)">Empty-state &amp; bulk-drop blocked</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-secondary" onclick="takeManualSnapshot()">📸 Take Snapshot Now</button>
+        <button class="btn btn-sm btn-ghost" onclick="loadDataProtectionStatus()">🔄 Refresh</button>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        Backups retained: 50 rolling + 1 per day for 30 days + all manual/startup snapshots forever.<br>
+        Deleted orders are logged and recoverable via server admin API.
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<span style="color:var(--text3)">Could not load protection status — server may be offline.</span>';
+  }
+}
+
+async function takeManualSnapshot() {
+  const serverUrl = localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app';
+  try {
+    const r = await fetch(serverUrl + '/api/admin/snapshot', {
+      method: 'POST',
+      headers: { 'x-session-token': currentUser?.token || '', 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert('✅ Snapshot saved — ' + j.orders + ' orders protected.');
+      loadDataProtectionStatus();
+    } else {
+      alert('❌ Snapshot failed: ' + j.error);
+    }
+  } catch(e) {
+    alert('❌ Could not reach server: ' + e.message);
+  }
 }
 
 function clearAllData() {
@@ -5535,8 +5639,8 @@ window.addEventListener('pageshow', (e) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && currentUser) {
-    // Re-pull when tab is re-focused (handles tab switch back)
-    SYNC.loadFromServer();
+    // Flush any queued saves first, then re-pull latest from server
+    planQueueFlush().then(() => SYNC.loadFromServer());
   }
 });
 </script>

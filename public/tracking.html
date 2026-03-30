@@ -941,49 +941,59 @@ function normLabel(l){
 
 async function pullFromServer(){
   if(!serverUrl) return;
+
+  // ── Pull planning orders FIRST (most critical — batches must always be current) ──
   try{
-    const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)});
-    if(!r.ok) return;
-    const j=await r.json();
-    if(j.ok && j.state){
-      // Normalise DB snake_case fields to camelCase
-      const normLabels = (j.state.labels||[]).map(normLabel);
-      const serverLabelIds = new Set(normLabels.map(l=>l.id));
-      const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-      Object.assign(state, j.state);
-      state.labels = normLabels;
-      // Re-add local-only labels
-      if(localOnlyLabels.length > 0){
-        state.labels = [...state.labels, ...localOnlyLabels];
-        // Push local-only labels to server so other devices can find them
-        fetch(serverUrl+'/api/tracking/state',{
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
-          signal:AbortSignal.timeout(8000)
-        }).catch(()=>{});
-      }
-    }
-    // Also pull planning orders for batch data
     const pr=await fetch(serverUrl+'/api/planning/state',{signal:AbortSignal.timeout(8000)});
     if(pr.ok){
       const pj=await pr.json();
       if(pj.ok && pj.state?.orders){
-        const batches = pj.state.orders.filter(o=>!o.deleted).map(b=>({
-          ...b,
-          // Normalise: server returns actualProd from DPR; tracking also uses actualQty
-          actualQty: b.actualQty || b.actualProd || 0,
-          actualProd: b.actualProd || b.actualQty || 0,
-        }));
-        if(batches.length > 0 || state.batches.length === 0){
-          state.batches = batches;
-        }
+        const batches = pj.state.orders
+          .filter(o=>!o.deleted && o.status!=='closed')
+          .map(b=>({
+            ...b,
+            actualQty: b.actualQty || b.actualProd || 0,
+            actualProd: b.actualProd || b.actualQty || 0,
+          }));
+        // Always update — planning is the source of truth for batches
+        state.batches = batches;
         state.machineMaster = pj.state.machineMaster||[];
       }
     }
-    saveLocal();
-    setSyncBadge('synced');
-    if(currentPage) renderPage(currentPage);
-  }catch(e){ setSyncBadge('offline'); }
+  }catch(e){ console.warn('[Tracking] Planning pull failed:', e.message); }
+
+  // ── Pull tracking state (labels, scans, etc.) ──
+  try{
+    const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)});
+    if(r.ok){
+      const j=await r.json();
+      if(j.ok && j.state){
+        const normLabels = (j.state.labels||[]).map(normLabel);
+        const serverLabelIds = new Set(normLabels.map(l=>l.id));
+        const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
+        // Merge server state but preserve batches (already loaded from planning above)
+        const savedBatches = state.batches;
+        const savedMachineMaster = state.machineMaster;
+        Object.assign(state, j.state);
+        state.labels = normLabels;
+        state.batches = savedBatches;
+        state.machineMaster = savedMachineMaster;
+        // Push local-only labels back to server
+        if(localOnlyLabels.length > 0){
+          state.labels = [...state.labels, ...localOnlyLabels];
+          fetch(serverUrl+'/api/tracking/state',{
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+            signal:AbortSignal.timeout(8000)
+          }).catch(()=>{});
+        }
+      }
+    }
+  }catch(e){ console.warn('[Tracking] Tracking state pull failed:', e.message); setSyncBadge('offline'); return; }
+
+  saveLocal();
+  setSyncBadge('synced');
+  if(currentPage) renderPage(currentPage);
 }
 
 // ── TRACKING OFFLINE RETRY QUEUE ────────────────────────────────
@@ -1701,7 +1711,9 @@ function renderPage(page){
 function renderDashboard(){
   const el=document.getElementById('page-dashboard');
   checkAlerts();
-  const totalBatches=state.batches.filter(b=>b.status!=='closed').length;
+  // Show all non-closed batches (pending + running + export-pending)
+  const activeBatches=state.batches.filter(b=>b.status!=='closed');
+  const totalBatches=activeBatches.length;
   const totalLabels=state.labels.filter(l=>!l.voided&&!l.isOrange).length;
   const totalAlerts=state.alerts.length;
   const packedBoxes=state.scans.filter(s=>s.dept==='packing'&&s.type==='out').length;
@@ -1753,7 +1765,7 @@ function renderDashboard(){
     <table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Machine</th><th>Size</th><th>Printed</th><th>Stage</th><th>WIP Days</th><th>Dispatch Est.</th><th>Status</th></tr></thead>
       <tbody>
-      ${state.batches.filter(b=>b.status!=='closed').slice(0,15).map(b=>{
+      ${activeBatches.slice(0,15).map(b=>{
         const wipDays=getBatchWIPDays(b.batchNumber);
         const dispDate=calcDispatchDate(b);
         const std=b.isPrinted?3:2;

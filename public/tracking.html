@@ -3755,8 +3755,12 @@ function autoFocusScanInput(dept, type) {
   const isMobile = window.innerWidth <= 768;
   if (isMobile) {
     setTimeout(() => {
-      document.getElementById(`scan-${type}-${dept}`)?.focus();
-    }, 300);
+      const el = document.getElementById(`scan-${type}-${dept}`);
+      if (el) {
+        el.focus();   // focuses input so mobile can scan
+        el.click();   // triggers mobile keyboard or scanner
+      }
+    }, 1000); // give 1 second to load mobile page
   }
 }
 // 🟢 Universal safe scan wrapper

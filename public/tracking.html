@@ -3080,75 +3080,6 @@ function renderReportC(){
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<style>
-body{font-family:sans-serif;margin:0;padding:0;--accent:#2a9d8f;--accent2:#264653;--accent2-light:#e0f2f1;--surface:#f9f9f9;--surface2:#fff;--surface3:#eee;--text:#222;--text2:#555;--text3:#888;--border:#ccc;--r-sm:6px}
-.card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px;margin:12px}
-.section-title{font-weight:700;font-size:14px;margin-bottom:8px}
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
-.kpi{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:8px;text-align:center}
-.kpi-label{font-size:12px;color:var(--text3);margin-bottom:4px}
-.kpi-val{font-size:16px;font-weight:600}
-.green{color:#2a9d8f}.red{color:#e63946}.amber{color:#f4a261}.purple{color:#6a4c93}
-.tbl-wrap{overflow-x:auto;margin-top:12px}
-table{border-collapse:collapse;width:100%}
-th,td{border-bottom:1px solid var(--border);padding:6px 10px;text-align:left;font-size:12px}
-td.td-mono,td.td-bold{font-family:monospace}
-td.td-bold{font-weight:600}
-.badge{padding:2px 6px;border-radius:4px;color:#fff;font-size:11px}
-.badge-green{background:#2a9d8f}.badge-amber{background:#f4a261}.badge-red{background:#e63946}
-.btn{padding:4px 8px;border:none;border-radius:4px;font-size:12px;cursor:pointer}
-.btn-sm{font-size:11px;padding:3px 6px}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-secondary{background:#555;color:#fff}
-.btn-ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
-.flex{display:flex}
-.flex-col{flex-direction:column}
-.flex-wrap{flex-wrap:wrap}
-.gap-8{gap:8px}
-.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.fw-bold{font-weight:600}
-.text-muted{color:var(--text3)}
-</style>
-</head>
-<body>
-<div id="report-output"></div>
-
-<script>
-// ───────── GLOBAL STATE ─────────
-let state={labels:[],scans:[],batches:[],dispatchRecs:[],alerts:[],stageClosure:[],wastage:[]};
-let serverUrl='';
-let currentDept='pi';
-let DEPT_LABELS={aim:'AIM',printing:'Printing',pi:'PI',packing:'Packing',dispatch:'Dispatch'};
-let PACK_SIZES={2:1.5,3:2.5};
-let FLOORS={Floor1:{machines:['MC.30','MC.31']},Floor2:{machines:['MC.26']}};
-let DEPT_INFO={pi:{label:'Production',defaultPage:'scan'},admin:{label:'Admin',defaultPage:'settings'}};
-
-// ───────── UTILITIES ─────────
-function fmt(v,d=0){return (typeof v==='number'?v.toFixed(d):v)}
-function today(){return new Date().toISOString().slice(0,10)}
-function fmtDate(d){return d instanceof Date?d.toISOString().slice(0,10):d}
-function boxToLakh(box,size){return (box||0)*(size||1)}
-function getLabelsByBatch(batch){return state.labels.filter(l=>l.batchNumber===batch)}
-function getBatchAGrade(batch,type){const aGrade=Math.floor(Math.random()*10+10);return {aGrade:aGrade,pct:80+Math.random()*20,salvage:1,remelt:0}}
-function getBatchFlow(batch){return ['aim','printing','pi','packing','dispatch']}
-function getBatchWIPDays(batch){return Math.floor(Math.random()*5)+1}
-function calcDispatchDate(batch){return new Date()}
-function hoursAgo(ts){return (Date.now()-new Date(ts))/36e5}
-function getMachineFloor(mc){return mc.includes('26')?'Floor2':'Floor1'}
-function isStageComplete(batch,dept){return Math.random()>0.5}
-
-// ───────── EXPORT ─────────
-function exportToExcel(rows, filename, sheetName){const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),sheetName||'Report');XLSX.writeFile(wb,filename)}
-
-// ───────── REPORT D ─────────
 function renderReportD(){
   const totalGross=state.batches.reduce((s,b)=>s+(b.actualProd||0),0);
   const stages=['aim','printing','pi','packing','dispatch'];
@@ -3182,24 +3113,18 @@ function renderReportD(){
     }).join('')}
     </tbody>
   </table></div>
-  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportDExcel()">📥 Export Excel</button></div>`;
+  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportD()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
-function exportReportDExcel(){
-  const rows=state.batches.filter(b=>!b.deleted).map(b=>{
-    const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
-    return {'Batch':b.batchNumber,'Gross Prod (L)':b.actualProd||0,'A-Grade (L)':fmt(ag.aGrade),'A-Grade %':fmt(ag.pct,1),'Salvage (L)':fmt(ag.salvage),'Remelt (L)':fmt(ag.remelt)};
-  });
-  exportToExcel(rows,`Sunloc_Summary_${today()}.xlsx`,'Summary');
-}
 
-// ───────── REPORT A ─────────
 function renderReportA(){
+  // Date filter
   const filterBatch = window._rptABatch||'';
   const batches = state.batches.filter(b=>!b.deleted && (!filterBatch||b.batchNumber===filterBatch));
   const batchOptions = state.batches.filter(b=>!b.deleted)
     .map(b=>`<option value="${b.batchNumber}" ${filterBatch===b.batchNumber?'selected':''}>${b.batchNumber} — ${b.customer||''}</option>`).join('');
+
   let html=`<div class="card">
     <div class="section-title mb-16">Report A — Complete Batch Tracking (Full Duration)</div>
     <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
@@ -3208,38 +3133,52 @@ function renderReportA(){
       </select>
       ${filterBatch?`<button class="btn btn-ghost btn-sm" onclick="window._rptABatch='';renderReportA()">✕ Clear</button>`:''}
     </div>`;
+
   batches.forEach(b=>{
+    const wipDays=getBatchWIPDays(b.batchNumber);
     const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
     const labels=getLabelsByBatch(b.batchNumber);
     const dispatched=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
     const batchScans=state.scans.filter(s=>s.batchNumber===b.batchNumber);
+
+    // Build day-wise scan history
     const scanDates=[...new Set(batchScans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
     let dayHistoryHtml='';
     if(scanDates.length>0){
       dayHistoryHtml=`<div style="margin-top:12px">
-        <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:8px">DAY-WISE SCAN HISTORY</div>
+        <div style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.8px;margin-bottom:8px">DAY-WISE SCAN HISTORY</div>
         <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:var(--surface3)">
-            <th style="padding:6px 10px;text-align:left">Date</th>
-            ${getBatchFlow(b).map(d=>`<th style="padding:6px 10px;text-align:center">${DEPT_LABELS[d]}</th>`).join('')}
-          </tr></thead>
-          <tbody>
-            ${scanDates.map(date=>{
-              const dayScans=batchScans.filter(s=>s.ts?.slice(0,10)===date);
-              return `<tr style="border-bottom:1px solid var(--border)">
-                <td style="padding:5px 10px;font-family:var(--mono);font-size:11px">${date}</td>
-                ${getBatchFlow(b).map(dept=>{
-                  const inn=dayScans.filter(s=>s.dept===dept&&s.type==='in').length;
-                  const out=dayScans.filter(s=>s.dept===dept&&s.type==='out').length;
-                  const hasActivity=inn>0||out>0;
-                  return `<td style="padding:5px 10px;text-align:center;font-family:var(--mono);font-size:11px;${hasActivity?'color:var(--text)':'color:var(--text3)'}">${hasActivity?`IN:${inn} / OUT:${out}`:'—'}</td>`;
-                }).join('')}
-              </tr>`;
-            }).join('')}
+            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">Date</th>
+            ${getBatchFlow(b).map(d=>`<th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">${DEPT_LABELS[d]||d}</th>`).join('')}
+          </tr></thead><tbody>
+          ${scanDates.map(date=>{
+            const dayScans=batchScans.filter(s=>s.ts?.slice(0,10)===date);
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:5px 10px;font-family:var(--mono);font-size:11px">${date}</td>
+              ${getBatchFlow(b).map(dept=>{
+                const inn=dayScans.filter(s=>s.dept===dept&&s.type==='in').length;
+                const out=dayScans.filter(s=>s.dept===dept&&s.type==='out').length;
+                const hasActivity=inn>0||out>0;
+                return `<td style="padding:5px 10px;text-align:center;font-family:var(--mono);font-size:11px;${hasActivity?'color:var(--text)':'color:var(--text3)'}">
+                  ${hasActivity?`IN:${inn} / OUT:${out}`:'—'}
+                </td>`;
+              }).join('')}
+            </tr>`;
+          }).join('')}
           </tbody>
+          <tfoot><tr style="background:var(--surface3);font-weight:600">
+            <td style="padding:6px 10px;font-size:11px">TOTAL</td>
+            ${getBatchFlow(b).map(dept=>{
+              const inn=batchScans.filter(s=>s.dept===dept&&s.type==='in').length;
+              const out=batchScans.filter(s=>s.dept===dept&&s.type==='out').length;
+              return `<td style="padding:6px 10px;text-align:center;font-family:var(--mono);font-size:11px">IN:${inn} / OUT:${out}</td>`;
+            }).join('')}
+          </tr></tfoot>
         </table></div>
       </div>`;
     }
+
     html+=`<div class="mb-20" style="border-bottom:1px solid var(--border);padding-bottom:16px">
       <div class="flex justify-between mb-8">
         <div class="fw-bold">${b.batchNumber} — ${b.customer||''} | ${b.machineId} | Size ${b.size}</div>
@@ -3247,39 +3186,651 @@ function renderReportA(){
       </div>
       <div class="grid-4 mb-8">
         <div class="text-sm"><span class="text-muted">Labels:</span> ${labels.length}</div>
-        <div class="text-sm"><span class="text-muted">WIP Days:</span> ${fmt(getBatchWIPDays(b.batchNumber),1)}</div>
+        <div class="text-sm"><span class="text-muted">WIP Days:</span> ${fmt(wipDays,1)}</div>
         <div class="text-sm"><span class="text-muted">Est Dispatch:</span> ${fmtDate(calcDispatchDate(b))}</div>
         <div class="text-sm"><span class="text-muted">Dispatched:</span> ${fmt(dispatched)}L</div>
       </div>
+      ${renderBatchFlowSummary(b)}
       ${dayHistoryHtml}
     </div>`;
   });
-  html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportAExcel()">📥 Export Excel</button></div>`;
+  html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportA()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
 }
 
-function exportReportAExcel(){
-  const rows=[];
-  state.batches.filter(b=>!b.deleted).forEach(b=>{
-    const batchScans=state.scans.filter(s=>s.batchNumber===b.batchNumber);
-    const scanDates=[...new Set(batchScans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
-    scanDates.forEach(date=>{
-      const dayScans=batchScans.filter(s=>s.ts?.slice(0,10)===date);
-      const row={Batch:b.batchNumber,Date:date};
-      getBatchFlow(b).forEach(dept=>{
-        const inn=dayScans.filter(s=>s.dept===dept&&s.type==='in').length;
-        const out=dayScans.filter(s=>s.dept===dept&&s.type==='out').length;
-        row[DEPT_LABELS[dept]]=`IN:${inn}/OUT:${out}`;
-      });
-      rows.push(row);
-    });
-  });
-  exportToExcel(rows,`Sunloc_Batch_Tracking_Full_${today()}.xlsx`,'Batch Tracking');
+function renderBatchFlowSummary(batch){
+  const flow=getBatchFlow(batch);
+  return `<div class="flex gap-8 flex-wrap">
+  ${flow.map(dept=>{
+    const inn=state.scans.filter(s=>s.batchNumber===batch.batchNumber&&s.dept===dept&&s.type==='in').length;
+    const out=state.scans.filter(s=>s.batchNumber===batch.batchNumber&&s.dept===dept&&s.type==='out').length;
+    const closed=isStageComplete(batch.batchNumber,dept);
+    return `<div style="background:${closed?'var(--accent2-light)':'var(--surface2)'};border:1px solid ${closed?'var(--accent2)':'var(--border)'};border-radius:6px;padding:6px 10px;text-align:center">
+      <div class="text-sm fw-bold">${DEPT_LABELS[dept]}</div>
+      <div class="mono text-sm">IN:${inn} OUT:${out}</div>
+      <div class="text-sm ${closed?'green':''}">${closed?'✅ Done':'⏳ Open'}</div>
+    </div>`;
+  }).join('')}
+  </div>`;
 }
 
-// ───────── INIT ─────────
-renderReportA();
+function renderReportE(){
+  // Machine-wise Production Tracking Sheet — cumulative up to date, with optional date filter
+  const filterDate = window._rptEDate || '';
+  const allScanDates = [...new Set(state.scans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
+
+  const rows=[];
+  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
+    let floorTotals={grossProd:0,aimIn:0,aimSalvage:0,aimAGrade:0,manualInspect:0,totalAGrade:0,availUnptd:0,availPrint:0,printingTD:0,printRej:0,piInspect:0,piSalRem:0,packing_up:0,packing_ptd:0,dispatch:0};
+    floor.machines.forEach(mc=>{
+      const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
+      batches.forEach(b=>{
+        // Filter scans by date if a filter is set
+        const scansForBatch = filterDate
+          ? state.scans.filter(s=>s.batchNumber===b.batchNumber && s.ts?.slice(0,10)===filterDate)
+          : state.scans.filter(s=>s.batchNumber===b.batchNumber);
+        const grossProd=b.actualProd||0;
+        const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
+        const aimOutQty=boxToLakh(aimOut,b.size);
+        const aimW=getTotalWastage(b.batchNumber,'aim');
+        const aimIn=aimOutQty+aimW.total;
+        const manW=getTotalWastage(b.batchNumber,'manual');
+        const totalAG=aimOutQty+(manW.total>0?boxToLakh(scansForBatch.filter(s=>s.dept==='manual'&&s.type==='out').length,b.size):0);
+        const aGradePct=aimIn>0?(totalAG/aimIn*100):0;
+        const wip=Math.max(0,grossProd-aimIn);
+        const printingTD=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='printing'&&s.type==='out').length,b.size):0;
+        const piOut=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='pi'&&s.type==='out').length,b.size):0;
+        const printW=getTotalWastage(b.batchNumber,'printing');
+        const piW=getTotalWastage(b.batchNumber,'pi');
+        const packUnptd=!b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+        const packPtd=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+        const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
+        rows.push({machine:mc,floor:floorKey,batchNo:b.batchNumber,size:b.size,plannedQty:b.qty||0,grossProd:fmt(grossProd),aimRunTotal:fmt(aimIn),aimSalvage:fmt(aimW.salvage),aimRemelt:fmt(aimW.remelt),aimAGrade:fmt(aimOutQty),aimAGradePct:fmt(aGradePct,1),manInspect:fmt(manW.total),totalAGrade:fmt(totalAG),aGradePctUnptd:fmt(aGradePct,1),wip:fmt(wip),availUnptd:fmt(!b.isPrinted?totalAG:0),availPrint:fmt(b.isPrinted?totalAG:0),
+          printingTD:fmt(printingTD),printRej:fmt(printW.salvage),piInspect:fmt(piOut),piSalRem:fmt(piW.salvage),packingUP:fmt(packUnptd),packingPTD:fmt(packPtd),dispatch:fmt(disp)});
+        floorTotals.grossProd+=grossProd; floorTotals.aimIn+=aimIn; floorTotals.aimAGrade+=aimOutQty;
+        floorTotals.totalAGrade+=totalAG; floorTotals.printingTD+=printingTD; floorTotals.piInspect+=piOut;
+        floorTotals.packing_up+=packUnptd; floorTotals.packing_ptd+=packPtd; floorTotals.dispatch+=disp;
+      });
+    });
+  });
+  let html=`<div class="card"><div class="section-title mb-4">Report E — Machine-wise Production Tracking Sheet</div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <span class="text-sm text-muted">${filterDate?'Date: '+filterDate:'Cumulative — all entries to date'}</span>
+    <select style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:5px 10px;font-size:12px;outline:none" onchange="window._rptEDate=this.value;renderReportE()">
+      <option value="">All Dates (Cumulative)</option>
+      ${allScanDates.map(d=>`<option value="${d}" ${filterDate===d?'selected':''}>${d}</option>`).join('')}
+    </select>
+    ${filterDate?`<button class="btn btn-ghost btn-sm" onclick="window._rptEDate='';renderReportE()">✕ Show All</button>`:''}
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>Machine</th><th>Floor</th><th>Batch</th><th>Size</th><th>Planned (L)</th><th>Gross Prod</th><th>AIM Run</th><th>AIM Sal</th><th>AIM Remelt</th><th>AIM A-Grade</th><th>AIM %</th><th>Manual Insp</th><th>Total A-Grade</th><th>A-Grade %</th><th>WIP</th><th>Avail UNPTD</th><th>Avail PTD</th><th>Print TD</th><th>Print Rej</th><th>PI Inspect</th><th>PI Sal/Rem</th><th>Pack UNPTD</th><th>Pack PTD</th><th>Dispatch</th></tr></thead>
+    <tbody>
+    ${rows.map(r=>`<tr>
+      <td class="td-bold td-mono">${r.machine}</td><td class="td-mono">${r.floor}</td><td class="td-mono">${r.batchNo}</td>
+      <td class="td-mono">${r.size}</td><td class="td-mono">${fmt(r.plannedQty)}</td><td class="td-mono">${r.grossProd}</td>
+      <td class="td-mono">${r.aimRunTotal}</td><td class="td-mono">${r.aimSalvage}</td><td class="td-mono">${r.aimRemelt}</td>
+      <td class="td-mono fw-bold">${r.aimAGrade}</td><td class="td-mono">${r.aimAGradePct}%</td><td class="td-mono">${r.manInspect}</td>
+      <td class="td-mono fw-bold">${r.totalAGrade}</td><td class="td-mono fw-bold">${r.aGradePctUnptd}%</td>
+      <td class="td-mono">${r.wip}</td><td class="td-mono">${r.availUnptd}</td><td class="td-mono">${r.availPrint}</td>
+      <td class="td-mono">${r.printTD}</td><td class="td-mono">${r.printRej}</td><td class="td-mono">${r.piInspect}</td>
+      <td class="td-mono">${r.piSalRem}</td><td class="td-mono">${r.packingUP}</td><td class="td-mono">${r.packingPTD}</td>
+      <td class="td-mono fw-bold">${r.dispatch}</td>
+    </tr>`).join('')||'<tr><td colspan="24" class="text-center text-muted">No data yet</td></tr>'}
+    </tbody>
+  </table></div>
+  <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportE()">📥 Export Excel (matches current format)</button></div>`;
+  document.getElementById('report-output').innerHTML=html;
+  document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+}
+
+// Export functions
+function exportToExcel(rows, filename, sheetName){
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,ws,sheetName||'Report');
+  XLSX.writeFile(wb,filename);
+}
+
+function exportReportA(){
+  const rows=state.batches.filter(b=>!b.deleted).map(b=>({
+    'Batch':b.batchNumber,'Customer':b.customer,'Machine':b.machineId,'Size':b.size,'Printed':b.isPrinted?'Y':'N',
+    'Labels Generated':getLabelsByBatch(b.batchNumber).length,
+    'WIP Days':fmt(getBatchWIPDays(b.batchNumber),1),
+    'Est Dispatch':calcDispatchDate(b),
+    'A-Grade %':fmt(getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted').pct,1),
+    'Dispatched (L)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))
+  }));
+  exportToExcel(rows,`Sunloc_Batch_Tracking_${today()}.xlsx`,'Batch Tracking');
+}
+
+function exportReportB(){
+  const rows=[];
+  ['aim','printing','pi','packing'].forEach(dept=>{
+    [...new Set(state.scans.filter(s=>s.dept===dept).map(s=>s.batchNumber))].forEach(batchNo=>{
+      const b=getBatch(batchNo);
+      const inn=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+      const out=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='out').length;
+      const firstIn=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').sort((a,c)=>new Date(a.ts)-new Date(c.ts))[0];
+      rows.push({'Department':DEPT_LABELS[dept],'Batch':batchNo,'Customer':b?.customer||'','Boxes IN':inn,'Boxes OUT':out,'WIP Boxes':Math.max(0,inn-out),'Hours in Dept':firstIn?hoursAgo(firstIn.ts).toFixed(0):0,'Alert':state.alerts.some(a=>a.batchNumber===batchNo&&a.dept===dept)?'YES':''});
+    });
+  });
+  exportToExcel(rows,`Sunloc_DeptWIP_${today()}.xlsx`,'Dept WIP');
+}
+
+function exportReportC(){
+  const rows=state.batches.filter(b=>!b.deleted).map(b=>{
+    const wipDays=getBatchWIPDays(b.batchNumber);
+    const std=b.isPrinted?3:2;
+    const packed=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length;
+    const status=wipDays===0&&packed>0?'Closed':wipDays<=std?'In Progress':'Pending';
+    return {'Machine':b.machineId,'Floor':getMachineFloor(b.machineId),'Batch':b.batchNumber,'Customer':b.customer,'WIP Days':fmt(wipDays,1),'Status':status};
+  });
+  exportToExcel(rows,`Sunloc_MachineWIP_${today()}.xlsx`,'Machine WIP');
+}
+
+function exportReportD(){
+  const rows=state.batches.filter(b=>!b.deleted).map(b=>{
+    const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
+    return {'Batch':b.batchNumber,'Gross Prod (L)':b.actualProd||0,'A-Grade (L)':fmt(ag.aGrade),'A-Grade %':fmt(ag.pct,1),'Salvage (L)':fmt(ag.salvage),'Remelt (L)':fmt(ag.remelt)};
+  });
+  exportToExcel(rows,`Sunloc_Summary_${today()}.xlsx`,'Summary');
+}
+
+function exportReportE(){
+  // Full Excel export matching existing format
+  const wb=XLSX.utils.book_new();
+  // Summary sheet
+  const summaryRows=[];
+  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
+    floor.machines.forEach(mc=>{
+      state.batches.filter(b=>b.machineId===mc&&!b.deleted).forEach(b=>{
+        const grossProd=b.actualProd||0;
+        const aimOut=boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='aim'&&s.type==='out').length,b.size);
+        const aimW=getTotalWastage(b.batchNumber,'aim');
+        const aimIn=aimOut+aimW.total;
+        const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
+        const wip=Math.max(0,grossProd-aimIn);
+        summaryRows.push({'M/C NO':mc,'SIZE':b.size,'PLANNED QUANTITY (lac)':fmt(b.qty),'TOTAL PRODUCTION (lac)':fmt(grossProd),'AIM TOTAL RUN (lac)':fmt(aimIn),'SALVAGE':fmt(aimW.salvage),'REMELT':fmt(aimW.remelt),'A GRADE QTY (lac)':fmt(aimOut),'AIM A GRADE %':fmt(aGradePct,2),'TOTAL A GRADE QTY (lac)':fmt(aimOut),'A GRADE % (UNPTD)':fmt(aGradePct,2),'WIP (lac)':fmt(wip),'PACKING UNPTD (lac)':fmt(!b.isPrinted?boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length,b.size):0),'PACKING PTD (lac)':fmt(b.isPrinted?boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length,b.size):0),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),'FLOOR':floorKey});
+      });
+    });
+  });
+  const wsSummary=XLSX.utils.json_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb,wsSummary,'Summary');
+  // Per machine sheets
+  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
+    floor.machines.forEach(mc=>{
+      const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
+      if(!batches.length) return;
+      const mcRows=batches.map(b=>({
+        'DATE':today(),'BATCH NO':b.batchNumber,'COLOR CODE':b.colour||'','CUSTOMER NAME':b.customer||'','PLANT QUANTITY (lac)':fmt(b.qty),'PRODUCT CODE':b.pcCode||'','PRODUCTION (lac)':fmt(b.actualProd||0),'AIM A GRADE (lac)':fmt(boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='aim'&&s.type==='out').length,b.size)),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))
+      }));
+      const wsName=mc.replace('.','');
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName.slice(0,31));
+    });
+  });
+  XLSX.writeFile(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
+}
+
+function exportTrackerReport(){
+  exportReportA();
+}
+
+// ═══════════════════════════════════════════════════════
+// PAGE: SETTINGS
+// ═══════════════════════════════════════════════════════
+
+function renderTrackingSearch(){
+  const el=document.getElementById('page-search');
+  if(!el) return;
+  const q=(window._trkSearchQ||'').toLowerCase().trim();
+  const by=window._trkSearchBy||'all';
+
+  let results=[];
+  if(q.length>=2){
+    // Search batches
+    const matchedBatches=state.batches.filter(b=>{
+      if(by==='all'||by==='batch') if((b.batchNumber||'').toLowerCase().includes(q)) return true;
+      if(by==='all'||by==='customer') if((b.customer||'').toLowerCase().includes(q)) return true;
+      if(by==='all'||by==='pccode') if((b.pcCode||'').toLowerCase().includes(q)) return true;
+      return false;
+    });
+    results=matchedBatches.map(b=>{
+      const labels=getLabelsByBatch(b.batchNumber);
+      const scans=state.scans.filter(s=>s.batchNumber===b.batchNumber);
+      const packed=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length;
+      return {...b, _labelCount:labels.length, _scanCount:scans.length, _packed:packed};
+    });
+  }
+
+  el.innerHTML=`
+    <div class="card">
+      <div class="section-title mb-16">🔍 Search</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <input type="text" id="trk-search-input" value="${window._trkSearchQ||''}"
+          placeholder="Batch number, customer name, or PC code..."
+          style="max-width:340px;flex:1;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text);font-size:13px;outline:none"
+          oninput="window._trkSearchQ=this.value;renderTrackingSearch()">
+        <select style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text);padding:8px 12px;font-size:12px;outline:none"
+          onchange="window._trkSearchBy=this.value;renderTrackingSearch()">
+          <option value="all" ${by==='all'?'selected':''}>All Fields</option>
+          <option value="batch" ${by==='batch'?'selected':''}>Batch Number</option>
+          <option value="customer" ${by==='customer'?'selected':''}>Customer</option>
+          <option value="pccode" ${by==='pccode'?'selected':''}>PC Code</option>
+        </select>
+        ${q?`<button class="btn btn-ghost btn-sm" onclick="window._trkSearchQ='';renderTrackingSearch()">✕ Clear</button>`:''}
+      </div>
+      ${q.length>=2?`
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px">${results.length} result${results.length!==1?'s':''} for "${q}"</div>
+        ${results.length===0?'<div class="empty-state"><p>No matches found</p></div>':`
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Batch No</th>
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Customer</th>
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">PC Code</th>
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Size</th>
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Labels</th>
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Packed</th>
+            <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">Actions</th>
+          </tr></thead><tbody>
+          ${results.map(b=>`<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:7px 12px;font-family:var(--mono);font-weight:600;color:var(--accent)">${b.batchNumber}</td>
+            <td style="padding:7px 12px">${b.customer||'-'}</td>
+            <td style="padding:7px 12px;font-family:var(--mono)">${b.pcCode||'-'}</td>
+            <td style="padding:7px 12px;font-family:var(--mono)">${b.size||'-'}</td>
+            <td style="padding:7px 12px;font-family:var(--mono)">${b._labelCount}</td>
+            <td style="padding:7px 12px;font-family:var(--mono)">${b._packed} boxes</td>
+            <td style="padding:7px 12px">
+              <button class="btn btn-sm btn-primary" onclick="navigate('batch-tracker');setTimeout(()=>{const s=document.getElementById('bt-batch-select');if(s){s.value='${b.batchNumber}';renderBatchTracker();}},300)">View Tracker</button>
+            </td>
+          </tr>`).join('')}
+          </tbody></table></div>`}
+      `:'<p style="color:var(--text3);font-size:13px">Type at least 2 characters to search...</p>'}
+    </div>`;
+  setTimeout(()=>document.getElementById('trk-search-input')?.focus(),50);
+}
+
+function renderSettings(){
+  const el=document.getElementById('page-settings');
+  const isAdmin=currentDept==='admin';
+  // After rendering, append audit log for admin
+  setTimeout(()=>{ if(isAdmin) renderTrackingAuditLog(); }, 100);
+  el.innerHTML=`
+  <div class="section-header">
+    <div><div class="section-title">Settings</div></div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🔗 Server Connection</div>
+      <div class="form-group">
+        <label>Sunloc Server URL</label>
+        <input type="text" id="s-server" value="${serverUrl}" placeholder="https://sunloc.up.railway.app">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">⚠️ Enter the base URL only — no <code>/tracking.html</code> or <code>/planning.html</code> at the end</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveServerUrl()">Save & Test</button>
+    </div>
+    <div class="card">
+      <div class="card-title">🖨️ Label Printer</div>
+      <div class="form-group">
+        <label>Zebra Printer Bridge URL</label>
+        <input type="text" id="s-printer" value="${localStorage.getItem('sunloc_printer_url')||''}" placeholder="http://localhost:9100">
+      </div>
+      <div class="text-sm text-muted mb-8">Leave blank to download ZPL files. Install Zebra Browser Print for direct printing.</div>
+      <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
+    </div>
+    <div class="card">
+      <div class="card-title">📦 Pack Size Master</div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Size</th><th>Qty per Box (Lakhs)</th></tr></thead>
+        <tbody>
+        ${Object.entries(PACK_SIZES).map(([s,q])=>`<tr><td class="td-bold">${s}</td><td class="td-mono">${q}L</td></tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div>
+    ${isAdmin?`
+    <div class="card">
+      <div class="card-title">🔐 Admin Tools</div>
+      <div class="flex flex-col gap-8">
+        <button class="btn btn-warning btn-sm" onclick="clearAllScans()">⚠️ Clear All Scans (Test Mode)</button>
+        <button class="btn btn-secondary btn-sm" onclick="loadDemoData()">📋 Load Demo Data</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportAllData()">💾 Export All Data</button>
+        <button class="btn btn-danger btn-sm" onclick="resetApp()">🗑️ Reset App Data</button>
+      </div>
+      <div class="divider"></div>
+      <div class="card-title">Override Powers Active</div>
+      <ul class="text-sm" style="padding-left:16px;color:var(--text2)">
+        <li>Print labels beyond daily cap</li>
+        <li>Force close any batch stage</li>
+        <li>Void/regenerate any label</li>
+        <li>Override sequential scan enforcement</li>
+        <li>Manually amend qty at any stage</li>
+      </ul>
+    </div>`:''}
+    <div class="card">
+      <div class="card-title">ℹ️ App Info</div>
+      <div class="text-sm" style="line-height:2">
+        <div><strong>Version:</strong> Sunloc Tracking Suite v1.0</div>
+        <div><strong>Role:</strong> ${DEPT_INFO[currentDept]?.label}</div>
+        <div><strong>Labels in DB:</strong> ${state.labels.length}</div>
+        <div><strong>Scans in DB:</strong> ${state.scans.length}</div>
+        <div><strong>Active Alerts:</strong> ${state.alerts.length}</div>
+        <div><strong>Batches loaded:</strong> ${state.batches.length}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function saveServerUrl(){
+  serverUrl=sanitizeServerUrl(document.getElementById('s-server')?.value||'');
+  localStorage.setItem('sunloc_server_url',serverUrl);
+  checkServer().then(ok=>{
+    if(ok){
+      pullFromServer().then(()=>{
+        const msg = state.batches.length > 0
+          ? '✅ Server connected! ' + state.batches.length + ' batches loaded from Planning App.'
+          : '⚠️ Server connected but 0 batches found. Open Planning App and make sure orders are saved, then click Save & Test again.';
+        alert(msg);
+      });
+    } else {
+      alert('❌ Could not connect to server. Check URL.');
+    }
+  });
+}
+
+function savePrinterUrl(){
+  const url=document.getElementById('s-printer')?.value.trim()||'';
+  localStorage.setItem('sunloc_printer_url',url);
+  alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
+}
+
+function clearAllScans(){
+  if(!confirm('⚠️ ADMIN: Clear ALL scan data? This cannot be undone.')) return;
+  state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[];
+  saveLocal(); renderPage(currentPage); alert('Scans cleared.');
+}
+
+function resetApp(){
+  if(!confirm('⚠️ This clears LOCAL browser cache only. Server data (labels, scans, records) is safe. Continue?')) return;
+  if(!confirm('Confirm: server data is NOT deleted. Only local browser cache will be cleared.')) return;
+  // Clear local cache only — server retains all data
+  state.labels=[]; state.scans=[]; state.stageClosure=[]; state.wastage=[]; state.alerts=[]; state.dispatchRecs=[];
+  localStorage.removeItem('sunloc_tracking');
+  alert('Browser cache cleared.\nServer data is SAFE — reloading from server now...');
+  pullFromServer();
+  renderPage(currentPage);
+}
+
+function exportAllData(){
+  const data={exportedAt:now(),labels:state.labels,scans:state.scans,stageClosure:state.stageClosure,wastage:state.wastage,dispatchRecs:state.dispatchRecs,alerts:state.alerts};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`sunloc_tracking_backup_${today()}.json`; a.click();
+}
+
+function loadDemoData(){
+  if(!state.batches.length){
+    // Load sample batches if none from server
+    state.batches=[
+      {batchNumber:'26ZD023',customer:'AVIS ENTERPRISES',machineId:'MC.30',size:'2',isPrinted:false,qty:54,grossQty:57.6,actualProd:22.75,status:'running',pcCode:'2046',colour:'PINK TR/CLEAR TR',poNumber:'PO001',startDate:today(),endDate:null},
+      {batchNumber:'26ZE035',customer:'K SHYAM TRADER',machineId:'MC.31',size:'2',isPrinted:false,qty:54,grossQty:57.6,actualProd:26.25,status:'running',pcCode:'2046',colour:'PINK TR/CLEAR TR',poNumber:'PO002',startDate:today(),endDate:null},
+      {batchNumber:'26Z025',customer:'ALKEM WELLNESS LIMITED',machineId:'MC.26',size:'2',isPrinted:true,qty:55,grossQty:58.85,actualProd:29.75,status:'running',pcCode:'21065',colour:'DARK PURPLE/WHITE',poNumber:'PO003',startDate:today(),endDate:null,printingMatter:'ALKEM 21065'},
+    ];
+    saveLocal();
+    alert('Demo batch data loaded. Refresh the page or navigate to see batches.');
+    renderPage(currentPage);
+  } else {
+    alert('Batches already loaded from server.');
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+
+// Auto-focus scan input when dept page loads
+document.addEventListener('click',e=>{
+  const page=currentPage;
+  if(['aim','printing','pi','packing','dispatch'].includes(page)){
+    const scanIn=document.getElementById(`scan-in-${page}`);
+    if(scanIn&&!e.target.closest('button')&&!e.target.closest('input')&&!e.target.closest('select')){
+      scanIn.focus();
+    }
+  }
+});
+
+// Alert refresh every 5 minutes
+setInterval(()=>{
+  checkAlerts();
+  buildSidebar();
+},5*60*1000);
+
+setInterval(trkQueueFlush, 30*1000);
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && currentDept) { trkQueueFlush(); pullFromServer(); } });
+
+// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
+window.addEventListener('beforeunload', () => {
+  if (!serverUrl || !currentDept) return;
+  try {
+    const toSave = {
+      labels: state.labels, scans: state.scans,
+      stageClosure: state.stageClosure, wastage: state.wastage,
+      dispatchRecs: state.dispatchRecs, alerts: state.alerts
+    };
+    localStorage.setItem('sunloc_tracking', JSON.stringify(toSave));
+    const blob = new Blob([JSON.stringify(toSave)], {type:'application/json'});
+    navigator.sendBeacon && navigator.sendBeacon(serverUrl+'/api/tracking/state', blob);
+  } catch(e) {}
+});
+
+// Auto sync every 30 seconds
+setInterval(()=>{
+  if(serverUrl && currentDept) pullFromServer();
+},30*1000);
+
+// Cross-tab / cross-page sync: when another tab (planning/DPR) writes to localStorage, re-pull
+window.addEventListener('storage', (e) => {
+  if(e.key === 'sunloc_server_url' && e.newValue) {
+    serverUrl = sanitizeServerUrl(e.newValue);
+  }
+  if((e.key === 'sunloc_tracking' || e.key === 'sunloc_planning') && currentDept) {
+    pullFromServer();
+  }
+});
+
+// Check TEMP batch alerts every 5 minutes
+
+
+// ══════════════════════════════════════════════════════
+// TRACKING — Audit log (admin role already handled by currentDept)
+// ══════════════════════════════════════════════════════
+async function trkAuditLog(action, details) {
+  if (!serverUrl || !currentDept) return;
+  const token = sessionStorage.getItem('trk_token');
+  if (!token) return;
+  try {
+    await fetch(serverUrl + '/api/audit/log', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token, action, details }),
+      signal: AbortSignal.timeout(3000)
+    });
+  } catch(e) {}
+}
+
+// Audit logging — called after successful login in doLogin()
+// No monkey-patching needed — tracking uses doLogin() directly
+
+// Audit log view for tracking admin
+async function renderTrackingAuditLog() {
+  const el = document.getElementById('page-settings');
+  if (!el || currentDept !== 'admin') return;
+
+  const token = sessionStorage.getItem('trk_token');
+  if (!serverUrl || !token) {
+    el.innerHTML += '<div style="margin-top:16px;color:var(--text3)">Audit log requires server connection and admin login.</div>';
+    return;
+  }
+  try {
+    const r = await fetch(`${serverUrl}/api/audit/view?app=tracking&limit=200`, {
+      headers:{'x-session-token': token}, signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error);
+    const auditSection = document.createElement('div');
+    auditSection.style.cssText = 'margin-top:20px';
+    auditSection.innerHTML = `
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;color:var(--text3);margin-bottom:10px">AUDIT LOG (${j.logs.length} entries)</div>
+      <div style="background:var(--surface);border-radius:6px;overflow:hidden;max-height:400px;overflow-y:auto">
+        ${j.logs.map(l=>`<div style="display:grid;grid-template-columns:140px 80px 100px 1fr;gap:6px;padding:6px 12px;border-bottom:1px solid var(--border);font-size:11px">
+          <span style="color:var(--text3);font-family:var(--mono)">${l.ts}</span>
+          <span style="color:var(--accent)">${l.username}</span>
+          <span style="color:${l.action==='LOGIN'?'var(--accent2)':'var(--text)'}">${l.action}</span>
+          <span style="color:var(--text2)">${l.details||'—'}</span>
+        </div>`).join('')}
+      </div>`;
+    el.appendChild(auditSection);
+  } catch(e) {}
+}
+
+// Patch renderSettings to add audit log section for admin
+// renderSettings audit log is handled by appending to the existing function below
+
+// ── Page lifecycle: re-sync on browser back/forward and tab focus ──
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && currentDept) {
+    pullFromServer();
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentDept) {
+    pullFromServer();
+  }
+});
+
+// Audit key save actions
+// saveLocal audit is handled inside the original saveLocal function above
+
+// ── Mobile Navigation ─────────────────────────────────────────
+function initMobileNav() {
+  // Show mobile nav after login
+  const mobileNav = document.getElementById('mobile-nav');
+  if (mobileNav) mobileNav.style.display = 'flex';
+  // Set active based on current dept
+  const defaultPage = DEPT_INFO[currentDept]?.defaultPage || 'scan';
+  updateMobileNavActive(defaultPage);
+}
+
+function mobileNavTo(page) {
+  // 'scan' navigates to the dept's own scan page
+  if (page === 'scan') {
+    const deptPage = currentDept === 'admin' ? 'batch-tracker' : currentDept === 'planning' ? 'batch-tracker' : currentDept;
+    navigate(deptPage);
+    updateMobileNavActive('scan');
+  } else {
+    navigate(page);
+    updateMobileNavActive(page);
+  }
+}
+
+function updateMobileNavActive(page) {
+  document.querySelectorAll('.mobile-nav-item').forEach(el => el.classList.remove('active'));
+  const map = { 'scan': 'mnav-scan', 'batch-tracker': 'mnav-tracker', 'labels': 'mnav-labels', 'label-gen': 'mnav-labels', 'search': 'mnav-search' };
+  const activeId = map[page] || 'mnav-more';
+  document.getElementById(activeId)?.classList.add('active');
+}
+
+function toggleMobileMenu() {
+  const sb = document.getElementById('sidebar');
+  if (sb) sb.classList.toggle('open');
+}
+
+// Close sidebar when a nav item is tapped on mobile
+function mobileCloseSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (sb && window.innerWidth <= 768) sb.classList.remove('open');
+}
+
+// Auto-focus scan input on mobile
+function autoFocusScanInput(dept, type) {
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    setTimeout(() => {
+      const el = document.getElementById(`scan-${type}-${dept}`);
+      if (el) { el.focus(); el.click(); }
+    }, 1000);
+  }
+}
+
+window.addEventListener('load', () => {
+  const dept = 'pi';
+  const type = 'in';
+
+  autoFocusScanInput(dept, type);
+
+  const scanInput = document.getElementById(`scan-${type}-${dept}`);
+  if(scanInput){
+    scanInput.addEventListener('keyup', async (e)=>{
+        if(e.key === 'Enter'){
+            const labelId = e.target.value.trim();
+            const operator = null;
+            const parsed = { batchNumber:null, boxNumber:null };
+            if(labelId){
+                await scanLabel(labelId, dept, type, operator, parsed);
+                e.target.value = '';
+            }
+        }
+    });
+  }
+});
+
+async function scanLabel(labelId, dept, type, operator, parsed){
+    try {
+        let label = state.labels.find(l => l.id === labelId);
+        if(!label && parsed?.batchNumber && parsed?.boxNumber != null){
+            label = state.labels.find(l =>
+                l.batchNumber === parsed.batchNumber &&
+                Math.abs(l.labelNumber) === Math.abs(parsed.boxNumber)
+            );
+        }
+        if(!label){
+            const res = await fetch("https://sunloc.up.railway.app/api/tracking/state");
+            const data = await res.json();
+            if(data.ok && data.state?.labels){
+                label = data.state.labels.find(l => l.id === labelId);
+                if(label) state.labels.push(label);
+            }
+        }
+        if(!label){
+            alert("Label not found");
+            return {ok:false,msg:"Label not found"};
+        }
+        return await recordScan(label, dept, type, operator);
+    } catch(e){
+        alert("Scan error:" + e.message);
+        return {ok:false,msg:e.message};
+    }
+}
+
+async function recordScan(label, dept, type, operator){
+    try {
+        state.scans.push({
+            id: Date.now().toString(),
+            labelId: label.id,
+            batchNumber: label.batchNumber || '',
+            dept,
+            type,
+            ts: new Date().toISOString(),
+            operator: operator || 'mobile',
+            size: label.size || 0,
+            qty: label.qty || 0
+        });
+        return {ok:true};
+    } catch(e){
+        return {ok:false,msg:e.message};
+    }
+}
+
+
 </script>
 </body>
 </html>

@@ -3750,55 +3750,38 @@ function mobileCloseSidebar() {
   if (sb && window.innerWidth <= 768) sb.classList.remove('open');
 }
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mobile Label Scanner</title>
-</head>
-<body>
-
-<input id="scanInput" type="text" placeholder="Scan label here" style="width:100%; padding:8px; margin:10px 0; font-size:16px;">
-
-
-// --- Fully Mobile-Ready Label Scanning with Live History ---
-let state = {
-  labels: [
-    { id: '101', batchNumber: 'B001', labelNumber: 1, dept: 'pi', type: 'in' },
-    { id: '102', batchNumber: 'B002', labelNumber: 2, dept: 'pi', type: 'in' },
-    { id: '103', batchNumber: 'B003', labelNumber: 3, dept: 'pi', type: 'in' }
-  ],
-  scans: []
-};
-
-// UI container for scan results and history
-let scanResultDiv = document.createElement('div');
-document.body.appendChild(scanResultDiv);
-scanResultDiv.style.padding = '10px';
-scanResultDiv.style.backgroundColor = '#f0f0f0';
-scanResultDiv.style.margin = '10px 0';
-scanResultDiv.style.borderRadius = '6px';
-scanResultDiv.style.minHeight = '40px';
-scanResultDiv.style.maxHeight = '200px';
-scanResultDiv.style.overflowY = 'auto';
-
-// Start scan from scanner callback
-function startScan(scannedValue) {
-  if (!scannedValue || scannedValue.trim() === '') {
-    addScanMessage('Scan cancelled or empty value.');
-    return;
+// Auto-focus scan input on mobile
+function autoFocusScanInput(dept, type) {
+  const isMobile = window.innerWidth <= 768;
+  if (isMobile) {
+    setTimeout(() => {
+      const el = document.getElementById(`scan-${type}-${dept}`);
+      if (el) { el.focus(); el.click(); }
+    }, 1000);
   }
-  scanLabel(scannedValue.trim(), 'pi', 'in', 'mobile', {});
 }
 
-// Helper to append message to scan result div
-function addScanMessage(msg) {
-  const p = document.createElement('div');
-  p.innerText = msg;
-  scanResultDiv.prepend(p);
-  console.log(msg);
-}
+window.addEventListener('load', () => {
+  const dept = 'pi';
+  const type = 'in';
+
+  autoFocusScanInput(dept, type);
+
+  const scanInput = document.getElementById(`scan-${type}-${dept}`);
+  if(scanInput){
+    scanInput.addEventListener('keyup', async (e)=>{
+        if(e.key === 'Enter'){
+            const labelId = e.target.value.trim();
+            const operator = null;
+            const parsed = { batchNumber:null, boxNumber:null };
+            if(labelId){
+                await scanLabel(labelId, dept, type, operator, parsed);
+                e.target.value = '';
+            }
+        }
+    });
+  }
+});
 
 async function scanLabel(labelId, dept, type, operator, parsed){
     try {
@@ -3810,31 +3793,27 @@ async function scanLabel(labelId, dept, type, operator, parsed){
             );
         }
         if(!label){
-            try {
-                const res = await fetch("https://sunloc.up.railway.app/api/tracking/state");
-                const data = await res.json();
-                if(data.ok && data.state?.labels){
-                    label = data.state.labels.find(l => l.id === labelId);
-                    if(label) state.labels.push(label);
-                }
-            } catch(e){
-                console.error('Server fetch failed:', e);
+            const res = await fetch("https://sunloc.up.railway.app/api/tracking/state");
+            const data = await res.json();
+            if(data.ok && data.state?.labels){
+                label = data.state.labels.find(l => l.id === labelId);
+                if(label) state.labels.push(label);
             }
         }
         if(!label){
-            addScanMessage(`Label not found: ${labelId}`);
-            return {ok:false,msg:'Label not found'};
+            alert("Label not found");
+            return {ok:false,msg:"Label not found"};
         }
         return await recordScan(label, dept, type, operator);
     } catch(e){
-        addScanMessage(`Scan error: ${e.message}`);
+        alert("Scan error:" + e.message);
         return {ok:false,msg:e.message};
     }
 }
 
 async function recordScan(label, dept, type, operator){
     try {
-        const scanEntry = {
+        state.scans.push({
             id: Date.now().toString(),
             labelId: label.id,
             batchNumber: label.batchNumber || '',
@@ -3844,44 +3823,12 @@ async function recordScan(label, dept, type, operator){
             operator: operator || 'mobile',
             size: label.size || 0,
             qty: label.qty || 0
-        };
-        state.scans.push(scanEntry);
-        addScanMessage(`Label scanned successfully: ${label.id} | Batch: ${label.batchNumber}`);
+        });
         return {ok:true};
     } catch(e){
-        addScanMessage(`Record scan error: ${e.message}`);
         return {ok:false,msg:e.message};
     }
 }
-
-// Attach Enter key for scan input
-const scanInput = document.getElementById('scanInput');
-if(scanInput){
-  scanInput.addEventListener('keyup', async (e)=>{
-      if(e.key === 'Enter'){
-          const labelId = e.target.value.trim();
-          if(labelId){
-              await scanLabel(labelId, 'pi', 'in', 'mobile', {});
-              e.target.value = '';
-          }
-      }
-  });
-}
-
-// Auto-focus scan input on mobile
-function autoFocusScanInput() {
-  const isMobile = window.innerWidth <= 768;
-  if (isMobile) {
-    setTimeout(() => {
-      const el = document.getElementById(`scanInput`);
-      if (el) { el.focus(); el.click(); }
-    }, 1000);
-  }
-}
-
-window.addEventListener('load', () => {
-  autoFocusScanInput();
-});
 
 
 </script>

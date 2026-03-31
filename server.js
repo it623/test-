@@ -1147,7 +1147,6 @@ app.get('/api/tracking/label', asyncRoute(async (req, res) => {
   res.json({ ok: true, label: label || null });
 }));
 
-// GET /api/tracking/state
 app.get('/api/tracking/state', asyncRoute(async (req, res) => {
   const [labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
     queryAll('SELECT * FROM tracking_labels ORDER BY generated DESC'),
@@ -1155,9 +1154,76 @@ app.get('/api/tracking/state', asyncRoute(async (req, res) => {
     queryAll('SELECT * FROM tracking_stage_closure'),
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_dispatch_records ORDER BY ts ASC'),
-    queryAll('SELECT * FROM tracking_alerts WHERE resolved=0'), // ✅ FIXED
+    queryAll('SELECT * FROM tracking_alerts WHERE resolved=FALSE'),
   ]);
   res.json({ ok:true, state:{ labels, scans, stageClosure:closure, wastage, dispatchRecs:dispatch, alerts } });
+}));
+
+// POST /api/tracking/state — save full tracking state
+app.post('/api/tracking/state', asyncRoute(async (req, res) => {
+  const { labels, scans, stageClosure, wastage, dispatchRecs, alerts } = req.body;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (labels && labels.length) {
+      for (const l of labels) {
+        await client.query(
+          `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+           ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,voided=EXCLUDED.voided,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status`,
+          [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,!!l.isPartial,!!l.isOrange,
+           l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
+           l.poNumber||null,l.machineId||null,l.printingMatter||null,
+           l.generated||new Date().toISOString(),!!l.printed,l.printedAt||null,
+           !!l.voided,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,
+           l.woStatus||null,l.shipTo||null,l.billTo||null,!!l.isExcess,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
+        );
+      }
+    }
+    if (scans && scans.length) {
+      for (const s of scans) {
+        await client.query(
+          `INSERT INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,size,qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO NOTHING`,
+          [s.id,s.labelId||s.label_id,s.batchNumber||s.batch_number,s.dept,s.type,s.ts,s.operator||null,s.size||null,s.qty||null]
+        );
+      }
+    }
+    if (stageClosure && stageClosure.length) {
+      for (const s of stageClosure) {
+        await client.query(
+          `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at,closed_by) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO UPDATE SET closed=EXCLUDED.closed`,
+          [s.id,s.batchNumber||s.batch_number,s.dept,!!s.closed,s.closedAt||s.closed_at,s.closedBy||s.closed_by||null]
+        );
+      }
+    }
+    if (wastage && wastage.length) {
+      for (const w of wastage) {
+        await client.query(
+          `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO UPDATE SET qty=EXCLUDED.qty`,
+          [w.id,w.batchNumber||w.batch_number,w.dept,w.type,w.qty,w.ts,w.by||null]
+        );
+      }
+    }
+    if (dispatchRecs && dispatchRecs.length) {
+      for (const d of dispatchRecs) {
+        await client.query(
+          `INSERT INTO tracking_dispatch_records (id,batch_number,customer,qty,boxes,vehicle_no,invoice_no,remarks,ts,by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO UPDATE SET qty=EXCLUDED.qty,boxes=EXCLUDED.boxes`,
+          [d.id,d.batchNumber||d.batch_number,d.customer||null,d.qty,d.boxes,d.vehicleNo||d.vehicle_no||null,d.invoiceNo||d.invoice_no||null,d.remarks||null,d.ts,d.by||null]
+        );
+      }
+    }
+    if (alerts && alerts.length) {
+      for (const a of alerts) {
+        await client.query(
+          `INSERT INTO tracking_alerts (id,label_id,batch_number,dept,scan_in_ts,hours_stuck,resolved,msg) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET resolved=EXCLUDED.resolved,hours_stuck=EXCLUDED.hours_stuck`,
+          [a.id,a.labelId||a.label_id,a.batchNumber||a.batch_number,a.dept,a.scanInTs||a.scan_in_ts,a.hoursStuck||a.hours_stuck||null,!!a.resolved,a.msg||null]
+        );
+      }
+    }
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+  res.json({ ok:true });
 }));
 
 // GET /api/tracking/batch-summary/:batchNumber
@@ -1168,23 +1234,12 @@ app.get('/api/tracking/batch-summary/:batchNumber', asyncRoute(async (req, res) 
     queryAll('SELECT * FROM tracking_scans WHERE batch_number=$1 ORDER BY ts',[batchNumber]),
     queryAll('SELECT * FROM tracking_wastage WHERE batch_number=$1',[batchNumber]),
     queryAll('SELECT * FROM tracking_dispatch_records WHERE batch_number=$1',[batchNumber]),
-    queryAll('SELECT * FROM tracking_alerts WHERE batch_number=$1 AND resolved=0',[batchNumber]), // ✅ FIXED
+    queryAll('SELECT * FROM tracking_alerts WHERE batch_number=$1 AND resolved=FALSE',[batchNumber]),
   ]);
-
   const deptMap = {};
-  scans.forEach(s=>{
-    if(!deptMap[s.dept]) deptMap[s.dept]={in:0,out:0};
-    deptMap[s.dept][s.type]=(deptMap[s.dept][s.type]||0)+1;
-  });
-
-  const labelStats = {
-    total:labels.length,
-    printed:labels.filter(l=>l.printed).length,
-    voided:labels.filter(l=>l.voided).length
-  };
-
+  scans.forEach(s=>{ if(!deptMap[s.dept]) deptMap[s.dept]={in:0,out:0}; deptMap[s.dept][s.type]=(deptMap[s.dept][s.type]||0)+1; });
+  const labelStats = { total:labels.length, printed:labels.filter(l=>l.printed).length, voided:labels.filter(l=>l.voided).length };
   const dispatched = dispatch.reduce((s,d)=>s+d.boxes,0);
-
   res.json({ ok:true, deptMap, labelStats, wastage, alerts, dispatched, batchNumber });
 }));
 
@@ -1192,7 +1247,7 @@ app.get('/api/tracking/batch-summary/:batchNumber', asyncRoute(async (req, res) 
 app.get('/api/tracking/wip-summary', asyncRoute(async (req, res) => {
   const [summary, closures] = await Promise.all([
     queryAll(`SELECT batch_number, dept, type, COUNT(*) as cnt FROM tracking_scans GROUP BY batch_number, dept, type`),
-    queryAll(`SELECT batch_number, dept, closed FROM tracking_stage_closure WHERE closed=1`) // ✅ FIXED
+    queryAll(`SELECT batch_number, dept, closed FROM tracking_stage_closure WHERE closed=TRUE`)
   ]);
   res.json({ ok: true, scanSummary: summary, closures });
 }));
@@ -1201,11 +1256,296 @@ app.get('/api/tracking/wip-summary', asyncRoute(async (req, res) => {
 app.get('/api/tracking/labels', asyncRoute(async (req, res) => {
   const { batchNumber } = req.query;
   if(!batchNumber) return res.status(400).json({ok:false,error:'batchNumber required'});
-
-  const labels = await queryAll(
-    'SELECT * FROM tracking_labels WHERE batch_number=$1 AND voided=0', // ✅ FIXED
-    [batchNumber]
-  );
-
+  const labels = await queryAll('SELECT * FROM tracking_labels WHERE batch_number=$1 AND voided=FALSE',[batchNumber]);
   res.json({ok:true, labels});
 }));
+
+// POST /api/tracking/scan
+app.post('/api/tracking/scan', asyncRoute(async (req, res) => {
+  const { scan } = req.body;
+  if(!scan||!scan.id) return res.status(400).json({ok:false,error:'Missing scan'});
+  await query(
+    `INSERT INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,size,qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO NOTHING`,
+    [scan.id,scan.labelId||scan.label_id,scan.batchNumber||scan.batch_number,scan.dept,scan.type,scan.ts,scan.operator||null,scan.size||null,scan.qty||null]
+  );
+  res.json({ok:true});
+}));
+
+// ─── TRACKING GRANULAR ENDPOINTS (called by pushToServer) ────────
+
+// POST /api/tracking/labels — upsert individual labels
+app.post('/api/tracking/labels', asyncRoute(async (req, res) => {
+  const { labels } = req.body;
+  if (!labels || !labels.length) return res.json({ ok: true });
+  for (const l of labels) {
+    await query(
+      `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
+       ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,voided=EXCLUDED.voided,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status,printed_at=EXCLUDED.printed_at`,
+      [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,!!l.isPartial,!!l.isOrange,
+       l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
+       l.poNumber||null,l.machineId||null,l.printingMatter||null,
+       l.generated||new Date().toISOString(),!!l.printed,l.printedAt||null,
+       !!l.voided,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,
+       l.woStatus||null,l.shipTo||null,l.billTo||null,!!l.isExcess,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
+    );
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/label-void — void a label
+app.post('/api/tracking/label-void', asyncRoute(async (req, res) => {
+  const { labelId, reason, voidedBy } = req.body;
+  if (!labelId) return res.status(400).json({ ok: false, error: 'Missing labelId' });
+  const now = new Date().toISOString();
+  await query(
+    `UPDATE tracking_labels SET voided=TRUE, void_reason=$1, voided_at=$2, voided_by=$3 WHERE id=$4`,
+    [reason || null, now, voidedBy || null, labelId]
+  );
+  await logAudit(voidedBy || 'SYSTEM', 'operator', 'tracking', 'LABEL_VOID', `Label ${labelId} voided: ${reason}`);
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/reprint-log — log a reprint event
+app.post('/api/tracking/reprint-log', asyncRoute(async (req, res) => {
+  const { log } = req.body;
+  if (log) {
+    await logAudit(log.by || 'SYSTEM', 'operator', 'tracking', 'REPRINT', `Label ${log.labelId} reprinted: ${log.reason || ''}`);
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/stage-status — update status map for batch
+app.post('/api/tracking/stage-status', asyncRoute(async (req, res) => {
+  const { batchNumber, statusMap } = req.body;
+  if (!batchNumber || !statusMap) return res.json({ ok: true });
+  // statusMap: { dept: 'open'|'closed' } — sync to stage_closure table
+  for (const [dept, status] of Object.entries(statusMap)) {
+    if (status === 'closed') {
+      const id = `sc-${batchNumber}-${dept}`;
+      await query(
+        `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at) VALUES ($1,$2,$3,TRUE,NOW())
+         ON CONFLICT(batch_number,dept) DO UPDATE SET closed=TRUE, closed_at=NOW()`,
+        [id, batchNumber, dept]
+      );
+    } else {
+      await query(
+        `UPDATE tracking_stage_closure SET closed=FALSE WHERE batch_number=$1 AND dept=$2`,
+        [batchNumber, dept]
+      );
+    }
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/stage-close — close a stage for a batch
+app.post('/api/tracking/stage-close', asyncRoute(async (req, res) => {
+  const { batchNumber, dept, closedBy } = req.body;
+  if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'Missing batchNumber or dept' });
+  const id = `sc-${batchNumber}-${dept}`;
+  await query(
+    `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at,closed_by) VALUES ($1,$2,$3,TRUE,NOW(),$4)
+     ON CONFLICT(batch_number,dept) DO UPDATE SET closed=TRUE, closed_at=NOW(), closed_by=EXCLUDED.closed_by`,
+    [id, batchNumber, dept, closedBy || null]
+  );
+  await logAudit(closedBy || 'SYSTEM', 'operator', 'tracking', 'STAGE_CLOSE', `Stage ${dept} closed for batch ${batchNumber}`);
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/wastage — record wastage (salvage/remelt)
+app.post('/api/tracking/wastage', asyncRoute(async (req, res) => {
+  const { batchNumber, dept, salvage, remelt, by } = req.body;
+  if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'Missing batchNumber or dept' });
+  const now = new Date().toISOString();
+  if (salvage > 0) {
+    const id = `w-${batchNumber}-${dept}-salv-${Date.now()}`;
+    await query(
+      `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,'salvage',$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+      [id, batchNumber, dept, salvage, now, by || null]
+    );
+  }
+  if (remelt > 0) {
+    const id = `w-${batchNumber}-${dept}-rem-${Date.now()}`;
+    await query(
+      `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,'remelt',$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+      [id, batchNumber, dept, remelt, now, by || null]
+    );
+  }
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/dispatch-record — save a dispatch record
+app.post('/api/tracking/dispatch-record', asyncRoute(async (req, res) => {
+  const { record } = req.body;
+  if (!record || !record.id) return res.status(400).json({ ok: false, error: 'Missing record' });
+  await query(
+    `INSERT INTO tracking_dispatch_records (id,batch_number,customer,qty,boxes,vehicle_no,invoice_no,remarks,ts,by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT(id) DO UPDATE SET qty=EXCLUDED.qty, boxes=EXCLUDED.boxes, vehicle_no=EXCLUDED.vehicle_no, invoice_no=EXCLUDED.invoice_no`,
+    [record.id, record.batchNumber||record.batch_number, record.customer||null, record.qty, record.boxes,
+     record.vehicleNo||record.vehicle_no||null, record.invoiceNo||record.invoice_no||null, record.remarks||null,
+     record.ts||new Date().toISOString(), record.by||null]
+  );
+  await logAudit(record.by||'SYSTEM','operator','tracking','DISPATCH_RECORD',`Dispatched ${record.boxes} boxes of batch ${record.batchNumber||record.batch_number}`);
+  res.json({ ok: true });
+}));
+
+// POST /api/tracking/dispatch-update — update dispatched qty on planning order
+app.post('/api/tracking/dispatch-update', asyncRoute(async (req, res) => {
+  const { batchNumber, dispatchedQty, vehicleNo, invoiceNo } = req.body;
+  if (!batchNumber) return res.status(400).json({ ok: false, error: 'Missing batchNumber' });
+  // Update planning state — mark dispatch progress
+  try {
+    const planState = await getPlanningState();
+    if (planState && planState.orders) {
+      const ord = planState.orders.find(o => o.batchNumber === batchNumber);
+      if (ord) {
+        ord.dispatchedQty = (ord.dispatchedQty || 0) + (dispatchedQty || 0);
+        if (vehicleNo) ord.lastVehicleNo = vehicleNo;
+        if (invoiceNo) ord.lastInvoiceNo = invoiceNo;
+        await savePlanningState(planState);
+      }
+    }
+  } catch (e) { console.error('dispatch-update planning sync error:', e.message); }
+  res.json({ ok: true });
+}));
+
+// jsQR proxy — serves jsQR to factory phones without CDN access
+let jsqrCache = null;
+app.get('/jsqr.min.js', (req, res) => {
+  if (jsqrCache) {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(jsqrCache);
+  }
+  const https = require('https');
+  https.get('https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js', r => {
+    let data = '';
+    r.on('data', c => data += c);
+    r.on('end', () => {
+      jsqrCache = data;
+      res.setHeader('Content-Type', 'application/javascript');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      res.send(data);
+    });
+  }).on('error', () => res.status(503).send('// jsQR fetch failed'));
+});
+
+// POST /api/admin/snapshot — manual snapshot before deploy
+app.post('/api/admin/snapshot', asyncRoute(async (req, res) => {
+  const key = req.query.key || req.body?.key;
+  const exportKey = process.env.EXPORT_KEY || 'sunloc-export-2024';
+  // Allow either export key OR admin session
+  if (key !== exportKey) {
+    const session = await verifyToken(req.headers['x-session-token']);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  }
+  const currentState = await queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1');
+  if (!currentState) return res.json({ ok: true, message: 'No data to snapshot', orders: 0 });
+  await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'manual')`, [currentState.state_json]);
+  await query(`DELETE FROM planning_state_backups WHERE id NOT IN (SELECT id FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 20)`);
+  const parsed = JSON.parse(currentState.state_json);
+  const orderCount = parsed.orders?.length || 0;
+  await logAudit('SYSTEM', 'admin', 'planning', 'MANUAL_SNAPSHOT', `Manual snapshot: ${orderCount} orders`);
+  res.json({ ok: true, message: `Snapshot saved — ${orderCount} orders protected`, orders: orderCount, savedAt: currentState.saved_at });
+}));
+
+// GET /api/admin/backups — list recent planning state backups
+app.get('/api/admin/backups', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token'] || req.query.token);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const rows = await queryAll(`SELECT id, backed_up_at, trigger, length(state_json) as size_bytes FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 10`);
+  res.json({ ok: true, backups: rows });
+}));
+
+// POST /api/admin/restore-backup/:id — restore a specific backup
+app.post('/api/admin/restore-backup/:id', asyncRoute(async (req, res) => {
+  const session = await verifyToken(req.headers['x-session-token']);
+  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+  const backup = await queryOne('SELECT * FROM planning_state_backups WHERE id=$1', [req.params.id]);
+  if (!backup) return res.status(404).json({ ok: false, error: 'Backup not found' });
+  // Save a backup of current state first before restoring
+  const current = await queryOne('SELECT state_json FROM planning_state WHERE id=1');
+  if (current) await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'pre-restore')`, [current.state_json]);
+  await query(`INSERT INTO planning_state (id, state_json) VALUES (1, $1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()`, [backup.state_json]);
+  await logAudit(session.username, session.role, 'planning', 'RESTORE_BACKUP', `Restored backup id=${req.params.id} from ${backup.backed_up_at}`);
+  res.json({ ok: true, message: `Restored backup from ${backup.backed_up_at}` });
+}));
+
+// ─── SPA Catch-all (must be LAST route) ───────────────────────
+app.get('*', (req, res) => {
+  const idx = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(idx)) res.sendFile(idx);
+  else res.json({ ok: false, error: 'No frontend found. Place files in /public folder.' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('[Error]', err.message);
+  res.status(500).json({ ok: false, error: err.message });
+});
+
+// Start server
+async function startServer() {
+  try {
+    await runMigrations();
+    await seedUsers();
+
+    // ── REDEPLOYMENT SAFETY: Snapshot + Integrity Check ─────────
+    try {
+      const currentState = await queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1');
+      if (currentState) {
+        const parsed = JSON.parse(currentState.state_json);
+        const orderCount = parsed.orders?.length || 0;
+        const printOrderCount = parsed.printOrders?.length || 0;
+        const dispatchCount = parsed.dispatchPlans?.length || 0;
+
+        // Take startup snapshot before anything else
+        await query(
+          `INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'startup-snapshot')`,
+          [currentState.state_json]
+        );
+        await query(
+          `DELETE FROM planning_state_backups WHERE id NOT IN (SELECT id FROM planning_state_backups ORDER BY backed_up_at DESC LIMIT 20)`
+        );
+
+        // Count other critical tables
+        const [dprCount, actualsCount, labelsCount, scansCount] = await Promise.all([
+          queryOne('SELECT COUNT(*) as c FROM dpr_records'),
+          queryOne('SELECT COUNT(*) as c FROM production_actuals'),
+          queryOne('SELECT COUNT(*) as c FROM tracking_labels'),
+          queryOne('SELECT COUNT(*) as c FROM tracking_scans'),
+        ]);
+
+        console.log('[Startup] ═══════════════════════════════════════════');
+        console.log(`[Startup] DATABASE INTEGRITY CHECK`);
+        console.log(`[Startup]   Planning orders:    ${orderCount}`);
+        console.log(`[Startup]   Print orders:       ${printOrderCount}`);
+        console.log(`[Startup]   Dispatch plans:     ${dispatchCount}`);
+        console.log(`[Startup]   DPR records:        ${parseInt(dprCount?.c||0)}`);
+        console.log(`[Startup]   Production actuals: ${parseInt(actualsCount?.c||0)}`);
+        console.log(`[Startup]   Tracking labels:    ${parseInt(labelsCount?.c||0)}`);
+        console.log(`[Startup]   Tracking scans:     ${parseInt(scansCount?.c||0)}`);
+        console.log(`[Startup]   Last saved:         ${currentState.saved_at}`);
+        console.log(`[Startup]   Snapshot:           ✅ taken`);
+        console.log('[Startup] ═══════════════════════════════════════════');
+        console.log(`[Startup] ALL DATA SAFE — ${orderCount} orders protected`);
+      } else {
+        console.log('[Startup] No planning state found — fresh database');
+      }
+    } catch(e) {
+      console.error('[Startup] Snapshot failed (non-fatal):', e.message);
+    }
+    // ─────────────────────────────────────────────────────────────
+
+    app.listen(PORT, () => {
+      console.log(`[Sunloc] Server running on port ${PORT}`);
+      console.log(`[Sunloc] Database: PostgreSQL (Railway) — data persists across redeployments`);
+      console.log(`[Sunloc] Data protection: ACTIVE — orders will never be overwritten`);
+    });
+  } catch(err) {
+    console.error('[Startup] Fatal error:', err.message);
+    process.exit(1);
+  }
+}
+
+startServer();

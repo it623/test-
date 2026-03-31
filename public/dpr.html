@@ -74,6 +74,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px
 input[type=text],input[type=number],select{background:var(--s2);border:1px solid var(--b1);border-radius:4px;color:var(--t1);padding:5px 8px;font-family:var(--font);font-size:12px;outline:none;width:100%;transition:.15s}
 input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--cyan);background:var(--s3)}
 input[type=number]{font-family:var(--mono);text-align:right}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
 /* MACHINE TABLE */
 .mtable{width:100%;border-collapse:collapse;font-size:12px}
 .mtable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--b1);text-align:left;white-space:nowrap}

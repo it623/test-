@@ -3622,30 +3622,7 @@ window.addEventListener('storage', (e) => {
 });
 
 // Check TEMP batch alerts every 5 minutes
-setInterval(checkTrackingTempAlerts, 5*60*1000);
-setTimeout(checkTrackingTempAlerts, 3000);
 
-async function checkTrackingTempAlerts(){
-  if(!serverUrl) return;
-  try{
-    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
-    const j = await r.json();
-    let banner = document.getElementById('trk-temp-banner');
-    if(!banner){
-      banner = document.createElement('div');
-      banner.id = 'trk-temp-banner';
-      banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-top:2px solid var(--accent3);padding:8px 16px;font-size:12px;text-align:center';
-      document.body.appendChild(banner);
-    }
-    if(j.ok && j.count > 0){
-      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
-      banner.style.display = 'block';
-      banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} active</strong> on machines: ${machines.join(', ')} — Labels will show <span style="color:#ff4060;font-weight:600">⚠️ TEMP</span> badge (red border) until reconciled. &nbsp;|&nbsp; W/O orders show <span style="color:#C55A11;font-weight:600">🔶 W/O</span> badge (orange border) until customer assigned.`;
-    } else {
-      banner.style.display = 'none';
-    }
-  }catch(e){}
-}
 
 // ══════════════════════════════════════════════════════
 // TRACKING — Audit log (admin role already handled by currentDept)

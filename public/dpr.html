@@ -649,7 +649,7 @@ function collectForm(){
   SHIFTS.forEach(sh=>{
     day.shifts[sh].incharge=v(`si-${sh}-incharge`)||'';
     day.shifts[sh].fitter=v(`si-${sh}-fitter`)||'';
-    day.shifts[sh].chemist=v(`si-${sh}-chemist`)||'';
+    day.shifts[sh].chemist=getMultiStaff(sh,'chemist');
     day.shifts[sh].electrical=getMultiStaff(sh,'electrical');
     day.shifts[sh].utility=getMultiStaff(sh,'utility');
     day.shifts[sh].aim_staff=getMultiStaff(sh,'aim_staff');
@@ -1208,7 +1208,7 @@ function renderShifts(){
       <div class="shift-body open" id="sb-${sh}">
         <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px">
           <div class="field-grp"><label>Process Incharge</label><input type="text" id="si-${sh}-incharge" value="${esc(sd.incharge||'')}" placeholder="Name" oninput="markUnsaved()"></div>
-          <div class="field-grp"><label>Shift Chemist</label><input type="text" id="si-${sh}-chemist" value="${esc(sd.chemist||'')}" placeholder="Name" oninput="markUnsaved()"></div>
+          ${renderMultiStaff(sh,'chemist','Shift Chemist', Array.isArray(sd.chemist)?sd.chemist:(sd.chemist?[sd.chemist]:[]))}
           ${fl==='GF'?`<div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>`:`<div class="field-grp"></div>`}
           <div class="field-grp"></div>
         </div>
@@ -2405,6 +2405,9 @@ async function doDprLogin() {
     applyDprRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     addDprUserBadge();
+    // Load cached orders from localStorage BEFORE renderEntry so dropdowns show saved selection
+    const cachedOrders = localStorage.getItem('dpr_active_orders');
+    if(cachedOrders) try{ activeOrders = JSON.parse(cachedOrders); }catch{}
     renderEntry();
     go('entry');
     postAuthServerInit();
@@ -2430,6 +2433,8 @@ function applyDprRoleRestrictions() {
     curFloor = allowedFloors[0];
     document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
     document.getElementById('ftab-'+curFloor)?.classList.add('on');
+    const cachedOrders = localStorage.getItem('dpr_active_orders');
+    if(cachedOrders) try{ activeOrders = JSON.parse(cachedOrders); }catch{}
     renderEntry();
   }
 }

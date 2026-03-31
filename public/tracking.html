@@ -1155,7 +1155,7 @@ function loadState(){
 // SCAN ENGINE
 // ═══════════════════════════════════════════════════════
 
-function recordScan(labelId, dept, type, operator, parsed){
+async function recordScan(labelId, dept, type, operator, parsed){
   // Primary lookup: by exact id
   let label = state.labels.find(l=>l.id===labelId);
   // Secondary lookup: by batchNumber + labelNumber (handles sync edge cases)
@@ -1165,7 +1165,23 @@ function recordScan(labelId, dept, type, operator, parsed){
       Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
     );
   }
-  if(!label) return {ok:false,msg:'Label not found'};
+  if(!label){
+  try{
+    const res = await fetch(serverUrl + "/api/tracking/state");
+    const data = await res.json();
+
+    if(data.ok && data.state){
+      state.labels = data.state.labels || [];
+      label = state.labels.find(l=>l.id===labelId);
+    }
+  }catch(e){
+    console.error("Server error:", e);
+  }
+
+  if(!label){
+    return {ok:false,msg:'Label not found'};
+  }
+}
   if(label.voided) return {ok:false,msg:'Label has been voided'};
 
   const batch = getBatch(label.batchNumber);

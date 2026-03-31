@@ -3750,7 +3750,6 @@ function mobileCloseSidebar() {
   if (sb && window.innerWidth <= 768) sb.classList.remove('open');
 }
 
-<script>
 // Auto-focus scan input on mobile after page load
 function autoFocusScanInput(dept, type) {
   const isMobile = window.innerWidth <= 768;
@@ -3761,11 +3760,11 @@ function autoFocusScanInput(dept, type) {
         el.focus();
         el.click();
       }
-    }, 1000); // 1 second delay for mobile rendering
+    }, 1000);
   }
 }
 
-// Attach input listener after page loads
+// Call auto-focus and attach input listener when page loads
 window.addEventListener('load', () => {
   const dept = 'pi';
   const type = 'in';
@@ -3773,22 +3772,23 @@ window.addEventListener('load', () => {
   autoFocusScanInput(dept, type);
 
   const scanInput = document.getElementById(`scan-${type}-${dept}`);
-  if(scanInput){
+  if (scanInput) {
     scanInput.addEventListener('input', async (e) => {
       const labelId = e.target.value;
       const operator = null;
       const parsed = { batchNumber: null, boxNumber: null };
 
       await scanLabel(labelId, dept, type, operator, parsed);
-      e.target.value = ''; // clear input for next scan
+
+      e.target.value = '';
     });
   }
 });
 
-// ✅ Safe universal scan wrapper
-async function scanLabel(labelId, dept, type, operator, parsed){
+// ✅ Single universal safe scan wrapper
+async function scanLabel(labelId, dept, type, operator, parsed) {
     try {
-        // Try local lookup
+        // Local lookup
         let label = state.labels.find(l => l.id === labelId);
 
         // Fallback: batch + box
@@ -3816,7 +3816,7 @@ async function scanLabel(labelId, dept, type, operator, parsed){
         }
 
         // Call recordScan safely
-        return await recordScan(label, dept, type, operator);
+        return await recordScan(labelId, dept, type, operator, parsed);
 
     } catch(e){
         console.error("Scan error:", e);
@@ -3824,13 +3824,41 @@ async function scanLabel(labelId, dept, type, operator, parsed){
         return {ok:false, msg:e.message};
     }
 }
-
-// ✅ recordScan only saves the scan, assumes label exists
-async function recordScan(label, dept, type, operator){
+async function recordScan(labelId, dept, type, operator, parsed) {
     try {
+        // Find label locally
+        let label = state.labels.find(l => l.id === labelId);
+
+        // Fallback by batch + box
+        if(!label && parsed?.batchNumber && parsed?.boxNumber != null){
+            label = state.labels.find(l =>
+                l.batchNumber === parsed.batchNumber &&
+                Math.abs(l.labelNumber) === Math.abs(parsed.boxNumber)
+            );
+        }
+
+        // Fetch from server if still not found
+        if(!label){
+            const res = await fetch("https://sunloc.up.railway.app/api/tracking/state");
+            const data = await res.json();
+            if(data.ok && data.state?.labels){
+                label = data.state.labels.find(l => l.id === labelId);
+                if(label){
+                    state.labels.push(label); // save locally
+                }
+            }
+        }
+
+        // If label still not found, stop safely
+        if(!label){
+            console.warn("Label not found:", labelId);
+            return { ok: false, msg: "Label not found" };
+        }
+
+        // ✅ Safe: label exists, proceed
         state.scans.push({
             id: Date.now().toString(),
-            labelId: label.id,
+            labelId,
             batchNumber: label.batchNumber || '',
             dept,
             type,
@@ -3839,10 +3867,12 @@ async function recordScan(label, dept, type, operator){
             size: label.size || 0,
             qty: label.qty || 0
         });
-        return {ok:true};
+
+        return { ok: true };
+
     } catch(e){
         console.error("Error during scan:", e);
-        return {ok:false, msg:e.message};
+        return { ok: false, msg: e.message };
     }
 }
 

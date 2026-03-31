@@ -839,14 +839,39 @@ async function fetchActiveOrders(){
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
       });
+
+      // ── AUTO-SELECT: if a machine has exactly 1 active order and current run
+      //    has no orderId yet, pre-fill orderId + batchNumber automatically ──
+      const fl=curFloor, d=getDate();
+      const dayData=loadDay(fl,d);
+      let autoFilled=false;
+      SHIFTS.forEach(sh=>{
+        getActiveMachines(fl).forEach(mc=>{
+          const orders=activeOrders[mc.id]||[];
+          if(orders.length===1){
+            const m=migrateMachineData(dayData.shifts[sh].machines[mc.id]||blankMachine());
+            m.runs.forEach(run=>{
+              if(!run.orderId){
+                run.orderId=orders[0].id;
+                run.batchNumber=orders[0].batchNumber||orders[0].poNumber||'';
+                autoFilled=true;
+              }
+            });
+            dayData.shifts[sh].machines[mc.id]=m;
+          }
+        });
+      });
+      if(autoFilled){
+        localStorage.setItem(skey(fl,d),JSON.stringify(dayData));
+      }
+
       // Cache locally
       localStorage.setItem('dpr_active_orders',JSON.stringify(activeOrders));
-      toast('✓ Orders synced from Planning App','var(--green)');
 
       // Check each machine on current floor — if no active order, ensure TEMP batch exists
       await checkAndCreateTempBatches();
 
-      renderShifts(); // Re-render so dropdowns populate
+      renderShifts(); // Re-render so dropdowns populate with pre-selected orders
     }
   }catch{
     const cached=localStorage.getItem('dpr_active_orders');
@@ -1277,6 +1302,12 @@ function renderShifts(){
     </tr></tfoot></table></div></div></div>`;
   });
   document.getElementById('shiftsArea').innerHTML=html;
+  // After render: trigger onRunOrderChange for any pre-selected orders to show Ord/Prod/Rem info
+  document.querySelectorAll('.run-row').forEach(row=>{
+    const sh=row.dataset.sh, mc=row.dataset.mc, ri=row.dataset.ri;
+    const sel=document.getElementById(`run-ord-${sh}-${mc}-${ri}`);
+    if(sel && sel.value) onRunOrderChange(sh, mc, parseInt(ri));
+  });
 }
 
 // ── Run management ─────────────────────────────────────────────
@@ -2082,22 +2113,60 @@ function setFloor(fl){
   curFloor=fl;
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
   document.getElementById('ftab-'+fl)?.classList.add('on');
-  renderEntry();
+  renderEntry(); // Render immediately from localStorage
+  fetchDpr(fl, getDate()); // Then silently sync from server
+}
+
+// ── Fetch DPR data for a floor+date from server, merge into localStorage, re-render ──
+async function fetchDpr(fl, d){
+  if(!serverUrl || !fl || !d) return;
+  try{
+    const r = await fetch(serverUrl+`/api/dpr/${fl}/${d}`, {signal:AbortSignal.timeout(6000)});
+    if(!r.ok) return;
+    const j = await r.json();
+    if(j.ok && j.data){
+      // Deep-merge: keep any locally-entered data that server doesn't have yet
+      const local = loadDay(fl, d);
+      const merged = deepMergeDpr(j.data, local);
+      localStorage.setItem(skey(fl,d), JSON.stringify(merged));
+      if(curFloor===fl && getDate()===d) renderEntry();
+    }
+  }catch(e){}
+}
+
+// Merge server data (authoritative) with local data (may have unsaved edits)
+// Server wins for all saved fields; local wins only for unsaved qty > 0
+function deepMergeDpr(server, local){
+  const merged = JSON.parse(JSON.stringify(server)); // deep copy server as base
+  SHIFTS.forEach(sh=>{
+    if(!local?.shifts?.[sh]?.machines) return;
+    Object.keys(local.shifts[sh].machines).forEach(mcId=>{
+      if(!merged.shifts[sh]) return;
+      if(!merged.shifts[sh].machines) merged.shifts[sh].machines={};
+      const localMc = local.shifts[sh].machines[mcId];
+      const serverMc = merged.shifts[sh].machines[mcId];
+      // Only copy local runs if server has no production data (avoids overwriting saved data)
+      if(serverMc){
+        const serverHasProd = (serverMc.runs||[]).some(r=>parseFloat(r.qty||0)>0);
+        const localHasProd = (localMc?.runs||[]).some(r=>parseFloat(r.qty||0)>0);
+        if(!serverHasProd && localHasProd){
+          merged.shifts[sh].machines[mcId].runs = localMc.runs;
+        }
+      } else {
+        merged.shifts[sh].machines[mcId] = localMc;
+      }
+    });
+  });
+  return merged;
 }
 
 function onDateChange(){
   refreshRecentDates();
-  renderEntry();
-  // Try to load from server
+  renderEntry(); // Render immediately from localStorage (instant)
   const fl=curFloor, d=getDate();
   if(serverUrl){
-    fetch(serverUrl+`/api/dpr/${fl}/${d}`,{signal:AbortSignal.timeout(4000)})
-      .then(r=>r.json()).then(j=>{
-        if(j.ok&&j.data){
-          localStorage.setItem(skey(fl,d),JSON.stringify(j.data));
-          renderEntry();toast('Loaded from server','var(--cyan)');
-        }
-      }).catch(()=>{});
+    // Silently pull from server and re-render with merged data
+    fetchDpr(fl, d);
   }
 }
 
@@ -2226,9 +2295,14 @@ document.getElementById('ndate').value=today();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
 function postAuthServerInit() {
-  checkServer().then(ok=>{
-    if(ok){ fetchActiveOrders(); }
-    else {
+  checkServer().then(async ok=>{
+    if(ok){
+      // 1. Fetch today's DPR data from server first (fills form with saved data)
+      await fetchDpr(curFloor, getDate());
+      // 2. Then fetch active orders (populates dropdowns)
+      await fetchActiveOrders();
+    } else {
+      // Offline — use localStorage cache
       const cached=localStorage.getItem('dpr_active_orders');
       if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
     }
@@ -2248,6 +2322,7 @@ window.addEventListener('pageshow', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && dprUser) {
     fetchActiveOrders();
+    fetchDpr(curFloor, getDate()); // Re-sync form data from server silently
   }
 });
 

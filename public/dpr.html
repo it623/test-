@@ -831,8 +831,7 @@ async function fetchActiveOrders(){
   try{
     const r=await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
     if(!r.ok) return;
-    const j=await r.json();
-    if(j.ok && j.orders){
+    const j=await r.json();    if(j.ok && j.orders){
       // Build map by machineId — only include orders that have a specific machineId assigned
       activeOrders={};
       j.orders.filter(o => o.machineId).forEach(o=>{
@@ -871,7 +870,7 @@ async function fetchActiveOrders(){
       // Check each machine on current floor — if no active order, ensure TEMP batch exists
       await checkAndCreateTempBatches();
 
-      renderShifts(); // Re-render so dropdowns populate with pre-selected orders
+      safeRenderShifts(); // Re-render dropdowns — preserves any typed-but-unsaved data
     }
   }catch{
     const cached=localStorage.getItem('dpr_active_orders');
@@ -1144,6 +1143,22 @@ function addStaffName(sh, role){
 function removeStaffName(btn){
   btn.parentElement.remove();
   markUnsaved();
+}
+
+// ── SAFE RENDER: always snapshot typed form data BEFORE re-rendering ──
+// Prevents background order/DPR sync from wiping unsaved user input
+function safeRenderShifts(){
+  // If the entry form exists in DOM, collect current typed values first
+  const shiftsArea = document.getElementById('shiftsArea');
+  if(shiftsArea && shiftsArea.querySelector('.run-row')){
+    const fl=curFloor, d=getDate();
+    try{
+      const snapshot = collectForm();
+      localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
+      // Keep unsaved flag — data is in localStorage but not yet on server
+    }catch(e){}
+  }
+  renderShifts();
 }
 
 function renderEntry(){
@@ -2125,11 +2140,21 @@ async function fetchDpr(fl, d){
     if(!r.ok) return;
     const j = await r.json();
     if(j.ok && j.data){
+      // Snapshot current typed data FIRST so merge doesn't lose unsaved input
+      if(curFloor===fl && getDate()===d){
+        const shiftsArea = document.getElementById('shiftsArea');
+        if(shiftsArea && shiftsArea.querySelector('.run-row')){
+          try{
+            const snapshot = collectForm();
+            localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
+          }catch(e){}
+        }
+      }
       // Deep-merge: keep any locally-entered data that server doesn't have yet
       const local = loadDay(fl, d);
       const merged = deepMergeDpr(j.data, local);
       localStorage.setItem(skey(fl,d), JSON.stringify(merged));
-      if(curFloor===fl && getDate()===d) renderEntry();
+      if(curFloor===fl && getDate()===d) safeRenderShifts();
     }
   }catch(e){}
 }

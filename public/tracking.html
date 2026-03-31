@@ -3750,17 +3750,17 @@ function mobileCloseSidebar() {
   if (sb && window.innerWidth <= 768) sb.classList.remove('open');
 }
 
-// Auto-focus scan input on mobile after page load for quick scanning
+// Auto-focus scan input on mobile after page load
 function autoFocusScanInput(dept, type) {
   const isMobile = window.innerWidth <= 768;
   if (isMobile) {
     setTimeout(() => {
       const el = document.getElementById(`scan-${type}-${dept}`);
       if (el) {
-        el.focus();   // focuses input so mobile can scan
-        el.click();   // triggers mobile keyboard or scanner
+        el.focus();
+        el.click();
       }
-    }, 1000); // give 1 second to load mobile page
+    }, 1000);
   }
 }
 
@@ -3769,29 +3769,29 @@ window.addEventListener('load', () => {
   const dept = 'pi';
   const type = 'in';
 
-  autoFocusScanInput(dept, type); // focus input
+  autoFocusScanInput(dept, type);
 
-  // Attach input listener for scanning
   const scanInput = document.getElementById(`scan-${type}-${dept}`);
   if (scanInput) {
     scanInput.addEventListener('input', async (e) => {
-      const labelId = e.target.value; // scanned label
+      const labelId = e.target.value;
       const operator = null;
-      const parsed = { batchNumber: null, boxNumber: null }; // optional
+      const parsed = { batchNumber: null, boxNumber: null };
 
       await scanLabel(labelId, dept, type, operator, parsed);
 
-      e.target.value = ''; // clear input for next scan
+      e.target.value = '';
     });
   }
 });
 
-async function scanLabel(labelId, dept, type, operator, parsed){
-    try{
-        // Try to find the label locally first
+// ✅ Single universal safe scan wrapper
+async function scanLabel(labelId, dept, type, operator, parsed) {
+    try {
+        // Local lookup
         let label = state.labels.find(l => l.id === labelId);
 
-        // Fallback: try matching batchNumber + boxNumber
+        // Fallback: batch + box
         if(!label && parsed?.batchNumber && parsed?.boxNumber != null){
             label = state.labels.find(l =>
                 l.batchNumber === parsed.batchNumber &&
@@ -3799,13 +3799,13 @@ async function scanLabel(labelId, dept, type, operator, parsed){
             );
         }
 
-        // If still not found, fetch from server
+        // Fetch from server if still not found
         if(!label){
             const res = await fetch("https://sunloc.up.railway.app/api/tracking/state");
             const data = await res.json();
             if(data.ok && data.state?.labels){
-                const serverLabels = data.state.labels;
-                label = serverLabels.find(l => l.id === labelId);
+                label = data.state.labels.find(l => l.id === labelId);
+                if(label) state.labels.push(label); // save locally
             }
         }
 
@@ -3815,7 +3815,7 @@ async function scanLabel(labelId, dept, type, operator, parsed){
             return {ok:false, msg:"Label not found"};
         }
 
-        // Call your original recordScan logic
+        // Call recordScan safely
         return await recordScan(labelId, dept, type, operator, parsed);
 
     } catch(e){
@@ -3824,21 +3824,7 @@ async function scanLabel(labelId, dept, type, operator, parsed){
         return {ok:false, msg:e.message};
     }
 }
-// 🟢 Universal safe scan wrapper
-async function scanLabel(labelId, dept, type, operator, parsed){
-    try{
-        const result = await recordScan(labelId, dept, type, operator, parsed);
-        if(!result.ok){
-            console.error("Scan failed:", result.msg);
-            alert(result.msg); // optional: shows message on mobile
-        }
-        return result;
-    } catch(e){
-        console.error("Scan error:", e);
-        alert("Scan error: "+e.message);
-        return {ok:false,msg:e.message};
-    }
-}
+
 </script>
 </body>
 </html>

@@ -1094,7 +1094,7 @@ app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
     queryAll('SELECT * FROM tracking_stage_closure'),
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_dispatch_records ORDER BY ts ASC'),
-    queryAll('SELECT * FROM tracking_alerts WHERE resolved=FALSE'),
+    queryAll('SELECT * FROM tracking_alerts WHERE resolved=0'),
   ]);
 
   // Enrich orders with actual production (same as /api/planning/state does)
@@ -1154,7 +1154,7 @@ app.get('/api/tracking/state', asyncRoute(async (req, res) => {
     queryAll('SELECT * FROM tracking_stage_closure'),
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_dispatch_records ORDER BY ts ASC'),
-    queryAll('SELECT * FROM tracking_alerts WHERE resolved=FALSE'),
+    queryAll('SELECT * FROM tracking_alerts WHERE resolved=0'),
   ]);
   res.json({ ok:true, state:{ labels, scans, stageClosure:closure, wastage, dispatchRecs:dispatch, alerts } });
 }));
@@ -1234,7 +1234,7 @@ app.get('/api/tracking/batch-summary/:batchNumber', asyncRoute(async (req, res) 
     queryAll('SELECT * FROM tracking_scans WHERE batch_number=$1 ORDER BY ts',[batchNumber]),
     queryAll('SELECT * FROM tracking_wastage WHERE batch_number=$1',[batchNumber]),
     queryAll('SELECT * FROM tracking_dispatch_records WHERE batch_number=$1',[batchNumber]),
-    queryAll('SELECT * FROM tracking_alerts WHERE batch_number=$1 AND resolved=FALSE',[batchNumber]),
+    queryAll('SELECT * FROM tracking_alerts WHERE batch_number=$1 AND resolved=0',[batchNumber]),
   ]);
   const deptMap = {};
   scans.forEach(s=>{ if(!deptMap[s.dept]) deptMap[s.dept]={in:0,out:0}; deptMap[s.dept][s.type]=(deptMap[s.dept][s.type]||0)+1; });
@@ -1247,7 +1247,7 @@ app.get('/api/tracking/batch-summary/:batchNumber', asyncRoute(async (req, res) 
 app.get('/api/tracking/wip-summary', asyncRoute(async (req, res) => {
   const [summary, closures] = await Promise.all([
     queryAll(`SELECT batch_number, dept, type, COUNT(*) as cnt FROM tracking_scans GROUP BY batch_number, dept, type`),
-    queryAll(`SELECT batch_number, dept, closed FROM tracking_stage_closure WHERE closed=TRUE`)
+    queryAll(`SELECT batch_number, dept, closed FROM tracking_stage_closure WHERE closed=1`)
   ]);
   res.json({ ok: true, scanSummary: summary, closures });
 }));
@@ -1256,7 +1256,7 @@ app.get('/api/tracking/wip-summary', asyncRoute(async (req, res) => {
 app.get('/api/tracking/labels', asyncRoute(async (req, res) => {
   const { batchNumber } = req.query;
   if(!batchNumber) return res.status(400).json({ok:false,error:'batchNumber required'});
-  const labels = await queryAll('SELECT * FROM tracking_labels WHERE batch_number=$1 AND voided=FALSE',[batchNumber]);
+  const labels = await queryAll('SELECT * FROM tracking_labels WHERE batch_number=$1 AND voided=0',[batchNumber]);
   res.json({ok:true, labels});
 }));
 
@@ -1325,7 +1325,7 @@ app.post('/api/tracking/stage-status', asyncRoute(async (req, res) => {
       const id = `sc-${batchNumber}-${dept}`;
       await query(
         `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at) VALUES ($1,$2,$3,TRUE,NOW())
-         ON CONFLICT(batch_number,dept) DO UPDATE SET closed=TRUE, closed_at=NOW()`,
+         ON CONFLICT(batch_number,dept) DO UPDATE SET closed=1, closed_at=NOW()`,
         [id, batchNumber, dept]
       );
     } else {
@@ -1345,7 +1345,7 @@ app.post('/api/tracking/stage-close', asyncRoute(async (req, res) => {
   const id = `sc-${batchNumber}-${dept}`;
   await query(
     `INSERT INTO tracking_stage_closure (id,batch_number,dept,closed,closed_at,closed_by) VALUES ($1,$2,$3,TRUE,NOW(),$4)
-     ON CONFLICT(batch_number,dept) DO UPDATE SET closed=TRUE, closed_at=NOW(), closed_by=EXCLUDED.closed_by`,
+     ON CONFLICT(batch_number,dept) DO UPDATE SET closed=1, closed_at=NOW(), closed_by=EXCLUDED.closed_by`,
     [id, batchNumber, dept, closedBy || null]
   );
   await logAudit(closedBy || 'SYSTEM', 'operator', 'tracking', 'STAGE_CLOSE', `Stage ${dept} closed for batch ${batchNumber}`);

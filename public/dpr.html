@@ -667,9 +667,16 @@ function collectForm(){
       if(runEls.length>0){
         m.runs=Array.from(runEls).map(el=>{
           const ri=el.dataset.ri;
+          const ordId=v(`run-ord-${sh}-${mc.id}-${ri}`)||'';
+          let batchNo=v(`run-batch-${sh}-${mc.id}-${ri}`)||'';
+          // If order is selected but batch field is empty, auto-fill from activeOrders
+          if(ordId && !batchNo){
+            const ord=Object.values(activeOrders).flat().find(o=>o.id===ordId);
+            if(ord) batchNo=ord.batchNumber||ord.poNumber||'';
+          }
           return{
-            orderId:v(`run-ord-${sh}-${mc.id}-${ri}`)||'',
-            batchNumber:v(`run-batch-${sh}-${mc.id}-${ri}`)||'',
+            orderId:ordId,
+            batchNumber:batchNo,
             qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'',
             note:v(`run-note-${sh}-${mc.id}-${ri}`)||''
           };
@@ -929,33 +936,6 @@ async function checkAndCreateTempBatches(){
       }catch(e){ /* non-blocking */ }
     }
   }
-  // Update TEMP alert banner
-  updateTempAlertBanner();
-}
-
-// Show/hide TEMP batch alert banner
-async function updateTempAlertBanner(){
-  if(!serverUrl) return;
-  try{
-    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
-    const j = await r.json();
-    let banner = document.getElementById('temp-alert-banner');
-    if(!banner){
-      banner = document.createElement('div');
-      banner.id = 'temp-alert-banner';
-      banner.style.cssText = 'position:fixed;top:var(--nav);left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-bottom:2px solid var(--amber);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px';
-      document.body.appendChild(banner);
-    }
-    if(j.ok && j.count > 0){
-      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
-      banner.style.display = 'flex';
-      banner.innerHTML = `⚠️ <strong style="color:var(--amber)">${j.count} TEMP batch${j.count>1?'es':''} active</strong>
-        — Machines: ${machines.join(', ')} — No planned orders assigned.
-        <span style="color:var(--amber);margin-left:4px">Planning entry + Admin reconciliation required.</span>`;
-    } else {
-      banner.style.display = 'none';
-    }
-  }catch(e){}
 }
 
 let trackingAGrade = {}; // { machineId: { batchNumber, aGradePct, inspected } }
@@ -1251,7 +1231,14 @@ function renderShifts(){
       let runsHtml='';
       runs.forEach((run,ri)=>{
         const orders=activeOrders[mc.id]||[];
-        const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${run.orderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
+        // Match by id first, then by batchNumber as fallback
+        const matchedOrder = orders.find(o=>o.id===run.orderId) || orders.find(o=>o.batchNumber===run.batchNumber);
+        const effectiveOrderId = matchedOrder ? matchedOrder.id : run.orderId;
+        let ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
+        // If run has a saved batch but no matching order in dropdown, add synthetic option so it's always visible
+        if(run.batchNumber && !matchedOrder){
+          ordOpts+=`<option value="${esc(run.orderId||run.batchNumber)}" selected>${esc(run.batchNumber)}</option>`;
+        }
         const isMult=runs.length>1;
         runsHtml+=`
           <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}">

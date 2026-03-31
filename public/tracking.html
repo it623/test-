@@ -3763,6 +3763,12 @@ function autoFocusScanInput(dept, type) {
     }, 1000); // give 1 second to load mobile page
   }
 }
+
+// Call the auto-focus function when the page loads
+window.addEventListener('load', () => {
+  autoFocusScanInput('pi', 'in'); // replace 'pi' and 'in' with your actual dept/type
+});
+
 // 🟢 Universal safe scan wrapper
 async function scanLabel(labelId, dept, type, operator, parsed){
     try{

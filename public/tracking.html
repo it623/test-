@@ -3759,6 +3759,21 @@ function autoFocusScanInput(dept, type) {
     }, 300);
   }
 }
+// 🟢 Universal safe scan wrapper
+async function scanLabel(labelId, dept, type, operator, parsed){
+    try{
+        const result = await recordScan(labelId, dept, type, operator, parsed);
+        if(!result.ok){
+            console.error("Scan failed:", result.msg);
+            alert(result.msg); // optional: shows message on mobile
+        }
+        return result;
+    } catch(e){
+        console.error("Scan error:", e);
+        alert("Scan error: "+e.message);
+        return {ok:false,msg:e.message};
+    }
+}
 </script>
 </body>
 </html>

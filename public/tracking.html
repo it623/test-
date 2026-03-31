@@ -3764,11 +3764,27 @@ function autoFocusScanInput(dept, type) {
   }
 }
 
-// Call the auto-focus function when the page loads
+// Call auto-focus and attach input listener when page loads
 window.addEventListener('load', () => {
-  autoFocusScanInput('pi', 'in'); // replace 'pi' and 'in' with your actual dept/type
-});
+  const dept = 'pi';
+  const type = 'in';
 
+  autoFocusScanInput(dept, type); // focus input
+
+  // Attach input listener for scanning
+  const scanInput = document.getElementById(`scan-${type}-${dept}`);
+  if (scanInput) {
+    scanInput.addEventListener('input', async (e) => {
+      const labelId = e.target.value; // scanned label
+      const operator = null;
+      const parsed = { batchNumber: null, boxNumber: null }; // optional
+
+      await scanLabel(labelId, dept, type, operator, parsed);
+
+      e.target.value = ''; // clear input for next scan
+    });
+  }
+});
 // 🟢 Universal safe scan wrapper
 async function scanLabel(labelId, dept, type, operator, parsed){
     try{

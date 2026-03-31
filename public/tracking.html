@@ -3785,6 +3785,45 @@ window.addEventListener('load', () => {
     });
   }
 });
+
+async function scanLabel(labelId, dept, type, operator, parsed){
+    try{
+        // Try to find the label locally first
+        let label = state.labels.find(l => l.id === labelId);
+
+        // Fallback: try matching batchNumber + boxNumber
+        if(!label && parsed?.batchNumber && parsed?.boxNumber != null){
+            label = state.labels.find(l =>
+                l.batchNumber === parsed.batchNumber &&
+                Math.abs(l.labelNumber) === Math.abs(parsed.boxNumber)
+            );
+        }
+
+        // If still not found, fetch from server
+        if(!label){
+            const res = await fetch("https://sunloc.up.railway.app/api/tracking/state");
+            const data = await res.json();
+            if(data.ok && data.state?.labels){
+                const serverLabels = data.state.labels;
+                label = serverLabels.find(l => l.id === labelId);
+            }
+        }
+
+        if(!label){
+            console.warn("Label not found:", labelId);
+            alert("Label not found");
+            return {ok:false, msg:"Label not found"};
+        }
+
+        // Call your original recordScan logic
+        return await recordScan(labelId, dept, type, operator, parsed);
+
+    } catch(e){
+        console.error("Scan error:", e);
+        alert("Scan error: " + e.message);
+        return {ok:false, msg:e.message};
+    }
+}
 // 🟢 Universal safe scan wrapper
 async function scanLabel(labelId, dept, type, operator, parsed){
     try{

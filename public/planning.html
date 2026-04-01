@@ -1672,51 +1672,170 @@ function saveOrderModal(existingId, defaultMachine) {
 // SAP IMPORT
 // =============================
 function importSAP() {
-  openModal('Import from SAP / Upload Template', `
+  openModal('📥 Bulk Import Orders', `
     <div style="margin-bottom:16px">
-      <div class="alert alert-info">Upload an Excel file exported from SAP B1, or use the Sunloc standard template.</div>
+      <div class="alert alert-info" style="font-size:13px">
+        Upload an Excel/CSV file to bulk import production orders. Download the template first to see the required format.
+      </div>
     </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
-      <button class="btn btn-secondary" onclick="downloadSAPTemplate()">📥 Download SAP Template</button>
-      <label class="btn btn-primary" style="cursor:pointer">
-        📤 Upload SAP Export
-        <input type="file" accept=".xlsx,.xls,.csv" onchange="processSAPFile(this)">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <button class="btn btn-secondary" onclick="downloadSAPTemplate()">📥 Download Template</button>
+      <label class="btn btn-primary" style="cursor:pointer;margin:0">
+        📤 Choose Excel / CSV File
+        <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="processSAPFile(this)">
       </label>
     </div>
-    <div class="alert alert-warn">
-      <strong>Template Columns:</strong> PO Number, Batch Number, Customer, Size, PC Code, Colour, Printed (Y/N), Qty (Lakhs), Packing, Zone, Printing Matter, Remarks
+    <div style="background:var(--surface2,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:6px">Required Columns (in any order):</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
+        <div>📌 <b>PO_Number</b> — Customer PO</div>
+        <div>📌 <b>Customer</b> — Customer name</div>
+        <div>📌 <b>Size</b> — Capsule size (00,0,1,2,3…)</div>
+        <div>📌 <b>Qty_Lakhs</b> — Order qty in lakhs</div>
+        <div>📌 <b>Machine_ID</b> — e.g. MC20, MC30</div>
+        <div>📌 <b>Printed_YN</b> — Y for printed, N for unprinted</div>
+        <div>⬜ <b>Batch_Number</b> — Auto-generated if blank</div>
+        <div>⬜ <b>PC_Code</b> — Product code</div>
+        <div>⬜ <b>Colour</b> — Cap/body colour</div>
+        <div>⬜ <b>Zone</b> — Dispatch zone</div>
+        <div>⬜ <b>Packing</b> — Packing type</div>
+        <div>⬜ <b>Printing_Matter</b> — Print text</div>
+        <div>⬜ <b>Remarks</b> — Any notes</div>
+      </div>
     </div>
     <div id="sap-preview"></div>
   `, [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
 }
 
 function downloadSAPTemplate() {
-  const headers = ['PO_Number','Batch_Number','Customer','Size','PC_Code','Colour','Printed_YN','Qty_Lakhs','Machine_ID','Packing','Zone','Printing_Matter','Remarks'];
-  const sample = ['26ZD23','BT001','ALKEM','2','21065','PU/WH','N','100','MC30','HDCL','BADDI','',''];
+  const machines = (state.machineMaster||[]).map(m=>m.id).join(', ') || 'MC20,MC30,MC31';
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
-  XLSX.utils.book_append_sheet(wb, ws, 'SAP_Import');
-  XLSX.writeFile(wb, 'Sunloc_SAP_Import_Template.xlsx');
+  // Main template sheet
+  const headers = ['PO_Number','Batch_Number','Customer','Size','PC_Code','Colour','Printed_YN','Qty_Lakhs','Machine_ID','Zone','Packing','Printing_Matter','Remarks'];
+  const samples = [
+    ['PO-2026-001','','ALKEM LABS','2','21065','PU/WH','N','100','MC30','BADDI','HDCL','',''],
+    ['PO-2026-002','','CIPLA','0','30012','CL/CL','N','75','MC20','PUNE','HDCL','','Rush order'],
+    ['PO-2026-003','26ZH035','M/S IRIAL MAGM','00','','CL.TR/CL.TR','Y','50','MC31','DELHI','PTD','SUNLOC 00','Printed capsule'],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...samples]);
+  // Column widths
+  ws['!cols'] = headers.map(h => ({wch: Math.max(h.length+2, 15)}));
+  XLSX.utils.book_append_sheet(wb, ws, 'Orders_Import');
+  // Instructions sheet
+  const instrRows = [
+    ['COLUMN','REQUIRED','DESCRIPTION','VALID VALUES / EXAMPLE'],
+    ['PO_Number','Yes','Customer Purchase Order number','PO-2026-001'],
+    ['Batch_Number','No','Leave blank for auto-generation','26ZH035'],
+    ['Customer','Yes','Full customer name','ALKEM LABS'],
+    ['Size','Yes','Capsule size code','00, 0, 1, 2, 3, 0EL'],
+    ['PC_Code','No','Product / PC code','21065'],
+    ['Colour','No','Cap/Body colour','PU/WH, CL/CL, CL.TR/CL.TR'],
+    ['Printed_YN','Yes','Is this a printed (PTD) order?','Y or N'],
+    ['Qty_Lakhs','Yes','Order quantity in Lakhs','100'],
+    ['Machine_ID','Yes','Machine to run on',''+machines],
+    ['Zone','No','Dispatch zone','BADDI, PUNE, DELHI, EXPORT'],
+    ['Packing','No','Packing type','HDCL, PTD'],
+    ['Printing_Matter','No','Text to print on capsule','SUNLOC 00'],
+    ['Remarks','No','Any additional notes','Rush order'],
+  ];
+  const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
+  wsInstr['!cols'] = [15,10,35,30].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb, wsInstr, 'Instructions');
+  XLSX.writeFile(wb, 'Sunloc_Bulk_Order_Template.xlsx');
 }
 
 function processSAPFile(input) {
   const file = input.files[0];
   if (!file) return;
+  const preview = document.getElementById('sap-preview');
+  preview.innerHTML = '<div style="color:var(--text3);padding:8px">Reading file...</div>';
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
       const wb = XLSX.read(e.target.result, {type:'binary'});
-      const ws = wb.Sheets[wb.SheetNames[0]];
+      // Use first sheet that is not "Instructions"
+      const sheetName = wb.SheetNames.find(n => !n.toLowerCase().includes('instruct')) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
-      const preview = document.getElementById('sap-preview');
-      preview.innerHTML = `<div class="alert alert-success">✓ Found ${rows.length} orders to import</div>
-        <div class="table-wrap" style="max-height:200px;overflow-y:auto">
-        <table><thead><tr>${Object.keys(rows[0]||{}).map(k=>`<th>${k}</th>`).join('')}</tr></thead>
-        <tbody>${rows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
-        </table></div>
-        <div class="mt-4"><button class="btn btn-primary" onclick="confirmSAPImport(${JSON.stringify(rows).replace(/"/g,'&quot;')})">✓ Import ${rows.length} Orders</button></div>`;
+      if (!rows.length) { preview.innerHTML = '<div class="alert alert-warn">⚠️ File is empty or has no data rows.</div>'; return; }
+
+      // Validate each row
+      const validRows = [], errorRows = [];
+      const existingPOs = new Set(state.orders.filter(o=>!o.deleted).map(o=>o.poNumber).filter(Boolean));
+      rows.forEach((row, i) => {
+        const errors = [];
+        const po = String(row.PO_Number || row['PO Number'] || '').trim();
+        const customer = String(row.Customer || '').trim();
+        const size = String(row.Size || '').trim();
+        const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty_Lakhs'] || 0);
+        const machineId = String(row.Machine_ID || row['Machine ID'] || row['Machine_ID'] || '').trim();
+        const printed = (row.Printed_YN || row['Printed (Y/N)'] || row['Printed_YN'] || 'N').toString().toUpperCase().trim();
+
+        if (!po) errors.push('Missing PO_Number');
+        if (!customer) errors.push('Missing Customer');
+        if (!size) errors.push('Missing Size');
+        if (!qty || qty <= 0) errors.push('Invalid Qty_Lakhs');
+        if (!machineId) errors.push('Missing Machine_ID');
+        if (!getMachine(machineId) && machineId) errors.push(`Machine ${machineId} not found`);
+        if (!['Y','N'].includes(printed)) errors.push('Printed_YN must be Y or N');
+        if (existingPOs.has(po)) errors.push(`PO ${po} already exists — will skip`);
+
+        if (errors.length) errorRows.push({row: i+2, po, customer, errors});
+        else validRows.push(row);
+      });
+
+      // Build preview HTML
+      let html = '';
+      if (validRows.length) {
+        html += `<div class="alert alert-success" style="margin-bottom:8px">✅ <strong>${validRows.length} orders ready to import</strong></div>`;
+        html += `<div style="max-height:220px;overflow-y:auto;border:1px solid var(--border,#e0e0e0);border-radius:6px;margin-bottom:12px">
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2,#f5f5f5)">
+            <th style="padding:6px 8px;text-align:left">PO Number</th>
+            <th style="padding:6px 8px;text-align:left">Customer</th>
+            <th style="padding:6px 8px">Size</th>
+            <th style="padding:6px 8px">Qty (L)</th>
+            <th style="padding:6px 8px">Machine</th>
+            <th style="padding:6px 8px">PTD?</th>
+            <th style="padding:6px 8px;text-align:left">Batch</th>
+          </tr></thead><tbody>
+          ${validRows.map((r,i)=>{
+            const po = String(r.PO_Number||r['PO Number']||'').trim();
+            const cust = String(r.Customer||'').trim();
+            const size = String(r.Size||'').trim();
+            const qty = parseFloat(r.Qty_Lakhs||r['Qty (Lakhs)']||0);
+            const mid = String(r.Machine_ID||r['Machine ID']||'').trim();
+            const ptd = (r.Printed_YN||r['Printed (Y/N)']||'N').toString().toUpperCase().trim();
+            const batch = String(r.Batch_Number||r['Batch Number']||'').trim() || '<i style="color:var(--text3)">auto</i>';
+            const bg = i%2===0?'':'background:var(--surface2,#fafafa)';
+            return `<tr style="${bg}">
+              <td style="padding:5px 8px;font-family:monospace">${po}</td>
+              <td style="padding:5px 8px">${cust}</td>
+              <td style="padding:5px 8px;text-align:center">${size}</td>
+              <td style="padding:5px 8px;text-align:center;font-weight:600">${qty}</td>
+              <td style="padding:5px 8px;text-align:center;font-family:monospace">${mid}</td>
+              <td style="padding:5px 8px;text-align:center">${ptd==='Y'?'✅ Y':'N'}</td>
+              <td style="padding:5px 8px;font-family:monospace">${batch}</td>
+            </tr>`;
+          }).join('')}
+          </tbody></table></div>`;
+      }
+      if (errorRows.length) {
+        html += `<div class="alert alert-warn" style="margin-bottom:8px">⚠️ <strong>${errorRows.length} rows have issues and will be skipped:</strong>
+          <ul style="margin:6px 0 0 16px;font-size:12px">
+            ${errorRows.map(e=>`<li>Row ${e.row} (${e.po||'no PO'} / ${e.customer||'no customer'}): ${e.errors.join(', ')}</li>`).join('')}
+          </ul></div>`;
+      }
+      if (validRows.length) {
+        // Store rows on window to avoid large inline JSON
+        window._sapImportRows = validRows;
+        html += `<button class="btn btn-primary" onclick="confirmSAPImport(window._sapImportRows)" style="margin-top:4px">
+          ✓ Import ${validRows.length} Order${validRows.length>1?'s':''} Now
+        </button>`;
+      }
+      preview.innerHTML = html;
     } catch(err) {
-      document.getElementById('sap-preview').innerHTML = `<div class="alert alert-warn">Error reading file: ${err.message}</div>`;
+      preview.innerHTML = `<div class="alert alert-warn">❌ Error reading file: ${err.message}</div>`;
     }
   };
   reader.readAsBinaryString(file);
@@ -1839,7 +1958,11 @@ function confirmSAPImport(rows) {
   if (machinesAffected.size === 0) saveState();
 
   closeModal();
-  alert(`✓ Imported ${imported} orders successfully. Batch numbers, print orders and dispatch plans auto-created.`);
+  const msg = imported === rows.length
+    ? `✅ Imported ${imported} order${imported>1?'s':''} successfully!\n\nBatch numbers, print/dispatch plans auto-created.`
+    : `✅ Imported ${imported} of ${rows.length} orders.\n(${rows.length-imported} skipped — duplicate PO numbers.)`;
+  alert(msg);
+  window._sapImportRows = null;
   render();
 }
 

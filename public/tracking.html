@@ -1334,6 +1334,9 @@ async function recordScan(labelId, dept, type, operator, parsed){
   saveLocal();
   pushToServer('/api/tracking/scan',{scan});
 
+  // Immediately flush queue so other devices see the scan without waiting 30s
+  setTimeout(()=>trkQueueFlush(), 500);
+
   // Update planning app stage status
   updatePlanningStageStatus(label.batchNumber);
 
@@ -3780,7 +3783,7 @@ setInterval(()=>{
   buildSidebar();
 },5*60*1000);
 
-setInterval(trkQueueFlush, 30*1000);
+setInterval(trkQueueFlush, 5*1000); // flush every 5s for near-realtime cross-device sync
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && currentDept) { trkQueueFlush(); pullFromServer(); } });
 
 // ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
@@ -3798,10 +3801,10 @@ window.addEventListener('beforeunload', () => {
   } catch(e) {}
 });
 
-// Auto sync every 60 seconds
+// Auto sync every 10 seconds — ensures cross-device scan visibility
 setInterval(()=>{
   if(serverUrl && currentDept) pullFromServer();
-},60*1000);
+},10*1000);
 
 // Cross-tab / cross-page sync: when another tab (planning/DPR) writes to localStorage, re-pull
 window.addEventListener('storage', (e) => {

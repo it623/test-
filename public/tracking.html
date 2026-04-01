@@ -1204,21 +1204,38 @@ async function recordScan(labelId, dept, type, operator, parsed){
   const batch = getBatch(label.batchNumber);
   if(!batch) return {ok:false,msg:'Batch not found'};
 
-  // Sequential check (skip for admin override)
-  if(currentDept!=='admin' && !canScanDept(label.batchNumber, dept)){
-    return {ok:false,msg:'Previous department has not closed this batch yet'};
+  // ── Strict per-label scan flow enforcement ──
+  // Rule: Each label follows AIM → Printing → PI → Packing → Dispatch
+  // Each stage: exactly 1 IN and 1 OUT, in order. No repeats, no skips.
+  const allBoxScans = getScansForBox(labelId); // sorted by ts ascending
+  const flow = getBatchFlow(batch);
+  const scannableFlow = flow.filter(s => SCANNABLE_STAGES.includes(s));
+  const deptIdx = scannableFlow.indexOf(dept);
+
+  if(deptIdx < 0) return {ok:false, msg:`Department "${dept}" is not in this batch flow`};
+
+  const deptScans = allBoxScans.filter(s => s.dept === dept);
+  const deptIn  = deptScans.filter(s => s.type === 'in').length;
+  const deptOut = deptScans.filter(s => s.type === 'out').length;
+
+  if(type === 'in'){
+    if(deptIn > 0 && deptOut > 0)
+      return {ok:false, msg:`✋ Box already completed ${dept.toUpperCase()} (IN & OUT done) — move to next stage`};
+    if(deptIn > 0)
+      return {ok:false, msg:`⚠️ Box already scanned IN at ${dept.toUpperCase()} — scan OUT to proceed`};
+    if(deptIdx > 0){
+      const prevDept = scannableFlow[deptIdx - 1];
+      const prevOut = allBoxScans.filter(s => s.dept === prevDept && s.type === 'out').length;
+      if(prevOut === 0)
+        return {ok:false, msg:`🚫 Complete ${prevDept.toUpperCase()} OUT first before scanning IN here`};
+    }
   }
 
-
-  // Check not already scanned in without out
-  if(type==='in'){
-    const lastScan = getScansForBox(labelId).filter(s=>s.dept===dept).pop();
-    if(lastScan && lastScan.type==='in') return {ok:false,msg:'Box already scanned IN at this department'};
-  }
-  if(type==='out'){
-    const deptScans = getScansForBox(labelId).filter(s=>s.dept===dept);
-    if(!deptScans.some(s=>s.type==='in')) return {ok:false,msg:'Box not scanned IN at this department'};
-    if(deptScans.filter(s=>s.type==='out').length>=deptScans.filter(s=>s.type==='in').length) return {ok:false,msg:'Box already scanned OUT at this department'};
+  if(type === 'out'){
+    if(deptIn === 0)
+      return {ok:false, msg:`⚠️ Box not scanned IN at ${dept.toUpperCase()} yet — scan IN first`};
+    if(deptOut >= deptIn)
+      return {ok:false, msg:`✋ Box already scanned OUT at ${dept.toUpperCase()}`};
   }
 
   const scan = { id:uid(), labelId, batchNumber:label.batchNumber, dept, type, ts:now(), operator:operator||currentDept, size:label.size, qty:label.qty };
@@ -2308,18 +2325,19 @@ function renderDeptScan(dept){
   <div class="card">
     <div class="card-title">Recent Scans — ${cfg.label}</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Time</th><th>Label ID</th><th>Batch</th><th>Type</th><th>Qty (L)</th></tr></thead>
+      <thead><tr><th>Time</th><th>Label</th><th>Batch</th><th>Type</th></tr></thead>
       <tbody>
       ${state.scans.filter(s=>s.dept===dept).slice(-50).reverse().map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
         const qty = s.qty || lbl?.qty || null;
+        const timeStr = fmtTime(s.ts);
+        const dateStr = fmtDate(s.ts);
         return `<tr>
-        <td class="td-mono text-sm">${fmtDateTime(s.ts)}</td>
-        <td class="td-mono text-sm">${s.labelId.slice(-8)}</td>
-        <td class="td-bold td-mono">${s.batchNumber}</td>
-        <td>${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
-        <td class="td-mono">${qty!=null?fmt(qty):'-'}</td>
-      </tr>`;}).join('')||'<tr><td colspan="5" class="text-center text-muted">No scans recorded yet</td></tr>'}
+        <td class="td-mono text-sm" style="white-space:nowrap"><div>${timeStr}</div><div style="font-size:11px;color:var(--text3)">${dateStr}</div></td>
+        <td class="td-mono text-sm">${s.labelId.slice(-8)}${qty!=null?`<div style="font-size:11px;color:var(--text3)">${fmt(qty)}L</div>`:''}</td>
+        <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}</td>
+        <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
+      </tr>`;}).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}
       </tbody>
     </table></div>
   </div>`;
@@ -2340,32 +2358,40 @@ async function processScanInput(dept,type){
   const parsed=parseScanInput(raw);
   el.value='';
 
-  const doScan = async ()=>{
-    const result= await recordScan(parsed.labelId,dept,type,currentDept,parsed);
-    if(result.ok){
+  // ── Duplicate-scan guard: block re-entry for same label+dept+type within 3s ──
+  const dedupKey = `${parsed.labelId||raw}|${dept}|${type}`;
+  if(!processScanInput._recentKeys) processScanInput._recentKeys = new Set();
+  if(processScanInput._recentKeys.has(dedupKey)){
+    zoneEl.className='scan-zone error';
+    resultEl.innerHTML=`<div class="alert alert-danger" style="font-size:15px;padding:12px">⚠️ Already scanned — wait a moment before scanning again</div>`;
+    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },3000);
+    return;
+  }
+  processScanInput._recentKeys.add(dedupKey);
+  setTimeout(()=>processScanInput._recentKeys.delete(dedupKey), 3000);
+
+  // Helper: show result without re-rendering page immediately (preserves DOM)
+  function showResult(ok, msg, warning){
+    if(ok){
       zoneEl.className='scan-zone success';
-      const warnHtml = result.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${result.warning}</div>` : '';
-      resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${result.label.batchNumber} Label #${result.label.labelNumber} (${fmt(result.label.qty)}L)</div>${warnHtml}`;
-      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, result.warning ? 6000 : 3000);
-      renderDeptScan(dept);
+      const warnHtml = warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${warning}</div>` : '';
+      resultEl.innerHTML=`<div class="alert alert-success" style="font-size:16px;padding:14px;font-weight:600">✅ ${msg}</div>${warnHtml}`;
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; renderDeptScan(dept); }, warning ? 6000 : 3000);
     } else {
       zoneEl.className='scan-zone error';
-      resultEl.innerHTML=`<div class="alert alert-danger">❌ ${result.msg}</div>`;
+      resultEl.innerHTML=`<div class="alert alert-danger" style="font-size:15px;padding:12px">❌ ${msg}</div>`;
       setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
     }
-    el.focus();
-  };
+    setTimeout(()=>{ const inp=document.getElementById(`scan-${type}-${dept}`); if(inp) inp.focus(); },100);
+  }
 
   // First attempt
   const firstResult = await recordScan(parsed.labelId, dept, type, currentDept, parsed);
   if(firstResult.ok){
-    // Success on first try
-    zoneEl.className='scan-zone success';
-    const warnHtml = firstResult.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${firstResult.warning}</div>` : '';
-    resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${firstResult.label.batchNumber} Label #${firstResult.label.labelNumber} (${fmt(firstResult.label.qty)}L)</div>${warnHtml}`;
-    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, firstResult.warning ? 6000 : 3000);
-    renderDeptScan(dept);
-    el.focus();
+    showResult(true,
+      `Scanned ${type.toUpperCase()} — Batch ${firstResult.label.batchNumber} Box #${firstResult.label.labelNumber} (${fmt(firstResult.label.qty)}L)`,
+      firstResult.warning
+    );
   } else if(firstResult.msg === 'Label not found' && serverUrl){
     // Label not in local state — sync from server then retry
     zoneEl.className='scan-zone';
@@ -2430,23 +2456,16 @@ async function processScanInput(dept,type){
       }
       // Always update UI — never stuck
       if(retry.ok){
-        zoneEl.className='scan-zone success';
-        const warnHtml = retry.warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${retry.warning}</div>` : '';
-        resultEl.innerHTML=`<div class="alert alert-success">✅ Scanned ${type.toUpperCase()} — Batch ${retry.label.batchNumber} Label #${retry.label.labelNumber} (${fmt(retry.label.qty)}L)</div>${warnHtml}`;
-        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; }, retry.warning ? 6000 : 3000);
-        renderDeptScan(dept);
+        showResult(true,
+          `Scanned ${type.toUpperCase()} — Batch ${retry.label.batchNumber} Box #${retry.label.labelNumber} (${fmt(retry.label.qty)}L)`,
+          retry.warning
+        );
       } else {
-        zoneEl.className='scan-zone error';
-        resultEl.innerHTML=`<div class="alert alert-danger">❌ ${retry.msg}</div>`;
-        setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+        showResult(false, retry.msg);
       }
-      el.focus();
     })();
   } else {
-    zoneEl.className='scan-zone error';
-    resultEl.innerHTML=`<div class="alert alert-danger">❌ ${firstResult.msg}</div>`;
-    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
-    el.focus();
+    showResult(false, firstResult.msg);
   }
 }
 

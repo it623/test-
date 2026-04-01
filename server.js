@@ -1269,9 +1269,28 @@ app.get('/api/tracking/labels', asyncRoute(async (req, res) => {
 app.post('/api/tracking/scan', asyncRoute(async (req, res) => {
   const { scan } = req.body;
   if(!scan||!scan.id) return res.status(400).json({ok:false,error:'Missing scan'});
+  const labelId = scan.labelId||scan.label_id;
+  const dept    = scan.dept;
+  const type    = scan.type;
+
+  // Server-side flow enforcement
+  const existing = await queryAll(
+    `SELECT type FROM tracking_scans WHERE label_id=$1 AND dept=$2 ORDER BY ts ASC`,
+    [labelId, dept]
+  );
+  const deptIn  = existing.filter(s=>s.type==='in').length;
+  const deptOut = existing.filter(s=>s.type==='out').length;
+
+  if(type==='in' && deptIn>0)
+    return res.json({ok:false, error:`Box already scanned IN at ${dept}`});
+  if(type==='out' && deptIn===0)
+    return res.json({ok:false, error:`Box not scanned IN at ${dept} yet`});
+  if(type==='out' && deptOut>=deptIn)
+    return res.json({ok:false, error:`Box already scanned OUT at ${dept}`});
+
   await query(
     `INSERT INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,size,qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO NOTHING`,
-    [scan.id,scan.labelId||scan.label_id,scan.batchNumber||scan.batch_number,scan.dept,scan.type,scan.ts,scan.operator||null,scan.size||null,scan.qty||null]
+    [scan.id,labelId,scan.batchNumber||scan.batch_number,dept,type,scan.ts,scan.operator||null,scan.size||null,scan.qty||null]
   );
   res.json({ok:true});
 }));

@@ -1556,22 +1556,67 @@ function updateBacklog(sh,mcId){
 function renderDTTable(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
-  let html=`<table class="dttable"><thead><tr><th>Machine</th>`;
-  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>html+=`<th>${sh}/${DT_LABELS[c].substring(0,4)}</th>`));
-  html+=`</tr></thead><tbody>`;
-  mcs.forEach(mc=>{
-    html+=`<tr><td>MC${mc.id.replace('MC','')}</td>`;
-    SHIFTS.forEach(sh=>DT_CATS.forEach(c=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      const val=m[c]||'';
-      html+=`<td><input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0" style="width:44px" oninput="markUnsaved();updateDTSummary()"></td>`;
-    }));
-    html+=`</tr>`;
+
+  const SHIFT_COLOR = { A:'#00d4ff', B:'#00e676', C:'#ffab00' };
+  const SHIFT_BG    = { A:'rgba(0,212,255,0.10)', B:'rgba(0,230,118,0.10)', C:'rgba(255,171,0,0.10)' };
+
+  // Header row — Machine + grouped shift columns
+  let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;min-width:700px;font-size:12px">
+    <thead>
+      <!-- Row 1: shift group labels -->
+      <tr>
+        <th rowspan="2" style="padding:6px 10px;text-align:left;font-family:var(--fc);font-size:11px;color:var(--t3);border:1px solid var(--b1);background:var(--s2);position:sticky;left:0;z-index:2;white-space:nowrap">Machine</th>
+        ${SHIFTS.map(sh=>`
+          <th colspan="${DT_CATS.length}" style="padding:5px 8px;text-align:center;font-family:var(--fc);font-size:11px;font-weight:700;letter-spacing:1px;color:${SHIFT_COLOR[sh]};background:${SHIFT_BG[sh]};border:1px solid ${SHIFT_COLOR[sh]}55;border-bottom:2px solid ${SHIFT_COLOR[sh]}">
+            SHIFT ${sh}
+          </th>`).join('')}
+      </tr>
+      <!-- Row 2: category labels per shift -->
+      <tr>
+        ${SHIFTS.map(sh=>DT_CATS.map(c=>`
+          <th style="padding:4px 5px;text-align:center;font-family:var(--fc);font-size:10px;color:${SHIFT_COLOR[sh]};background:${SHIFT_BG[sh]};border:1px solid ${SHIFT_COLOR[sh]}33;white-space:nowrap;letter-spacing:.3px">
+            ${DT_LABELS[c].substring(0,4)}
+          </th>`).join('')).join('')}
+      </tr>
+    </thead>
+    <tbody>`;
+
+  mcs.forEach((mc, ri)=>{
+    const rowBg = ri%2===0 ? 'transparent' : 'rgba(255,255,255,0.025)';
+    html += `<tr style="background:${rowBg}">
+      <td style="padding:4px 10px;font-family:var(--mono);font-size:12px;color:var(--cyan);font-weight:600;border:1px solid var(--b1);position:sticky;left:0;background:var(--bg1);z-index:1;white-space:nowrap">${mc.id}</td>
+      ${SHIFTS.map(sh=>{
+        const m = migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+        return DT_CATS.map(c=>{
+          const val = m[c]||'';
+          const v = parseFloat(val)||0;
+          const cellBg = v>=60?'rgba(255,64,96,0.15)':v>=30?'rgba(255,171,0,0.12)':v>0?SHIFT_BG[sh]:'transparent';
+          const cellClr = v>=60?'#ff4060':v>=30?'var(--amber)':v>0?SHIFT_COLOR[sh]:'var(--t2)';
+          return `<td style="padding:2px 3px;border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};text-align:center;background:${cellBg}">
+            <input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0"
+              style="width:38px;text-align:center;background:transparent;border:none;color:${cellClr};font-family:var(--mono);font-size:12px;padding:1px 0"
+              oninput="markUnsaved();updateDTSummary()">
+          </td>`;
+        }).join('');
+      }).join('')}
+    </tr>`;
   });
-  html+=`</tbody></table>`;
+
+  // Totals row
+  html += `<tr style="border-top:2px solid var(--b1)">
+    <td style="padding:4px 10px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px;border:1px solid var(--b1);position:sticky;left:0;background:var(--bg1);z-index:1">TOTAL</td>
+    ${SHIFTS.map(sh=>DT_CATS.map(c=>{
+      const total = mcs.reduce((s,mc)=>{
+        const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+        return s+parseFloat(m[c]||0);
+      },0);
+      return `<td style="padding:4px 3px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:${total>0?SHIFT_COLOR[sh]:'var(--t3)'};border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};background:${SHIFT_BG[sh]}">${total||'—'}</td>`;
+    }).join('')).join('')}
+  </tr>`;
+
+  html += `</tbody></table></div>`;
   document.getElementById('dtTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
 }
-
 function renderDTSummary(){
   const fl=curFloor, d=getDate();
   const mcs=getActiveMachines(fl);

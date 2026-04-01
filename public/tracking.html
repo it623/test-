@@ -2647,12 +2647,12 @@ function renderDispatch(){
       ${state.scans.filter(s=>s.dept==='dispatch').slice(-50).reverse().map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
         const qty = s.qty || lbl?.qty || null;
-        return \`<tr>
-          <td class="td-mono text-sm" style="white-space:nowrap"><div>\${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">\${fmtDate(s.ts)}</div></td>
-          <td class="td-mono text-sm">\${s.labelId.slice(-8)}\${qty!=null?\`<div style="font-size:11px;color:var(--text3)">\${fmt(qty)}L</div>\`:''}</td>
-          <td class="td-bold td-mono" style="white-space:nowrap">\${s.batchNumber}</td>
-          <td style="white-space:nowrap">\${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
-        </tr>\`;
+        return `<tr>
+          <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
+          <td class="td-mono text-sm">${s.labelId.slice(-8)}${qty!=null?`<div style="font-size:11px;color:var(--text3)">${fmt(qty)}L</div>`:''}</td>
+          <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}</td>
+          <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
+        </tr>`;
       }).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}
       </tbody>
     </table></div>

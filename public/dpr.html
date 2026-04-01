@@ -457,7 +457,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 // ═══════════════════════════════════════════════════════
 // MASTER DATA
 // ═══════════════════════════════════════════════════════
-const FLOORS = {
+const FLOORS_DEFAULT = {
   GF: { label:'Ground Floor', machines:[
     {id:'MC20',sz:'#2'},{id:'MC21',sz:'#0'},{id:'MC22',sz:'#0'},
     {id:'MC29',sz:'#0'},{id:'MC30',sz:'#2'},{id:'MC31',sz:'#2'},
@@ -471,6 +471,45 @@ const FLOORS = {
     {id:'MC26',sz:'#0'},{id:'MC27',sz:'#1'},{id:'MC28',sz:'#2'}
   ]}
 };
+
+// Load custom machine edits (size changes + new machines) from localStorage
+function loadFloors() {
+  try {
+    const custom = JSON.parse(localStorage.getItem('dpr_custom_machines') || '{}');
+    // Deep clone defaults
+    const floors = JSON.parse(JSON.stringify(FLOORS_DEFAULT));
+    // Apply size overrides and add new machines
+    Object.entries(custom).forEach(([flKey, machines]) => {
+      if (!floors[flKey]) floors[flKey] = { label: flKey, machines: [] };
+      machines.forEach(cm => {
+        const existing = floors[flKey].machines.find(m => m.id === cm.id);
+        if (existing) {
+          existing.sz = cm.sz; // update size
+        } else {
+          floors[flKey].machines.push({ id: cm.id, sz: cm.sz }); // add new
+        }
+      });
+    });
+    return floors;
+  } catch(e) { return JSON.parse(JSON.stringify(FLOORS_DEFAULT)); }
+}
+
+function saveCustomMachines() {
+  // Save only differences from default (size changes + new machines)
+  const custom = {};
+  Object.entries(FLOORS).forEach(([fl, flData]) => {
+    const defaultMachines = FLOORS_DEFAULT[fl]?.machines || [];
+    const changed = [];
+    flData.machines.forEach(m => {
+      const def = defaultMachines.find(d => d.id === m.id);
+      if (!def || def.sz !== m.sz) changed.push({ id: m.id, sz: m.sz });
+    });
+    if (changed.length) custom[fl] = changed;
+  });
+  localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
+}
+
+let FLOORS = loadFloors();
 
 // Machine operator groups — one operator entry covers all machines in a group
 // Multiple operators allowed per group
@@ -570,28 +609,92 @@ function resetAllMachinesActive(fl){
 function renderMachineSettings(){
   const container=document.getElementById('machine-settings-area');
   if(!container) return;
+  const SIZES = ['#00','#0','#0EL','#1','#2','#3','#4','#5'];
   let html='';
   Object.entries(FLOORS).forEach(([fl,flData])=>{
     const active=getActiveMachines(fl).map(m=>m.id);
-    html+=`<div style="margin-bottom:16px">
-      <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">
+    html+=`<div style="margin-bottom:20px">
+      <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:var(--t3);margin-bottom:8px;display:flex;align-items:center;gap:8px">
         ${flData.label}
         <button onclick="resetAllMachinesActive('${fl}');renderMachineSettings();renderEntry()"
-          style="margin-left:8px;font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
+          style="font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         ${flData.machines.map(m=>{
           const on=active.includes(m.id);
-          return `<label style="display:flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid ${on?'var(--accent)':'var(--b2)'};border-radius:4px;cursor:pointer;background:${on?'rgba(0,212,255,0.08)':'transparent'}">
-            <input type="checkbox" ${on?'checked':''} onchange="setMachineActive('${fl}','${m.id}',this.checked);renderMachineSettings();renderEntry()" style="accent-color:var(--accent)">
-            <span style="font-family:var(--mono);font-size:12px;color:${on?'var(--accent)':'var(--t2)'}">${m.id}</span>
-            <span style="font-size:10px;color:var(--t3)">${m.sz}</span>
-          </label>`;
+          const isCustom=!FLOORS_DEFAULT[fl]?.machines.find(d=>d.id===m.id);
+          return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 8px;border:1px solid ${on?'var(--accent)':'var(--b2)'};border-radius:6px;background:${on?'rgba(0,212,255,0.06)':'transparent'}">
+            <div style="display:flex;align-items:center;gap:4px">
+              <input type="checkbox" ${on?'checked':''} onchange="setMachineActive('${fl}','${m.id}',this.checked);renderMachineSettings();renderEntry()" style="accent-color:var(--accent)">
+              <span style="font-family:var(--mono);font-size:12px;color:${on?'var(--accent)':'var(--t2)'}">${m.id}${isCustom?'<span style="color:var(--yellow);font-size:9px;margin-left:2px">NEW</span>':''}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:3px">
+              <select onchange="updateMachineSize('${fl}','${m.id}',this.value)"
+                style="font-size:10px;background:var(--bg2);border:1px solid var(--b2);border-radius:3px;color:var(--t2);padding:1px 2px;cursor:pointer">
+                ${SIZES.map(s=>`<option value="${s}" ${m.sz===s?'selected':''}>${s}</option>`).join('')}
+              </select>
+              ${isCustom?`<button onclick="removeMachine('${fl}','${m.id}')" title="Remove machine"
+                style="font-size:9px;padding:1px 4px;background:transparent;border:1px solid var(--red);border-radius:3px;color:var(--red);cursor:pointer">✕</button>`:''}
+            </div>
+          </div>`;
         }).join('')}
+      </div>
+      <!-- Add new machine row -->
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span style="font-size:11px;color:var(--t3)">+ Add:</span>
+        <input id="new-mc-id-${fl}" placeholder="e.g. MC35" maxlength="6"
+          style="width:72px;font-size:12px;font-family:var(--mono);background:var(--bg2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:3px 6px">
+        <select id="new-mc-sz-${fl}"
+          style="font-size:12px;background:var(--bg2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:3px 6px">
+          ${SIZES.map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+        <button onclick="addNewMachine('${fl}')"
+          style="font-size:11px;padding:3px 10px;background:var(--accent);color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600">Add</button>
       </div>
     </div>`;
   });
   container.innerHTML=html;
+}
+
+function updateMachineSize(fl, mcId, newSz) {
+  const mc = FLOORS[fl]?.machines.find(m=>m.id===mcId);
+  if (mc) {
+    mc.sz = newSz;
+    saveCustomMachines();
+    renderEntry();
+    toast(`${mcId} size updated to ${newSz}`,'var(--accent)');
+  }
+}
+
+function addNewMachine(fl) {
+  const idInput = document.getElementById(`new-mc-id-${fl}`);
+  const szInput = document.getElementById(`new-mc-sz-${fl}`);
+  const id = idInput?.value?.trim().toUpperCase();
+  const sz = szInput?.value || '#0';
+  if (!id) { toast('Enter machine ID','var(--red)'); return; }
+  // Check not already exists
+  const allIds = Object.values(FLOORS).flatMap(f=>f.machines.map(m=>m.id));
+  if (allIds.includes(id)) { toast(`${id} already exists`,'var(--red)'); return; }
+  FLOORS[fl].machines.push({id, sz});
+  saveCustomMachines();
+  renderMachineSettings();
+  renderEntry();
+  toast(`${id} (${sz}) added to ${FLOORS[fl].label}`,'var(--accent)');
+}
+
+function removeMachine(fl, mcId) {
+  if (!confirm(`Remove ${mcId} from ${FLOORS[fl].label}? This only removes it from the machine list.`)) return;
+  FLOORS[fl].machines = FLOORS[fl].machines.filter(m=>m.id!==mcId);
+  // Also remove from custom storage
+  try {
+    const custom = JSON.parse(localStorage.getItem('dpr_custom_machines')||'{}');
+    if (custom[fl]) custom[fl] = custom[fl].filter(m=>m.id!==mcId);
+    localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
+  } catch(e){}
+  saveCustomMachines();
+  renderMachineSettings();
+  renderEntry();
+  toast(`${mcId} removed`,'var(--yellow)');
 }
 
 function blankMachine(){ return {runs:[blankRun()], aim:'', operator:'', proc:'', mech:'', elec:'', gpr:'', hvac:'', dw:''}; }
@@ -823,6 +926,7 @@ async function pushToServer(fl,d,data){
       signal:AbortSignal.timeout(6000)
     });
     setSyncBadge('synced');
+    try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
     // Push succeeded — remove this entry from the queue
     try{
       const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');

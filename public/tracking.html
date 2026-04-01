@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>Sunloc Tracking Suite v1.1</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -637,8 +640,33 @@ function getMachineFloor(machineId){
 function getBatch(batchNo){ return state.batches.find(b=>b.batchNumber===batchNo||b.id===batchNo)||null }
 function getBatchFlow(batch){ return batch?.isPrinted ? WIP_FLOW.printed : WIP_FLOW.unprinted }
 
-function getScansForBox(labelId){ return state.scans.filter(s=>s.labelId===labelId).sort((a,b)=>new Date(a.ts)-new Date(b.ts)) }
-function getScansForBatch(batchNo){ return state.scans.filter(s=>s.batchNumber===batchNo) }
+function getScansForBox(labelId){
+  // Primary: exact match
+  // Fallback: suffix match handles temp-batch -> real-batch ID migration
+  // e.g. old scan labelId "BT006-abc123xyz", new labelId "26ZH035-abc123xyz"
+  // The suffix "-abc123xyz" (random part) stays the same — safe to match on
+  const dashIdx = labelId.indexOf('-');
+  const suffix = (dashIdx > 0 && labelId.length - dashIdx >= 7) ? labelId.slice(dashIdx) : null;
+  return state.scans.filter(s =>
+    s.labelId === labelId ||
+    (suffix && s.labelId && s.labelId !== labelId && s.labelId.endsWith(suffix))
+  ).sort((a,b) => new Date(a.ts) - new Date(b.ts));
+}
+function getScansForBatch(batchNo){
+  // Primary: by batchNumber field
+  // Also include scans whose labelId belongs to a label in this batch
+  // (handles old scans stored with temp-batch batchNumber e.g. BT006 vs real 26ZH035)
+  const batchLabelIds = new Set(state.labels.filter(l=>l.batchNumber===batchNo).map(l=>l.id));
+  // For suffix matching: collect ID suffixes of this batch's labels
+  const suffixes = new Set(
+    [...batchLabelIds].map(id=>{ const d=id.indexOf('-'); return d>0?id.slice(d):null; }).filter(Boolean)
+  );
+  return state.scans.filter(s=>
+    s.batchNumber===batchNo ||
+    batchLabelIds.has(s.labelId) ||
+    (s.labelId && [...suffixes].some(sx=>s.labelId.endsWith(sx)))
+  );
+}
 
 function getBoxCurrentStage(labelId){
   const scans = getScansForBox(labelId);
@@ -661,7 +689,7 @@ function getStageQty(batchNo, dept, type){
   // Returns total lakhs scanned in/out for a batch at a dept
   const batch = getBatch(batchNo);
   if(!batch) return 0;
-  const relevantScans = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type===type);
+  const relevantScans = getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type===type);
   return relevantScans.reduce((sum,s)=>sum+(boxToLakh(1,batch.size)*1),0);
 }
 
@@ -687,22 +715,35 @@ function canScanDept(batchNo, dept){
   const idx = flow.indexOf(dept);
   if(idx < 0) return false;
 
-  // Find the previous SCANNABLE stage (skip 'production' — tracked via DPR not scanner)
+  // Find the previous SCANNABLE stage
   let prevScannable = null;
   for(let i = idx-1; i >= 0; i--){
     if(SCANNABLE_STAGES.includes(flow[i])){ prevScannable = flow[i]; break; }
   }
 
-  // No previous scannable stage = this is the first scannable dept (AIM) — always open
+  // No previous scannable stage = first dept (AIM) — always open
   if(!prevScannable) return true;
 
-  // Count how many boxes were scanned OUT of the previous scannable department
-  const prevOut = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===prevScannable&&s.type==='out').length;
-  if(prevOut === 0) return false;
+  // Get all labels for this batch
+  const batchLabels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided);
+  if(!batchLabels.length) return false;
 
-  // Count how many boxes already scanned IN to this department
-  const thisIn = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
-  return thisIn < prevOut;
+  // Check if at least one label has been scanned OUT from previous dept
+  // Uses getScansForBox which handles old temp-batch label IDs via suffix matching
+  const anyPrevOut = batchLabels.some(l=>{
+    const scans = getScansForBox(l.id);
+    return scans.some(s=>s.dept===prevScannable&&s.type==='out');
+  });
+  if(!anyPrevOut) return false;
+
+  // Check if there are still labels not yet scanned IN at this dept
+  const anyNotYetIn = batchLabels.some(l=>{
+    const scans = getScansForBox(l.id);
+    const thisIn  = scans.filter(s=>s.dept===dept&&s.type==='in').length;
+    const thisOut = scans.filter(s=>s.dept===dept&&s.type==='out').length;
+    return thisIn === 0 || thisOut < thisIn;
+  });
+  return anyNotYetIn;
 }
 
 function checkAlerts(){
@@ -1255,7 +1296,7 @@ async function recordScan(labelId, dept, type, operator, parsed){
   // ── Level 1 soft warning: scan count vs DPR production ──
   let scanWarning = null;
   if(type==='in' && dept==='aim'){
-    const aimScansIn = state.scans.filter(s=>s.batchNumber===label.batchNumber&&s.dept==='aim'&&s.type==='in').length + 1;
+    const aimScansIn = getScansForBatch(label.batchNumber).filter(s=>s.dept==='aim'&&s.type==='in').length + 1;
     const dprBoxes   = batch.actualQty ? lakhToBox(batch.actualQty, batch.size) : null;
     if(dprBoxes !== null && aimScansIn > dprBoxes){
       scanWarning = `⚠️ Scan count (${aimScansIn} boxes) exceeds DPR gross production (${batch.actualQty}L = ${dprBoxes} boxes). Please verify DPR entry.`;
@@ -1430,8 +1471,8 @@ function getBatchWIPDays(batchNo){
   let wipQty = 0;
   const flow = getBatchFlow(batch);
   flow.filter(s=>s!=='production'&&s!=='dispatch').forEach(dept=>{
-    const inScans = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in');
-    const outScans = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='out');
+    const inScans = getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in');
+    const outScans = getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='out');
     const netBoxes = inScans.length - outScans.length;
     if(netBoxes>0) wipQty += boxToLakh(netBoxes, batch.size);
   });
@@ -1467,8 +1508,8 @@ function getBatchAGrade(batchNo, stage){
   if(!batch) return {inspected:0,aGrade:0,pct:0,salvage:0,remelt:0};
 
   if(stage==='unprinted'){
-    const aimOut = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='out').length;
-    const aimIn = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
+    const aimOut = getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='out').length;
+    const aimIn = getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in').length;
     const aGrade = boxToLakh(aimOut, batch.size);
     const w = getTotalWastage(batchNo,'aim');
     const inspected = aGrade + w.total;
@@ -1476,11 +1517,11 @@ function getBatchAGrade(batchNo, stage){
   }
 
   if(stage==='printed'){
-    const piOut = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='pi'&&s.type==='out').length;
+    const piOut = getScansForBatch(batchNo).filter(s=>s.dept==='pi'&&s.type==='out').length;
     const aGrade = boxToLakh(piOut, batch.size);
     const wPrinting = getTotalWastage(batchNo,'printing');
     const wPI = getTotalWastage(batchNo,'pi');
-    const grossIn = boxToLakh(state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='out').length, batch.size);
+    const grossIn = boxToLakh(getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='out').length, batch.size);
     return { aGrade, salvage:wPrinting.salvage+wPI.salvage, remelt:wPrinting.remelt+wPI.remelt, pct:grossIn>0?(aGrade/grossIn*100):0 };
   }
   return {inspected:0,aGrade:0,pct:0};
@@ -1927,7 +1968,7 @@ function getBoxCurrentStageForBatch(batchNo){
   for(let i=flow.length-1;i>=0;i--){
     const dept=flow[i];
     if(isStageComplete(batchNo,dept)) return i<flow.length-1?DEPT_LABELS[flow[i+1]]:'Complete';
-    const inScans=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+    const inScans=getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in').length;
     if(inScans>0) return DEPT_LABELS[dept];
   }
   return DEPT_LABELS[flow[0]];
@@ -2289,8 +2330,8 @@ function renderDeptScan(dept){
       <thead><tr><th>Batch</th><th>Customer</th><th>Scan IN</th><th>Scan OUT</th><th>A-Grade</th><th>Wastage</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
       ${activeBatches.map(b=>{
-        const inCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='in').length;
-        const outCount=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='out').length;
+        const inCount=getScansForBatch(b.batchNumber).filter(s=>s.dept===dept&&s.type==='in').length;
+        const outCount=getScansForBatch(b.batchNumber).filter(s=>s.dept===dept&&s.type==='out').length;
         const w=getTotalWastage(b.batchNumber,dept);
         const inQty=boxToLakh(inCount,b.size);
         const outQty=boxToLakh(outCount,b.size);
@@ -2479,7 +2520,7 @@ function saveWastage(dept){
   const batch=getBatch(batchNo);
   if(!batch) return;
   // Validate: total wastage cannot exceed scanned in qty
-  const inCount=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+  const inCount=getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in').length;
   const inQty=boxToLakh(inCount,batch.size);
   const existing=getTotalWastage(batchNo,dept);
   if(existing.total+salvage+remelt>inQty){
@@ -2498,8 +2539,8 @@ function saveWastage(dept){
 
 function closeBatchStage(batchNo, dept){
   const batch = getBatch(batchNo);
-  const inCount  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
-  const outCount = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='out').length;
+  const inCount  = getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in').length;
+  const outCount = getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='out').length;
   const w = getTotalWastage(batchNo, dept);
   const ps = PACK_SIZES[String(batch?.size)] || 1;
   const wastageBoxes = Math.round(w.total / ps);
@@ -2561,34 +2602,60 @@ function renderDispatch(){
     </div>
 
     <!-- SCAN PANEL -->
-    <div class="grid-2 mb-16">
+    <div class="grid-2 scan-panels-grid mb-16">
       <div>
-        <div class="card-title">📥 Receive from Packing</div>
+        <div class="card-title">📥 SCAN IN — Receive from Packing</div>
         <div class="scan-zone" id="scan-zone-in-dispatch">
-          <div style="font-size:28px;margin-bottom:6px">📥</div>
-          <input class="scan-input" id="scan-in-dispatch" placeholder="Scan label to receive"
-            onkeydown="if(event.key==='Enter')processScanInput('dispatch','in')">
+          <div style="font-size:28px;margin-bottom:6px;text-align:center">📥</div>
+          <div class="fw-bold mb-8" style="text-align:center">Scan box to check IN</div>
+          <button class="btn btn-camera-mobile mobile-show" onclick="startCamera(v=>fillScanInput('dispatch','in',v))">📷 Open Camera to Scan</button>
+          <input class="scan-input" id="scan-in-dispatch" placeholder="Scan or type label ID"
+            onkeydown="if(event.key==='Enter')processScanInput('dispatch','in')"
+            style="width:100%;margin-bottom:8px">
           <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('dispatch','in',v))">📷</button>
-            <button class="btn btn-sm btn-primary" onclick="processScanInput('dispatch','in')">✓ Receive</button>
+            <button class="btn btn-sm btn-secondary desktop-only" onclick="startCamera(v=>fillScanInput('dispatch','in',v))">📷 Camera</button>
+            <button class="btn btn-sm btn-primary" onclick="processScanInput('dispatch','in')" style="flex:1">✓ Confirm IN</button>
           </div>
         </div>
         <div id="scan-result-in-dispatch" class="mt-8"></div>
       </div>
       <div>
-        <div class="card-title">📤 Dispatch Out</div>
+        <div class="card-title">📤 SCAN OUT — Dispatch</div>
         <div class="scan-zone" id="scan-zone-out-dispatch">
-          <div style="font-size:28px;margin-bottom:6px">🚚</div>
-          <input class="scan-input" id="scan-out-dispatch" placeholder="Scan label to dispatch"
-            onkeydown="if(event.key==='Enter')processScanInput('dispatch','out')">
+          <div style="font-size:28px;margin-bottom:6px;text-align:center">🚚</div>
+          <div class="fw-bold mb-8" style="text-align:center">Scan box to Dispatch OUT</div>
+          <button class="btn btn-camera-mobile mobile-show" style="background:var(--accent2)!important" onclick="startCamera(v=>fillScanInput('dispatch','out',v))">📷 Open Camera to Scan</button>
+          <input class="scan-input" id="scan-out-dispatch" placeholder="Scan or type label ID"
+            onkeydown="if(event.key==='Enter')processScanInput('dispatch','out')"
+            style="width:100%;margin-bottom:8px">
           <div class="flex gap-8 mt-8" style="justify-content:center">
-            <button class="btn btn-sm btn-secondary" onclick="startCamera(v=>fillScanInput('dispatch','out',v))">📷</button>
-            <button class="btn btn-sm btn-success" onclick="processScanInput('dispatch','out')">✓ Dispatch</button>
+            <button class="btn btn-sm btn-secondary desktop-only" onclick="startCamera(v=>fillScanInput('dispatch','out',v))">📷 Camera</button>
+            <button class="btn btn-sm btn-success" onclick="processScanInput('dispatch','out')" style="flex:1">✓ Confirm OUT</button>
           </div>
         </div>
         <div id="scan-result-out-dispatch" class="mt-8"></div>
       </div>
     </div>
+  </div>
+
+  <!-- RECENT SCANS - DISPATCH -->
+  <div class="card mb-16">
+    <div class="card-title">Recent Scans — Dispatch</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Time</th><th>Label</th><th>Batch</th><th>Type</th></tr></thead>
+      <tbody>
+      ${state.scans.filter(s=>s.dept==='dispatch').slice(-50).reverse().map(s=>{
+        const lbl = state.labels.find(l=>l.id===s.labelId);
+        const qty = s.qty || lbl?.qty || null;
+        return \`<tr>
+          <td class="td-mono text-sm" style="white-space:nowrap"><div>\${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">\${fmtDate(s.ts)}</div></td>
+          <td class="td-mono text-sm">\${s.labelId.slice(-8)}\${qty!=null?\`<div style="font-size:11px;color:var(--text3)">\${fmt(qty)}L</div>\`:''}</td>
+          <td class="td-bold td-mono" style="white-space:nowrap">\${s.batchNumber}</td>
+          <td style="white-space:nowrap">\${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
+        </tr>\`;
+      }).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}
+      </tbody>
+    </table></div>
   </div>
 
   <!-- PACKED LEDGER -->
@@ -2762,13 +2829,13 @@ function renderBatchCard(batch){
   const ag=getBatchAGrade(batchNo,batch.isPrinted?'printed':'unprinted');
   const labels=getLabelsByBatch(batchNo);
   const totalBoxes=labels.length;
-  const packedOut=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out').length;
-  const dispatched=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='dispatch'&&s.type==='out').length;
+  const packedOut=getScansForBatch(batchNo).filter(s=>s.dept==='packing'&&s.type==='out').length;
+  const dispatched=getScansForBatch(batchNo).filter(s=>s.dept==='dispatch'&&s.type==='out').length;
   const dispatchPct=totalBoxes>0?(dispatched/totalBoxes*100):0;
 
   const flowSteps=flow.map((dept,i)=>{
     const closed=isStageComplete(batchNo,dept)||dept==='production';
-    const inCount=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+    const inCount=getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in').length;
     const isActive=!closed&&inCount>0;
     const deptAlerts=alerts.filter(a=>a.dept===dept).length;
     const cls=deptAlerts>0?'alert':closed?'done':isActive?'active':'';
@@ -2950,11 +3017,11 @@ function renderReportF(){
     const dprBoxes  = dprQtyL > 0 ? lakhToBox(dprQtyL, batch.size) : 0;
 
     // AIM scans IN for today
-    const aimInToday  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
+    const aimInToday  = getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
     // AIM scans IN total (all time)
-    const aimInTotal  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
+    const aimInTotal  = getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in').length;
     // Packing scans OUT today
-    const packOutToday = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
+    const packOutToday = getScansForBatch(batchNo).filter(s=>s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
 
     const diff        = aimInToday - dprBoxes;
     const hasException = dprBoxes === 0 && aimInToday > 0  ? 'NO_DPR'
@@ -3036,9 +3103,9 @@ function exportReportF(){
   batchNos.forEach(batchNo=>{
     const b = getBatch(batchNo); if(!b) return;
     const dprL = b.actualQty||0, dprBox = dprL>0?lakhToBox(dprL,b.size):0;
-    const aimToday = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
-    const aimTotal = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
-    const packOut  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
+    const aimToday = getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
+    const aimTotal = getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in').length;
+    const packOut  = getScansForBatch(batchNo).filter(s=>s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
     const status   = dprBox===0&&aimToday>0?'No DPR Entry':aimToday>dprBox?'Over-scan':aimToday<dprBox&&dprBox>0?'Under-scan':'Matched';
     rows.push([batchNo,b.customer||'',b.size,dprL,dprBox,aimToday,aimTotal,packOut,status]);
   });
@@ -3095,7 +3162,7 @@ function renderReportC(){
     batches.forEach(b=>{
       const wipDays=getBatchWIPDays(b.batchNumber);
       const std=b.isPrinted?3:2;
-      const packedOut=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length;
+      const packedOut=getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length;
       const packedQty=boxToLakh(packedOut,b.size);
       const grossProd=b.actualProd||0;
       let statusBadge='';
@@ -3178,7 +3245,7 @@ function renderReportA(){
     const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
     const labels=getLabelsByBatch(b.batchNumber);
     const dispatched=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
-    const batchScans=state.scans.filter(s=>s.batchNumber===b.batchNumber);
+    const batchScans=getScansForBatch(b.batchNumber);
 
     // Build day-wise scan history
     const scanDates=[...new Set(batchScans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
@@ -3242,8 +3309,8 @@ function renderBatchFlowSummary(batch){
   const flow=getBatchFlow(batch);
   return `<div class="flex gap-8 flex-wrap">
   ${flow.map(dept=>{
-    const inn=state.scans.filter(s=>s.batchNumber===batch.batchNumber&&s.dept===dept&&s.type==='in').length;
-    const out=state.scans.filter(s=>s.batchNumber===batch.batchNumber&&s.dept===dept&&s.type==='out').length;
+    const inn=getScansForBatch(batch.batchNumber).filter(s=>s.dept===dept&&s.type==='in').length;
+    const out=getScansForBatch(batch.batchNumber).filter(s=>s.dept===dept&&s.type==='out').length;
     const closed=isStageComplete(batch.batchNumber,dept);
     return `<div style="background:${closed?'var(--accent2-light)':'var(--surface2)'};border:1px solid ${closed?'var(--accent2)':'var(--border)'};border-radius:6px;padding:6px 10px;text-align:center">
       <div class="text-sm fw-bold">${DEPT_LABELS[dept]}</div>
@@ -3267,8 +3334,8 @@ function renderReportE(){
       batches.forEach(b=>{
         // Filter scans by date if a filter is set
         const scansForBatch = filterDate
-          ? state.scans.filter(s=>s.batchNumber===b.batchNumber && s.ts?.slice(0,10)===filterDate)
-          : state.scans.filter(s=>s.batchNumber===b.batchNumber);
+          ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
+          : getScansForBatch(b.batchNumber);
         const grossProd=b.actualProd||0;
         const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
         const aimOutQty=boxToLakh(aimOut,b.size);
@@ -3348,9 +3415,9 @@ function exportReportB(){
   ['aim','printing','pi','packing'].forEach(dept=>{
     [...new Set(state.scans.filter(s=>s.dept===dept).map(s=>s.batchNumber))].forEach(batchNo=>{
       const b=getBatch(batchNo);
-      const inn=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
-      const out=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='out').length;
-      const firstIn=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').sort((a,c)=>new Date(a.ts)-new Date(c.ts))[0];
+      const inn=getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in').length;
+      const out=getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='out').length;
+      const firstIn=getScansForBatch(batchNo).filter(s=>s.dept===dept&&s.type==='in').sort((a,c)=>new Date(a.ts)-new Date(c.ts))[0];
       rows.push({'Department':DEPT_LABELS[dept],'Batch':batchNo,'Customer':b?.customer||'','Boxes IN':inn,'Boxes OUT':out,'WIP Boxes':Math.max(0,inn-out),'Hours in Dept':firstIn?hoursAgo(firstIn.ts).toFixed(0):0,'Alert':state.alerts.some(a=>a.batchNumber===batchNo&&a.dept===dept)?'YES':''});
     });
   });
@@ -3361,7 +3428,7 @@ function exportReportC(){
   const rows=state.batches.filter(b=>!b.deleted).map(b=>{
     const wipDays=getBatchWIPDays(b.batchNumber);
     const std=b.isPrinted?3:2;
-    const packed=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length;
+    const packed=getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length;
     const status=wipDays===0&&packed>0?'Closed':wipDays<=std?'In Progress':'Pending';
     return {'Machine':b.machineId,'Floor':getMachineFloor(b.machineId),'Batch':b.batchNumber,'Customer':b.customer,'WIP Days':fmt(wipDays,1),'Status':status};
   });
@@ -3385,12 +3452,12 @@ function exportReportE(){
     floor.machines.forEach(mc=>{
       state.batches.filter(b=>b.machineId===mc&&!b.deleted).forEach(b=>{
         const grossProd=b.actualProd||0;
-        const aimOut=boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='aim'&&s.type==='out').length,b.size);
+        const aimOut=boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size);
         const aimW=getTotalWastage(b.batchNumber,'aim');
         const aimIn=aimOut+aimW.total;
         const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
         const wip=Math.max(0,grossProd-aimIn);
-        summaryRows.push({'M/C NO':mc,'SIZE':b.size,'PLANNED QUANTITY (lac)':fmt(b.qty),'TOTAL PRODUCTION (lac)':fmt(grossProd),'AIM TOTAL RUN (lac)':fmt(aimIn),'SALVAGE':fmt(aimW.salvage),'REMELT':fmt(aimW.remelt),'A GRADE QTY (lac)':fmt(aimOut),'AIM A GRADE %':fmt(aGradePct,2),'TOTAL A GRADE QTY (lac)':fmt(aimOut),'A GRADE % (UNPTD)':fmt(aGradePct,2),'WIP (lac)':fmt(wip),'PACKING UNPTD (lac)':fmt(!b.isPrinted?boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length,b.size):0),'PACKING PTD (lac)':fmt(b.isPrinted?boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length,b.size):0),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),'FLOOR':floorKey});
+        summaryRows.push({'M/C NO':mc,'SIZE':b.size,'PLANNED QUANTITY (lac)':fmt(b.qty),'TOTAL PRODUCTION (lac)':fmt(grossProd),'AIM TOTAL RUN (lac)':fmt(aimIn),'SALVAGE':fmt(aimW.salvage),'REMELT':fmt(aimW.remelt),'A GRADE QTY (lac)':fmt(aimOut),'AIM A GRADE %':fmt(aGradePct,2),'TOTAL A GRADE QTY (lac)':fmt(aimOut),'A GRADE % (UNPTD)':fmt(aGradePct,2),'WIP (lac)':fmt(wip),'PACKING UNPTD (lac)':fmt(!b.isPrinted?boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0),'PACKING PTD (lac)':fmt(b.isPrinted?boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),'FLOOR':floorKey});
       });
     });
   });
@@ -3402,7 +3469,7 @@ function exportReportE(){
       const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
       if(!batches.length) return;
       const mcRows=batches.map(b=>({
-        'DATE':today(),'BATCH NO':b.batchNumber,'COLOR CODE':b.colour||'','CUSTOMER NAME':b.customer||'','PLANT QUANTITY (lac)':fmt(b.qty),'PRODUCT CODE':b.pcCode||'','PRODUCTION (lac)':fmt(b.actualProd||0),'AIM A GRADE (lac)':fmt(boxToLakh(state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='aim'&&s.type==='out').length,b.size)),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))
+        'DATE':today(),'BATCH NO':b.batchNumber,'COLOR CODE':b.colour||'','CUSTOMER NAME':b.customer||'','PLANT QUANTITY (lac)':fmt(b.qty),'PRODUCT CODE':b.pcCode||'','PRODUCTION (lac)':fmt(b.actualProd||0),'AIM A GRADE (lac)':fmt(boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size)),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))
       }));
       const wsName=mc.replace('.','');
       XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName.slice(0,31));
@@ -3436,8 +3503,8 @@ function renderTrackingSearch(){
     });
     results=matchedBatches.map(b=>{
       const labels=getLabelsByBatch(b.batchNumber);
-      const scans=state.scans.filter(s=>s.batchNumber===b.batchNumber);
-      const packed=state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept==='packing'&&s.type==='out').length;
+      const scans=getScansForBatch(b.batchNumber);
+      const packed=getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length;
       return {...b, _labelCount:labels.length, _scanCount:scans.length, _packed:packed};
     });
   }

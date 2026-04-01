@@ -1274,9 +1274,12 @@ app.post('/api/tracking/scan', asyncRoute(async (req, res) => {
   const type    = scan.type;
 
   // Server-side flow enforcement
+  // Also match old temp-batch label IDs (e.g. BT006-xxx -> 26ZH035-xxx same suffix)
+  const dashIdx = labelId.indexOf('-');
+  const suffix  = dashIdx > 0 ? labelId.slice(dashIdx) : null;
   const existing = await queryAll(
-    `SELECT type FROM tracking_scans WHERE label_id=$1 AND dept=$2 ORDER BY ts ASC`,
-    [labelId, dept]
+    `SELECT type FROM tracking_scans WHERE (label_id=$1 OR (label_id LIKE $2)) AND dept=$3 ORDER BY ts ASC`,
+    [labelId, suffix ? `%${suffix}` : labelId, dept]
   );
   const deptIn  = existing.filter(s=>s.type==='in').length;
   const deptOut = existing.filter(s=>s.type==='out').length;

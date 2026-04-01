@@ -1944,7 +1944,7 @@ function confirmSAPImport(rows) {
       id: uid(),
       machineId,
       poType: 'po',
-      poNumber: (String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim()) || ('PO-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,5).toUpperCase()),
+      poNumber: String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim(),
       batchNumber,
       customer: String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),
       shipTo:   String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),

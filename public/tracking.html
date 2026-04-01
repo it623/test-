@@ -2374,7 +2374,7 @@ function renderDeptScan(dept){
         const boxNo = lbl?.labelNumber || s.labelId.slice(-6);
         return `<tr>
         <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
-        <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}\${boxNo}</td>
+        <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber + "/" + boxNo}</td>
         <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
         <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
       </tr>`;}).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}
@@ -2649,7 +2649,7 @@ function renderDispatch(){
         const boxNo = lbl?.labelNumber || s.labelId.slice(-6);
         return `<tr>
           <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
-          <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}\${boxNo}</td>
+          <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber + "/" + boxNo}</td>
           <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
           <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
         </tr>`;

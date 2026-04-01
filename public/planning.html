@@ -1672,39 +1672,27 @@ function saveOrderModal(existingId, defaultMachine) {
 // SAP IMPORT
 // =============================
 function importSAP() {
-  openModal('📥 Bulk Import Orders', `
-    <div style="margin-bottom:16px">
-      <div class="alert alert-info" style="font-size:13px">
-        Upload an Excel/CSV file to bulk import production orders. Download the template first to see the required format.
-      </div>
+  openModal('📥 Import SAP / Bulk Upload Orders', `
+    <div class="alert alert-info" style="font-size:13px;margin-bottom:14px">
+      Upload an Excel or CSV file to bulk import production orders. Use the template for the correct column format.
     </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-      <button class="btn btn-secondary" onclick="downloadSAPTemplate()">📥 Download Template</button>
-      <label class="btn btn-primary" style="cursor:pointer;margin:0">
-        📤 Choose Excel / CSV File
-        <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="processSAPFile(this)">
-      </label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+      <button class="btn btn-secondary btn-sm" onclick="downloadSAPTemplate()">📥 Download Template</button>
+      <button class="btn btn-primary btn-sm" onclick="document.getElementById('sap-file-input').click()">📤 Upload Excel / CSV</button>
+      <input id="sap-file-input" type="file" accept=".xlsx,.xls,.csv" style="display:none">
     </div>
-    <div style="background:var(--surface2,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:12px;font-size:12px;margin-bottom:12px">
-      <div style="font-weight:600;margin-bottom:6px">Required Columns (in any order):</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px">
-        <div>📌 <b>PO_Number</b> — Customer PO</div>
-        <div>📌 <b>Customer</b> — Customer name</div>
-        <div>📌 <b>Size</b> — Capsule size (00,0,1,2,3…)</div>
-        <div>📌 <b>Qty_Lakhs</b> — Order qty in lakhs</div>
-        <div>📌 <b>Machine_ID</b> — e.g. MC20, MC30</div>
-        <div>📌 <b>Printed_YN</b> — Y for printed, N for unprinted</div>
-        <div>⬜ <b>Batch_Number</b> — Auto-generated if blank</div>
-        <div>⬜ <b>PC_Code</b> — Product code</div>
-        <div>⬜ <b>Colour</b> — Cap/body colour</div>
-        <div>⬜ <b>Zone</b> — Dispatch zone</div>
-        <div>⬜ <b>Packing</b> — Packing type</div>
-        <div>⬜ <b>Printing_Matter</b> — Print text</div>
-        <div>⬜ <b>Remarks</b> — Any notes</div>
-      </div>
+    <div style="background:var(--surface2,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:12px">
+      <b>Required:</b> PO_Number, Customer, Size, Qty_Lakhs, Machine_ID, Printed_YN &nbsp;|&nbsp;
+      <b>Optional:</b> Batch_Number, PC_Code, Colour, Zone, Packing, Printing_Matter, Remarks
     </div>
     <div id="sap-preview"></div>
   `, [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
+
+  // Attach file input handler AFTER modal HTML is in DOM
+  setTimeout(() => {
+    const inp = document.getElementById('sap-file-input');
+    if (inp) inp.addEventListener('change', function(){ processSAPFile(this); });
+  }, 50);
 }
 
 function downloadSAPTemplate() {

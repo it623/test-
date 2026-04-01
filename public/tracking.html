@@ -1196,6 +1196,9 @@ async function recordScan(labelId, dept, type, operator, parsed){
     return {ok:false,msg:`Label not found${debugInfo} — try Sync then scan again`};
   }
 }
+  // Always use the resolved label's actual ID — QR may have old/temp-batch ID
+  labelId = label.id;
+
   if(label.voided) return {ok:false,msg:'Label has been voided'};
 
   const batch = getBatch(label.batchNumber);
@@ -2307,13 +2310,16 @@ function renderDeptScan(dept){
     <div class="tbl-wrap"><table>
       <thead><tr><th>Time</th><th>Label ID</th><th>Batch</th><th>Type</th><th>Qty (L)</th></tr></thead>
       <tbody>
-      ${state.scans.filter(s=>s.dept===dept).slice(-20).reverse().map(s=>`<tr>
+      ${state.scans.filter(s=>s.dept===dept).slice(-50).reverse().map(s=>{
+        const lbl = state.labels.find(l=>l.id===s.labelId);
+        const qty = s.qty || lbl?.qty || null;
+        return `<tr>
         <td class="td-mono text-sm">${fmtDateTime(s.ts)}</td>
         <td class="td-mono text-sm">${s.labelId.slice(-8)}</td>
         <td class="td-bold td-mono">${s.batchNumber}</td>
         <td>${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
-        <td class="td-mono">${fmt(s.qty)}</td>
-      </tr>`).join('')||'<tr><td colspan="5" class="text-center text-muted">No scans recorded yet</td></tr>'}
+        <td class="td-mono">${qty!=null?fmt(qty):'-'}</td>
+      </tr>`;}).join('')||'<tr><td colspan="5" class="text-center text-muted">No scans recorded yet</td></tr>'}
       </tbody>
     </table></div>
   </div>`;

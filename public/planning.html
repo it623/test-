@@ -1757,7 +1757,7 @@ function importSAP() {
       <input id="sap-file-input" type="file" accept=".xlsx,.xls,.csv" style="display:none">
     </div>
     <div style="background:var(--surface2,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:12px">
-      <b>Required:</b> PO_Number, Customer, Size, Qty_Lakhs, Machine_ID, Printed_YN &nbsp;|&nbsp;
+      <b>Required:</b> PO_Number (or PO No), Customer, Size, Qty_Lakhs, Machine_ID (e.g. MC21 or MC.21), Printed_YN (Y/N) &nbsp;|&nbsp;
       <b>Optional:</b> Batch_Number, PC_Code, Colour, Zone, Packing, Printing_Matter, Remarks
     </div>
     <div id="sap-preview"></div>
@@ -1827,12 +1827,16 @@ function processSAPFile(input) {
       const existingPOs = new Set(state.orders.filter(o=>!o.deleted).map(o=>o.poNumber).filter(Boolean));
       rows.forEach((row, i) => {
         const errors = [];
-        const po = String(row.PO_Number || row['PO Number'] || '').trim();
-        const customer = String(row.Customer || '').trim();
-        const size = String(row.Size || '').trim();
-        const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty_Lakhs'] || 0);
-        const machineId = String(row.Machine_ID || row['Machine ID'] || row['Machine_ID'] || '').trim();
-        const printed = (row.Printed_YN || row['Printed (Y/N)'] || row['Printed_YN'] || 'N').toString().toUpperCase().trim();
+        // Flexible column name matching
+        const po = String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || row['Order Number'] || row['po_number'] || '').trim();
+        const customer = String(row.Customer || row['Customer Name'] || row['Ship To'] || row['ShipTo'] || row['CUSTOMER'] || '').trim();
+        const size = String(row.Size || row['Cap Size'] || row['SIZE'] || '').trim();
+        const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty_Lakhs'] || row['Qty'] || row['QTY'] || row['Quantity'] || 0);
+        // Normalize machine ID — strip dots, spaces (MC.21 → MC21, MC 21 → MC21)
+        const machineRaw = String(row.Machine_ID || row['Machine ID'] || row['Machine'] || row['MC'] || row['MACHINE'] || '').trim();
+        const machineId = machineRaw.replace(/[\s\.]+/g,'').toUpperCase();
+        const printed = (row.Printed_YN || row['Printed (Y/N)'] || row['Printed_YN'] || row['PTD'] || row['Printed'] || 'N').toString().toUpperCase().trim();
+        const printedNorm = printed.startsWith('Y') ? 'Y' : 'N';
 
         if (!po) errors.push('Missing PO_Number');
         if (!customer) errors.push('Missing Customer');
@@ -1840,7 +1844,7 @@ function processSAPFile(input) {
         if (!qty || qty <= 0) errors.push('Invalid Qty_Lakhs');
         if (!machineId) errors.push('Missing Machine_ID');
         if (!getMachine(machineId) && machineId) errors.push(`Machine ${machineId} not found`);
-        if (!['Y','N'].includes(printed)) errors.push('Printed_YN must be Y or N');
+        if (!['Y','N'].includes(printedNorm)) errors.push('Printed_YN must be Y or N');
         if (existingPOs.has(po)) errors.push(`PO ${po} already exists — will skip`);
 
         if (errors.length) errorRows.push({row: i+2, po, customer, errors});
@@ -1863,7 +1867,7 @@ function processSAPFile(input) {
             <th style="padding:6px 8px;text-align:left">Batch</th>
           </tr></thead><tbody>
           ${validRows.map((r,i)=>{
-            const po = String(r.PO_Number||r['PO Number']||'').trim();
+            const po = String(r.PO_Number||r['PO Number']||r['PO No']||r['PO No.']||r['PO#']||r['Order No']||'').trim();
             const cust = String(r.Customer||'').trim();
             const size = String(r.Size||'').trim();
             const qty = parseFloat(r.Qty_Lakhs||r['Qty (Lakhs)']||0);
@@ -1909,12 +1913,13 @@ function confirmSAPImport(rows) {
   const machinesAffected = new Set();
 
   for (const row of rows) {
-    const machineId = String(row.Machine_ID || row['Machine ID'] || '').trim();
+    const machineRaw = String(row.Machine_ID || row['Machine ID'] || row['Machine'] || row['MC'] || '').trim();
+    const machineId = machineRaw.replace(/[\s\.]+/g,'').toUpperCase();
     const mc = getMachine(machineId);
-    const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || 0);
+    const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty'] || row['QTY'] || 0);
     if (!qty) continue;
 
-    const isPrinted = (row.Printed_YN || row['Printed (Y/N)'] || 'N').toUpperCase() === 'Y';
+    const isPrinted = (row.Printed_YN || row['Printed (Y/N)'] || row['PTD'] || row['Printed'] || 'N').toString().toUpperCase().startsWith('Y');
     const size = String(row.Size || '');
     const ag = mc?.aGrade || 93;
     const grossQty = isPrinted ? qty*1.07*1.02 : qty/(ag/100);
@@ -1939,9 +1944,10 @@ function confirmSAPImport(rows) {
       id: uid(),
       machineId,
       poType: 'po',
-      poNumber: String(row.PO_Number || row['PO Number'] || '').trim(),
+      poNumber: String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim(),
       batchNumber,
-      customer: String(row.Customer || '').trim(),
+      customer: String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),
+      shipTo:   String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),
       size,
       pcCode: String(row.PC_Code || row['PC Code'] || '').trim(),
       colour: String(row.Colour || '').trim(),

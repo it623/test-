@@ -18,16 +18,16 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px;min-height:100vh}
 /* NAV */
-#nav{position:fixed;top:0;left:0;right:0;height:var(--nav);background:var(--s1);border-bottom:1px solid var(--b1);z-index:200;display:flex;align-items:center;padding:0 16px;gap:0}
+#nav{position:fixed;top:0;left:0;right:0;height:var(--nav);background:var(--s1);border-bottom:1px solid var(--b1);z-index:200;display:flex;align-items:center;padding:0 12px;gap:0;min-width:0}
 .nbrand{font-family:var(--fc);font-weight:800;font-size:18px;letter-spacing:1px;color:var(--t2);white-space:nowrap;margin-right:16px}
 .nbrand b{color:var(--cyan)}
 .nbrand small{font-size:11px;color:var(--t3);font-weight:400;margin-left:4px}
-.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none}
+.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none;min-width:0}
 .ntabs::-webkit-scrollbar{display:none}
 .ntab{display:flex;align-items:center;gap:5px;padding:0 13px;height:100%;font-family:var(--fc);font-weight:700;font-size:11.5px;letter-spacing:1px;text-transform:uppercase;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
 .ntab:hover{color:var(--t2)}
 .ntab.on{color:var(--cyan);border-bottom-color:var(--cyan)}
-.nright{display:flex;align-items:center;gap:6px;margin-left:8px;flex-shrink:0}
+.nright{display:flex;align-items:center;gap:4px;margin-left:6px;flex-shrink:0;flex-wrap:nowrap}
 #ndate{background:transparent;border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:12px;font-weight:600;cursor:pointer;outline:none}
 #ndate::-webkit-calendar-picker-indicator{filter:invert(0.5)}
 .nbtn{padding:5px 11px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1px solid var(--b2);background:transparent;color:var(--t2);transition:.15s;white-space:nowrap}
@@ -141,7 +141,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .ntabs::-webkit-scrollbar { display: none; }
   .ntab { padding: 0 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
   .nbrand { font-size: 14px; white-space: nowrap; }
-  .nright { flex-shrink: 0; gap: 4px; }
+  .nright { flex-shrink: 0; gap: 3px; }
+  .nright .nbtn:not(.primary):not(#saveBtn) { display: none; }
+  #ndate { max-width: 120px; font-size: 11px; }
+  #recentDatesSelect { max-width: 80px; font-size: 10px; }
   .nright .btn { padding: 4px 7px; font-size: 11px; }
 
   /* ── Content padding ── */
@@ -267,13 +270,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
   <div class="nright">
     <div id="unsavedDot"></div>
-    <span id="syncBadge" class="offline" onclick="configureServer()">⚙ Server</span>
-    <input type="date" id="ndate" onchange="onDateChange()">
-    <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:140px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
+    <span id="syncBadge" class="offline" onclick="configureServer()">⚙ S</span>
+    <input type="date" id="ndate" onchange="onDateChange()" style="max-width:130px">
+    <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 6px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:110px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
       <option value="">📅 History</option>
     </select>
-    <button class="nbtn" onclick="exportData()">↓ Export</button>
-    <button class="nbtn" onclick="document.getElementById('imp').click()">↑ Import</button>
+    <button class="nbtn" onclick="exportData()" title="Export">↓ Export</button>
+    <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import">↑ Import</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
     <button class="nbtn primary" id="saveBtn" onclick="saveDay()">Save</button>
   </div>
@@ -2599,10 +2602,17 @@ function addDprUserBadge() {
   if (document.getElementById('dpr-user-badge')) return;
   const wrap = document.createElement('div');
   wrap.id = 'dpr-user-badge';
-  wrap.style.cssText = 'position:fixed;top:8px;right:10px;z-index:500;display:flex;align-items:center;gap:6px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer';
+  wrap.style.cssText = 'display:flex;align-items:center;gap:5px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0';
   wrap.innerHTML = `👤 ${dprUser.username} <span style="color:var(--t3)">[${dprUser.role.toUpperCase()}]</span> <span style="color:var(--t3)">▾</span>`;
   wrap.onclick = showDprUserMenu;
-  document.body.appendChild(wrap);
+  // Insert into nright before Save button instead of floating over topbar
+  const nright = document.querySelector('.nright');
+  const saveBtn = document.getElementById('saveBtn');
+  if (nright && saveBtn) {
+    nright.insertBefore(wrap, saveBtn);
+  } else {
+    document.body.appendChild(wrap);
+  }
 
   // Show audit tab for admin
   if (dprUser.role === 'admin') {

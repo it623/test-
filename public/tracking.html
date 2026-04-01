@@ -1029,12 +1029,26 @@ async function pullFromServer(){
           const serverLabelIds = new Set(normLabels.map(l=>l.id));
           const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
           state.labels = [...normLabels, ...localOnlyLabels];
-          state.scans = (snap.tracking.scans||[]).map(s=>({
+          const serverScans = (snap.tracking.scans||[]).map(s=>({
             id:s.id, labelId:s.label_id||s.labelId,
             batchNumber:s.batch_number||s.batchNumber,
             dept:s.dept, type:s.type, ts:s.ts,
             operator:s.operator||null, size:s.size||null, qty:s.qty||null
           }));
+          // Merge: keep local scans that are not yet on server (queued offline scans)
+          const serverScanIds = new Set(serverScans.map(s=>s.id));
+          const localOnlyScans = state.scans.filter(s=>!serverScanIds.has(s.id));
+          state.scans = [...serverScans, ...localOnlyScans];
+          // Re-push any local-only scans to server
+          if(localOnlyScans.length > 0){
+            localOnlyScans.forEach(scan=>{
+              fetch(serverUrl+'/api/tracking/scan',{
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({scan}),
+                signal:AbortSignal.timeout(8000)
+              }).catch(()=>{});
+            });
+          }
           state.stageClosure = (snap.tracking.stageClosure||[]).map(s=>({
             id:s.id, batchNumber:s.batch_number||s.batchNumber,
             dept:s.dept, closed:!!s.closed,
@@ -2398,7 +2412,7 @@ function renderDeptScan(dept){
     <div class="tbl-wrap"><table>
       <thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead>
       <tbody>
-      ${state.scans.filter(s=>s.dept===dept).slice(-50).reverse().map(s=>{
+      ${[...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50).map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
         const qty = s.qty || lbl?.qty || null;
         const boxNo = lbl?.labelNumber || s.labelId.slice(-6);

@@ -1353,7 +1353,10 @@ function renderShifts(){
         // Match by id first, then by batchNumber as fallback
         const matchedOrder = orders.find(o=>o.id===run.orderId) || orders.find(o=>o.batchNumber===run.batchNumber);
         const effectiveOrderId = matchedOrder ? matchedOrder.id : run.orderId;
-        let ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
+        let ordOpts=`<option value="">— Order —</option>`+orders.map(o=>{
+          const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
+          return `<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(custShort)}</option>`;
+        }).join('');
         // If run has a saved batch but no matching order in dropdown, add synthetic option so it's always visible
         if(run.batchNumber && !matchedOrder){
           ordOpts+=`<option value="${esc(run.orderId||run.batchNumber)}" selected>${esc(run.batchNumber)}</option>`;
@@ -1455,7 +1458,10 @@ function addRun(sh, mcId){
     div.dataset.sh=sh; div.dataset.mc=mcId; div.dataset.ri=ri;
     div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}`;
     const orders=activeOrders[mcId]||[];
-    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}">${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp&&o.pcCode?' | PC:'+esc(o.pcCode):''}${o.isTemp&&!o.colourConfirmed?' ⚠️ PC not set':''}</option>`).join('');
+    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>{
+      const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
+      return `<option value="${esc(o.id)}">${o.isTemp?'⚠️ ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(custShort)}</option>`;
+    }).join('');
     div.innerHTML=`
       ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
       <select id="run-ord-${sh}-${mcId}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mcId}',${ri})" title="Select active order">${ordOpts}</select>
@@ -1495,6 +1501,11 @@ function onRunOrderChange(sh, mcId, ri){
     const ord=activeOrders[mcId].find(o=>o.id===ordId);
     if(ord){
       if(batchInp) batchInp.value=ord.batchNumber||ord.poNumber||'';
+      // Auto-fill note with colour if note is empty
+      const noteInp=document.getElementById(`run-note-${sh}-${mcId}-${ri}`);
+      if(noteInp && !noteInp.value && ord.colour){
+        noteInp.value=ord.colour;
+      }
       // Show order qty and remaining qty as a tooltip/note on the run row
       const rowEl=document.querySelector(`.run-row[data-sh="${sh}"][data-mc="${mcId}"][data-ri="${ri}"]`);
       if(rowEl){
@@ -1509,7 +1520,7 @@ function onRunOrderChange(sh, mcId, ri){
         const actual=ord.actualQty||0;
         const remaining=Math.max(0,planned-actual);
         infoEl.textContent=`Ord:${planned}L Prod:${actual}L Rem:${remaining}L`;
-        infoEl.style.color=remaining<=0?'var(--green)':'var(--t3)';
+        infoEl.style.color='var(--green)';
       }
     }
   }
@@ -1677,20 +1688,69 @@ function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
 function renderRemarks(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const rem=day.remarks||[];
-  if(rem.length===0){document.getElementById('remList').innerHTML=`<div style="color:var(--t3);font-size:12px;padding:8px">No remarks. Click "+ Add Remark" to log issues.</div>`;return;}
-  let html='';
-  rem.forEach((r,i)=>{
-    const mcLabel=r.mc?`<span style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:6px">${r.mc}</span>`:'';
-    html+=`<div class="remark-row" style="align-items:flex-start;gap:8px;padding:7px 10px;border-bottom:1px solid var(--b1)">
-      <span class="rem-shift" style="flex-shrink:0">Shift ${r.shift}</span>
-      ${mcLabel}
-      <div style="flex:1;min-width:0">
-        <textarea id="rem-edit-${i}" style="width:100%;min-height:48px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px 4px;color:var(--t1)" oninput="saveRemarkEdit(${i})" onfocus="this.style.borderColor='var(--cyan)'" onblur="this.style.borderColor='transparent'">${esc(r.text)}</textarea>
-      </div>
-      <button class="btn-sm danger" style="flex-shrink:0" onclick="deleteRemark(${i})">✕</button>
-    </div>`;
+
+  const SHIFT_CFG={
+    A:{color:'#00d4ff',bg:'rgba(0,212,255,0.07)',label:'SHIFT A'},
+    B:{color:'#00e676',bg:'rgba(0,230,118,0.07)',label:'SHIFT B'},
+    C:{color:'#ffab00',bg:'rgba(255,171,0,0.07)',label:'SHIFT C'},
+    General:{color:'#b388ff',bg:'rgba(179,136,255,0.07)',label:'GENERAL'}
+  };
+
+  let html='<div style="display:flex;flex-direction:column;gap:0">';
+
+  ['A','B','C','General'].forEach((sh,si)=>{
+    const cfg=SHIFT_CFG[sh];
+    const shRemarks=rem.map((r,i)=>({...r,_i:i})).filter(r=>(r.shift||'General')===sh);
+    const isLast=si===3;
+    html+=`<div style="border:1px solid ${cfg.color}33;${si===0?'border-radius:8px 8px 0 0':isLast?'border-radius:0 0 8px 8px;border-top:none':'border-top:none'}">
+      <div style="background:${cfg.bg};border-bottom:1px solid ${cfg.color}44;padding:7px 14px;display:flex;align-items:center;gap:10px">
+        <span style="font-family:var(--fc);font-size:12px;font-weight:700;color:${cfg.color};letter-spacing:1px">${cfg.label}</span>
+        <span style="font-size:11px;color:var(--t3)">${shRemarks.length} remark${shRemarks.length!==1?'s':''}</span>
+      </div>`;
+
+    if(shRemarks.length===0){
+      html+=`<div style="padding:8px 14px;color:var(--t3);font-size:11px;font-style:italic">No remarks for this shift.</div>`;
+    } else {
+      html+=`<table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:var(--s2)">
+          <th style="padding:5px 10px;text-align:left;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px;width:80px">MACHINE</th>
+          <th style="padding:5px 10px;text-align:left;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">REMARK / ISSUE</th>
+          <th style="padding:5px 8px;width:36px"></th>
+        </tr></thead>
+        <tbody>`;
+      shRemarks.forEach((r,ri)=>{
+        const rowBg=ri%2===0?'transparent':'rgba(255,255,255,0.02)';
+        html+=`<tr style="background:${rowBg};border-top:1px solid var(--b1)">
+          <td style="padding:5px 10px;vertical-align:top;font-family:var(--mono);font-size:12px;color:${cfg.color};font-weight:600;white-space:nowrap">
+            ${r.mc||'<span style="color:var(--t3);font-weight:400;font-style:italic;font-family:inherit">—</span>'}
+          </td>
+          <td style="padding:4px 6px;vertical-align:top">
+            <textarea id="rem-edit-${r._i}" rows="1"
+              style="width:100%;min-height:30px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:3px 5px;color:var(--t1);font-family:inherit;line-height:1.5"
+              oninput="saveRemarkEdit(${r._i});this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+              onfocus="this.style.borderColor='${cfg.color}'"
+              onblur="this.style.borderColor='transparent'"
+            >${esc(r.text)}</textarea>
+          </td>
+          <td style="padding:5px 6px;vertical-align:top;text-align:center">
+            <button onclick="deleteRemark(${r._i})"
+              style="background:none;border:1px solid var(--red)55;border-radius:4px;color:var(--red);cursor:pointer;font-size:10px;padding:2px 6px">✕</button>
+          </td>
+        </tr>`;
+      });
+      html+=`</tbody></table>`;
+    }
+    html+=`</div>`;
   });
+
+  html+='</div>';
   document.getElementById('remList').innerHTML=html;
+
+  // Auto-resize all textareas
+  rem.forEach((_,i)=>{
+    const ta=document.getElementById(`rem-edit-${i}`);
+    if(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
+  });
 }
 
 function saveRemarkEdit(i){

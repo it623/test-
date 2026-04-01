@@ -1016,9 +1016,12 @@ async function pullFromServer(){
       if(snap.ok){
         // Load planning orders — always overwrite, server is source of truth
         // snap.orders is always an array (may be empty if no orders yet)
-        if(Array.isArray(snap.orders)){
+        if(Array.isArray(snap.orders) && snap.orders.length > 0){
           state.batches = snap.orders;
           state.machineMaster = snap.machineMaster || [];
+        } else if(Array.isArray(snap.orders)) {
+          // orders empty — keep local batches but update machine master
+          state.machineMaster = snap.machineMaster || state.machineMaster;
         }
         // Load tracking state (labels from server are snake_case — normalise)
         if(snap.tracking){
@@ -2311,6 +2314,10 @@ function renderDeptScan(dept){
   const cfg=DEPT_CONFIG[dept];
   const myAlerts=state.alerts.filter(a=>a.dept===dept);
   const activeBatches=getActiveBatchesForDept(dept);
+  // If scans not loaded yet, trigger a pull and re-render once done
+  if(state.scans.length===0 && serverUrl){
+    pullFromServer().then(()=>{ if(currentPage===dept) renderDeptScan(dept); }).catch(()=>{});
+  }
 
   document.getElementById('tb-actions').innerHTML=`
     <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">📊 View All Batches</button>
@@ -2436,16 +2443,21 @@ function renderDeptScan(dept){
     <div class="tbl-wrap"><table>
       <thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead>
       <tbody>
-      ${[...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50).map(s=>{
-        const lbl = state.labels.find(l=>l.id===s.labelId);
-        const qty = s.qty || lbl?.qty || null;
-        const boxNo = lbl?.labelNumber || s.labelId.slice(-6);
-        return `<tr>
-        <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
-        <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber + "/" + boxNo}</td>
-        <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
-        <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
-      </tr>`;}).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}
+      ${(()=>{
+        const deptScans = [...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50);
+        if(!deptScans.length) return '<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>';
+        return deptScans.map(s=>{
+          const lbl = state.labels.find(l=>l.id===s.labelId);
+          const qty = s.qty ?? lbl?.qty ?? null;
+          const boxNo = lbl?.labelNumber ?? (s.labelId||'').slice(-6);
+          return `<tr>
+            <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
+            <td class="td-bold td-mono" style="white-space:nowrap">${(s.batchNumber||'?') + '/' + boxNo}</td>
+            <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
+            <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
+          </tr>`;
+        }).join('');
+      })()}
       </tbody>
     </table></div>
   </div>`;
@@ -3855,13 +3867,26 @@ setInterval(async ()=>{
       const serverScanIds = new Set(serverScans.map(s=>s.id));
       const localOnlyScans = state.scans.filter(s=>!serverScanIds.has(s.id));
       const prevCount = state.scans.length;
-      state.scans = [...serverScans, ...localOnlyScans];
-      // Also update labels and batches
-      if(Array.isArray(snap.orders)) state.batches = snap.orders;
-      saveLocal();
+      const merged = [...serverScans, ...localOnlyScans];
+      state.scans = merged;
+      // Update batches only if server returned non-empty list
+      if(Array.isArray(snap.orders) && snap.orders.length > 0) state.batches = snap.orders;
+      // Update labels only if server returned non-empty list
+      if(snap.tracking.labels && snap.tracking.labels.length > 0){
+        const sLabels = (snap.tracking.labels).map(l=>l.batchNumber?l:normLabel(l));
+        const sLabelIds = new Set(sLabels.map(l=>l.id));
+        const localLabels = state.labels.filter(l=>!sLabelIds.has(l.id));
+        state.labels = [...sLabels, ...localLabels];
+      }
+      // Save merged state locally
+      try{ localStorage.setItem('sunloc_tracking', JSON.stringify({
+        labels:state.labels, scans:state.scans,
+        stageClosure:state.stageClosure, wastage:state.wastage,
+        dispatchRecs:state.dispatchRecs, alerts:state.alerts
+      })); }catch(e){}
       setSyncBadge('synced');
-      // Re-render if scan count changed
-      if(state.scans.length !== prevCount && currentPage){
+      // Re-render if scan count changed OR scans were empty before
+      if((state.scans.length !== prevCount || prevCount === 0) && currentPage){
         renderPage(currentPage);
       }
     }
@@ -3873,7 +3898,8 @@ window.addEventListener('storage', (e) => {
   if(e.key === 'sunloc_server_url' && e.newValue) {
     serverUrl = sanitizeServerUrl(e.newValue);
   }
-  if((e.key === 'sunloc_tracking' || e.key === 'sunloc_planning') && currentDept) {
+  // Only re-pull on planning changes (not sunloc_tracking to avoid loops)
+  if(e.key === 'sunloc_planning' && currentDept) {
     pullFromServer();
   }
 });

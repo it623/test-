@@ -1516,9 +1516,9 @@ function onRunOrderChange(sh, mcId, ri){
           infoEl.style.cssText='font-size:9px;color:var(--t3);font-family:var(--mono);white-space:nowrap;flex-shrink:0';
           rowEl.appendChild(infoEl);
         }
-        const planned=ord.qty||0;
-        const actual=ord.actualQty||0;
-        const remaining=Math.max(0,planned-actual);
+        const planned=Math.round((ord.qty||0)*100)/100;
+        const actual=Math.round((ord.actualQty||0)*100)/100;
+        const remaining=Math.max(0,Math.round((planned-actual)*100)/100);
         infoEl.textContent=`Ord:${planned}L Prod:${actual}L Rem:${remaining}L`;
         infoEl.style.color='var(--green)';
       }

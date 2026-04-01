@@ -472,6 +472,15 @@ const FLOORS_DEFAULT = {
   ]}
 };
 
+// Sort machines numerically by ID (MC7 < MC8 < MC14 < MC20...)
+function sortMachines(machines){
+  return [...machines].sort((a,b)=>{
+    const na = parseInt(a.id.replace(/\D/g,''))||0;
+    const nb = parseInt(b.id.replace(/\D/g,''))||0;
+    return na - nb;
+  });
+}
+
 // Load custom machine edits (size changes + new machines) from localStorage
 function loadFloors() {
   try {
@@ -490,6 +499,8 @@ function loadFloors() {
         }
       });
     });
+    // Sort all floors numerically
+    Object.values(floors).forEach(f=>{ f.machines = sortMachines(f.machines); });
     return floors;
   } catch(e) { return JSON.parse(JSON.stringify(FLOORS_DEFAULT)); }
 }
@@ -676,6 +687,7 @@ function addNewMachine(fl) {
   const allIds = Object.values(FLOORS).flatMap(f=>f.machines.map(m=>m.id));
   if (allIds.includes(id)) { toast(`${id} already exists`,'var(--red)'); return; }
   FLOORS[fl].machines.push({id, sz});
+  FLOORS[fl].machines = sortMachines(FLOORS[fl].machines);
   saveCustomMachines();
   renderMachineSettings();
   renderEntry();

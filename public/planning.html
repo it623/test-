@@ -564,6 +564,7 @@ async function planQueueFlush() {
     });
     if (resp.ok) {
       localStorage.removeItem(PLAN_QUEUE_KEY);
+      try{ sunlocChannel.postMessage({type:'PLANNING_SAVED',ts:Date.now()}); }catch(e){}
       console.log('[Plan] Offline queue flushed');
     }
   } catch(e) {}
@@ -725,7 +726,7 @@ function saveState() {
 
     // Stale-push guard: if not synced from server in >10 min, pull first then push
     const lastSync = state._serverSavedAt || 0;
-    const staleThreshold = 10 * 60 * 1000;
+    const staleThreshold = 2 * 60 * 1000; // 2 min — keep data fresh across all devices
     if (Date.now() - lastSync > staleThreshold) {
       SYNC.loadFromServer().then(() => {
         const fresh = {...state};
@@ -4648,23 +4649,30 @@ async function renderReconciliation() {
   const content = document.getElementById('content');
   content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Loading TEMP batches...</div>';
 
-  let tempBatches = [], pendingRequests = [], history = [];
+  let tempBatches = [], pendingRequests = [], history = [], woPendingRequests = [], woHistory = [];
   if (serverUrl) {
-    try {
-      const [r1, r2, r3, r4, r5] = await Promise.all([
-        fetch(serverUrl+'/api/temp-batches/active', {signal:AbortSignal.timeout(5000)}),
-        currentUser?.role==='admin' ? fetch(serverUrl+'/api/reconciliation/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
-        fetch(serverUrl+'/api/reconciliation/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
-        currentUser?.role==='admin' ? fetch(serverUrl+'/api/wo/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
-        fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)})
-      ]);
-      const j1 = await r1.json(); if(j1.ok) tempBatches = j1.batches;
-      if(r2){ const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; }
-      const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20);
-      let woPendingRequests = [], woHistory = [];
-      if(r4){ const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; }
-      if(r5){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
-    } catch(e) { content.innerHTML = `<div class="alert alert-warn">⚠️ Could not load data: ${e.message}</div>`; return; }
+    // Each fetch is independent — one failure never blocks the whole page
+    const safeFetch = async (url, opts={}) => {
+      try {
+        const r = await fetch(url, {...opts, signal: AbortSignal.timeout(8000)});
+        if (!r.ok) return null;
+        return await r.json();
+      } catch(e) { console.warn('Recon fetch failed:', url, e.message); return null; }
+    };
+    const hdrs = {'x-session-token': currentUser?.token||''};
+    const isAdminUser = currentUser?.role === 'admin';
+    const [j1, j2, j3, j4, j5] = await Promise.all([
+      safeFetch(serverUrl+'/api/temp-batches/active'),
+      isAdminUser ? safeFetch(serverUrl+'/api/reconciliation/pending', {headers:hdrs}) : Promise.resolve(null),
+      safeFetch(serverUrl+'/api/reconciliation/history', {headers:hdrs}),
+      isAdminUser ? safeFetch(serverUrl+'/api/wo/pending', {headers:hdrs}) : Promise.resolve(null),
+      safeFetch(serverUrl+'/api/wo/history', {headers:hdrs})
+    ]);
+    if(j1?.ok) tempBatches = j1.batches||[];
+    if(j2?.ok) pendingRequests = j2.requests||[];
+    if(j3?.ok) history = (j3.requests||[]).slice(0,20);
+    if(j4?.ok) woPendingRequests = j4.requests||[];
+    if(j5?.ok) woHistory = (j5.requests||[]).slice(0,20);
   }
 
   _reconTempBatches = tempBatches;

@@ -450,6 +450,33 @@ const PRINT_MACHINES = [
 const PACK_SIZES = {'00':75000,'0':100000,'1':125000,'2':175000,'3':225000,'0EL':100000,'4':175000,'5':175000};
 const CAPSULE_COLOURS = ['White/White','White/Yellow','White/Clear','Yellow/Yellow','Clear/Clear','Orange/White','Orange/Orange','Blue/White','Blue/Blue','Green/White','Green/Green','Pink/White','Pink/Pink','Red/White','Red/Red','Purple/White','Purple/Purple','Brown/White','Black/White','Maroon/White'];
 const SIZES = ['00','0','0EL','1','2','3','4','5'];
+// Customer Master — Ship To → Bill To mapping
+// Populated from existing orders + manually editable in Settings
+// Format: { 'SHIP TO NAME': 'BILL TO NAME' } — leave blank if same as Ship To
+const CUSTOMER_BILL_TO_MAP_DEFAULT = {};
+
+function getCustomerList() {
+  // Merge: order history + custom master stored in state
+  const fromOrders = [...new Set(
+    state.orders.filter(o=>!o.deleted && (o.shipTo||o.customer))
+                 .map(o => o.shipTo||o.customer)
+  )].sort();
+  const fromMaster = Object.keys(state.customerMaster||{});
+  return [...new Set([...fromMaster, ...fromOrders])].sort();
+}
+
+function getBillTo(shipTo) {
+  // Look up bill-to from state customer master, fallback to order history
+  if (!shipTo) return '';
+  const master = state.customerMaster || {};
+  if (master[shipTo] !== undefined) return master[shipTo];
+  // Try to find from recent orders
+  const recent = [...state.orders]
+    .filter(o => (o.shipTo||o.customer) === shipTo && o.billTo)
+    .sort((a,b)=>new Date(b.startDate||0)-new Date(a.startDate||0));
+  return recent.length ? recent[0].billTo : '';
+}
+
 const ZONES = ['BADDI','BADDI + JAMMU','BADDI+JAMMU','NORTH','SOUTH','EAST','WEST','DELHI','MUMBAI','RAJASTHAN','ALWAR','NEPAL','BANGLADESH','LOCAL','EXPORT'];
 const EXPORT_ZONES = ['EXPORT','BANGLADESH','NEPAL','MUMBAI']; // export zones: dispatch only when full container/indent complete
 // getTruckCapacity() is read from state so it's configurable in Settings
@@ -521,6 +548,7 @@ let state = {
   zoneCapacities: {},      // { zoneName: boxes } — per-zone override, falls back to truckCapacity
   activeMonth: null,       // 'YYYY-MM' — current active planning month
   archives: [],            // [{month, closedAt, data:{orders,printOrders,dispatchPlans,dailyPrinting}}]
+  customerMaster: {},     // { 'Ship To Name': 'Bill To Name' } — customer bill-to mapping
 };
 
 // ─── SERVER SYNC ──────────────────────────────────────────────
@@ -1331,11 +1359,25 @@ function showAddOrderModal(machineId, existingOrder) {
       </div>
       <div class="form-group">
         <label>Ship To (Customer Name) ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
-        <input class="form-control" id="fo-customer" value="${ord.shipTo||ord.customer||''}" placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'e.g. M/S ACME LIFETECH LLP'}" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
+        <input class="form-control" id="fo-customer" list="customer-list-datalist"
+          value="${ord.shipTo||ord.customer||''}"
+          placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'Type or select customer name'}"
+          ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}
+          oninput="onShipToInput(this.value)"
+          onchange="onShipToInput(this.value)">
+        <datalist id="customer-list-datalist">
+          ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
+        </datalist>
       </div>
       <div class="form-group">
-        <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span> ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
-        <input class="form-control" id="fo-billto" value="${ord.billTo||''}" placeholder="e.g. M/S ACME PHARMA PVT LTD — leave blank if same as Ship To" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
+        <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To — auto-filled from customer master)</span> ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
+        <input class="form-control" id="fo-billto" list="billto-list-datalist"
+          value="${ord.billTo||''}"
+          placeholder="Auto-filled from customer history — leave blank if same as Ship To"
+          ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
+        <datalist id="billto-list-datalist">
+          ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
+        </datalist>
       </div>
       <div class="form-group">
         <label>Machine</label>
@@ -1443,6 +1485,37 @@ function showAddOrderModal(machineId, existingOrder) {
 function updatePoType(sel) {
   const grp = document.getElementById('fo-ponum-group');
   if (grp) grp.style.display = sel.value === 'verbal' ? 'none' : '';
+}
+
+function onWocShipToInput(val) {
+  if (!val || !val.trim()) return;
+  const billTo = getBillTo(val.trim());
+  const billToInput = document.getElementById('woc-billto');
+  if (billToInput && !billToInput.value && billTo) {
+    billToInput.value = billTo;
+  }
+}
+
+function onShipToInput(val) {
+  if (!val || !val.trim()) return;
+  const billTo = getBillTo(val.trim());
+  const billToInput = document.getElementById('fo-billto');
+  if (billToInput && !billToInput.value && billTo) {
+    billToInput.value = billTo;
+  }
+  // Save to customer master on blur so it learns new customers
+}
+
+// Called when order is saved — update customer master with ship/bill mapping
+function learnCustomer(shipTo, billTo) {
+  if (!shipTo) return;
+  if (!state.customerMaster) state.customerMaster = {};
+  // Only update if bill-to is provided or not yet in master
+  if (billTo !== undefined) {
+    state.customerMaster[shipTo.trim()] = billTo ? billTo.trim() : '';
+  } else if (!(shipTo.trim() in state.customerMaster)) {
+    state.customerMaster[shipTo.trim()] = '';
+  }
 }
 
 function toggleWOMode(isWO) {
@@ -1581,6 +1654,9 @@ function saveOrderModal(existingId, defaultMachine) {
   } else {
     state.orders.push(ord);
   }
+
+  // Learn customer ship-to/bill-to mapping for future autocomplete
+  learnCustomer(ord.shipTo||ord.customer, ord.billTo||'');
 
   // Auto-create print order if PTD
   if (isPrinted && !state.printOrders.find(p=>p.productionOrderId===ord.id)) {
@@ -1881,6 +1957,7 @@ function confirmSAPImport(rows) {
     };
 
     state.orders.push(ord);
+    learnCustomer(ord.shipTo||ord.customer, ord.billTo||'');
     machinesAffected.add(machineId);
 
     // Auto-create print order if PTD
@@ -4691,11 +4768,20 @@ function openAssignCustomerModal(orderId) {
       <div class="form-grid">
         <div class="form-group">
           <label>Ship To (Customer Name) <span style="color:var(--accent4)">*</span></label>
-          <input class="form-control" id="woc-customer" placeholder="e.g. M/S ACME LIFETECH LLP">
+          <input class="form-control" id="woc-customer" list="woc-customer-list"
+            placeholder="Type or select customer name"
+            oninput="onWocShipToInput(this.value)">
+          <datalist id="woc-customer-list">
+            ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
+          </datalist>
         </div>
         <div class="form-group">
           <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span></label>
-          <input class="form-control" id="woc-billto" placeholder="Leave blank if same as Ship To">
+          <input class="form-control" id="woc-billto" list="woc-billto-list"
+            placeholder="Auto-filled — leave blank if same as Ship To">
+          <datalist id="woc-billto-list">
+            ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
+          </datalist>
         </div>
         <div class="form-group">
           <label>PO / Reference Number</label>
@@ -5218,6 +5304,42 @@ function renderSettings() {
 
     </div>
     <div class="card mt-4">
+      <div class="card-title">👥 Customer Master — Ship To / Bill To Mapping</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+        Auto-populated from order history. Add or edit Bill To names here. When creating a new order, Bill To is auto-filled based on this list.
+      </div>
+      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border,#e0e0e0);border-radius:6px;margin-bottom:10px">
+        <table style="width:100%;font-size:13px;border-collapse:collapse">
+          <thead><tr style="background:var(--surface2)">
+            <th style="padding:6px 10px;text-align:left">Ship To (Customer Name)</th>
+            <th style="padding:6px 10px;text-align:left">Bill To (if different)</th>
+            <th style="padding:6px 10px;width:60px"></th>
+          </tr></thead>
+          <tbody id="customer-master-tbody">
+            ${(()=>{
+              const master = state.customerMaster||{};
+              const fromOrders = [...new Set(state.orders.filter(o=>!o.deleted&&(o.shipTo||o.customer)).map(o=>o.shipTo||o.customer))];
+              const allKeys = [...new Set([...Object.keys(master),...fromOrders])].sort();
+              if(!allKeys.length) return '<tr><td colspan="3" style="padding:12px;text-align:center;color:var(--text3)">No customers yet — add orders to populate</td></tr>';
+              return allKeys.map((k,i)=>`<tr style="${i%2===0?'':'background:var(--surface2)'}">
+                <td style="padding:5px 10px;font-weight:500">${k}</td>
+                <td style="padding:5px 4px"><input value="${(master[k]||'').replace(/"/g,'&quot;')}" placeholder="Same as Ship To" data-shipto="${k.replace(/"/g,'&quot;')}"
+                  style="width:100%;border:1px solid var(--border,#e0e0e0);border-radius:4px;padding:3px 6px;font-size:12px;background:var(--surface)"
+                  onchange="updateCustomerBillTo(this)"></td>
+                <td style="padding:5px 8px;text-align:center"><button onclick="removeCustomer('${k.replace(/'/g,"\\'")}');renderSettings()" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px">✕</button></td>
+              </tr>`).join('');
+            })()}
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="new-customer-name" placeholder="Add new customer name" style="flex:2;min-width:180px;padding:6px 10px;border:1px solid var(--border,#e0e0e0);border-radius:6px;font-size:13px;background:var(--surface)">
+        <input id="new-customer-billto" placeholder="Bill To (if different)" style="flex:2;min-width:180px;padding:6px 10px;border:1px solid var(--border,#e0e0e0);border-radius:6px;font-size:13px;background:var(--surface)">
+        <button class="btn btn-primary btn-sm" onclick="addCustomerToMaster()">+ Add</button>
+      </div>
+    </div>
+
+    <div class="card mt-4">
       <div class="card-title">Data Management</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="exportAllData()">📤 Export All Data (JSON)</button>
@@ -5246,6 +5368,32 @@ function renderSettings() {
       <div id="reset-result" style="margin-top:10px"></div>
     </div>` : ''}
   `;
+}
+
+function updateCustomerBillTo(input) {
+  const shipTo = input.dataset.shipto;
+  if (!shipTo) return;
+  if (!state.customerMaster) state.customerMaster = {};
+  state.customerMaster[shipTo] = input.value.trim();
+  saveState();
+}
+
+function addCustomerToMaster() {
+  const name = document.getElementById('new-customer-name')?.value?.trim();
+  const billTo = document.getElementById('new-customer-billto')?.value?.trim() || '';
+  if (!name) { alert('Please enter a customer name'); return; }
+  if (!state.customerMaster) state.customerMaster = {};
+  state.customerMaster[name] = billTo;
+  saveState();
+  document.getElementById('new-customer-name').value = '';
+  document.getElementById('new-customer-billto').value = '';
+  renderSettings();
+}
+
+function removeCustomer(name) {
+  if (!state.customerMaster) return;
+  delete state.customerMaster[name];
+  saveState();
 }
 
 function updatePackSize(sz, val) {

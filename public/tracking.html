@@ -1216,9 +1216,21 @@ function saveLocal(){
 function loadState(){
   try{
     const saved=localStorage.getItem('sunloc_tracking');
-    if(saved){ const p=JSON.parse(saved); Object.assign(state,p); }
+    if(saved){
+      const p=JSON.parse(saved);
+      // Load scans/closure/wastage from local cache for offline resilience
+      // BUT always pull fresh labels/batches from server (server is truth)
+      if(p.scans) state.scans=p.scans;
+      if(p.stageClosure) state.stageClosure=p.stageClosure;
+      if(p.wastage) state.wastage=p.wastage;
+      if(p.dispatchRecs) state.dispatchRecs=p.dispatchRecs;
+      if(p.alerts) state.alerts=p.alerts;
+      // Load labels/batches from cache only as fallback while server loads
+      if(p.labels&&p.labels.length>0) state.labels=p.labels;
+      if(p.batches&&p.batches.length>0) state.batches=p.batches;
+    }
   }catch{}
-  // Pull from server immediately — batches from Planning must load on every login
+  // Always pull fresh from server — overrides local cache
   if(serverUrl){
     pullFromServer();
   }
@@ -1253,12 +1265,26 @@ async function recordScan(labelId, dept, type, operator, parsed){
   }
   if(!label){
   try{
-    const res = await fetch(serverUrl + "/api/tracking/state");
-    const data = await res.json();
-
-    if(data.ok && data.state){
-      state.labels = (data.state.labels || []).map(normLabel);
+    // Pull fresh snapshot from server — labels may not be loaded yet
+    const res = await fetch(serverUrl + "/api/sync/snapshot", {signal:AbortSignal.timeout(8000)});
+    const snap = await res.json();
+    if(snap.ok && snap.tracking){
+      const fresh = (snap.tracking.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
+      state.labels = fresh;
+      if(Array.isArray(snap.orders)&&snap.orders.length>0) state.batches=snap.orders;
+      saveLocal();
+      // Try all lookups again with fresh labels
       label = state.labels.find(l=>l.id===labelId);
+      if(!label && parsed?.batchNumber && parsed?.boxNumber!=null){
+        label = state.labels.find(l=>
+          l.batchNumber===parsed.batchNumber &&
+          Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
+        );
+      }
+      if(!label && parsed?.boxNumber!=null){
+        const cands=state.labels.filter(l=>Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)&&!l.voided);
+        label=cands.length===1?cands[0]:(cands.length>1&&parsed?.size?cands.find(l=>String(l.size)===String(parsed.size))||cands[0]:null);
+      }
     }
   }catch(e){
     console.error("Server error:", e);

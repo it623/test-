@@ -637,7 +637,14 @@ function getMachineFloor(machineId){
   return 'GF';
 }
 
-function getBatch(batchNo){ return state.batches.find(b=>b.batchNumber===batchNo||b.id===batchNo)||null }
+function getBatch(batchNo){
+  if(!batchNo) return null;
+  const bn = String(batchNo).trim().toUpperCase();
+  return state.batches.find(b=>
+    String(b.batchNumber||'').trim().toUpperCase()===bn ||
+    String(b.id||'').trim().toUpperCase()===bn
+  ) || null;
+}
 function getBatchFlow(batch){ return batch?.isPrinted ? WIP_FLOW.printed : WIP_FLOW.unprinted }
 
 function getScansForBox(labelId){
@@ -1151,7 +1158,10 @@ async function trkQueueFlush() {
     }
     if (remaining.length===0) localStorage.removeItem(TRK_QUEUE_KEY);
     else localStorage.setItem(TRK_QUEUE_KEY, JSON.stringify(remaining));
-    if (remaining.length < q.length) console.log(`[Tracking] Queue flushed ${q.length-remaining.length} entries`);
+    if (remaining.length < q.length) {
+      console.log(`[Tracking] Queue flushed ${q.length-remaining.length} entries`);
+      try{ sunlocChannel.postMessage({type:'TRACKING_SYNCED',ts:Date.now()}); }catch(e){}
+    }
   } catch(e) {}
 }
 
@@ -1242,8 +1252,28 @@ async function recordScan(labelId, dept, type, operator, parsed){
 
   if(label.voided) return {ok:false,msg:'Label has been voided'};
 
-  const batch = getBatch(label.batchNumber);
-  if(!batch) return {ok:false,msg:'Batch not found'};
+  let batch = getBatch(label.batchNumber);
+  if(!batch){
+    // Auto-sync and retry before giving up
+    try{
+      const r=await fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)});
+      const snap=await r.json();
+      if(snap.ok && Array.isArray(snap.orders)) state.batches=snap.orders;
+      batch=getBatch(label.batchNumber);
+    }catch(e){}
+  }
+  if(!batch){
+    // Create a synthetic minimal batch from label data so scan can proceed
+    batch={
+      batchNumber: label.batchNumber,
+      id: label.batchNumber,
+      machineId: label.machineId||'',
+      size: label.size||'0',
+      customer: label.customer||'',
+      isPrinted: false,
+      status:'running'
+    };
+  }
 
   // ── Strict per-label scan flow enforcement ──
   // Rule: Each label follows AIM → Printing → PI → Packing → Dispatch
@@ -2504,6 +2534,32 @@ async function processScanInput(dept,type){
         showResult(false, retry.msg);
       }
     })();
+  } else if(firstResult.msg && firstResult.msg.includes('Batch') && serverUrl){
+    // Batch not found — sync planning orders from server then retry
+    zoneEl.className='scan-zone';
+    resultEl.innerHTML=`<div class="alert" style="background:rgba(255,171,0,0.1);border:1px solid rgba(255,171,0,0.4);padding:8px 12px">🔄 Syncing orders from server...</div>`;
+    (async()=>{
+      let retry = firstResult;
+      try{
+        const r = await fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)});
+        const snap = await r.json();
+        if(snap.ok && Array.isArray(snap.orders)){
+          state.batches = snap.orders;
+          saveLocal();
+          retry = await recordScan(parsed.labelId, dept, type, currentDept, parsed);
+        }
+      }catch(e){
+        retry = {ok:false, msg:'Cannot reach server — check connection'};
+      }
+      if(retry.ok){
+        showResult(true,
+          `Scanned ${type.toUpperCase()} — Batch ${retry.label.batchNumber} Box #${retry.label.labelNumber} (${fmt(retry.label.qty)}L)`,
+          retry.warning
+        );
+      } else {
+        showResult(false, retry.msg);
+      }
+    })();
   } else {
     showResult(false, firstResult.msg);
   }
@@ -3728,10 +3784,10 @@ window.addEventListener('beforeunload', () => {
   } catch(e) {}
 });
 
-// Auto sync every 30 seconds
+// Auto sync every 60 seconds
 setInterval(()=>{
   if(serverUrl && currentDept) pullFromServer();
-},30*1000);
+},60*1000);
 
 // Cross-tab / cross-page sync: when another tab (planning/DPR) writes to localStorage, re-pull
 window.addEventListener('storage', (e) => {

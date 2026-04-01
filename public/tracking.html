@@ -649,15 +649,23 @@ function getBatchFlow(batch){ return batch?.isPrinted ? WIP_FLOW.printed : WIP_F
 
 function getScansForBox(labelId){
   // Primary: exact match
-  // Fallback: suffix match handles temp-batch -> real-batch ID migration
+  // Fallback: suffix match ONLY for temp-batch -> real-batch reconciliation
   // e.g. old scan labelId "BT006-abc123xyz", new labelId "26ZH035-abc123xyz"
-  // The suffix "-abc123xyz" (random part) stays the same — safe to match on
+  // Only apply suffix match if the scan's batchNumber matches this label's batch
   const dashIdx = labelId.indexOf('-');
   const suffix = (dashIdx > 0 && labelId.length - dashIdx >= 7) ? labelId.slice(dashIdx) : null;
-  return state.scans.filter(s =>
-    s.labelId === labelId ||
-    (suffix && s.labelId && s.labelId !== labelId && s.labelId.endsWith(suffix))
-  ).sort((a,b) => new Date(a.ts) - new Date(b.ts));
+  // Find the label to get its batchNumber for safe suffix matching
+  const thisLabel = state.labels.find(l=>l.id===labelId);
+  const thisBatch = thisLabel?.batchNumber || null;
+  return state.scans.filter(s => {
+    if(s.labelId === labelId) return true; // exact match always ok
+    if(!suffix || !s.labelId || s.labelId === labelId) return false;
+    if(!s.labelId.endsWith(suffix)) return false;
+    // Only allow suffix match if it's the SAME batch (reconciliation case)
+    // or if the scan's batchNumber starts with 'BT' (temp batch)
+    if(!thisBatch) return false;
+    return s.batchNumber === thisBatch || (s.batchNumber||'').startsWith('BT');
+  }).sort((a,b) => new Date(a.ts) - new Date(b.ts));
 }
 function getScansForBatch(batchNo){
   // Primary: by batchNumber field
@@ -671,7 +679,8 @@ function getScansForBatch(batchNo){
   return state.scans.filter(s=>
     s.batchNumber===batchNo ||
     batchLabelIds.has(s.labelId) ||
-    (s.labelId && [...suffixes].some(sx=>s.labelId.endsWith(sx)))
+    // Suffix match only for temp-batch (BT*) scans being reconciled to this batch
+    (s.labelId && (s.batchNumber||'').startsWith('BT') && [...suffixes].some(sx=>s.labelId.endsWith(sx)))
   );
 }
 

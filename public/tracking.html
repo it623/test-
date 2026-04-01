@@ -1989,7 +1989,19 @@ function renderDashboard(){
         const wipDays=getBatchWIPDays(b.batchNumber);
         const dispDate=calcDispatchDate(b);
         const std=b.isPrinted?3:2;
-        const statusBadge=wipDays===0?'<span class="badge badge-green">✅ Closed</span>':wipDays<=std?'<span class="badge badge-blue">🔵 On Track</span>':'<span class="badge badge-amber">⚠️ Delayed</span>';
+        // wipDays===0 means no WIP in transit (either not started or all dispatched)
+        // Check if any scans exist to distinguish "not started" from "completed"
+        const hasAnyScans = getScansForBatch(b.batchNumber).length > 0;
+        const allDispatched = hasAnyScans && getScansForBatch(b.batchNumber).filter(s=>s.dept==='dispatch'&&s.type==='out').length > 0;
+        const statusBadge = !hasAnyScans
+          ? '<span class="badge badge-gray">⏳ Production</span>'
+          : wipDays===0 && allDispatched
+            ? '<span class="badge badge-green">✅ Dispatched</span>'
+            : wipDays===0
+              ? '<span class="badge badge-blue">🔵 On Track</span>'
+              : wipDays<=std
+                ? '<span class="badge badge-blue">🔵 On Track</span>'
+                : '<span class="badge badge-amber">⚠️ Delayed</span>';
         const alerts=state.alerts.filter(a=>a.batchNumber===b.batchNumber).length;
         return `<tr>
           <td class="td-bold td-mono">${b.batchNumber}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
@@ -3263,7 +3275,8 @@ function renderReportC(){
       const packedQty=boxToLakh(packedOut,b.size);
       const grossProd=b.actualProd||0;
       let statusBadge='';
-      if(wipDays===0&&packedOut>0) statusBadge='<span class="badge badge-green">✅ Closed</span>';
+      if(wipDays===0&&packedOut>0&&dispatchedOut>0) statusBadge='<span class="badge badge-green">✅ Dispatched</span>';
+      else if(wipDays===0&&packedOut===0) statusBadge='<span class="badge badge-gray">⏳ Production</span>';
       else if(wipDays<=std) statusBadge='<span class="badge badge-blue">🔵 In Progress</span>';
       else statusBadge='<span class="badge badge-amber">⚠️ Pending</span>';
       html+=`<tr>

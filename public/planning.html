@@ -34,7 +34,7 @@ html, body { height:100%; background:var(--bg); color:var(--text); font-family:v
 #app { display:flex; height:100vh; overflow:hidden; }
 #sidebar { width:220px; min-width:220px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; }
 #main { flex:1; overflow:hidden; display:flex; flex-direction:column; }
-#topbar { background:var(--surface); border-bottom:1px solid var(--border); padding:0 24px; height:56px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+#topbar { background:var(--surface); border-bottom:1px solid var(--border); padding:0 24px; height:56px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; gap:8px; min-width:0; }
 #content { flex:1; overflow-y:auto; padding:24px; }
 
 /* SIDEBAR */
@@ -50,8 +50,8 @@ html, body { height:100%; background:var(--bg); color:var(--text); font-family:v
 .nav-badge { margin-left:auto; background:var(--accent); color:#000; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:10px; font-weight:600; }
 
 /* TOPBAR */
-.topbar-title { font-family:var(--head); font-size:16px; font-weight:700; }
-.topbar-actions { display:flex; gap:8px; align-items:center; }
+.topbar-title { font-family:var(--head); font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.topbar-actions { display:flex; gap:6px; align-items:center; flex-shrink:0; flex-wrap:nowrap; }
 .btn { padding:7px 16px; border-radius:6px; border:none; cursor:pointer; font-family:var(--body); font-size:13px; font-weight:500; transition:all 0.15s; display:inline-flex; align-items:center; gap:6px; }
 .btn-primary { background:var(--accent); color:#000; }
 .btn-primary:hover { background:#e09600; }
@@ -272,7 +272,6 @@ input[type="file"] { display:none; }
   .summary-table td, .summary-table th { padding: 6px 8px; font-size: 11px; }
 
   /* ── User badge ── */
-  #user-badge-wrap { top: 6px; right: 8px; }
   #user-badge { font-size: 11px; padding: 3px 8px; }
 
   /* ── Auth overlay card ── */
@@ -1107,9 +1106,9 @@ function renderProduction() {
   const topActions = document.getElementById('topbar-actions');
 
   topActions.innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="importSAP()">📥 Import SAP</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportProdPlan()">📤 Export</button>
-    <button class="btn btn-primary btn-sm" onclick="showAddOrderModal()">+ New Order</button>
+    <button class="btn btn-ghost btn-sm" onclick="importSAP()" style="padding:5px 10px;font-size:12px">📥 Import SAP</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportProdPlan()" style="padding:5px 10px;font-size:12px">📤 Export</button>
+    <button class="btn btn-primary btn-sm" onclick="showAddOrderModal()" style="padding:5px 10px;font-size:12px">+ New Order</button>
   `;
 
   // Group by machine
@@ -5730,19 +5729,23 @@ function applyRoleRestrictions() {
 function updateUserBadge() {
   const topbar = document.getElementById('topbar-actions');
   if (!topbar || !currentUser) return;
-  // Add user badge to topbar if not already there
+  // Add user badge inline in topbar-actions (before last button)
   if (!document.getElementById('user-badge')) {
     const badge = document.createElement('div');
     badge.id = 'user-badge';
     badge.className = 'auth-user-badge';
     badge.onclick = showUserMenu;
+    badge.style.cssText = 'flex-shrink:0;white-space:nowrap;font-size:12px;padding:4px 10px';
     badge.innerHTML = `👤 ${currentUser.username} <span style="color:var(--text3);font-size:10px">[${currentUser.role}]</span> ▾`;
-    // Insert at start of body as fixed element
-    const fixed = document.createElement('div');
-    fixed.id = 'user-badge-wrap';
-    fixed.style.cssText = 'position:fixed;top:10px;right:16px;z-index:500';
-    fixed.appendChild(badge);
-    document.body.appendChild(fixed);
+    // Insert into topbar-actions as first child
+    const topbarActions = document.getElementById('topbar-actions');
+    if (topbarActions) {
+      topbarActions.insertBefore(badge, topbarActions.firstChild);
+    }
+  } else {
+    // Update existing badge
+    const badge = document.getElementById('user-badge');
+    if (badge) badge.innerHTML = `👤 ${currentUser.username} <span style="color:var(--text3);font-size:10px">[${currentUser.role}]</span> ▾`;
   }
 }
 

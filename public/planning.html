@@ -1757,7 +1757,7 @@ function importSAP() {
       <input id="sap-file-input" type="file" accept=".xlsx,.xls,.csv" style="display:none">
     </div>
     <div style="background:var(--surface2,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:12px">
-      <b>Required:</b> PO_Number (or PO No), Customer, Size, Qty_Lakhs, Machine_ID (e.g. MC21 or MC.21), Printed_YN (Y/N) &nbsp;|&nbsp;
+      <b>Required:</b> Customer, Size, Qty_Lakhs, Machine_ID (e.g. MC21 or MC.21), Printed_YN (Y/N) &nbsp;|&nbsp; <b>Optional:</b> PO_Number (auto-generated if blank),
       <b>Optional:</b> Batch_Number, PC_Code, Colour, Zone, Packing, Printing_Matter, Remarks
     </div>
     <div id="sap-preview"></div>
@@ -1838,7 +1838,7 @@ function processSAPFile(input) {
         const printed = (row.Printed_YN || row['Printed (Y/N)'] || row['Printed_YN'] || row['PTD'] || row['Printed'] || 'N').toString().toUpperCase().trim();
         const printedNorm = printed.startsWith('Y') ? 'Y' : 'N';
 
-        if (!po) errors.push('Missing PO_Number');
+        // PO Number is optional — auto-generated if blank
         if (!customer) errors.push('Missing Customer');
         if (!size) errors.push('Missing Size');
         if (!qty || qty <= 0) errors.push('Invalid Qty_Lakhs');
@@ -1944,7 +1944,7 @@ function confirmSAPImport(rows) {
       id: uid(),
       machineId,
       poType: 'po',
-      poNumber: String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim(),
+      poNumber: (String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim()) || ('PO-'+Date.now().toString(36).toUpperCase()+'-'+Math.random().toString(36).slice(2,5).toUpperCase()),
       batchNumber,
       customer: String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),
       shipTo:   String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),

@@ -5222,9 +5222,25 @@ function renderSettings() {
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="exportAllData()">📤 Export All Data (JSON)</button>
         <label class="btn btn-secondary" style="cursor:pointer">📥 Import Data (JSON)<input type="file" accept=".json" onchange="importAllData(this)"></label>
-        <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear All Data</button>
+        <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
       </div>
     </div>
+
+    ${currentUser?.role==='admin' ? `
+    <div class="card mt-4" style="border:2px solid #dc2626">
+      <div class="card-title" style="color:#dc2626">🔴 Fresh Start — Wipe All Data</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
+        This will permanently delete all <strong>Orders, Print Orders, Dispatch Plans, DPR Records, Scans, Labels and Batches</strong>.<br>
+        <strong>✅ Preserved: Machine Master, Print Machines, Pack Sizes, Truck Config, Zones, Archives, Users &amp; PINs.</strong><br>
+        Use this to start a new Financial Year or clear test data.
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <input id="reset-confirm-input" type="text" placeholder='Type  RESET-ALL-DATA  to confirm'
+          style="padding:8px 12px;border:1px solid #dc2626;border-radius:6px;font-family:monospace;font-size:13px;width:280px;background:var(--surface2)">
+        <button class="btn btn-danger" onclick="doFullReset()">🗑️ Wipe All Data Now</button>
+      </div>
+      <div id="reset-result" style="margin-top:10px"></div>
+    </div>` : ''}
   `;
 }
 
@@ -5261,6 +5277,52 @@ function saveAllTruckCaps() {
   const overrides = Object.entries(state.zoneCapacities).map(([z,v])=>`${z}: ${v}`).join(', ');
   alert(`✅ Saved.\nGlobal default: ${state.truckCapacity} boxes\n${overrides ? 'Zone overrides: ' + overrides : 'No zone overrides set.'}`);
   render();
+}
+
+async function doFullReset() {
+  const confirm = document.getElementById('reset-confirm-input')?.value?.trim();
+  const resultEl = document.getElementById('reset-result');
+  if (confirm !== 'RESET-ALL-DATA') {
+    resultEl.innerHTML = '<span style="color:#dc2626">❌ Type exactly: RESET-ALL-DATA</span>';
+    return;
+  }
+  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  if (!serverUrl) { resultEl.innerHTML = '<span style="color:#dc2626">❌ No server connected</span>'; return; }
+  if (!window.confirm('⚠️ FINAL WARNING\n\nThis will permanently delete ALL orders, scans, labels, DPR records and batches from the server.\n\nThis CANNOT be undone.\n\nClick OK to proceed.')) return;
+
+  resultEl.innerHTML = '<span style="color:var(--text3)">⏳ Wiping server data...</span>';
+  try {
+    const r = await fetch(serverUrl + '/api/admin/reset-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: currentUser?.token || '', confirm: 'RESET-ALL-DATA' }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      // Clear operational localStorage only — preserve server URL and session
+      localStorage.removeItem('sunloc_tracking');
+      localStorage.removeItem('sunloc_plan_push_queue');
+      localStorage.removeItem('sunloc_trk_push_queue');
+      localStorage.removeItem('sunloc_dpr_push_queue');
+      localStorage.removeItem('dpr_active_orders');
+      // Reset only operational state — preserve master data
+      state.orders = [];
+      state.printOrders = [];
+      state.dispatchPlans = [];
+      state.dispatchRecords = [];
+      state.dailyPrinting = [];
+      state.activeMonth = null;
+      // machineMaster, printMachineMaster, packSizes, truckCapacity, zoneCapacities, archives preserved
+      saveState();
+      resultEl.innerHTML = '<span style="color:#16a34a">✅ All data wiped successfully. Reloading...</span>';
+      setTimeout(() => location.reload(), 2000);
+    } else {
+      resultEl.innerHTML = `<span style="color:#dc2626">❌ ${j.error}</span>`;
+    }
+  } catch(e) {
+    resultEl.innerHTML = `<span style="color:#dc2626">❌ Error: ${e.message}</span>`;
+  }
 }
 
 function exportAllData() {

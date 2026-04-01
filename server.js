@@ -1476,6 +1476,60 @@ app.post('/api/admin/snapshot', asyncRoute(async (req, res) => {
   res.json({ ok: true, message: `Snapshot saved — ${orderCount} orders protected`, orders: orderCount, savedAt: currentState.saved_at });
 }));
 
+// POST /api/admin/reset-all -- WIPE ALL DATA (Admin only, fresh FY start)
+app.post('/api/admin/reset-all', asyncRoute(async (req, res) => {
+  const { token, confirm } = req.body;
+  const session = await verifyToken(token);
+  if (!session || session.role !== 'admin')
+    return res.status(403).json({ ok: false, error: 'Admin only' });
+  if (confirm !== 'RESET-ALL-DATA')
+    return res.status(400).json({ ok: false, error: 'Missing confirmation phrase' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM tracking_scans');
+    await client.query('DELETE FROM tracking_labels');
+    await client.query('DELETE FROM tracking_stage_closure');
+    await client.query('DELETE FROM tracking_wastage');
+    await client.query('DELETE FROM tracking_dispatch_records');
+    await client.query('DELETE FROM tracking_alerts');
+    await client.query('DELETE FROM dpr_records');
+    await client.query('DELETE FROM production_actuals');
+    await client.query('DELETE FROM temp_batches');
+    await client.query('DELETE FROM temp_batch_alerts');
+    await client.query('DELETE FROM reconciliation_requests');
+    await client.query('DELETE FROM wo_reconciliation_requests');
+    await client.query('DELETE FROM planning_state_backups');
+    // Preserve master data — only wipe operational data
+    const existing = await queryOne('SELECT state_json FROM planning_state ORDER BY id DESC LIMIT 1');
+    const existingState = existing ? JSON.parse(existing.state_json) : {};
+    const freshState = {
+      orders: [],
+      printOrders: [],
+      dailyPrinting: [],
+      dispatchPlans: [],
+      dispatchRecords: [],
+      currentPage: 'production',
+      activeMonth: null,
+      archives: existingState.archives || [],
+      // Preserve all master data
+      machineMaster: existingState.machineMaster || [],
+      printMachineMaster: existingState.printMachineMaster || [],
+      packSizes: existingState.packSizes || {},
+      truckCapacity: existingState.truckCapacity || 130,
+      zoneCapacities: existingState.zoneCapacities || {},
+    };
+    await client.query('UPDATE planning_state SET state_json=$1, saved_at=NOW()', [JSON.stringify(freshState)]);
+    await client.query('COMMIT');
+    await logAudit(session.username, session.role, 'admin', 'FULL_DATA_RESET', 'All operational data wiped for fresh FY start');
+    res.json({ ok: true, message: 'All data wiped. Users and machine settings preserved.' });
+  } catch(e) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ ok: false, error: e.message });
+  } finally { client.release(); }
+}));
+
 // GET /api/admin/backups — list recent planning state backups
 app.get('/api/admin/backups', asyncRoute(async (req, res) => {
   const session = await verifyToken(req.headers['x-session-token'] || req.query.token);

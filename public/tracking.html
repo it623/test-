@@ -2366,17 +2366,16 @@ function renderDeptScan(dept){
   <div class="card">
     <div class="card-title">Recent Scans — ${cfg.label}</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Time</th><th>Label</th><th>Batch</th><th>Type</th></tr></thead>
+      <thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead>
       <tbody>
       ${state.scans.filter(s=>s.dept===dept).slice(-50).reverse().map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
         const qty = s.qty || lbl?.qty || null;
-        const timeStr = fmtTime(s.ts);
-        const dateStr = fmtDate(s.ts);
+        const boxNo = lbl?.labelNumber || s.labelId.slice(-6);
         return `<tr>
-        <td class="td-mono text-sm" style="white-space:nowrap"><div>${timeStr}</div><div style="font-size:11px;color:var(--text3)">${dateStr}</div></td>
-        <td class="td-mono text-sm">${s.labelId.slice(-8)}${qty!=null?`<div style="font-size:11px;color:var(--text3)">${fmt(qty)}L</div>`:''}</td>
-        <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}</td>
+        <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
+        <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}\${boxNo}</td>
+        <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
         <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
       </tr>`;}).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}
       </tbody>
@@ -2642,15 +2641,16 @@ function renderDispatch(){
   <div class="card mb-16">
     <div class="card-title">Recent Scans — Dispatch</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Time</th><th>Label</th><th>Batch</th><th>Type</th></tr></thead>
+      <thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead>
       <tbody>
       ${state.scans.filter(s=>s.dept==='dispatch').slice(-50).reverse().map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
         const qty = s.qty || lbl?.qty || null;
+        const boxNo = lbl?.labelNumber || s.labelId.slice(-6);
         return `<tr>
           <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
-          <td class="td-mono text-sm">${s.labelId.slice(-8)}${qty!=null?`<div style="font-size:11px;color:var(--text3)">${fmt(qty)}L</div>`:''}</td>
-          <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}</td>
+          <td class="td-bold td-mono" style="white-space:nowrap">${s.batchNumber}\${boxNo}</td>
+          <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
           <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
         </tr>`;
       }).join('')||'<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>'}

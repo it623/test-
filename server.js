@@ -1476,6 +1476,34 @@ app.post('/api/admin/snapshot', asyncRoute(async (req, res) => {
   res.json({ ok: true, message: `Snapshot saved — ${orderCount} orders protected`, orders: orderCount, savedAt: currentState.saved_at });
 }));
 
+// POST /api/admin/purge-temp -- just clear temp batches (no full reset needed)
+app.post('/api/admin/purge-temp', asyncRoute(async (req, res) => {
+  const { token } = req.body;
+  const session = await verifyToken(token);
+  if (!session || session.role !== 'admin')
+    return res.status(403).json({ ok: false, error: 'Admin only' });
+  await query("DELETE FROM temp_batches");
+  await query('DELETE FROM temp_batch_alerts');
+  await logAudit(session.username, session.role, 'admin', 'PURGE_TEMP_BATCHES', 'All TEMP batches purged');
+  res.json({ ok: true, message: 'All TEMP batches cleared' });
+}));
+
+// POST /api/admin/purge-labels -- clear all tracking labels and scans
+app.post('/api/admin/purge-labels', asyncRoute(async (req, res) => {
+  const { token } = req.body;
+  const session = await verifyToken(token);
+  if (!session || session.role !== 'admin')
+    return res.status(403).json({ ok: false, error: 'Admin only' });
+  await query('DELETE FROM tracking_scans');
+  await query('DELETE FROM tracking_labels');
+  await query('DELETE FROM tracking_stage_closure');
+  await query('DELETE FROM tracking_wastage');
+  await query('DELETE FROM tracking_dispatch_records');
+  await query('DELETE FROM tracking_alerts');
+  await logAudit(session.username, session.role, 'admin', 'PURGE_LABELS', 'All tracking labels and scans purged');
+  res.json({ ok: true, message: 'All labels and scans cleared' });
+}));
+
 // POST /api/admin/reset-all -- WIPE ALL DATA (Admin only, fresh FY start)
 app.post('/api/admin/reset-all', asyncRoute(async (req, res) => {
   const { token, confirm } = req.body;

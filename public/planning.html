@@ -5230,10 +5230,14 @@ function renderSettings() {
     <div class="card mt-4" style="border:2px solid #dc2626">
       <div class="card-title" style="color:#dc2626">🔴 Fresh Start — Wipe All Data</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
-        This will permanently delete all <strong>Orders, Print Orders, Dispatch Plans, DPR Records, Scans, Labels and Batches</strong>.<br>
-        <strong>✅ Preserved: Machine Master, Print Machines, Pack Sizes, Truck Config, Zones, Archives, Users &amp; PINs.</strong><br>
-        Use this to start a new Financial Year or clear test data.
+        <strong>✅ Preserved:</strong> Machine Master, Pack Sizes, Truck Config, Zones, Users &amp; PINs.<br>
+        <strong>🗑️ Deleted:</strong> Orders, Labels, Scans, DPR Records, Dispatch Plans, TEMP Batches.
       </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+        <button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="doPurgeTemp()">🧹 Clear TEMP Batches only</button>
+        <button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="doPurgeLabels()">🧹 Clear Labels &amp; Scans only</button>
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">For full wipe (new FY), type the confirmation and click Wipe All:</div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <input id="reset-confirm-input" type="text" placeholder='Type  RESET-ALL-DATA  to confirm'
           style="padding:8px 12px;border:1px solid #dc2626;border-radius:6px;font-family:monospace;font-size:13px;width:280px;background:var(--surface2)">
@@ -5277,6 +5281,36 @@ function saveAllTruckCaps() {
   const overrides = Object.entries(state.zoneCapacities).map(([z,v])=>`${z}: ${v}`).join(', ');
   alert(`✅ Saved.\nGlobal default: ${state.truckCapacity} boxes\n${overrides ? 'Zone overrides: ' + overrides : 'No zone overrides set.'}`);
   render();
+}
+
+async function doPurgeTemp() {
+  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  if (!serverUrl || !currentUser?.token) { alert('Not connected to server'); return; }
+  if (!confirm('Clear all TEMP batches from the server? This will hide the unreconciled banner.')) return;
+  const r = await fetch(serverUrl+'/api/admin/purge-temp', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ token: currentUser.token }),
+    signal: AbortSignal.timeout(8000)
+  });
+  const j = await r.json();
+  alert(j.ok ? '✅ TEMP batches cleared. Refresh to update.' : '❌ '+j.error);
+  if(j.ok) setTimeout(()=>checkPlanningTempAlerts(), 500);
+}
+
+async function doPurgeLabels() {
+  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  if (!serverUrl || !currentUser?.token) { alert('Not connected to server'); return; }
+  if (!confirm('Clear all tracking labels and scans from the server? Labels Generated will reset to 0.')) return;
+  const r = await fetch(serverUrl+'/api/admin/purge-labels', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ token: currentUser.token }),
+    signal: AbortSignal.timeout(8000)
+  });
+  const j = await r.json();
+  if(j.ok){
+    localStorage.removeItem('sunloc_tracking');
+    alert('✅ Labels and scans cleared.');
+  } else { alert('❌ '+j.error); }
 }
 
 async function doFullReset() {

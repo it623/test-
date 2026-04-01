@@ -984,13 +984,18 @@ app.post('/api/reconciliation/approve/:id', asyncRoute(async (req, res) => {
       const labelsToMigrate = (await client.query(labelQ, labelP)).rows;
       for (const label of labelsToMigrate) {
         const newId = label.id.replace(tbId, orderId);
+        // Rebuild qr_data so printed QR codes still resolve after batch reconciliation
+        const oldQr = label.qr_data || '';
+        const newQr = oldQr
+          ? oldQr.replace(tbId, orderId).replace(label.id, newId)
+          : `SUNLOC|${orderId}|${label.label_number}|${label.size}|${label.qty}|${newId}`;
         await client.query(
           `INSERT INTO tracking_labels SELECT $1 as id, $2 as batch_number,
             label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,
             po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,
-            voided_at,voided_by,qr_data FROM tracking_labels WHERE id=$3
-           ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number`,
-          [newId, orderId, label.id]
+            voided_at,voided_by,$4 as qr_data FROM tracking_labels WHERE id=$3
+           ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number, qr_data=EXCLUDED.qr_data`,
+          [newId, orderId, label.id, newQr]
         );
         const sc = await client.query(`UPDATE tracking_scans SET label_id=$1,batch_number=$2 WHERE label_id=$3 RETURNING id`,
           [newId, orderId, label.id]);

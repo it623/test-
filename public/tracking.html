@@ -1165,6 +1165,19 @@ async function recordScan(labelId, dept, type, operator, parsed){
       Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
     );
   }
+  // Tertiary lookup: by labelNumber alone across all batches
+  // (handles post-reconciliation where batchNumber in QR is old temp-batch ID)
+  if(!label && parsed?.boxNumber!=null){
+    const candidates = state.labels.filter(l=>
+      Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber) && !l.voided
+    );
+    // If only one match, use it. If multiple, prefer one matching QR size/qty
+    if(candidates.length===1){
+      label = candidates[0];
+    } else if(candidates.length>1 && parsed?.size){
+      label = candidates.find(l=>String(l.size)===String(parsed.size)) || candidates[0];
+    }
+  }
   if(!label){
   try{
     const res = await fetch(serverUrl + "/api/tracking/state");
@@ -1179,7 +1192,8 @@ async function recordScan(labelId, dept, type, operator, parsed){
   }
 
   if(!label){
-    return {ok:false,msg:'Label not found'};
+    const debugInfo = parsed?.batchNumber ? ` (QR: batch=${parsed.batchNumber}, box#${parsed.boxNumber})` : ` (ID: ${labelId})`;
+    return {ok:false,msg:`Label not found${debugInfo} — try Sync then scan again`};
   }
 }
   if(label.voided) return {ok:false,msg:'Label has been voided'};

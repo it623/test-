@@ -2030,6 +2030,11 @@ function renderLabels(){
   const activeBatches=state.batches.filter(b=>b.status!=='closed');
 
   document.getElementById('tb-actions').innerHTML=`
+    <button class="btn btn-secondary btn-sm" id="sync-btn" onclick="
+      const b=this; b.textContent='⏳ Syncing...'; b.disabled=true;
+      pullFromServer().then(()=>{ renderPage(currentPage); b.textContent='✅ Synced'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); })
+      .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
+    ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
   el.innerHTML=`
@@ -2297,7 +2302,11 @@ function renderDeptScan(dept){
 
   document.getElementById('tb-actions').innerHTML=`
     <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">📊 View All Batches</button>
-    <button class="btn btn-secondary btn-sm" onclick="pullFromServer().then(()=>renderPage(currentPage))">🔄 Sync</button>`;
+    <button class="btn btn-secondary btn-sm" id="sync-btn" onclick="
+      const b=this; b.textContent='⏳ Syncing...'; b.disabled=true;
+      pullFromServer().then(()=>{ renderPage(currentPage); b.textContent='✅ Synced'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); })
+      .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
+    ">🔄 Sync</button>`;
 
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid ${cfg.color}">
@@ -2650,6 +2659,16 @@ function getActiveBatchesForDept(dept){
 
 function renderDispatch(){
   const el=document.getElementById('page-dispatch');
+  // Add Sync button to topbar
+  const tbActions = document.getElementById('tb-actions');
+  if(tbActions && !tbActions.innerHTML.includes('sync-btn')){
+    tbActions.innerHTML = `<button class="btn btn-secondary btn-sm" id="sync-btn" onclick="
+      const b=this; b.textContent='⏳ Syncing...'; b.disabled=true;
+      pullFromServer().then(()=>{ renderPage(currentPage); b.textContent='✅ Synced'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); })
+      .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
+    ">🔄 Sync</button>
+    <button class="btn btn-secondary btn-sm" onclick="navigate('batch-tracker')">📊 View All Batches</button>` + tbActions.innerHTML;
+  }
   // Get packed but not dispatched boxes
   const packedOut=state.scans.filter(s=>s.dept==='packing'&&s.type==='out');
   const dispatchedIn=state.scans.filter(s=>s.dept==='dispatch'&&s.type==='in');
@@ -2846,6 +2865,11 @@ function renderBatchTracker(){
   const batches=state.batches.filter(b=>!b.deleted);
 
   document.getElementById('tb-actions').innerHTML=`
+    <button class="btn btn-secondary btn-sm" id="sync-btn" onclick="
+      const b=this; b.textContent='⏳ Syncing...'; b.disabled=true;
+      pullFromServer().then(()=>{ renderPage(currentPage); b.textContent='✅ Synced'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); })
+      .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
+    ">🔄 Sync</button>
     <button class="btn btn-secondary btn-sm" onclick="exportTrackerReport()">📥 Export</button>`;
 
   el.innerHTML=`
@@ -3802,8 +3826,33 @@ window.addEventListener('beforeunload', () => {
 });
 
 // Auto sync every 10 seconds — ensures cross-device scan visibility
-setInterval(()=>{
-  if(serverUrl && currentDept) pullFromServer();
+setInterval(async ()=>{
+  if(!serverUrl || !currentDept) return;
+  // Lightweight scan-only refresh — just fetch new scans without full page re-render
+  try{
+    const r = await fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)});
+    const snap = await r.json();
+    if(snap.ok && snap.tracking){
+      const serverScans = (snap.tracking.scans||[]).map(s=>({
+        id:s.id, labelId:s.label_id||s.labelId,
+        batchNumber:s.batch_number||s.batchNumber,
+        dept:s.dept, type:s.type, ts:s.ts,
+        operator:s.operator||null, size:s.size||null, qty:s.qty||null
+      }));
+      const serverScanIds = new Set(serverScans.map(s=>s.id));
+      const localOnlyScans = state.scans.filter(s=>!serverScanIds.has(s.id));
+      const prevCount = state.scans.length;
+      state.scans = [...serverScans, ...localOnlyScans];
+      // Also update labels and batches
+      if(Array.isArray(snap.orders)) state.batches = snap.orders;
+      saveLocal();
+      setSyncBadge('synced');
+      // Re-render if scan count changed
+      if(state.scans.length !== prevCount && currentPage){
+        renderPage(currentPage);
+      }
+    }
+  }catch(e){ setSyncBadge('offline'); }
 },10*1000);
 
 // Cross-tab / cross-page sync: when another tab (planning/DPR) writes to localStorage, re-pull

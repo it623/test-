@@ -1370,7 +1370,7 @@ function renderShifts(){
             </select>
             <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" title="Type batch number if not in dropdown" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
             <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" step="0.01" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprQtyNav(event,'${sh}','${mc.id}')" title="Production in Lakhs">
-            <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
+            <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t1);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
           </div>`;
       });

@@ -1372,6 +1372,7 @@ function renderShifts(){
             <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" step="0.01" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprQtyNav(event,'${sh}','${mc.id}')" title="Production in Lakhs">
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t1);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
+            ${(()=>{ const mo=(activeOrders[mc.id]||[]).find(o=>o.id===(run.orderId||'')||o.batchNumber===(run.batchNumber||'')); if(!mo) return ''; const pl=Math.round((mo.qty||0)*100)/100; const ac=Math.round((mo.actualQty||0)*100)/100; const rm=Math.max(0,Math.round((pl-ac)*100)/100); const col=rm<=0?'var(--green)':rm<pl*0.2?'var(--amber)':'var(--cyan)'; return `<span class="run-ord-info" style="font-size:9px;color:${col};font-family:var(--mono);white-space:nowrap;flex-shrink:0" title="${mo.customer||''}">Ord:${pl}L Prod:${ac}L Rem:${rm}L</span>`; })()}
           </div>`;
       });
 
@@ -2824,10 +2825,15 @@ setInterval(async () => {
   if (dprUser) {
     try { await fetchActiveOrders(); } catch(e) {}
   }
-}, 60*1000);
+}, 30*1000); // sync orders every 30s
 
-setInterval(dprQueueFlush, 30*1000);
-document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') dprQueueFlush(); });
+setInterval(dprQueueFlush, 5*1000); // flush queue every 5s
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible'){
+    dprQueueFlush();
+    if(dprUser) fetchActiveOrders().catch(()=>{});
+  }
+});
 
 // ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
 window.addEventListener('beforeunload', () => {

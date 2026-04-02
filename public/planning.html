@@ -5584,16 +5584,16 @@ loadState();
 setTimeout(() => SYNC.online().then(() => SYNC.updateBadge()), 800);
 
 // Refresh tracking WIP every 3 minutes
-setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},180000);
+setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},60*1000); // tracking status every 60s
 
-// Auto-refresh planning state from server every 60 seconds (was 5 min)
+// Auto-refresh planning state from server every 30 seconds
 setInterval(async()=>{
   if(currentUser && _serverDataLoaded){
     try{ await SYNC.loadFromServer(); }catch(e){}
   }
-}, 60*1000);
+}, 30*1000);
 
-setInterval(planQueueFlush, 30*1000);
+setInterval(planQueueFlush, 5*1000); // flush queue every 5s
 
 // ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
 window.addEventListener('beforeunload', () => {
@@ -5607,6 +5607,14 @@ window.addEventListener('beforeunload', () => {
     const blob = new Blob([JSON.stringify({state:toSave})], {type:'application/json'});
     navigator.sendBeacon && navigator.sendBeacon(url+'/api/planning/state', blob);
   } catch(e) {}
+});
+
+// Sync immediately when tab becomes visible
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='visible' && currentUser && _serverDataLoaded){
+    planQueueFlush();
+    SYNC.loadFromServer().catch(()=>{});
+  }
 });
 
 // Check TEMP batch alerts every 5 minutes

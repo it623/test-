@@ -489,7 +489,8 @@ input[type=number]{font-family:var(--mono)}
       <div id="page-pi" class="page"></div>
       <div id="page-packing" class="page"></div>
       <div id="page-dispatch" class="page"></div>
-      <div id="page-batch-tracker" class="page"></div>
+      <div id="page-scan-history" class="page"></div>
+<div id="page-batch-tracker" class="page"></div>
       <div id="page-reports" class="page"></div>
       <div id="page-search" class="page"></div>
       <div id="page-settings" class="page"></div>
@@ -566,6 +567,7 @@ const NAV_ITEMS = [
   { id:'pi',            icon:'🟠', label:'Print Inspection', section:'Operations' },
   { id:'packing',       icon:'📦', label:'Packing',          section:'Operations' },
   { id:'dispatch',      icon:'🚚', label:'Dispatch',         section:'Operations' },
+  { id:'scan-history',   icon:'📋', label:'Scan History',     section:'Tracking' },
   { id:'batch-tracker', icon:'🗺️', label:'Batch Tracker',    section:'Tracking' },
   { id:'reports',       icon:'📈', label:'Reports',          section:'Tracking' },
   { id:'search',        icon:'🔍', label:'Search',           section:'Tracking' },
@@ -1951,6 +1953,7 @@ function renderPage(page){
     case 'pi': renderDeptScan('pi'); break;
     case 'packing': renderDeptScan('packing'); break;
     case 'dispatch': renderDispatch(); break;
+    case 'scan-history': renderScanHistory(); break;
     case 'batch-tracker': renderBatchTracker(); break;
     case 'reports': renderReports(); break;
     case 'search': renderTrackingSearch(); break;
@@ -2598,11 +2601,8 @@ async function processScanInput(dept,type){
       zoneEl.className='scan-zone success';
       const warnHtml = warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${warning}</div>` : '';
       resultEl.innerHTML=`
-        <div style="background:#00c853;color:#fff;border-radius:12px;padding:16px 20px;text-align:center;font-size:18px;font-weight:700;box-shadow:0 4px 16px rgba(0,200,83,0.4);margin:8px 0">
-          ✅ ${type.toUpperCase()} SUCCESS
-        </div>
-        <div style="background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:14px;font-weight:600">
-          ${msg}
+        <div style="background:rgba(0,200,83,0.12);border:2px solid #00c853;border-radius:12px;padding:16px 20px;font-size:17px;font-weight:700;color:#00a844">
+          ✅ ${msg}
         </div>${warnHtml}`;
       // Show recent scans immediately after success
       const recentEl = document.getElementById('recent-scans-${dept}');
@@ -3003,6 +3003,120 @@ function confirmDispatch(batchNo){
 // ═══════════════════════════════════════════════════════
 // PAGE: BATCH TRACKER
 // ═══════════════════════════════════════════════════════
+
+function renderScanHistory(){
+  const el = document.getElementById('page-scan-history');
+  if(!el) return;
+
+  document.getElementById('tb-actions').innerHTML=`
+    <button class="btn btn-secondary btn-sm" onclick="
+      const b=this; b.textContent='⏳ Syncing...'; b.disabled=true;
+      pullFromServer().then(()=>{ renderPage('scan-history'); b.textContent='✅ Synced'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); })
+      .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
+    ">🔄 Sync</button>`;
+
+  const DEPT_LABELS = {aim:'AIM',printing:'Printing',pi:'Print Insp.',packing:'Packing',dispatch:'Dispatch'};
+  const DEPT_COLORS = {aim:'#2196f3',printing:'#9c27b0',pi:'#ff9800',packing:'#00bcd4',dispatch:'#4caf50'};
+
+  const filterDept = window._shDept||'all';
+  const filterType = window._shType||'all';
+  const filterDate = window._shDate||'';
+
+  let scans = [...state.scans].sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  if(filterDept!=='all') scans=scans.filter(s=>s.dept===filterDept);
+  if(filterType!=='all') scans=scans.filter(s=>s.type===filterType);
+  if(filterDate) scans=scans.filter(s=>s.ts&&s.ts.slice(0,10)===filterDate);
+
+  el.innerHTML=`
+  <div class="section-header mb-16">
+    <div>
+      <div class="section-title">📋 Scan History</div>
+      <div class="section-sub">All IN/OUT scans across all departments</div>
+    </div>
+  </div>
+
+  <div class="card mb-16" style="padding:12px 16px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <select onchange="window._shDept=this.value;renderPage('scan-history')"
+        style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
+        <option value="all" ${filterDept==='all'?'selected':''}>All Departments</option>
+        <option value="aim" ${filterDept==='aim'?'selected':''}>AIM Inspection</option>
+        <option value="printing" ${filterDept==='printing'?'selected':''}>Printing</option>
+        <option value="pi" ${filterDept==='pi'?'selected':''}>Print Inspection</option>
+        <option value="packing" ${filterDept==='packing'?'selected':''}>Packing</option>
+        <option value="dispatch" ${filterDept==='dispatch'?'selected':''}>Dispatch</option>
+      </select>
+      <select onchange="window._shType=this.value;renderPage('scan-history')"
+        style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
+        <option value="all" ${filterType==='all'?'selected':''}>IN & OUT</option>
+        <option value="in" ${filterType==='in'?'selected':''}>📥 IN only</option>
+        <option value="out" ${filterType==='out'?'selected':''}>📤 OUT only</option>
+      </select>
+      <input type="date" value="${filterDate}"
+        onchange="window._shDate=this.value;renderPage('scan-history')"
+        style="padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
+      ${filterDept!=='all'||filterType!=='all'||filterDate
+        ? `<button class="btn btn-ghost btn-sm" onclick="window._shDept='all';window._shType='all';window._shDate='';renderPage('scan-history')">✕ Clear</button>`
+        : ''}
+      <span style="margin-left:auto;font-size:12px;color:var(--text3);font-weight:600">${scans.length} scans</span>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <div class="tbl-wrap">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--surface2);border-bottom:2px solid var(--border)">
+          <th style="padding:10px 12px;text-align:left;white-space:nowrap;font-size:11px;color:var(--text3);font-weight:700">TIME</th>
+          <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--text3);font-weight:700">BATCH / BOX</th>
+          <th style="padding:10px 12px;text-align:left;font-size:11px;color:var(--text3);font-weight:700">CUSTOMER</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:var(--text3);font-weight:700">DEPT</th>
+          <th style="padding:10px 12px;text-align:center;font-size:11px;color:var(--text3);font-weight:700">TYPE</th>
+          <th style="padding:10px 12px;text-align:right;font-size:11px;color:var(--text3);font-weight:700">QTY</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${scans.length===0
+          ? '<tr><td colspan="6" style="padding:24px;text-align:center;color:var(--text3)">No scans recorded yet — press 🔄 Sync to load</td></tr>'
+          : scans.map(s=>{
+              const lbl = state.labels.find(l=>l.id===s.labelId);
+              const boxNo = lbl?.labelNumber || s.labelId?.slice(-4) || '?';
+              const total = state.labels.filter(l=>l.batchNumber===s.batchNumber&&!l.voided).length;
+              const customer = lbl?.customer || s.customer || '-';
+              const qty = s.qty ?? lbl?.qty ?? null;
+              const dColor = DEPT_COLORS[s.dept]||'#888';
+              const timeStr = new Date(s.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+              const dateStr = new Date(s.ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+              return `<tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:10px 12px;white-space:nowrap">
+                  <div style="font-weight:700;font-family:monospace;font-size:13px">${timeStr}</div>
+                  <div style="font-size:11px;color:var(--text3)">${dateStr}</div>
+                </td>
+                <td style="padding:10px 12px;white-space:nowrap">
+                  <div style="font-weight:700;font-family:monospace;font-size:14px">${s.batchNumber||'?'}</div>
+                  <div style="font-size:11px;color:var(--text3)">Box ${boxNo}${total?'/'+total:''}</div>
+                </td>
+                <td style="padding:10px 12px;font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${customer}</td>
+                <td style="padding:10px 12px;text-align:center">
+                  <span style="background:${dColor}22;color:${dColor};border:1px solid ${dColor}44;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700">
+                    ${DEPT_LABELS[s.dept]||s.dept}
+                  </span>
+                </td>
+                <td style="padding:10px 12px;text-align:center">
+                  ${s.type==='in'
+                    ? '<span style="background:#2196f322;color:#2196f3;border:1px solid #2196f344;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:700">📥 IN</span>'
+                    : '<span style="background:#4caf5022;color:#4caf50;border:1px solid #4caf5044;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:700">📤 OUT</span>'}
+                </td>
+                <td style="padding:10px 12px;text-align:right;font-family:monospace;font-size:13px;font-weight:600">
+                  ${qty!=null?fmt(qty)+'L':'-'}
+                </td>
+              </tr>`;
+            }).join('')}
+      </tbody>
+    </table>
+    </div>
+  </div>`;
+}
 
 function renderBatchTracker(){
   const el=document.getElementById('page-batch-tracker');

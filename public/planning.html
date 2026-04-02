@@ -355,7 +355,7 @@ input[type="file"] { display:none; }
     <div class="nav-item" onclick="navigate('dispatch-customer')"><span class="icon">👤</span> Customer View</div>
     <div class="nav-item" onclick="navigate('dispatch-export')"><span class="icon">📥</span> Dispatch Export</div>
     <div class="nav-item" onclick="navigate('order-tracker')"><span class="icon">📊</span> Order Tracker</div>
-    <div class="nav-item" onclick="openTrackingApp()" style="color:var(--accent2)"><span class="icon">🏷️</span> Tracking Suite ↗</div>
+    <div class="nav-item" onclick="event.stopPropagation();openTrackingApp()" style="color:var(--accent2)"><span class="icon">🏷️</span> Tracking Suite ↗</div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Masters</div>
     <div class="nav-item" onclick="navigate('machines')"><span class="icon">🔧</span> Machine Master</div>
@@ -666,17 +666,32 @@ const SYNC = (() => {
   async function loadFromServer() {
     const serverState = await pull();
     if (!serverState) return;
-    // Stamp when we last loaded from server
+
+    // Check if data actually changed before re-rendering
+    // Compare order count and last saved timestamp to avoid unnecessary re-renders
+    const prevOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
+    const prevSavedAt = state._serverSavedAt || 0;
+    const serverSavedAt = serverState._serverSavedAt || serverState.savedAt || 0;
+
     serverState._serverSavedAt = Date.now();
     Object.assign(state, serverState);
     state.pcCodes = PC_CODES_RAW;
     state.zoneMap = ZONE_MAP_RAW;
-    // Mark server data as confirmed loaded — saveState() will now allow pushes
     _serverDataLoaded = true;
-    // Persist locally
+
     try { const s = {...serverState}; delete s.pcCodes; delete s.zoneMap; localStorage.setItem('sunloc_state', JSON.stringify(s)); } catch {}
+
     await loadTrackingStatus();
-    render();
+
+    // Only re-render if this is initial load OR data actually changed
+    const newOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
+    const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
+    const isInitialLoad = prevSavedAt === 0;
+
+    if (isInitialLoad || dataChanged) {
+      render();
+    }
+    // If data unchanged — skip re-render to prevent view disruption
   }
 
   async function loadTrackingStatus() {
@@ -733,8 +748,12 @@ function loadState() {
 
 function openTrackingApp() {
   const url = localStorage.getItem('sunloc_server_url') || '';
-  if (url) window.open(url + '/tracking.html', '_blank');
-  else alert('Please configure the Server URL in Settings first.');
+  if (url) {
+    // Open in same tab to prevent accidental new tab spawning
+    window.location.href = url + '/tracking.html';
+  } else {
+    alert('Please configure the Server URL in Settings first.');
+  }
 }
 
 function saveState() {
@@ -776,9 +795,10 @@ const sunlocChannel = (() => {
     const ch = new BroadcastChannel('sunloc_sync');
     ch.onmessage = (e) => {
       const msg = e.data;
-      // If tracking saved new data, refresh our tracking WIP display
+      // If tracking saved new data, refresh WIP display only if not on a data-entry page
       if (msg.type === 'TRACKING_SYNCED' && currentUser && _serverDataLoaded) {
-        try{ SYNC.loadTrackingStatus().then(()=>render()); }catch(ex){}
+        // Only refresh tracking status numbers — never full render from broadcast
+        try{ SYNC.loadTrackingStatus(); }catch(ex){}
       }
     };
     return ch;
@@ -5584,7 +5604,7 @@ loadState();
 setTimeout(() => SYNC.online().then(() => SYNC.updateBadge()), 800);
 
 // Refresh tracking WIP every 3 minutes
-setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},60*1000); // tracking status every 60s
+setInterval(async()=>{try{await SYNC.loadTrackingStatus();}catch(e){}},60*1000); // tracking status every 60s — no re-render
 
 // Auto-refresh planning state from server every 30 seconds
 setInterval(async()=>{

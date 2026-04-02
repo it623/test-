@@ -1009,70 +1009,63 @@ async function pullFromServer(){
   if(!serverUrl) return;
 
   try{
-    // ── Single snapshot call — gets planning orders + tracking state atomically ──
     const r = await fetch(serverUrl+'/api/sync/snapshot', {signal:AbortSignal.timeout(10000)});
     if(r.ok){
       const snap = await r.json();
       if(snap.ok){
-        // Load planning orders — always overwrite, server is source of truth
-        // snap.orders is always an array (may be empty if no orders yet)
+        // SERVER IS ALWAYS SOURCE OF TRUTH
+        // Get queued pending scans from push queue only
+        let queuedScans = [];
+        try{
+          const q = JSON.parse(localStorage.getItem('sunloc_trk_push_queue')||'[]');
+          queuedScans = q.filter(e=>e.endpoint==='/api/tracking/scan').map(e=>e.payload?.scan).filter(Boolean);
+        }catch(e){}
+
+        // Orders — always take server version if non-empty
         if(Array.isArray(snap.orders) && snap.orders.length > 0){
           state.batches = snap.orders;
           state.machineMaster = snap.machineMaster || [];
-        } else if(Array.isArray(snap.orders)) {
-          // orders empty — keep local batches but update machine master
-          state.machineMaster = snap.machineMaster || state.machineMaster;
+        } else if(snap.machineMaster){
+          state.machineMaster = snap.machineMaster;
         }
-        // Load tracking state (labels from server are snake_case — normalise)
+
         if(snap.tracking){
-          const normLabels = (snap.tracking.labels||[]).map(l=>
-            // Server returns snake_case; normLabel handles both cases
-            l.batchNumber ? l : normLabel(l)
-          );
-          const serverLabelIds = new Set(normLabels.map(l=>l.id));
-          const localOnlyLabels = state.labels.filter(l=>!serverLabelIds.has(l.id));
-          state.labels = [...normLabels, ...localOnlyLabels];
+          // Labels — server is truth
+          const normLabels = (snap.tracking.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
+          if(normLabels.length > 0) state.labels = normLabels;
+
+          // Scans — server + queued pending
           const serverScans = (snap.tracking.scans||[]).map(s=>({
             id:s.id, labelId:s.label_id||s.labelId,
             batchNumber:s.batch_number||s.batchNumber,
             dept:s.dept, type:s.type, ts:s.ts,
             operator:s.operator||null, size:s.size||null, qty:s.qty||null
           }));
-          // Merge: keep local scans that are not yet on server (queued offline scans)
           const serverScanIds = new Set(serverScans.map(s=>s.id));
-          const localOnlyScans = state.scans.filter(s=>!serverScanIds.has(s.id));
-          state.scans = [...serverScans, ...localOnlyScans];
-          // Re-push any local-only scans to server
-          if(localOnlyScans.length > 0){
-            localOnlyScans.forEach(scan=>{
-              fetch(serverUrl+'/api/tracking/scan',{
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({scan}),
-                signal:AbortSignal.timeout(8000)
-              }).catch(()=>{});
-            });
-          }
+          const pendingScans = queuedScans.filter(s=>s&&s.id&&!serverScanIds.has(s.id));
+          state.scans = [...serverScans, ...pendingScans];
+
+          // Re-push pending scans to server
+          pendingScans.forEach(scan=>{
+            fetch(serverUrl+'/api/tracking/scan',{
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body:JSON.stringify({scan}), signal:AbortSignal.timeout(8000)
+            }).catch(()=>{});
+          });
+
           state.stageClosure = (snap.tracking.stageClosure||[]).map(s=>({
             id:s.id, batchNumber:s.batch_number||s.batchNumber,
             dept:s.dept, closed:!!s.closed,
             closedAt:s.closed_at||s.closedAt, closedBy:s.closed_by||s.closedBy||null
           }));
-          state.wastage = snap.tracking.wastage || [];
-          state.dispatchRecs = snap.tracking.dispatchRecs || [];
+          state.wastage = snap.tracking.wastage||[];
+          state.dispatchRecs = snap.tracking.dispatchRecs||[];
           state.alerts = (snap.tracking.alerts||[]).map(a=>({
             id:a.id, labelId:a.label_id||a.labelId,
             batchNumber:a.batch_number||a.batchNumber,
             dept:a.dept, scanInTs:a.scan_in_ts||a.scanInTs,
             hoursStuck:a.hours_stuck||a.hoursStuck, resolved:!!a.resolved, msg:a.msg
           }));
-          // Push any local-only labels back to server
-          if(localOnlyLabels.length > 0){
-            fetch(serverUrl+'/api/tracking/state',{
-              method:'POST', headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({labels:localOnlyLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
-              signal:AbortSignal.timeout(8000)
-            }).catch(()=>{});
-          }
         }
         saveLocal();
         setSyncBadge('synced');
@@ -1081,8 +1074,7 @@ async function pullFromServer(){
         return;
       }
     }
-  }catch(e){ console.warn('[Tracking] Snapshot failed, trying fallback:', e.message); }
-
+  }catch(e){ console.warn('[Tracking] Snapshot failed:', e.message); }
   // ── Fallback: individual endpoints if snapshot not available ──
   let gotAny = false;
   try{
@@ -1248,15 +1240,41 @@ async function recordScan(labelId, dept, type, operator, parsed){
   }
   if(!label){
   try{
-    const res = await fetch(serverUrl + "/api/tracking/state");
-    const data = await res.json();
-
-    if(data.ok && data.state){
-      state.labels = (data.state.labels || []).map(normLabel);
+    // Pull full snapshot — gets all labels from server
+    const res = await fetch(serverUrl + "/api/sync/snapshot", {signal:AbortSignal.timeout(10000)});
+    const snap = await res.json();
+    if(snap.ok && snap.tracking){
+      const fresh = (snap.tracking.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
+      state.labels = fresh;
+      if(Array.isArray(snap.orders)&&snap.orders.length>0) state.batches=snap.orders;
+      saveLocal();
+      // Retry all lookups with fresh data
       label = state.labels.find(l=>l.id===labelId);
+      if(!label && parsed?.batchNumber && parsed?.boxNumber!=null){
+        label = state.labels.find(l=>
+          l.batchNumber===parsed.batchNumber &&
+          Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)
+        );
+      }
+      if(!label && parsed?.boxNumber!=null){
+        const cands=state.labels.filter(l=>Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber)&&!l.voided);
+        label=cands.length===1?cands[0]:(cands.length>1&&parsed?.size?cands.find(l=>String(l.size)===String(parsed.size))||cands[0]:null);
+      }
+    }
+    // If still not found, try batch-specific endpoint
+    if(!label && parsed?.batchNumber){
+      const br = await fetch(serverUrl+'/api/tracking/labels?batchNumber='+encodeURIComponent(parsed.batchNumber),{signal:AbortSignal.timeout(5000)});
+      const bj = await br.json();
+      if(bj.ok && bj.labels && bj.labels.length){
+        const bl = bj.labels.map(normLabel);
+        bl.forEach(nl=>{ if(!state.labels.find(l=>l.id===nl.id)) state.labels.push(nl); });
+        saveLocal();
+        label = state.labels.find(l=>l.batchNumber===parsed.batchNumber && Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber));
+        if(!label) label = state.labels.find(l=>l.id===labelId);
+      }
     }
   }catch(e){
-    console.error("Server error:", e);
+    console.error("Label lookup server error:", e);
   }
 
   if(!label){

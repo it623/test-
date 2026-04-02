@@ -2464,6 +2464,21 @@ function renderDeptScan(dept){
     </table></div>
   </div>
 
+  <!-- CHECK LABEL STATUS -->
+  <div class="card" style="border:1px solid var(--border)">
+    <div class="card-title">🔍 Check Label Status</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input id="check-label-input-${dept}" placeholder="Scan or type label ID / batch-box"
+        style="flex:1;padding:10px 14px;border:2px solid var(--border);border-radius:8px;font-size:14px;font-family:monospace;background:var(--surface2)"
+        onkeydown="if(event.key==='Enter')checkLabelStatus('${dept}')">
+      <button onclick="checkLabelStatus('${dept}')"
+        style="padding:10px 20px;background:var(--accent);color:#000;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap">
+        🔍 Check
+      </button>
+    </div>
+    <div id="check-label-result-${dept}" style="margin-top:10px"></div>
+  </div>
+
   <!-- RECENT SCANS -->
   <div class="card">
     <div class="card-title">Recent Scans — ${cfg.label}</div>
@@ -2490,6 +2505,59 @@ function renderDeptScan(dept){
   </div>`;
 }
 
+function checkLabelStatus(dept){
+  const inp = document.getElementById(`check-label-input-${dept}`);
+  const resultEl = document.getElementById(`check-label-result-${dept}`);
+  if(!inp||!resultEl) return;
+  const raw = inp.value.trim();
+  if(!raw){ resultEl.innerHTML='<div style="color:var(--text3);font-size:13px">Enter a label ID or batch/box number</div>'; return; }
+
+  const parsed = parseScanInput(raw);
+  let label = state.labels.find(l=>l.id===parsed.labelId);
+  if(!label && parsed.batchNumber && parsed.boxNumber!=null){
+    label = state.labels.find(l=>l.batchNumber===parsed.batchNumber && Math.abs(l.labelNumber)===Math.abs(parsed.boxNumber));
+  }
+
+  if(!label){
+    resultEl.innerHTML=`<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;font-size:14px">
+      ⚠️ Label not found locally — press <b>Sync</b> and try again
+    </div>`;
+    return;
+  }
+
+  const scans = getScansForBox(label.id);
+  const DEPT_NAMES = {aim:'AIM Inspection',printing:'Printing',pi:'Print Inspection',packing:'Packing',dispatch:'Dispatch'};
+  const STAGES = ['aim','printing','pi','packing','dispatch'];
+
+  // Build status for each stage
+  const stageRows = STAGES.map(s=>{
+    const sIn = scans.filter(sc=>sc.dept===s&&sc.type==='in').length;
+    const sOut = scans.filter(sc=>sc.dept===s&&sc.type==='out').length;
+    let status, color, icon;
+    if(sIn===0){ status='Not reached'; color='#9e9e9e'; icon='○'; }
+    else if(sIn>0&&sOut===0){ status='IN ✓ — OUT pending'; color='#ff9800'; icon='◑'; }
+    else { status='IN ✓ OUT ✓ — Done'; color='#4caf50'; icon='●'; }
+    const lastScan = scans.filter(sc=>sc.dept===s).sort((a,b)=>new Date(b.ts)-new Date(a.ts))[0];
+    const timeStr = lastScan ? new Date(lastScan.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}) : '';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border)">
+      <span style="font-size:18px;color:${color}">${icon}</span>
+      <span style="flex:1;font-size:13px;font-weight:600">${DEPT_NAMES[s]}</span>
+      <span style="font-size:12px;color:${color};font-weight:600">${status}</span>
+      ${timeStr?`<span style="font-size:11px;color:var(--text3)">${timeStr}</span>`:''}
+    </div>`;
+  }).join('');
+
+  resultEl.innerHTML=`
+    <div style="background:var(--surface2);border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+      <div style="background:var(--accent);color:#000;padding:10px 14px;font-weight:700;font-size:14px">
+        📦 ${label.batchNumber} — Box ${label.labelNumber}/${state.labels.filter(l=>l.batchNumber===label.batchNumber&&!l.voided).length}
+        &nbsp;|&nbsp; ${label.customer||''}
+      </div>
+      ${stageRows}
+    </div>`;
+  inp.value='';
+}
+
 function fillScanInput(dept,type,value){
   const el=document.getElementById(`scan-${type}-${dept}`);
   if(el){ el.value=value; processScanInput(dept,type); }
@@ -2509,9 +2577,16 @@ async function processScanInput(dept,type){
   const dedupKey = `${parsed.labelId||raw}|${dept}|${type}`;
   if(!processScanInput._recentKeys) processScanInput._recentKeys = new Set();
   if(processScanInput._recentKeys.has(dedupKey)){
-    zoneEl.className='scan-zone error';
-    resultEl.innerHTML=`<div class="alert alert-danger" style="font-size:15px;padding:12px">⚠️ Already scanned — wait a moment before scanning again</div>`;
-    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },3000);
+    // This means scan WAS already recorded successfully — show green confirmation
+    zoneEl.className='scan-zone success';
+    resultEl.innerHTML=`
+      <div style="background:#00c853;color:#fff;border-radius:12px;padding:16px 20px;text-align:center;font-size:18px;font-weight:700;box-shadow:0 4px 16px rgba(0,200,83,0.4)">
+        ✅ ${type.toUpperCase()} ALREADY RECORDED
+      </div>
+      <div style="background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:13px;color:var(--text2)">
+        This box was just scanned ${type.toUpperCase()}. Wait 3 seconds before scanning the same box again.
+      </div>`;
+    setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },45000);
     return;
   }
   processScanInput._recentKeys.add(dedupKey);
@@ -2542,7 +2617,7 @@ async function processScanInput(dept,type){
           </div>`;
         }).join('') : '<div style="padding:8px;color:var(--text3);font-size:12px">No scans yet</div>';
       }
-      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; renderDeptScan(dept); }, warning ? 7000 : 4000);
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; renderDeptScan(dept); }, warning ? 50000 : 45000);
     } else {
       zoneEl.className='scan-zone error';
       resultEl.innerHTML=`<div class="alert alert-danger" style="font-size:15px;padding:12px;border-radius:8px">❌ ${msg}</div>`;

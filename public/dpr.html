@@ -2355,21 +2355,33 @@ async function fetchDpr(fl, d){
     if(!r.ok) return;
     const j = await r.json();
     if(j.ok && j.data){
-      // Snapshot current typed data FIRST so merge doesn't lose unsaved input
-      if(curFloor===fl && getDate()===d){
+      // SERVER IS TRUTH — always use server data
+      // Only preserve currently-typed-but-unsaved data if user is actively on this floor+date
+      const isCurrentView = (curFloor===fl && getDate()===d);
+      if(isCurrentView){
         const shiftsArea = document.getElementById('shiftsArea');
-        if(shiftsArea && shiftsArea.querySelector('.run-row')){
-          try{
-            const snapshot = collectForm();
-            localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
-          }catch(e){}
+        const hasUnsavedTyping = shiftsArea && shiftsArea.querySelector('.run-row') && unsaved;
+        if(hasUnsavedTyping){
+          // User has unsaved changes — merge keeping server as base, local as override
+          const local = loadDay(fl, d);
+          const merged = deepMergeDpr(j.data, local);
+          localStorage.setItem(skey(fl,d), JSON.stringify(merged));
+        } else {
+          // No unsaved changes — server data wins completely
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
         }
+      } else {
+        // Background fetch for different floor/date — server always wins
+        localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
       }
-      // Deep-merge: keep any locally-entered data that server doesn't have yet
-      const local = loadDay(fl, d);
-      const merged = deepMergeDpr(j.data, local);
-      localStorage.setItem(skey(fl,d), JSON.stringify(merged));
-      if(curFloor===fl && getDate()===d) safeRenderShifts();
+      if(isCurrentView) safeRenderShifts();
+    } else if(j.ok && !j.data){
+      // No data on server for this floor+date — clear local stale data
+      // Only if no unsaved changes
+      if(!(curFloor===fl && getDate()===d && unsaved)){
+        localStorage.removeItem(skey(fl,d));
+        if(curFloor===fl && getDate()===d) safeRenderShifts();
+      }
     }
   }catch(e){}
 }
@@ -2824,8 +2836,10 @@ function showDprAuditPage() {
 setInterval(async () => {
   if (dprUser) {
     try { await fetchActiveOrders(); } catch(e) {}
+    // Also sync DPR data from server every 30s — keeps all browsers in sync
+    try { await fetchDpr(curFloor, getDate()); } catch(e) {}
   }
-}, 30*1000); // sync orders every 30s
+}, 30*1000); // sync orders + DPR data every 30s
 
 setInterval(dprQueueFlush, 5*1000); // flush queue every 5s
 document.addEventListener('visibilitychange', ()=>{

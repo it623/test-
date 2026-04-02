@@ -2467,26 +2467,26 @@ function renderDeptScan(dept){
   <!-- RECENT SCANS -->
   <div class="card">
     <div class="card-title">Recent Scans — ${cfg.label}</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead>
-      <tbody>
-      ${(()=>{
-        const deptScans = [...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50);
-        if(!deptScans.length) return '<tr><td colspan="4" class="text-center text-muted">No scans recorded yet</td></tr>';
-        return deptScans.map(s=>{
-          const lbl = state.labels.find(l=>l.id===s.labelId);
-          const qty = s.qty ?? lbl?.qty ?? null;
-          const boxNo = lbl?.labelNumber ?? (s.labelId||'').slice(-6);
-          return `<tr>
-            <td class="td-mono text-sm" style="white-space:nowrap"><div>${fmtTime(s.ts)}</div><div style="font-size:11px;color:var(--text3)">${fmtDate(s.ts)}</div></td>
-            <td class="td-bold td-mono" style="white-space:nowrap">${(s.batchNumber||'?') + '/' + boxNo}</td>
-            <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
-            <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue">📥 IN</span>':'<span class="badge badge-green">📤 OUT</span>'}</td>
-          </tr>`;
-        }).join('');
-      })()}
-      </tbody>
-    </table></div>
+    <div id="recent-scans-${dept}">
+    ${(()=>{
+      const deptScans = [...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50);
+      if(!deptScans.length) return '<div style="padding:12px;text-align:center;color:var(--text3);font-size:13px">No scans recorded yet</div>';
+      return '<div class="tbl-wrap"><table><thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead><tbody>' +
+      deptScans.map(s=>{
+        const lbl = state.labels.find(l=>l.id===s.labelId);
+        const qty = s.qty ?? lbl?.qty ?? null;
+        const boxNo = lbl?.labelNumber ?? (s.labelId||'').slice(-6);
+        const timeStr = new Date(s.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+        const dateStr = new Date(s.ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+        return `<tr>
+          <td class="td-mono text-sm" style="white-space:nowrap"><div style="font-weight:600">${timeStr}</div><div style="font-size:11px;color:var(--text3)">${dateStr}</div></td>
+          <td class="td-bold td-mono" style="white-space:nowrap;font-size:14px">${(s.batchNumber||'?') + '/' + boxNo}</td>
+          <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
+          <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue" style="font-size:13px;padding:4px 10px">📥 IN</span>':'<span class="badge badge-green" style="font-size:13px;padding:4px 10px">📤 OUT</span>'}</td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>';
+    })()}
+    </div>
   </div>`;
 }
 
@@ -2522,12 +2522,31 @@ async function processScanInput(dept,type){
     if(ok){
       zoneEl.className='scan-zone success';
       const warnHtml = warning ? `<div class="alert alert-warning mt-8" style="background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-left:4px solid #C55A11;padding:8px 12px;font-size:13px">${warning}</div>` : '';
-      resultEl.innerHTML=`<div class="alert alert-success" style="font-size:16px;padding:14px;font-weight:600">✅ ${msg}</div>${warnHtml}`;
-      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; renderDeptScan(dept); }, warning ? 6000 : 3000);
+      resultEl.innerHTML=`
+        <div style="background:#00c853;color:#fff;border-radius:12px;padding:16px 20px;text-align:center;font-size:18px;font-weight:700;box-shadow:0 4px 16px rgba(0,200,83,0.4);margin:8px 0">
+          ✅ ${type.toUpperCase()} SUCCESS
+        </div>
+        <div style="background:rgba(0,200,83,0.1);border:1px solid rgba(0,200,83,0.3);border-radius:8px;padding:10px 14px;margin-top:8px;font-size:14px;font-weight:600">
+          ${msg}
+        </div>${warnHtml}`;
+      // Show recent scans immediately after success
+      const recentEl = document.getElementById('recent-scans-${dept}');
+      if(recentEl){
+        const deptScans = [...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5);
+        recentEl.innerHTML = deptScans.length ? deptScans.map(s=>{
+          const lbl=state.labels.find(l=>l.id===s.labelId);
+          return `<div style="display:flex;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--border);font-size:13px">
+            <span style="font-weight:700;font-family:monospace">${s.batchNumber}/${lbl?.labelNumber||'?'}</span>
+            <span style="color:${s.type==='in'?'#2196f3':'#00c853'};font-weight:600">${s.type.toUpperCase()}</span>
+            <span style="color:var(--text3);font-size:11px">${new Date(s.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span>
+          </div>`;
+        }).join('') : '<div style="padding:8px;color:var(--text3);font-size:12px">No scans yet</div>';
+      }
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; renderDeptScan(dept); }, warning ? 7000 : 4000);
     } else {
       zoneEl.className='scan-zone error';
-      resultEl.innerHTML=`<div class="alert alert-danger" style="font-size:15px;padding:12px">❌ ${msg}</div>`;
-      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },4000);
+      resultEl.innerHTML=`<div class="alert alert-danger" style="font-size:15px;padding:12px;border-radius:8px">❌ ${msg}</div>`;
+      setTimeout(()=>{ zoneEl.className='scan-zone'; resultEl.innerHTML=''; },5000);
     }
     setTimeout(()=>{ const inp=document.getElementById(`scan-${type}-${dept}`); if(inp) inp.focus(); },100);
   }

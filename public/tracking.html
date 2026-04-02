@@ -1203,11 +1203,24 @@ function saveLocal(){
 }
 
 function loadState(){
+  // Load local cache as fast initial state (scans/closure only — labels always from server)
   try{
     const saved=localStorage.getItem('sunloc_tracking');
-    if(saved){ const p=JSON.parse(saved); Object.assign(state,p); }
+    if(saved){
+      const p=JSON.parse(saved);
+      // Load scans and stage data from local cache for speed
+      if(p.scans) state.scans=p.scans;
+      if(p.stageClosure) state.stageClosure=p.stageClosure;
+      if(p.wastage) state.wastage=p.wastage;
+      if(p.dispatchRecs) state.dispatchRecs=p.dispatchRecs;
+      if(p.alerts) state.alerts=p.alerts;
+      // Labels and batches: load from cache as fallback while server loads
+      // Server will always overwrite these with fresh data
+      if(p.labels&&p.labels.length>0) state.labels=p.labels;
+      if(p.batches&&p.batches.length>0) state.batches=p.batches;
+    }
   }catch{}
-  // Pull from server immediately — batches from Planning must load on every login
+  // ALWAYS pull from server — ensures labels/batches are fresh even after browser reset
   if(serverUrl){
     pullFromServer();
   }
@@ -1940,6 +1953,91 @@ function startCanvasScan(video){
 // PAGE: DASHBOARD
 // ═══════════════════════════════════════════════════════
 
+// Smart partial DOM update — updates only data-dependent elements without full re-render
+// Prevents cursor jump, scroll reset, input clearing during background sync
+function smartUpdatePage(){
+  if(!currentPage) return;
+
+  // Update recent scans for current dept page
+  const depts = ['aim','printing','pi','packing','dispatch'];
+  if(depts.includes(currentPage)){
+    const dept = currentPage;
+    const recentEl = document.getElementById(`recent-scans-${dept}`);
+    if(recentEl){
+      const deptScans = [...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50);
+      if(!deptScans.length){
+        recentEl.innerHTML='<div style="padding:12px;text-align:center;color:var(--text3);font-size:13px">No scans recorded yet</div>';
+      } else {
+        recentEl.innerHTML='<div class="tbl-wrap"><table><thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead><tbody>' +
+        deptScans.map(s=>{
+          const lbl=state.labels.find(l=>l.id===s.labelId);
+          const qty=s.qty??lbl?.qty??null;
+          const boxNo=lbl?.labelNumber??(s.labelId||'').slice(-6);
+          const timeStr=new Date(s.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+          const dateStr=new Date(s.ts).toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+          return `<tr>
+            <td class="td-mono text-sm" style="white-space:nowrap"><div style="font-weight:600">${timeStr}</div><div style="font-size:11px;color:var(--text3)">${dateStr}</div></td>
+            <td class="td-bold td-mono" style="white-space:nowrap;font-size:14px">${(s.batchNumber||'?')+'/'+boxNo}</td>
+            <td class="td-mono text-sm">${qty!=null?fmt(qty)+'L':'-'}</td>
+            <td style="white-space:nowrap">${s.type==='in'?'<span class="badge badge-blue" style="font-size:13px;padding:4px 10px">📥 IN</span>':'<span class="badge badge-green" style="font-size:13px;padding:4px 10px">📤 OUT</span>'}</td>
+          </tr>`;
+        }).join('') + '</tbody></table></div>';
+      }
+    }
+
+    // Update scan counts in batch closure table without re-rendering
+    // Just update the scan badge numbers if they exist
+    const closureTable = document.getElementById(`closure-table-${dept}`);
+    if(closureTable){
+      // Re-render just the closure table body
+      const activeBatches = getActiveBatchesForDept(dept);
+      const tbody = closureTable.querySelector('tbody');
+      if(tbody){
+        const DEPT_CFG = {aim:{color:'#3b82f6'},printing:{color:'#8b5cf6'},pi:{color:'#f97316'},packing:{color:'#06b6d4'},dispatch:{color:'#10b981'}};
+        tbody.innerHTML = activeBatches.map(b=>{
+          const inCount=getScansForBatch(b.batchNumber).filter(s=>s.dept===dept&&s.type==='in').length;
+          const outCount=getScansForBatch(b.batchNumber).filter(s=>s.dept===dept&&s.type==='out').length;
+          const w=getTotalWastage(b.batchNumber,dept);
+          const inQty=boxToLakh(inCount,b.size);
+          const outQty=boxToLakh(outCount,b.size);
+          const aGradePct=inQty>0?(outQty/inQty*100):0;
+          const closed=isStageComplete(b.batchNumber,dept);
+          const ps=PACK_SIZES[String(b.size)]||1;
+          const wastageBoxes=Math.round(w.total/ps);
+          const accountedBoxes=outCount+wastageBoxes;
+          const balanced=inCount>0&&accountedBoxes===inCount;
+          const balanceShortfall=inCount-accountedBoxes;
+          return `<tr>
+            <td class="td-bold td-mono">${b.batchNumber}</td>
+            <td class="text-sm">${b.customer||'-'}</td>
+            <td class="td-mono">${inCount} <span class="text-muted">(${fmt(inQty)}L)</span></td>
+            <td class="td-mono">${outCount} <span class="text-muted">(${fmt(outQty)}L)</span></td>
+            <td class="td-mono ${aGradePct<90?'red':aGradePct<95?'amber':'green'}">${fmt(aGradePct,1)}%</td>
+            <td class="td-mono">S:${fmt(w.salvage)} R:${fmt(w.remelt)}</td>
+            <td>${closed?'<span class="badge badge-green">✅ Closed</span>':inCount===0?'<span class="badge badge-gray">No scans</span>':balanced?'<span class="badge badge-blue">Ready to Close</span>':`<span class="badge badge-amber">⚠ ${balanceShortfall>0?balanceShortfall+' unaccounted':'Over by '+Math.abs(balanceShortfall)}</span>`}</td>
+            <td>${!closed&&(balanced||currentDept==='admin')?`<button class="btn btn-sm ${balanced?'btn-success':'btn-warning'}" onclick="${balanced?'closeBatchStage':'adminCloseBatchStage'}('${b.batchNumber}','${dept}')">${balanced?'Close Stage':'⚡ Force Close'}</button>`:'—'}</td>
+          </tr>`;
+        }).join('') || '<tr><td colspan="8" class="text-center text-muted">No active batches</td></tr>';
+      }
+    }
+  }
+
+  // Update scan history page if open
+  if(currentPage==='scan-history'){
+    renderScanHistory();
+  }
+
+  // Update dashboard stats if open
+  if(currentPage==='dashboard'){
+    const wipEls = document.querySelectorAll('[data-wip-dept]');
+    wipEls.forEach(el=>{
+      const d=el.dataset.wipDept;
+      const wipScans=state.scans.filter(s=>s.dept===d&&s.type==='in').length - state.scans.filter(s=>s.dept===d&&s.type==='out').length;
+      el.textContent=Math.max(0,wipScans)+' boxes';
+    });
+  }
+}
+
 function renderPage(page){
   document.getElementById('tb-title').textContent = NAV_ITEMS.find(n=>n.id===page)?.label||page;
   document.getElementById('tb-subtitle').textContent = DEPT_INFO[currentDept]?.role||'';
@@ -2072,7 +2170,6 @@ function getBoxCurrentStageForBatch(batchNo){
 
 function renderLabels(){
   const el=document.getElementById('page-labels');
-  const activeBatches=state.batches.filter(b=>b.status!=='closed');
 
   document.getElementById('tb-actions').innerHTML=`
     <button class="btn btn-secondary btn-sm" id="sync-btn" onclick="
@@ -2081,6 +2178,16 @@ function renderLabels(){
       .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
     ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
+
+  // Always pull fresh from server — labels must always reflect server state
+  // regardless of browser cache/history
+  if(serverUrl && (state.labels.length===0 || state.batches.length===0)){
+    el.innerHTML='<div style="padding:40px;text-align:center;color:var(--text3)">⏳ Loading labels from server...</div>';
+    pullFromServer().then(()=>renderLabels()).catch(()=>{});
+    return;
+  }
+
+  const activeBatches=state.batches.filter(b=>b.status!=='closed');
 
   el.innerHTML=`
   <div class="section-header">
@@ -2431,7 +2538,7 @@ function renderDeptScan(dept){
   <div class="card mb-16">
     <div class="card-title">✅ Batch Stage Closure</div>
     <div class="text-sm text-muted mb-12">Close a batch at this stage once all boxes have been scanned OUT.</div>
-    <div class="tbl-wrap"><table>
+    <div class="tbl-wrap"><table id="closure-table-${dept}">
       <thead><tr><th>Batch</th><th>Customer</th><th>Scan IN</th><th>Scan OUT</th><th>A-Grade</th><th>Wastage</th><th>Status</th><th>Action</th></tr></thead>
       <tbody>
       ${activeBatches.map(b=>{
@@ -4120,7 +4227,6 @@ setInterval(async ()=>{
         dispatchRecs:state.dispatchRecs, alerts:state.alerts
       })); }catch(e){}
       setSyncBadge('synced');
-      // Re-render if scan count changed OR scans were empty before
       if((state.scans.length !== prevCount || prevCount === 0) && currentPage){
         renderPage(currentPage);
       }

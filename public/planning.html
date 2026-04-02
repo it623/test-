@@ -880,6 +880,12 @@ function getMachineOrders(machineId) {
 }
 
 // Recalculate all order dates on a machine after any change
+function recalcAllMachines() {
+  const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
+  machineIds.forEach(mid => recalcMachineSchedule(mid));
+  saveState();
+}
+
 function recalcMachineSchedule(machineId) {
   const mc = getMachine(machineId);
   if (!mc) return;
@@ -888,7 +894,9 @@ function recalcMachineSchedule(machineId) {
   for (const ord of orders) {
     if (ord.status === 'closed') continue;
     if (!cursor) {
+      // First order — use its existing startDate or today
       cursor = new Date(ord.startDate || today());
+      ord.startDate = new Date(cursor); // always set startDate explicitly
     } else {
       ord.startDate = new Date(cursor);
     }

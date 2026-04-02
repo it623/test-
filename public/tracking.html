@@ -1392,7 +1392,16 @@ function parseScanInput(raw){
   if(parts[0]==='SUNLOC'){
     if(parts.length>=6){
       // New format: SUNLOC|BatchNo|BoxNo|Size|Qty|SystemID
-      return { labelId:parts[5], batchNumber:parts[1], boxNumber:parseInt(parts[2])||0, size:parts[3], qty:parseFloat(parts[4])||0 };
+      // Note: BatchNo in QR may be truncated — SystemID is the reliable lookup key
+      const systemId = parts[5];
+      const batchFromQR = parts[1];
+      const boxNum = parseInt(parts[2])||0;
+      const size = parts[3];
+      const qty = parseFloat(parts[4])||0;
+      // Try to find real batch number from state.labels using SystemID
+      const matchedLabel = state.labels.find(l=>l.id===systemId);
+      const realBatch = matchedLabel?.batchNumber || batchFromQR;
+      return { labelId:systemId, batchNumber:realBatch, boxNumber:boxNum, size, qty, rawBatch:batchFromQR };
     }
     if(parts.length>=4){
       // Legacy format: SUNLOC|labelId|batchNo|size|qty

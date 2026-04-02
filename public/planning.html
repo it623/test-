@@ -665,25 +665,41 @@ const SYNC = (() => {
 
   async function loadFromServer() {
     const serverState = await pull();
-    if (!serverState) return;
 
-    // Check if data actually changed before re-rendering
-    // Compare order count and last saved timestamp to avoid unnecessary re-renders
+    // SERVER IS ALWAYS TRUTH
+    // If server returns null (empty DB or network fail) — still mark as loaded
+    // but NEVER push localStorage orders back to server automatically
+    if (!serverState) {
+      // Server unreachable or empty — use localStorage as display only
+      // but block any auto-push to prevent stale data contaminating server
+      _serverDataLoaded = false;
+      return;
+    }
+
     const prevOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
     const prevSavedAt = state._serverSavedAt || 0;
     const serverSavedAt = serverState._serverSavedAt || serverState.savedAt || 0;
 
     serverState._serverSavedAt = Date.now();
+
+    // Always take server orders — never merge with localStorage orders
+    // This prevents old/deleted orders from coming back via localStorage push
     Object.assign(state, serverState);
+    state.orders = serverState.orders || [];
+    state.printOrders = serverState.printOrders || [];
+    state.dispatchPlans = serverState.dispatchPlans || [];
     state.pcCodes = PC_CODES_RAW;
     state.zoneMap = ZONE_MAP_RAW;
     _serverDataLoaded = true;
 
-    try { const s = {...serverState}; delete s.pcCodes; delete s.zoneMap; localStorage.setItem('sunloc_state', JSON.stringify(s)); } catch {}
+    try {
+      const s = {...serverState};
+      delete s.pcCodes; delete s.zoneMap;
+      localStorage.setItem('sunloc_state', JSON.stringify(s));
+    } catch {}
 
     await loadTrackingStatus();
 
-    // Only re-render if this is initial load OR data actually changed
     const newOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
     const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
     const isInitialLoad = prevSavedAt === 0;
@@ -691,7 +707,6 @@ const SYNC = (() => {
     if (isInitialLoad || dataChanged) {
       render();
     }
-    // If data unchanged — skip re-render to prevent view disruption
   }
 
   async function loadTrackingStatus() {
@@ -719,26 +734,33 @@ const SYNC = (() => {
 
 // Load from localStorage (with server enrichment on init)
 function loadState() {
-  // SAFETY: Load localStorage as a temporary offline fallback only.
-  // We NEVER render from localStorage if server is reachable.
-  // Server is the single source of truth — localStorage is just a cache.
+  // Load ONLY master data from localStorage (machines, packSizes, customers)
+  // NEVER load orders from localStorage — orders must always come from server
   try {
     const saved = localStorage.getItem('sunloc_state');
     if (saved) {
       const parsed = JSON.parse(saved);
-      Object.assign(state, parsed);
+      // Only restore master/config data — NOT orders (they must come from server)
+      if (parsed.machineMaster) state.machineMaster = parsed.machineMaster;
+      if (parsed.printMachineMaster) state.printMachineMaster = parsed.printMachineMaster;
+      if (parsed.packSizes) state.packSizes = parsed.packSizes;
+      if (parsed.truckCapacity) state.truckCapacity = parsed.truckCapacity;
+      if (parsed.customerMaster) state.customerMaster = parsed.customerMaster;
+      if (parsed.zoneCapacities) state.zoneCapacities = parsed.zoneCapacities;
       state.pcCodes = PC_CODES_RAW;
       state.zoneMap = ZONE_MAP_RAW;
+      // Orders, printOrders, dispatchPlans come from server ONLY
+      state.orders = [];
+      state.printOrders = [];
+      state.dispatchPlans = [];
     }
   } catch(e) {}
 
-  // Always pull from server immediately — this overwrites any stale localStorage.
-  // If server pull succeeds → render with server data (orders always current).
-  // If server pull fails (offline) → localStorage data is already in state, render that.
+  // Always pull from server — orders always come from here
   SYNC.loadFromServer().then(() => {
     // Server pull done — render() was called inside loadFromServer
   }).catch(() => {
-    // Server unreachable — render with whatever is in state (localStorage fallback)
+    // Server unreachable — render with master data only (no orders from localStorage)
     render();
   });
 

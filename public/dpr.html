@@ -1357,14 +1357,14 @@ function removeStaffName(btn){
 // ── SAFE RENDER: always snapshot typed form data BEFORE re-rendering ──
 // Prevents background order/DPR sync from wiping unsaved user input
 function safeRenderShifts(){
-  // If the entry form exists in DOM, collect current typed values first
+  // Only snapshot current form values if user has actually typed something
+  // NEVER snapshot blank form — it would overwrite real saved data in localStorage
   const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && shiftsArea.querySelector('.run-row')){
+  if(shiftsArea && shiftsArea.querySelector('.run-row') && unsaved){
     const fl=curFloor, d=getDate();
     try{
       const snapshot = collectForm();
       localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
-      // Keep unsaved flag — data is in localStorage but not yet on server
     }catch(e){}
   }
   renderShifts();
@@ -2687,14 +2687,41 @@ refreshRecentDates();
 function postAuthServerInit() {
   checkServer().then(async ok=>{
     if(ok){
-      // 1. Fetch today's DPR data from server first (fills form with saved data)
-      await fetchDpr(curFloor, getDate());
-      // 2. Then fetch active orders (populates dropdowns)
-      await fetchActiveOrders();
+      // Fetch DPR data AND active orders at the same time
+      // Then render ONCE with both — so qty/batch and order dropdowns show together
+      try{
+        const [dprRes, ordRes] = await Promise.all([
+          fetch(serverUrl+'/api/dpr/'+curFloor+'/'+getDate(),{signal:AbortSignal.timeout(6000)}).then(r=>r.json()),
+          fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)}).then(r=>r.json())
+        ]);
+        // Store DPR data into localStorage
+        if(dprRes.ok && dprRes.data){
+          localStorage.setItem(skey(curFloor,getDate()), JSON.stringify(dprRes.data));
+        }
+        // Store active orders
+        if(ordRes.ok && ordRes.orders){
+          activeOrders={};
+          ordRes.orders.filter(o=>o.machineId).forEach(o=>{
+            if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
+            activeOrders[o.machineId].push(o);
+          });
+          localStorage.setItem('dpr_active_orders', JSON.stringify(activeOrders));
+        }
+      }catch(e){
+        // Partial failure — try individual fallbacks
+        const cached=localStorage.getItem('dpr_active_orders');
+        if(cached) try{activeOrders=JSON.parse(cached);}catch{}
+      }
+      // Render ONCE — everything is ready
+      renderEntry();
+      setSyncBadge('synced');
+      // Run full fetchActiveOrders in background for TEMP batch logic
+      setTimeout(()=>fetchActiveOrders().catch(()=>{}), 1000);
     } else {
-      // Offline — use localStorage cache
+      // Offline — render from localStorage cache
       const cached=localStorage.getItem('dpr_active_orders');
-      if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
+      if(cached) try{activeOrders=JSON.parse(cached);}catch{}
+      renderEntry();
     }
   });
 }

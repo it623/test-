@@ -2880,19 +2880,19 @@ function showExportMenu(){
       </div>
 
       <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:4px;margin-bottom:2px">📊 EXCEL (.xlsx)</div>
-      <button class="nbtn" onclick="closeModal();exportDailyReportExcel()" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();exportDailyReportExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
         📋 Daily Production Report — All Shifts
       </button>
-      <button class="nbtn" onclick="closeModal();exportAimStatusExcel()" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();exportAimStatusExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
         🎯 AIM Status Report
       </button>
-      <button class="nbtn" onclick="closeModal();exportDowntimeExcel()" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();exportDowntimeExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
         ⏱ Machine-wise Downtime Report
       </button>
-      <button class="nbtn" onclick="closeModal();exportShiftPerformanceExcel()" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();exportShiftPerformanceExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
         👤 Shift Performance Report
       </button>
-      <button class="nbtn" onclick="closeModal();exportAllShiftsExcel()" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();exportAllShiftsExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
         📦 Full DPR — All Data (All Sheets)
       </button>
 
@@ -2917,8 +2917,24 @@ function getExportData(){
   return {fl,d,day,mcs};
 }
 
+// ── Check XLSX available ────────────────────────────────────────
+function checkXLSX(){
+  if(typeof XLSX === 'undefined'){
+    // XLSX not loaded — load it now dynamically
+    return new Promise((resolve, reject)=>{
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload = ()=>resolve(true);
+      s.onerror = ()=>reject(new Error('XLSX library failed to load'));
+      document.head.appendChild(s);
+    });
+  }
+  return Promise.resolve(true);
+}
+
 // ── EXCEL: Daily Production Report ──────────────────────────────
-function exportDailyReportExcel(){
+async function exportDailyReportExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const wb=XLSX.utils.book_new();
 
@@ -2974,7 +2990,8 @@ function exportDailyReportExcel(){
 }
 
 // ── EXCEL: AIM Status ────────────────────────────────────────────
-function exportAimStatusExcel(){
+async function exportAimStatusExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
   rows.push(['SUNLOC — AIM Status Report — '+fl+' — '+d]);
@@ -3006,7 +3023,8 @@ function exportAimStatusExcel(){
 }
 
 // ── EXCEL: Downtime ──────────────────────────────────────────────
-function exportDowntimeExcel(){
+async function exportDowntimeExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
   rows.push(['SUNLOC — Machine-wise Downtime — '+fl+' — '+d]);
@@ -3044,7 +3062,8 @@ function exportDowntimeExcel(){
 }
 
 // ── EXCEL: Shift Performance ─────────────────────────────────────
-function exportShiftPerformanceExcel(){
+async function exportShiftPerformanceExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
   rows.push(['SUNLOC — Shift Performance — '+fl+' — '+d]);
@@ -3082,7 +3101,8 @@ function exportShiftPerformanceExcel(){
 }
 
 // ── EXCEL: Full DPR — All sheets ────────────────────────────────
-function exportAllShiftsExcel(){
+async function exportAllShiftsExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const wb=XLSX.utils.book_new();
   // Sheet 1: Production
   const {fl,d,day,mcs}=getExportData();

@@ -2200,6 +2200,8 @@ function renderShiftPersonnelPerf(){
     utility:    { label:'Shift Utility',    dtCats:['hvac'],        color:'#A8E6CF' },
     gpr_staff:  { label:'Shift GPR',        dtCats:['gpr','dw'],    color:'#FFD93D' },
     aim_staff:  { label:'Shift AIM',        dtCats:[],              color:'#FF6B6B', isAIM:true },
+    fitter:     { label:'Shift Fitter',     dtCats:['mech'],        color:'#FFA07A', isSingle:true },
+    chemist:    { label:'Shift Chemist',    dtCats:['proc'],        color:'#C3A6FF', isArray:true  },
   };
 
   // Aggregate stats per role per person across all saved days
@@ -2215,13 +2217,13 @@ function renderShiftPersonnelPerf(){
       const sd=dy.shifts[sh];
       const dt=calcShiftDT(fl,date,sh);
       Object.entries(ROLE_MAP).forEach(([roleKey, roleCfg])=>{
-        const names=(sd[roleKey]||[]).filter(n=>n.trim());
+        // Handle both array fields (chemist, electrical etc) and string fields (fitter)
+        const raw = sd[roleKey];
+        const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(n=>String(n).trim());
         names.forEach(name=>{
           if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
           personStats[name].shiftsWorked++;
           if(roleCfg.isAIM){
-            // AIM performance: count AIM boxes scanned — use tracking data if available
-            // Fall back to DPR AIM column sum for this shift
             let aimSum=0;
             getActiveMachines(fl).forEach(mc=>{
               const m=migrateMachineData((sd.machines||{})[mc.id]||blankMachine());
@@ -2229,7 +2231,6 @@ function renderShiftPersonnelPerf(){
             });
             personStats[name].aimBoxes+=aimSum;
           } else {
-            // DT performance: lower DT = better
             let roleDT=0;
             roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
             personStats[name].dtMins+=roleDT;
@@ -2246,11 +2247,12 @@ function renderShiftPersonnelPerf(){
     const sd=todayDay.shifts[sh];
     const dt=calcShiftDT(fl,today,sh);
     Object.entries(ROLE_MAP).forEach(([roleKey,roleCfg])=>{
-      const names=(sd[roleKey]||[]).filter(n=>n.trim());
+      const raw = sd[roleKey];
+      const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(n=>String(n).trim());
       names.forEach(name=>{
         if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
         const already=allKeys.some(k=>k.includes(`_${fl}_${today}`));
-        if(!already){ // avoid double-counting if already saved
+        if(!already){
           personStats[name].shiftsWorked++;
           if(roleCfg.isAIM){
             let aimSum=0;
@@ -2290,7 +2292,15 @@ function renderShiftPersonnelPerf(){
     html+=`<div style="margin-bottom:20px">
       <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:${roleCfg.color};margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--b2)">
         ${roleCfg.label.toUpperCase()}
-        ${roleCfg.isAIM?'— scored on AIM lakhs inspected':'— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
+        ${roleCfg.isAIM
+          ? '— scored on AIM lakhs inspected'
+          : roleCfg.dtCats.length===0
+            ? ''
+            : roleKey==='fitter'
+              ? '— scored on linked DT (MECH)'
+              : roleKey==='chemist'
+                ? '— scored on linked DT (PROCESS)'
+                : '— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
       </div>
       <table class="data-table"><thead><tr>
         <th>Name</th>
@@ -2346,7 +2356,16 @@ function renderShiftPersonnelPerf(){
 
 function renderPerf(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  let html=`<table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
+  let html=`<table class="data-table"><thead><tr>
+    <th>Shift</th>
+    <th>Incharge</th>
+    <th>Chemist</th>
+    <th>Fitter</th>
+    <th>Production</th>
+    <th>Efficiency</th>
+    <th>DT%</th>
+    <th>Score</th>
+  </tr></thead><tbody>`;
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0;
@@ -2361,8 +2380,25 @@ function renderPerf(){
     const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
     const sc=parseInt(score);
     const scCls=sc>=80?'g':sc>=60?'a':'r';
-    html+=`<tr><td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
-      <td>${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
+
+    // Chemist — can be array or string
+    const chemistList = Array.isArray(sd.chemist)
+      ? sd.chemist.filter(n=>n&&n.trim())
+      : (sd.chemist ? [sd.chemist] : []);
+    const chemistCell = chemistList.length
+      ? chemistList.map(n=>`<span style="display:inline-block;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:4px;padding:1px 7px;font-size:11px;color:var(--t1);margin:1px 2px">${n}</span>`).join('')
+      : '<span style="color:var(--t3)">—</span>';
+
+    // Fitter — single string
+    const fitterCell = sd.fitter
+      ? `<span style="display:inline-block;background:rgba(0,230,118,0.08);border:1px solid rgba(0,230,118,0.2);border-radius:4px;padding:1px 7px;font-size:11px;color:var(--t1)">${sd.fitter}</span>`
+      : '<span style="color:var(--t3)">—</span>';
+
+    html+=`<tr>
+      <td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
+      <td style="font-weight:600">${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
+      <td>${chemistCell}</td>
+      <td>${fitterCell}</td>
       <td class="mono">${prod||'—'}</td>
       <td><span class="pill ${eff>=90?'g':eff>=75?'a':'r'}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
       <td><span class="pill ${dt.dtPct<=5?'g':dt.dtPct<=10?'a':'r'}">${dt.total>0?dt.dtPct.toFixed(1)+'%':'—'}</span></td>

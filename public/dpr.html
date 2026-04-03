@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DPR.tracker v7 — Sunloc</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{
@@ -275,7 +276,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 6px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:110px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
       <option value="">📅 History</option>
     </select>
-    <button class="nbtn" onclick="exportData()" title="Export">↓ Export</button>
+    <button class="nbtn" onclick="showExportMenu()" title="Export Reports">↓ Export</button>
     <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import">↑ Import</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
     <button class="nbtn" onclick="forceSyncNow()" title="Force push all data to server" style="color:var(--cyan);border-color:var(--cyan)">⬆ Sync</button>
@@ -2867,6 +2868,362 @@ function closeModal(){ document.getElementById('modal-overlay').classList.remove
 // ═══════════════════════════════════════════════════════
 // EXPORT / IMPORT
 // ═══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// EXPORT SYSTEM — Excel + PDF
+// ══════════════════════════════════════════════════════
+
+function showExportMenu(){
+  openModal('↓ Export Reports', `
+    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+      <div style="font-family:var(--fc);font-size:10px;letter-spacing:1px;color:var(--t3);margin-bottom:4px">
+        Floor: <b style="color:var(--cyan)">${curFloor}</b> &nbsp;|&nbsp; Date: <b style="color:var(--cyan)">${getDate()}</b>
+      </div>
+
+      <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:4px;margin-bottom:2px">📊 EXCEL (.xlsx)</div>
+      <button class="nbtn" onclick="closeModal();exportDailyReportExcel()" style="text-align:left;padding:10px 14px">
+        📋 Daily Production Report — All Shifts
+      </button>
+      <button class="nbtn" onclick="closeModal();exportAimStatusExcel()" style="text-align:left;padding:10px 14px">
+        🎯 AIM Status Report
+      </button>
+      <button class="nbtn" onclick="closeModal();exportDowntimeExcel()" style="text-align:left;padding:10px 14px">
+        ⏱ Machine-wise Downtime Report
+      </button>
+      <button class="nbtn" onclick="closeModal();exportShiftPerformanceExcel()" style="text-align:left;padding:10px 14px">
+        👤 Shift Performance Report
+      </button>
+      <button class="nbtn" onclick="closeModal();exportAllShiftsExcel()" style="text-align:left;padding:10px 14px">
+        📦 Full DPR — All Data (All Sheets)
+      </button>
+
+      <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:8px;margin-bottom:2px">🖨 PDF (Print)</div>
+      <button class="nbtn" onclick="closeModal();exportPDF()" style="text-align:left;padding:10px 14px">
+        🖨 Print / Save as PDF — Daily Report
+      </button>
+
+      <div style="border-top:1px solid var(--b2);margin-top:8px;padding-top:8px">
+        <button class="nbtn" onclick="closeModal();exportData()" style="text-align:left;padding:8px 14px;font-size:11px;color:var(--t3)">
+          💾 Backup — Full JSON Export
+        </button>
+      </div>
+    </div>
+  `, [{label:'Close', fn:'closeModal()'}]);
+}
+
+// ── Helper: get day data ─────────────────────────────────────────
+function getExportData(){
+  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
+  const mcs=getActiveMachines(fl);
+  return {fl,d,day,mcs};
+}
+
+// ── EXCEL: Daily Production Report ──────────────────────────────
+function exportDailyReportExcel(){
+  const {fl,d,day,mcs}=getExportData();
+  const wb=XLSX.utils.book_new();
+
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    const rows=[];
+    // Header info
+    rows.push(['SUNLOC DPR — '+fl+' — Shift '+sh+' — '+d]);
+    rows.push([]);
+    rows.push(['Process Incharge', sd.incharge||'—',
+               'Chemist', Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'—'),
+               'Fitter', sd.fitter||'—']);
+    rows.push(['Electrical', (sd.electrical||[]).join(', ')||'—',
+               'Utility', (sd.utility||[]).join(', ')||'—',
+               'Shift AIM', (sd.aim_staff||[]).join(', ')||'—',
+               'Shift GPR', (sd.gpr_staff||[]).join(', ')||'—']);
+    rows.push([]);
+    // Machine table header
+    rows.push(['MC','Size','Operator','Order/Batch','Qty (L)','Note','Target','VS Target','AIM','Backlog','Proc DT','Mech DT','Elec DT','GPR DT','HVAC DT','DW DT']);
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      const prod=Math.round(mcTotalProd(m)*100)/100;
+      const t=tgt(fl,mc.id);
+      const vs=prod>0?Math.round((prod-t)*100)/100:null;
+      const aim=parseFloat(m.aim||0);
+      const bl=aim>0?Math.round((prod-aim)*100)/100:null;
+      const runs=m.runs||[blankRun()];
+      runs.forEach((run,ri)=>{
+        rows.push([
+          ri===0?mc.id:'', ri===0?mc.sz:'', ri===0?(m.operator||''):'',
+          run.batchNumber||'', run.qty||'', run.note||'',
+          ri===0?t:'', ri===0?(vs!==null?vs:'—'):'',
+          ri===0?(aim||'—'):'', ri===0?(bl!==null?bl:'—'):'',
+          ri===0?(m.proc||0):'', ri===0?(m.mech||0):'', ri===0?(m.elec||0):'',
+          ri===0?(m.gpr||0):'', ri===0?(m.hvac||0):'', ri===0?(m.dw||0):''
+        ]);
+      });
+    });
+    // Totals
+    let shProd=0, shTgt=0, shAim=0;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      shProd+=mcTotalProd(m); shTgt+=tgt(fl,mc.id); shAim+=parseFloat(m.aim||0);
+    });
+    shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100;
+    rows.push(['TOTAL','','','','',shProd,'',shTgt,Math.round((shProd-shTgt)*100)/100,shAim,'','','','','','']);
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:8},{wch:6},{wch:14},{wch:14},{wch:8},{wch:14},{wch:7},{wch:8},{wch:8},{wch:8},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7}];
+    XLSX.utils.book_append_sheet(wb,'Shift '+sh,ws);
+  });
+  XLSX.writeFile(wb, `DPR_${fl}_${d}_Production.xlsx`);
+  toast('✅ Excel exported','var(--green)');
+}
+
+// ── EXCEL: AIM Status ────────────────────────────────────────────
+function exportAimStatusExcel(){
+  const {fl,d,day,mcs}=getExportData();
+  const rows=[];
+  rows.push(['SUNLOC — AIM Status Report — '+fl+' — '+d]);
+  rows.push([]);
+  rows.push(['Machine','Size','AIM (L)','Produced (L)','Produced − AIM','Status']);
+  let totAim=0, totProd=0;
+  mcs.forEach(mc=>{
+    let prod=0,aim=0;
+    SHIFTS.forEach(sh=>{
+      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m); aim+=parseFloat(m.aim||0);
+    });
+    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
+    totAim+=aim; totProd+=prod;
+    const diff=aim>0?Math.round((prod-aim)*100)/100:null;
+    const status=aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track';
+    rows.push([mc.id,mc.sz,aim||'—',prod||'—',diff!==null?(diff>0?'+'+diff:diff):'—',status]);
+  });
+  totAim=Math.round(totAim*100)/100; totProd=Math.round(totProd*100)/100;
+  const totDiff=totAim>0?Math.round((totProd-totAim)*100)/100:null;
+  rows.push([]);
+  rows.push(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'—',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']);
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:8},{wch:6},{wch:10},{wch:12},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,'AIM Status',ws);
+  XLSX.writeFile(wb,`DPR_${fl}_${d}_AIM.xlsx`);
+  toast('✅ AIM Excel exported','var(--green)');
+}
+
+// ── EXCEL: Downtime ──────────────────────────────────────────────
+function exportDowntimeExcel(){
+  const {fl,d,day,mcs}=getExportData();
+  const rows=[];
+  rows.push(['SUNLOC — Machine-wise Downtime — '+fl+' — '+d]);
+  rows.push([]);
+  const hdr=['Machine'];
+  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>hdr.push('Shift '+sh+' '+DT_LABELS[c])));
+  hdr.push('Total DT (min)');
+  rows.push(hdr);
+  let grandTotal=0;
+  const colTotals={}; SHIFTS.forEach(sh=>DT_CATS.forEach(c=>{colTotals[sh+c]=0;}));
+  mcs.forEach(mc=>{
+    const row=[mc.id];
+    let mcTotal=0;
+    SHIFTS.forEach(sh=>{
+      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+      DT_CATS.forEach(c=>{
+        const v=parseFloat(m[c]||0);
+        row.push(v||0); mcTotal+=v; colTotals[sh+c]+=v;
+      });
+    });
+    row.push(Math.round(mcTotal*10)/10);
+    grandTotal+=mcTotal;
+    rows.push(row);
+  });
+  // Totals row
+  const totRow=['TOTAL'];
+  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>totRow.push(Math.round(colTotals[sh+c]*10)/10)));
+  totRow.push(Math.round(grandTotal*10)/10);
+  rows.push(totRow);
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,'Downtime',ws);
+  XLSX.writeFile(wb,`DPR_${fl}_${d}_Downtime.xlsx`);
+  toast('✅ Downtime Excel exported','var(--green)');
+}
+
+// ── EXCEL: Shift Performance ─────────────────────────────────────
+function exportShiftPerformanceExcel(){
+  const {fl,d,day,mcs}=getExportData();
+  const rows=[];
+  rows.push(['SUNLOC — Shift Performance — '+fl+' — '+d]);
+  rows.push([]);
+  rows.push(['Shift','Incharge','Chemist','Fitter','Electrical','Utility','AIM Staff','GPR Staff','Production (L)','Target (L)','Efficiency %','DT (min)','DT %','Score']);
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    let prod=0,t=0;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m); t+=tgt(fl,mc.id);
+    });
+    prod=Math.round(prod*100)/100;
+    const dt=calcShiftDT(fl,d,sh);
+    const eff=t>0?Math.round(prod/t*1000)/10:0;
+    const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
+    rows.push([
+      'Shift '+sh,
+      sd.incharge||'—',
+      Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'—'),
+      sd.fitter||'—',
+      (sd.electrical||[]).join(', ')||'—',
+      (sd.utility||[]).join(', ')||'—',
+      (sd.aim_staff||[]).join(', ')||'—',
+      (sd.gpr_staff||[]).join(', ')||'—',
+      prod||'—', t, eff+'%', dt.total, dt.dtPct.toFixed(1)+'%', prod>0?score:'—'
+    ]);
+  });
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:8},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:7}];
+  XLSX.utils.book_append_sheet(wb,'Shift Performance',ws);
+  XLSX.writeFile(wb,`DPR_${fl}_${d}_ShiftPerformance.xlsx`);
+  toast('✅ Shift Performance exported','var(--green)');
+}
+
+// ── EXCEL: Full DPR — All sheets ────────────────────────────────
+function exportAllShiftsExcel(){
+  const wb=XLSX.utils.book_new();
+  // Sheet 1: Production
+  const {fl,d,day,mcs}=getExportData();
+  const summaryRows=[['SUNLOC FULL DPR — '+fl+' — '+d],[]];
+  summaryRows.push(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']);
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    let prod=0,t=0,aim=0;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m); t+=tgt(fl,mc.id); aim+=parseFloat(m.aim||0);
+    });
+    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
+    const dt=calcShiftDT(fl,d,sh);
+    summaryRows.push(['Shift '+sh, sd.incharge||'—', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'—', dt.total]);
+  });
+  const summaryWs=XLSX.utils.aoa_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb,'Summary',summaryWs);
+  // Add individual shift sheets
+  XLSX.utils.book_append_sheet(wb,'_temp',XLSX.utils.aoa_to_sheet([[]]));
+  wb.SheetNames.pop(); // remove temp
+  // Re-use production export logic per shift
+  const wbTemp=XLSX.utils.book_new();
+  exportDailyReportExcel.__exportToWb=true;
+  // Just add all sheets manually
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    const rows=[['Shift '+sh+' — '+fl+' — '+d],[]];
+    rows.push(['MC','Sz','Operator','Batch','Qty(L)','Note','Target','VS Tgt','AIM','Backlog','Proc','Mech','Elec','GPR','HVAC','DW']);
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      const prod=Math.round(mcTotalProd(m)*100)/100;
+      const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
+      (m.runs||[blankRun()]).forEach((run,ri)=>{
+        rows.push([ri===0?mc.id:'',ri===0?mc.sz:'',ri===0?(m.operator||''):'',
+          run.batchNumber||'',run.qty||'',run.note||'',
+          ri===0?t:'',ri===0?Math.round((prod-t)*100)/100:'',
+          ri===0?(aim||0):'',ri===0?(aim>0?Math.round((prod-aim)*100)/100:''):'',
+          ri===0?(m.proc||0):'',ri===0?(m.mech||0):'',ri===0?(m.elec||0):'',
+          ri===0?(m.gpr||0):'',ri===0?(m.hvac||0):'',ri===0?(m.dw||0):''
+        ]);
+      });
+    });
+    XLSX.utils.book_append_sheet(wb,'Shift '+sh,XLSX.utils.aoa_to_sheet(rows));
+  });
+  // AIM sheet
+  const aimRows=[['AIM Status — '+fl+' — '+d],[]];
+  aimRows.push(['MC','Sz','AIM','Produced','Diff','Status']);
+  mcs.forEach(mc=>{
+    let prod=0,aim=0;
+    SHIFTS.forEach(sh=>{const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());prod+=mcTotalProd(m);aim+=parseFloat(m.aim||0);});
+    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
+    const diff=aim>0?Math.round((prod-aim)*100)/100:null;
+    aimRows.push([mc.id,mc.sz,aim||'—',prod||'—',diff!==null?(diff>0?'+'+diff:diff):'—',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']);
+  });
+  XLSX.utils.book_append_sheet(wb,'AIM Status',XLSX.utils.aoa_to_sheet(aimRows));
+  XLSX.writeFile(wb,`DPR_${fl}_${d}_FULL.xlsx`);
+  toast('✅ Full DPR Excel exported','var(--green)');
+}
+
+// ── PDF: Print Daily Report ──────────────────────────────────────
+function exportPDF(){
+  const {fl,d,day,mcs}=getExportData();
+  let html=`
+    <html><head><title>DPR ${fl} ${d}</title>
+    <style>
+      body{font-family:Arial,sans-serif;font-size:11px;margin:20px;color:#111}
+      h1{font-size:16px;margin-bottom:4px;color:#0a6d91}
+      h2{font-size:13px;margin:16px 0 6px;color:#0a6d91;border-bottom:2px solid #0a6d91;padding-bottom:3px}
+      table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:10px}
+      th{background:#0a6d91;color:#fff;padding:5px 7px;text-align:left;white-space:nowrap}
+      td{padding:4px 7px;border-bottom:1px solid #ddd}
+      tr:nth-child(even) td{background:#f5f9fc}
+      .tot{font-weight:700;background:#e8f4f8!important;border-top:2px solid #0a6d91}
+      .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+      .info-box{background:#f5f9fc;border:1px solid #cce;padding:6px 10px;border-radius:4px}
+      .info-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+      .info-val{font-size:12px;font-weight:700;color:#111;margin-top:2px}
+      .pos{color:#16a34a}.neg{color:#dc2626}
+      @media print{@page{margin:15mm}}
+    </style></head><body>
+    <h1>📋 SUNLOC DPR — ${fl} — ${d}</h1>
+    <p style="color:#666;font-size:10px;margin-bottom:12px">Generated: ${new Date().toLocaleString('en-IN')}</p>
+  `;
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    let shProd=0,shTgt=0,shAim=0;
+    html+=`<h2>SHIFT ${sh}</h2>
+    <div class="info-grid">
+      <div class="info-box"><div class="info-label">Incharge</div><div class="info-val">${sd.incharge||'—'}</div></div>
+      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'—')}</div></div>
+      <div class="info-box"><div class="info-label">Fitter</div><div class="info-val">${sd.fitter||'—'}</div></div>
+      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${(sd.electrical||[]).join(', ')||'—'}</div></div>
+      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${(sd.utility||[]).join(', ')||'—'}</div></div>
+      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${(sd.aim_staff||[]).join(', ')||'—'}</div></div>
+      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${(sd.gpr_staff||[]).join(', ')||'—'}</div></div>
+    </div>
+    <table><thead><tr>
+      <th>MC</th><th>Sz</th><th>Operator</th><th>Batch</th><th>Qty (L)</th><th>Note</th>
+      <th>Target</th><th>VS Tgt</th><th>AIM</th><th>Backlog/Excess</th>
+    </tr></thead><tbody>`;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      const prod=Math.round(mcTotalProd(m)*100)/100;
+      const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
+      const vs=Math.round((prod-t)*100)/100;
+      const bl=aim>0?Math.round((prod-aim)*100)/100:null;
+      shProd+=prod; shTgt+=t; shAim+=aim;
+      (m.runs||[blankRun()]).forEach((run,ri)=>{
+        html+=`<tr>
+          <td>${ri===0?`<b>${mc.id}</b>`:''}</td>
+          <td>${ri===0?mc.sz:''}</td>
+          <td>${ri===0?(m.operator||'—'):''}</td>
+          <td>${run.batchNumber||'—'}</td>
+          <td><b>${run.qty||'—'}</b></td>
+          <td>${run.note||''}</td>
+          <td>${ri===0?t:''}</td>
+          <td>${ri===0&&prod>0?`<span class="${vs>=0?'pos':'neg'}">${vs>=0?'+'+vs:vs}</span>`:''}</td>
+          <td>${ri===0&&aim>0?aim:''}</td>
+          <td>${ri===0&&bl!==null?`<span class="${bl>=0?'pos':'neg'}">${bl>=0?'+'+bl:bl}</span>`:''}</td>
+        </tr>`;
+      });
+    });
+    shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100; shTgt=Math.round(shTgt*100)/100;
+    const shVs=Math.round((shProd-shTgt)*100)/100;
+    html+=`<tr class="tot"><td colspan="4">SHIFT ${sh} TOTAL</td>
+      <td>${shProd||'—'}</td><td></td><td>${shTgt}</td>
+      <td><span class="${shVs>=0?'pos':'neg'}">${shVs>=0?'+'+shVs:shVs}</span></td>
+      <td>${shAim||'—'}</td>
+      <td><span class="${shProd-shAim>=0?'pos':'neg'}">${shAim>0?(shProd-shAim>=0?'+':'')+Math.round((shProd-shAim)*100)/100:'—'}</span></td>
+    </tr></tbody></table>`;
+  });
+  html+=`</body></html>`;
+  const w=window.open('','_blank','width=900,height=700');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(()=>w.print(),600);
+  toast('🖨 Print dialog opened','var(--cyan)');
+}
+
 function exportData(){
   const data={};
   Object.keys(localStorage).filter(k=>k.startsWith('dpr3_')||k==='dpr_targets').forEach(k=>data[k]=localStorage.getItem(k));

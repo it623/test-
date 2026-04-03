@@ -908,7 +908,8 @@ function calcDayStats(fl,d){
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
-  const backlog = Math.max(0, totAim - totProd);
+  // Produced - AIM: positive = excess, negative = behind
+  const backlog = Math.round((totProd - totAim)*100)/100;
   return {totTgt,totProd,totAim,totResort,totDT,dtPct,eff,backlog};
 }
 
@@ -1389,7 +1390,7 @@ function renderDayKpis(){
     <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
     <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
     <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim||'—'}</div><div class="kpi-sub">planned today</div></div>
-    <div class="kpi"><div class="kpi-label">Net Backlog</div><div class="kpi-val ${s.backlog>0?'amber':'green'}">${s.backlog||'—'}</div><div class="kpi-sub">units behind</div></div>
+    <div class="kpi"><div class="kpi-label">Produced − AIM</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+s.backlog:s.backlog}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
     <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
@@ -2089,22 +2090,83 @@ function renderTrends(){
 function renderAIM(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
-  let html=`<table class="data-table"><thead><tr><th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th><th>Backlog</th><th>Status</th></tr></thead><tbody>`;
+  let html=`<table class="data-table"><thead><tr>
+    <th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th>
+    <th>Backlog / Excess</th><th>Status</th>
+  </tr></thead><tbody>`;
+  let totalAIM=0, totalProd=0;
+
   mcs.forEach(mc=>{
-    let prod=0,aim=0;
+    let prod=0, aim=0;
     SHIFTS.forEach(sh=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       prod+=mcTotalProd(m);
       aim+=parseFloat(m.aim||0);
     });
-    const bl=aim>0?Math.max(0,aim-prod):null;
-    const st=aim===0?'<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>':
-      bl===0?'<span class="pill g">On Track</span>':
-      bl>0?`<span class="pill a">Behind by ${bl}</span>`:
-      '<span class="pill g">Ahead</span>';
-    html+=`<tr><td class="mono">${mc.id}</td><td style="color:var(--t3)">${mc.sz}</td><td class="mono">${aim||'—'}</td><td class="mono">${prod||'—'}</td><td class="mono">${bl===null?'—':bl}</td><td>${st}</td></tr>`;
+    prod=Math.round(prod*100)/100;
+    aim=Math.round(aim*100)/100;
+    totalAIM+=aim;
+    totalProd+=prod;
+
+    // Formula: Produced - AIM
+    const diff = aim>0 ? Math.round((prod - aim)*100)/100 : null;
+
+    let diffCell, statusCell;
+    if(diff===null){
+      diffCell  = `<span style="color:var(--t3)">—</span>`;
+      statusCell = `<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>`;
+    } else if(diff>0){
+      diffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:700">+${diff} Excess</span>`;
+      statusCell = `<span class="pill g">Excess +${diff}</span>`;
+    } else if(diff<0){
+      diffCell  = `<span style="color:var(--red);font-family:var(--mono);font-weight:700">${diff} Behind</span>`;
+      statusCell = `<span class="pill r">Behind ${diff}</span>`;
+    } else {
+      diffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:700">0</span>`;
+      statusCell = `<span class="pill g">On Track</span>`;
+    }
+
+    html+=`<tr>
+      <td class="mono">${mc.id}</td>
+      <td style="color:var(--t3)">${mc.sz}</td>
+      <td class="mono">${aim||'—'}</td>
+      <td class="mono">${prod||'—'}</td>
+      <td>${diffCell}</td>
+      <td>${statusCell}</td>
+    </tr>`;
   });
-  html+=`</tbody></table>`;
+
+  // ── TOTAL ROW ──────────────────────────────────────────
+  totalAIM  = Math.round(totalAIM*100)/100;
+  totalProd = Math.round(totalProd*100)/100;
+  const totalDiff = totalAIM>0 ? Math.round((totalProd - totalAIM)*100)/100 : null;
+
+  let totalDiffCell, totalStatusCell;
+  if(totalDiff===null){
+    totalDiffCell  = `<span style="color:var(--t3)">—</span>`;
+    totalStatusCell = `<span style="color:var(--t3);font-family:var(--fc);font-size:11px">No AIM</span>`;
+  } else if(totalDiff>0){
+    totalDiffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:800;font-size:14px">+${totalDiff} Excess</span>`;
+    totalStatusCell = `<span class="pill g">Excess +${totalDiff}</span>`;
+  } else if(totalDiff<0){
+    totalDiffCell  = `<span style="color:var(--red);font-family:var(--mono);font-weight:800;font-size:14px">${totalDiff} Behind</span>`;
+    totalStatusCell = `<span class="pill r">Behind ${totalDiff}</span>`;
+  } else {
+    totalDiffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:800;font-size:14px">0</span>`;
+    totalStatusCell = `<span class="pill g">On Track</span>`;
+  }
+
+  html+=`</tbody>
+  <tfoot>
+    <tr style="border-top:2px solid var(--b2);background:rgba(0,212,255,0.06)">
+      <td colspan="2" style="padding:8px 10px;font-family:var(--fc);font-weight:800;font-size:12px;letter-spacing:1px;color:var(--cyan)">TOTAL</td>
+      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--cyan)">${totalAIM||'—'}</td>
+      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--green)">${totalProd||'—'}</td>
+      <td style="padding:8px 10px">${totalDiffCell}</td>
+      <td style="padding:8px 10px">${totalStatusCell}</td>
+    </tr>
+  </tfoot>
+  </table>`;
   document.getElementById('aimTable').innerHTML=html;
 
   // AIM chart

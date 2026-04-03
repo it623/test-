@@ -1011,6 +1011,20 @@ function normLabel(l){
 async function pullFromServer(){
   if(!serverUrl) return;
 
+  // Before pulling — push any local labels not yet on server
+  // This auto-saves labels generated offline or before server was available
+  if(state.labels.length > 0){
+    const labelsToSync = state.labels.filter(l=>!l.isOrange);
+    if(labelsToSync.length > 0){
+      fetch(serverUrl+'/api/tracking/state',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({labels:labelsToSync,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+        signal:AbortSignal.timeout(10000)
+      }).catch(()=>{});
+    }
+  }
+
   try{
     const r = await fetch(serverUrl+'/api/sync/snapshot', {signal:AbortSignal.timeout(10000)});
     if(r.ok){
@@ -1510,9 +1524,30 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
 
   state.labels.push(...newLabels);
   saveLocal();
-  // Save via state sync (labels stored in saveLocal above)
-  // Trigger immediate state push to ensure persistence
-  if(serverUrl){ fetch(serverUrl+'/api/tracking/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),signal:AbortSignal.timeout(8000)}).catch(()=>{}); }
+  // Push new labels to server immediately
+  if(serverUrl){
+    fetch(serverUrl+'/api/tracking/state',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+      signal:AbortSignal.timeout(10000)
+    }).then(r=>r.json()).then(j=>{
+      if(j.ok){
+        console.log('[Labels] Saved '+newLabels.length+' labels to server');
+        setSyncBadge('synced');
+      } else {
+        console.error('[Labels] Server save failed:', j.error);
+        setSyncBadge('offline');
+        // Queue for retry
+        trkQueuePush('/api/tracking/state',{labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+      }
+    }).catch(e=>{
+      console.error('[Labels] Network error saving labels:', e.message);
+      setSyncBadge('offline');
+      // Queue for retry when connection restored
+      trkQueuePush('/api/tracking/state',{labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+    });
+  }
   return newLabels;
 }
 
@@ -2157,6 +2192,34 @@ function renderLabels(){
     if(si){ si.value = _savedSearch; filterLabelTable(); }
   } else {
     updateLabelCount(allBatches.length);
+  }
+}
+
+// Push ALL local labels to server (recovery function)
+async function pushAllLabelsToServer(btn){
+  if(!serverUrl){ alert('No server configured'); return; }
+  const allLabels = state.labels.filter(l=>!l.isOrange);
+  if(!allLabels.length){ alert('No labels to push'); return; }
+  if(btn){ btn.textContent='⏳ Pushing...'; btn.disabled=true; }
+  try{
+    const r = await fetch(serverUrl+'/api/tracking/state',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({labels:allLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+      signal:AbortSignal.timeout(15000)
+    });
+    const j = await r.json();
+    if(j.ok){
+      setSyncBadge('synced');
+      if(btn){ btn.textContent='✅ Done'; setTimeout(()=>{ btn.textContent='⬆ Push Labels'; btn.disabled=false; },2000); }
+      alert('✅ '+allLabels.length+' labels pushed to server successfully');
+    } else {
+      if(btn){ btn.textContent='❌ Failed'; btn.disabled=false; }
+      alert('❌ Server error: '+(j.error||'Unknown'));
+    }
+  }catch(e){
+    if(btn){ btn.textContent='❌ Failed'; btn.disabled=false; }
+    alert('❌ Network error: '+e.message);
   }
 }
 

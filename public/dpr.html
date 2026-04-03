@@ -1560,8 +1560,8 @@ function renderShifts(){
       const mRaw=sd.machines[mc.id]||blankMachine();
       const m=migrateMachineData(mRaw);
       const t=tgt(fl,mc.id);
-      const p=mcTotalProd(m);
-      const a=parseFloat(m.aim||0);
+      const p=Math.round(mcTotalProd(m)*100)/100;
+      const a=Math.round(parseFloat(m.aim||0)*100)/100;
       const vs=p>0?Math.round((p-t)*100)/100:null;
       const bl=p>0?Math.round((p-a)*100)/100:null;
       shTgt+=t; shProd+=p; shAim+=a;
@@ -1636,17 +1636,20 @@ function renderShifts(){
         <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${p||'—'}</td>
         <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`}</td>
         <td><input type="number" id="aim-${sh}-${mc.id}" value="${m.aim||''}" placeholder="0" min="0" style="width:52px" step="0.01" oninput="markUnsaved();updateBacklog('${sh}','${mc.id}');updateShiftTotals('${sh}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprAimNav(event,'${sh}','${mc.id}')">  </td>
-        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);color:var(--amber)">${bl===null?'—':bl}</td>
+        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);${bl===null?'color:var(--t3)':bl>0?'color:var(--green)':bl<0?'color:var(--red)':'color:var(--t2)'}">${bl===null?'—':bl>0?'+'+bl:bl}</td>
         <td class="r" style="font-family:var(--mono);color:var(--red)">${mcResort||`<span style="color:var(--t3)">0</span>`}</td>
       </tr>`;
     });
 
-    const shVs=shProd>0?shProd-shTgt:null;
+    shProd = Math.round(shProd*100)/100;
+    shAim  = Math.round(shAim*100)/100;
+    shTgt  = Math.round(shTgt*100)/100;
+    const shVs=shProd>0?Math.round((shProd-shTgt)*100)/100:null;
     html+=`</tbody><tfoot><tr class="tot-row">
       <td colspan="4" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
       <td class="r" style="font-family:var(--mono)">${shTgt}</td>
       <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
-      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
+      <td class="r" id="shvs-${sh}">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
       <td class="r" id="shaim-${sh}" style="font-family:var(--mono)">${shAim||'—'}</td>
       <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
       <td></td>
@@ -1785,10 +1788,18 @@ function updateShiftTotals(sh){
   });
   shProd=Math.round(shProd*100)/100;
   shAim=Math.round(shAim*100)/100;
+  const shTgtTotal = getActiveMachines(fl).reduce((s,mc)=>s+tgt(fl,mc.id),0);
+  const shVsLive = shProd>0?Math.round((shProd-shTgtTotal)*100)/100:null;
+
   const totEl=document.getElementById(`shtot-${sh}`);
   if(totEl) totEl.textContent=shProd||'—';
-  const aimEl=document.getElementById(`shaim-${sh}`);
-  if(aimEl) aimEl.textContent=shAim||'—';
+
+  // Update VS TGT cell in shift total row
+  const vsEl=document.getElementById(`shvs-${sh}`);
+  if(vsEl) vsEl.innerHTML=shVsLive===null?'<span class="vs-zero">—</span>':shVsLive>=0?`<span class="vs-pos">+${shVsLive}</span>`:`<span class="vs-neg">${shVsLive}</span>`;
+
+  const aimEl2=document.getElementById(`shaim-${sh}`);
+  if(aimEl2) aimEl2.textContent=shAim||'—';
 }
 
 function updateBacklog(sh,mcId){

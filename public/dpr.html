@@ -2880,19 +2880,19 @@ function showExportMenu(){
       </div>
 
       <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:4px;margin-bottom:2px">📊 EXCEL (.xlsx)</div>
-      <button class="nbtn" onclick="closeModal();exportDailyReportExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();runExport(exportDailyReportExcel)" style="text-align:left;padding:10px 14px">
         📋 Daily Production Report — All Shifts
       </button>
-      <button class="nbtn" onclick="closeModal();exportAimStatusExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();runExport(exportAimStatusExcel)" style="text-align:left;padding:10px 14px">
         🎯 AIM Status Report
       </button>
-      <button class="nbtn" onclick="closeModal();exportDowntimeExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();runExport(exportDowntimeExcel)" style="text-align:left;padding:10px 14px">
         ⏱ Machine-wise Downtime Report
       </button>
-      <button class="nbtn" onclick="closeModal();exportShiftPerformanceExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();runExport(exportShiftPerformanceExcel)" style="text-align:left;padding:10px 14px">
         👤 Shift Performance Report
       </button>
-      <button class="nbtn" onclick="closeModal();exportAllShiftsExcel().catch(e=>toast('❌ '+e.message,'var(--red)'))" style="text-align:left;padding:10px 14px">
+      <button class="nbtn" onclick="closeModal();runExport(exportAllShiftsExcel)" style="text-align:left;padding:10px 14px">
         📦 Full DPR — All Data (All Sheets)
       </button>
 
@@ -2915,6 +2915,16 @@ function getExportData(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
   return {fl,d,day,mcs};
+}
+
+// ── Export wrapper — handles errors cleanly ─────────────────────
+function runExport(fn){
+  try{
+    const result = fn();
+    if(result && result.catch) result.catch(e=>toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)'));
+  }catch(e){
+    toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)');
+  }
 }
 
 // ── Check XLSX available ────────────────────────────────────────

@@ -2083,6 +2083,9 @@ function renderLabels(){
 
   const allBatches=state.batches.filter(b=>b.status!=='closed');
 
+  // Save search value before re-render
+  const _savedSearch = document.getElementById('label-search')?.value || '';
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Label Generation</div><div class="section-sub">Generate and print box labels for active batches</div></div>
@@ -2122,8 +2125,13 @@ function renderLabels(){
     </table></div>
   </div>`;
 
-  // Update result count
-  updateLabelCount(allBatches.length);
+  // Restore search value after re-render and apply filter
+  if(_savedSearch){
+    const si = document.getElementById('label-search');
+    if(si){ si.value = _savedSearch; filterLabelTable(); }
+  } else {
+    updateLabelCount(allBatches.length);
+  }
 }
 
 function buildLabelRows(batches){
@@ -2421,6 +2429,20 @@ const DEPT_CONFIG={
 };
 
 function renderDeptScan(dept){
+  // Don't re-render if user has wastage dropdown open (focus inside the form)
+  const activeEl = document.activeElement;
+  const wastageCard = document.querySelector('.card.mb-16 select[id^="wastage-batch-"]');
+  if(activeEl && (
+    activeEl.id === 'wastage-batch-'+dept ||
+    activeEl.id === 'wastage-salvage-'+dept ||
+    activeEl.id === 'wastage-remelt-'+dept
+  )) return; // user is interacting — skip re-render
+
+  // Save wastage batch selection before re-render so it survives auto-refresh
+  const _savedWastageBatch = document.getElementById('wastage-batch-'+dept)?.value || '';
+  const _savedWastageSalvage = document.getElementById('wastage-salvage-'+dept)?.value || '';
+  const _savedWastageRemelt = document.getElementById('wastage-remelt-'+dept)?.value || '';
+
   const el=document.getElementById('page-'+dept);
   const cfg=DEPT_CONFIG[dept];
   const myAlerts=state.alerts.filter(a=>a.dept===dept);
@@ -2587,6 +2609,20 @@ function renderDeptScan(dept){
     })()}
     </div>
   </div>`;
+
+  // Restore wastage selections after re-render
+  if(_savedWastageBatch){
+    const wb=document.getElementById('wastage-batch-'+dept);
+    if(wb) wb.value=_savedWastageBatch;
+  }
+  if(_savedWastageSalvage){
+    const ws=document.getElementById('wastage-salvage-'+dept);
+    if(ws) ws.value=_savedWastageSalvage;
+  }
+  if(_savedWastageRemelt){
+    const wr=document.getElementById('wastage-remelt-'+dept);
+    if(wr) wr.value=_savedWastageRemelt;
+  }
 }
 
 function checkLabelStatus(dept){
@@ -4202,7 +4238,10 @@ setInterval(async ()=>{
       })); }catch(e){}
       setSyncBadge('synced');
       // Re-render if scan count changed OR scans were empty before
-      if((state.scans.length !== prevCount || prevCount === 0) && currentPage){
+      // BUT skip if user is actively interacting with a form element (select/input)
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const userInteracting = activeTag === 'select' || activeTag === 'input' || activeTag === 'textarea';
+      if((state.scans.length !== prevCount || prevCount === 0) && currentPage && !userInteracting){
         renderPage(currentPage);
       }
     }

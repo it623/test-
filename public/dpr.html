@@ -823,19 +823,100 @@ async function saveDay(){
     }catch(e){ /* offline — use what we have in localStorage */ }
   }
 
-  // Step 2 — ensure DT table is rendered so all inputs exist in DOM
-  renderDTTable();
+  // Step 2 — collect live form values BEFORE writing server data to localStorage
+  // This captures what the user actually typed/entered right now
+  const liveFormSnapshot = collectLiveFormValues();
 
-  // Step 3 — collect form fields ON TOP of the server data
-  // Filled fields override server; blank fields keep existing server value
-  const data = collectForm();
+  // Step 3 — merge: live form values override server data
+  // Start with server data as base, then apply live values on top
+  const serverData = loadDay(fl, d); // has fresh server data from Step 1
+  const data = mergeFormIntoData(serverData, liveFormSnapshot);
 
-  // Step 3 — save merged data locally and push to server
+  // Step 4 — save merged data locally and push to server
   localStorage.setItem(skey(fl,d), JSON.stringify(data));
   setUnsaved(false);
   renderDayKpis();
   pushToServer(fl,d,data);
 }
+// ── Collect ONLY what is currently visible/typed in the DOM ─────
+// Returns a snapshot of all live input values — does NOT read localStorage
+function collectLiveFormValues(){
+  const fl=curFloor;
+  const live = { staff:{}, machines:{} };
+  SHIFTS.forEach(sh=>{
+    live.staff[sh] = {
+      incharge:   v(`si-${sh}-incharge`) || null,
+      fitter:     v(`si-${sh}-fitter`)   || null,
+      chemist:    getMultiStaff(sh,'chemist'),
+      electrical: getMultiStaff(sh,'electrical'),
+      utility:    getMultiStaff(sh,'utility'),
+      aim_staff:  getMultiStaff(sh,'aim_staff'),
+      gpr_staff:  getMultiStaff(sh,'gpr_staff'),
+    };
+    if(!live.machines[sh]) live.machines[sh] = {};
+    getActiveMachines(fl).forEach(mc=>{
+      const mcLive = { aim: v(`aim-${sh}-${mc.id}`) || null, operator: v(`op-${sh}-${mc.id}`) || null };
+      // DT values — read directly from DOM inputs
+      DT_CATS.forEach(c=>{
+        const el = document.getElementById(`dt-${sh}-${mc.id}-${c}`);
+        mcLive[c] = el ? (el.value || null) : null;
+      });
+      // Runs — from run-row elements
+      const runEls = document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
+      if(runEls.length > 0){
+        mcLive.runs = Array.from(runEls).map(el=>{
+          const ri = el.dataset.ri;
+          const ordId = v(`run-ord-${sh}-${mc.id}-${ri}`) || '';
+          let batchNo = v(`run-batch-${sh}-${mc.id}-${ri}`) || '';
+          if(ordId && !batchNo){
+            const ord = Object.values(activeOrders).flat().find(o=>o.id===ordId);
+            if(ord) batchNo = ord.batchNumber || ord.poNumber || '';
+          }
+          return { orderId:ordId, batchNumber:batchNo, qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'', note:v(`run-note-${sh}-${mc.id}-${ri}`)||'' };
+        }).filter(r=>r.qty||r.batchNumber||r.orderId);
+      }
+      // Group operators
+      const grpOps = collectGroupOperators(sh, fl, mc.id);
+      if(grpOps !== null) mcLive.operators = grpOps;
+      live.machines[sh][mc.id] = mcLive;
+    });
+  });
+  return live;
+}
+
+// ── Merge live DOM values ON TOP of base data (from server/localStorage) ──
+// Live value wins if not null; base value wins if live is null (input not rendered)
+function mergeFormIntoData(base, live){
+  const fl = curFloor;
+  const result = JSON.parse(JSON.stringify(base)); // deep copy
+  SHIFTS.forEach(sh=>{
+    const s = live.staff[sh] || {};
+    if(s.incharge   !== null) result.shifts[sh].incharge   = s.incharge;
+    if(s.fitter     !== null) result.shifts[sh].fitter     = s.fitter;
+    if(s.chemist    && s.chemist.length)    result.shifts[sh].chemist    = s.chemist;
+    if(s.electrical && s.electrical.length) result.shifts[sh].electrical = s.electrical;
+    if(s.utility    && s.utility.length)    result.shifts[sh].utility    = s.utility;
+    if(s.aim_staff  && s.aim_staff.length)  result.shifts[sh].aim_staff  = s.aim_staff;
+    if(s.gpr_staff  && s.gpr_staff.length)  result.shifts[sh].gpr_staff  = s.gpr_staff;
+
+    getActiveMachines(fl).forEach(mc=>{
+      const mcLive = (live.machines[sh] || {})[mc.id] || {};
+      const m = migrateMachineData(result.shifts[sh].machines[mc.id] || blankMachine());
+      if(mcLive.aim      !== null && mcLive.aim      !== undefined) m.aim      = mcLive.aim;
+      if(mcLive.operator !== null && mcLive.operator !== undefined) m.operator = mcLive.operator;
+      if(mcLive.operators) m.operators = mcLive.operators;
+      // DT values — only overwrite if input existed in DOM
+      DT_CATS.forEach(c=>{
+        if(mcLive[c] !== null && mcLive[c] !== undefined) m[c] = mcLive[c];
+      });
+      // Runs — only overwrite if run rows existed in DOM
+      if(mcLive.runs && mcLive.runs.length > 0) m.runs = mcLive.runs;
+      result.shifts[sh].machines[mc.id] = m;
+    });
+  });
+  return result;
+}
+
 function collectForm(){
   const d=getDate(), fl=curFloor;
   const day=loadDay(fl,d);

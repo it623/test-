@@ -2082,13 +2082,6 @@ function renderLabels(){
     ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
-  // If labels are empty — fetch from server first so counts are always correct
-  if(state.labels.length === 0 && serverUrl){
-    el.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text3);font-size:14px;gap:10px"><span style="display:inline-block;animation:spin 1s linear infinite">⟳</span> Loading label data from server...</div>';
-    pullFromServer().then(()=>renderLabels()).catch(()=>renderLabels());
-    return;
-  }
-
   const allBatches=state.batches.filter(b=>b.status!=='closed');
 
   // Save search value before re-render
@@ -4250,7 +4243,7 @@ setInterval(async ()=>{
       // BUT skip if user is actively interacting with a form element (select/input)
       const activeTag = document.activeElement?.tagName?.toLowerCase();
       const userInteracting = activeTag === 'select' || activeTag === 'input' || activeTag === 'textarea';
-      const dataChanged = state.scans.length !== prevCount || prevCount === 0 || state.labels.length !== prevLabelCount;
+      const dataChanged = state.scans.length !== prevCount || prevCount === 0 || state.labels.length !== prevLabelCount || prevLabelCount === 0;
       if(dataChanged && currentPage && !userInteracting){
         renderPage(currentPage);
       }

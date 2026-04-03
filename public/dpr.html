@@ -1729,7 +1729,7 @@ function renderDTTable(){
           return `<td style="padding:2px 3px;border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};text-align:center;background:${cellBg}">
             <input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0"
               style="width:38px;text-align:center;background:transparent;border:none;color:${cellClr};font-family:var(--mono);font-size:12px;padding:1px 0"
-              oninput="markUnsaved();updateDTSummary()">
+              oninput="markUnsaved();updateDTSummary();updateDTTotalRow()">
           </td>`;
         }).join('');
       }).join('')}
@@ -1744,12 +1744,14 @@ function renderDTTable(){
         const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
         return s+parseFloat(m[c]||0);
       },0);
-      return `<td style="padding:4px 3px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:${total>0?SHIFT_COLOR[sh]:'var(--t3)'};border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};background:${SHIFT_BG[sh]}">${total||'—'}</td>`;
+      return `<td id="dt-total-${sh}-${c}" style="padding:4px 3px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:${total>0?SHIFT_COLOR[sh]:'var(--t3)'};border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};background:${SHIFT_BG[sh]}">${total||'—'}</td>`;
     }).join('')).join('')}
   </tr>`;
 
   html += `</tbody></table></div>`;
   document.getElementById('dtTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
+  // Recalculate totals from live input values immediately after render
+  setTimeout(updateDTTotalRow, 0);
 }
 function renderDTSummary(){
   const fl=curFloor, d=getDate();
@@ -1792,6 +1794,27 @@ function renderDTSummary(){
   document.getElementById('dtSumTable').innerHTML=html;
 }
 function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
+
+// Update TOTAL row in DT table live from input values — no save/refresh needed
+function updateDTTotalRow(){
+  const mcs = getActiveMachines(curFloor);
+  SHIFTS.forEach(sh=>{
+    DT_CATS.forEach(c=>{
+      let total = 0;
+      mcs.forEach(mc=>{
+        const el = document.getElementById('dt-'+sh+'-'+mc.id+'-'+c);
+        if(el) total += parseFloat(el.value||0);
+      });
+      // Find the total cell for this shift+category
+      const totalCell = document.getElementById('dt-total-'+sh+'-'+c);
+      if(totalCell){
+        const SHIFT_COLOR = { A:'#00d4ff', B:'#00e676', C:'#ffab00' };
+        totalCell.textContent = total || '—';
+        totalCell.style.color = total > 0 ? SHIFT_COLOR[sh] : 'var(--t3)';
+      }
+    });
+  });
+}
 
 function renderRemarks(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);

@@ -2072,7 +2072,6 @@ function getBoxCurrentStageForBatch(batchNo){
 
 function renderLabels(){
   const el=document.getElementById('page-labels');
-  const activeBatches=state.batches.filter(b=>b.status!=='closed');
 
   document.getElementById('tb-actions').innerHTML=`
     <button class="btn btn-secondary btn-sm" id="sync-btn" onclick="
@@ -2082,53 +2081,135 @@ function renderLabels(){
     ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
+  const allBatches=state.batches.filter(b=>b.status!=='closed');
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Label Generation</div><div class="section-sub">Generate and print box labels for active batches</div></div>
     <button class="btn btn-primary" onclick="openLabelGen()">+ Generate Labels</button>
   </div>
   <div class="alert alert-info">Labels are capped by: (1) daily machine target in boxes, (2) total gross quantity planned. Gross qty amendments in Planning App automatically unlock additional labels.</div>
+
+  <!-- ── SEARCH BAR ── -->
+  <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
+    <div style="position:relative;flex:1;max-width:380px">
+      <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:13px">🔍</span>
+      <input type="text" id="label-search" placeholder="Search by batch, customer or size..."
+        style="width:100%;padding:8px 10px 8px 34px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-size:13px;outline:none;box-shadow:var(--shadow)"
+        oninput="filterLabelTable()">
+    </div>
+    <span id="label-result-count" style="font-size:12px;color:var(--text3)"></span>
+  </div>
+
   <div class="card">
     <div class="card-title">Active Batches — Label Status</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Size</th><th>Gross Qty</th><th>Max Labels</th><th>Generated</th><th>Printed</th><th>Remaining</th><th>Daily Cap</th><th>Actions</th></tr></thead>
-      <tbody>
-      ${activeBatches.map(b=>{
-        const ps=PACK_SIZES[String(b.size)]||1;
-        const maxLabels=lakhToBox(b.grossQty||b.qty,b.size);
-        const generated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange).length;
-        const printed=state.labels.filter(l=>l.batchNumber===b.batchNumber&&l.printed&&!l.voided&&!l.isOrange).length;
-        const normalBoxMax2=lakhToBox(b.qty,b.size);
-        const excessGenerated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.isExcess).length;
-        const normalGenerated=generated-excessGenerated;
-        const remaining=Math.max(0,maxLabels-generated);
-        const isExcessAvailable=normalGenerated>=normalBoxMax2&&remaining>0;
-        const machine=state.machineMaster.find(m=>m.id===b.machineId||m.machineId===b.machineId);
-        const dailyCap=lakhToBox(machine?.dailyTarget||machine?.yTarget||27,b.size);
-        const todayGen=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.generated?.slice(0,10)===today()).length;
-        const pct=maxLabels>0?(generated/maxLabels*100):0;
-        return `<tr>
-          <td class="td-bold td-mono">${b.batchNumber}</td>
-          <td>${b.customer||'-'}</td>
-          <td class="td-mono">${b.size} (${ps}L/box)</td>
-          <td class="td-mono">${fmt(b.grossQty||b.qty)}L</td>
-          <td class="td-mono">${maxLabels}</td>
-          <td><div class="mono fw-bold">${generated}</div><div class="progress mt-4" style="width:80px"><div class="progress-bar ${pct>=100?'green':'blue'}" style="width:${Math.min(100,pct)}%"></div></div></td>
-          <td class="td-mono">${printed}</td>
-          <td class="td-mono ${remaining===0?'':'fw-bold'}">${remaining}${excessGenerated>0?` <span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3);font-size:9px">E:${excessGenerated}</span>`:''}</td>
-          <td class="text-sm text-muted">${todayGen}/${dailyCap} today</td>
-          <td>
-            <div class="flex gap-8">
-              ${remaining>0?`<button class="btn btn-sm ${isExcessAvailable?'btn-warning':'btn-primary'}" onclick="openLabelGen('${b.batchNumber||b.id}')">${isExcessAvailable?'⊕ Excess Labels':'Generate'}</button>`:''}
-              ${generated>0?`<button class="btn btn-sm btn-secondary" onclick="viewBatchLabels('${b.batchNumber}')">View</button>`:''}
-              ${printed<generated?`<button class="btn btn-sm btn-success" onclick="printBatchLabels('${b.batchNumber}')">Print All</button>`:''}
-            </div>
-          </td>
-        </tr>`;
-      }).join('')||'<tr><td colspan="10" class="text-center text-muted">No active batches from Planning App</td></tr>'}
+    <div class="tbl-wrap"><table id="label-status-table">
+      <thead><tr>
+        <th onclick="sortLabelTable('batch')" style="cursor:pointer">Batch ↕</th>
+        <th onclick="sortLabelTable('customer')" style="cursor:pointer">Customer ↕</th>
+        <th>Size</th>
+        <th>Gross Qty</th>
+        <th>Max Labels</th>
+        <th>Generated</th>
+        <th>Printed</th>
+        <th onclick="sortLabelTable('remaining')" style="cursor:pointer">Remaining ↕</th>
+        <th>Daily Cap</th>
+        <th>Actions</th>
+      </tr></thead>
+      <tbody id="label-table-body">
+      ${buildLabelRows(allBatches)}
       </tbody>
     </table></div>
   </div>`;
+
+  // Update result count
+  updateLabelCount(allBatches.length);
+}
+
+function buildLabelRows(batches){
+  return batches.map(b=>{
+    const ps=PACK_SIZES[String(b.size)]||1;
+    const maxLabels=lakhToBox(b.grossQty||b.qty,b.size);
+    const generated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange).length;
+    const printed=state.labels.filter(l=>l.batchNumber===b.batchNumber&&l.printed&&!l.voided&&!l.isOrange).length;
+    const normalBoxMax2=lakhToBox(b.qty,b.size);
+    const excessGenerated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.isExcess).length;
+    const normalGenerated=generated-excessGenerated;
+    const remaining=Math.max(0,maxLabels-generated);
+    const isExcessAvailable=normalGenerated>=normalBoxMax2&&remaining>0;
+    const machine=state.machineMaster.find(m=>m.id===b.machineId||m.machineId===b.machineId);
+    const dailyCap=lakhToBox(machine?.dailyTarget||machine?.yTarget||27,b.size);
+    const todayGen=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.generated?.slice(0,10)===today()).length;
+    const pct=maxLabels>0?(generated/maxLabels*100):0;
+    return `<tr
+      data-batch="${(b.batchNumber||'').toLowerCase()}"
+      data-customer="${(b.customer||'').toLowerCase()}"
+      data-size="${b.size||''}"
+      data-generated="${generated}"
+      data-printed="${printed}"
+      data-remaining="${remaining}"
+      data-maxlabels="${maxLabels}">
+      <td class="td-bold td-mono">${b.batchNumber}</td>
+      <td>${b.customer||'-'}</td>
+      <td class="td-mono">${b.size} (${ps}L/box)</td>
+      <td class="td-mono">${fmt(b.grossQty||b.qty)}L</td>
+      <td class="td-mono">${maxLabels}</td>
+      <td><div class="mono fw-bold">${generated}</div><div class="progress mt-4" style="width:80px"><div class="progress-bar ${pct>=100?'green':'blue'}" style="width:${Math.min(100,pct)}%"></div></div></td>
+      <td class="td-mono">${printed}</td>
+      <td class="td-mono ${remaining===0?'':'fw-bold'}">${remaining}${excessGenerated>0?` <span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3);font-size:9px">E:${excessGenerated}</span>`:''}</td>
+      <td class="text-sm text-muted">${todayGen}/${dailyCap} today</td>
+      <td>
+        <div class="flex gap-8">
+          ${remaining>0?`<button class="btn btn-sm ${isExcessAvailable?'btn-warning':'btn-primary'}" onclick="openLabelGen('${b.batchNumber||b.id}')">${isExcessAvailable?'⊕ Excess':'Generate'}</button>`:''}
+          ${generated>0?`<button class="btn btn-sm btn-secondary" onclick="viewBatchLabels('${b.batchNumber}')">View</button>`:''}
+          ${printed<generated?`<button class="btn btn-sm btn-success" onclick="printBatchLabels('${b.batchNumber}')">Print All</button>`:''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('')||'<tr><td colspan="10" class="text-center text-muted">No active batches from Planning App</td></tr>';
+}
+
+let _labelSortCol='', _labelSortDir=1;
+
+function sortLabelTable(col){
+  if(_labelSortCol===col) _labelSortDir*=-1;
+  else { _labelSortCol=col; _labelSortDir=1; }
+  filterLabelTable();
+}
+
+function filterLabelTable(){
+  const search=(document.getElementById('label-search')?.value||'').toLowerCase().trim();
+  const rows=document.querySelectorAll('#label-table-body tr[data-batch]');
+  let visible=0;
+  rows.forEach(row=>{
+    const match=!search||(
+      (row.dataset.batch||'').includes(search)||
+      (row.dataset.customer||'').includes(search)||
+      (row.dataset.size||'').includes(search)
+    );
+    row.style.display=match?'':'none';
+    if(match) visible++;
+  });
+  updateLabelCount(visible, rows.length);
+}
+
+function updateLabelCount(visible, total){
+  const el=document.getElementById('label-result-count');
+  if(el){
+    if(total!==undefined && visible!==total){
+      el.textContent=visible+' of '+total+' batches';
+      el.style.color='var(--accent)';
+    } else {
+      el.textContent=visible+' batches';
+      el.style.color='var(--text3)';
+    }
+  }
+}
+
+function clearLabelFilters(){
+  const s=document.getElementById('label-search');
+  if(s) s.value='';
+  filterLabelTable();
 }
 
 function openLabelGen(preselect){
@@ -2411,7 +2492,7 @@ function renderDeptScan(dept){
         <label>Batch</label>
         <select id="wastage-batch-${dept}">
           <option value="">-- Select Batch --</option>
-          ${activeBatches.map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''}</option>`).join('')}
+          ${state.batches.filter(b=>b.status!=='closed').map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''} (Size ${b.size})</option>`).join('')}
         </select>
       </div>
       <div class="form-group">

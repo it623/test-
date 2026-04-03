@@ -278,6 +278,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <button class="nbtn" onclick="exportData()" title="Export">↓ Export</button>
     <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import">↑ Import</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
+    <button class="nbtn" onclick="forceSyncNow()" title="Force push all data to server" style="color:var(--cyan);border-color:var(--cyan)">⬆ Sync</button>
     <button class="nbtn primary" id="saveBtn" onclick="saveDay()">Save</button>
   </div>
 </div>
@@ -757,9 +758,11 @@ function saveDay(){
   const data=collectForm();
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   setUnsaved(false);
-  pushToServer(fl,d,data);
   renderDayKpis();
-  toast('✓ Saved — '+fl+' '+d,'var(--green)');
+  toast('💾 Saving to server...','var(--cyan)');
+  pushToServer(fl,d,data).then(()=>{
+    // toast shown inside pushToServer on success/failure
+  });
 }
 function collectForm(){
   const d=getDate(), fl=curFloor;
@@ -934,22 +937,36 @@ async function pushToServer(fl,d,data){
   // Always queue first so data is never lost if push fails
   dprQueuePush(fl, d, data, actuals);
   try{
-    await fetch(serverUrl+'/api/dpr/save',{
+    const r = await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({floor:fl,date:d,data,actuals}),
-      signal:AbortSignal.timeout(6000)
+      signal:AbortSignal.timeout(10000)
     });
-    setSyncBadge('synced');
-    try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
-    // Push succeeded — remove this entry from the queue
-    try{
-      const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
-      const filtered = q.filter(e=>!(e.fl===fl&&e.d===d));
-      if(filtered.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
-      else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(filtered));
-    }catch(e){}
-  }catch{ setSyncBadge('offline'); }
+    const j = await r.json();
+    if(r.ok && j.ok){
+      setSyncBadge('synced');
+      console.log('[DPR] Saved to server OK — floor:'+fl+' date:'+d);
+      try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
+      // Push succeeded — remove this entry from the queue
+      try{
+        const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
+        const filtered = q.filter(e=>!(e.fl===fl&&e.d===d));
+        if(filtered.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
+        else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(filtered));
+      }catch(e){}
+    } else {
+      // Server returned error — show it clearly
+      setSyncBadge('offline');
+      const errMsg = j?.error || ('HTTP '+r.status);
+      console.error('[DPR] Save failed:', errMsg);
+      toast('❌ Save failed: '+errMsg,'var(--red)');
+    }
+  }catch(e){
+    setSyncBadge('offline');
+    console.error('[DPR] Save network error:', e.message);
+    toast('❌ Server unreachable — data queued locally','var(--amber)');
+  }
 }
 async function fetchActiveOrders(){
   if(!serverUrl){
@@ -1109,6 +1126,17 @@ function openPlanningApp(){
   if(url) window.open(url+'/planning.html','_blank');
   else alert('Please configure Server URL in Settings tab first.');
 }
+// ── FORCE SYNC — push current data to server immediately ─────────
+async function forceSyncNow() {
+  if(!serverUrl){ toast('No server configured','var(--red)'); return; }
+  toast('⬆ Pushing data to server...','var(--cyan)');
+  const fl=curFloor, d=getDate();
+  const data=collectForm();
+  localStorage.setItem(skey(fl,d),JSON.stringify(data));
+  await pushToServer(fl,d,data);
+  await dprQueueFlush();
+}
+
 function configureServer(){
   const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'https://sunloc.up.railway.app');
   if(url===null) return;

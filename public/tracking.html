@@ -2084,6 +2084,31 @@ function renderLabels(){
 
   const allBatches=state.batches.filter(b=>b.status!=='closed');
 
+  // Always fetch fresh label data from server when this page opens
+  // This ensures Generated/Printed/Remaining are always correct on any device
+  if(serverUrl && !renderLabels._fetching){
+    renderLabels._fetching = true;
+    fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)})
+      .then(r=>r.json())
+      .then(snap=>{
+        if(snap.ok && snap.tracking && snap.tracking.labels && snap.tracking.labels.length>0){
+          const fresh=(snap.tracking.labels).map(l=>l.batchNumber?l:normLabel(l));
+          // Only update if server has more labels than local
+          if(fresh.length >= state.labels.length){
+            state.labels=fresh;
+            try{localStorage.setItem('sunloc_tracking',JSON.stringify({
+              labels:state.labels,scans:state.scans,
+              stageClosure:state.stageClosure,wastage:state.wastage,
+              dispatchRecs:state.dispatchRecs,alerts:state.alerts
+            }));}catch(e){}
+            if(currentPage==='labels') renderLabels();
+          }
+        }
+        renderLabels._fetching=false;
+      })
+      .catch(()=>{ renderLabels._fetching=false; });
+  }
+
   // Save search value before re-render
   const _savedSearch = document.getElementById('label-search')?.value || '';
 

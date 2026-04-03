@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DPR.tracker v7 — Sunloc</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{
@@ -275,9 +276,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 6px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:110px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
       <option value="">📅 History</option>
     </select>
-    <button class="nbtn" onclick="exportData()" title="Export">↓ Export</button>
+    <button class="nbtn" onclick="showExportMenu()" title="Export Reports">↓ Export</button>
     <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import">↑ Import</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
+    <button class="nbtn" onclick="forceSyncNow()" title="Force push all data to server" style="color:var(--cyan);border-color:var(--cyan)">⬆ Sync</button>
     <button class="nbtn primary" id="saveBtn" onclick="saveDay()">Save</button>
   </div>
 </div>
@@ -462,6 +464,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 // ═══════════════════════════════════════════════════════
 const FLOORS_DEFAULT = {
   GF: { label:'Ground Floor', machines:[
+    {id:'MC7', sz:'#4'},{id:'MC8', sz:'#4'},
     {id:'MC20',sz:'#2'},{id:'MC21',sz:'#0'},{id:'MC22',sz:'#0'},
     {id:'MC29',sz:'#0'},{id:'MC30',sz:'#2'},{id:'MC31',sz:'#2'},
     {id:'MC32',sz:'#3'},{id:'MC33',sz:'#1'},{id:'MC34',sz:'#00'}
@@ -525,14 +528,32 @@ function saveCustomMachines() {
 
 let FLOORS = loadFloors();
 
+// Clean up custom entries for machines now in FLOORS_DEFAULT
+// (MC7, MC8 moved from custom to default — remove from custom storage)
+(function cleanupCustomMachines(){
+  try{
+    const custom = JSON.parse(localStorage.getItem('dpr_custom_machines')||'{}');
+    let changed = false;
+    Object.entries(FLOORS_DEFAULT).forEach(([fl, flData])=>{
+      if(!custom[fl]) return;
+      const defaultIds = flData.machines.map(m=>m.id);
+      const filtered = custom[fl].filter(m=>!defaultIds.includes(m.id));
+      if(filtered.length !== custom[fl].length){ custom[fl]=filtered; changed=true; }
+      if(custom[fl].length===0) delete custom[fl];
+    });
+    if(changed) localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
+  }catch(e){}
+})();
+
 // Machine operator groups — one operator entry covers all machines in a group
 // Multiple operators allowed per group
 const MC_GROUPS = {
   GF: [
+    { label:'MC 7 & 8',       machines:['MC7','MC8'] },
+    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
     { label:'MC 29 & 30',     machines:['MC29','MC30'] },
     { label:'MC 31, 32 & 33', machines:['MC31','MC32','MC33'] },
     { label:'MC 34',          machines:['MC34'] },
-    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
   ],
   '1F': [
     { label:'MC 14, 15 & 16', machines:['MC14','MC15','MC16'] },
@@ -752,26 +773,190 @@ function loadDay(fl,d){
     return p;
   }catch{return blankDay(fl);}
 }
-function saveDay(){
+async function saveDay(){
   const fl=curFloor, d=getDate();
-  const data=collectForm();
-  localStorage.setItem(skey(fl,d),JSON.stringify(data));
+
+  // ── GUARD: Do not save if user has not changed anything ──────────
+  // Check if there is ANY real data in the form right now
+  function formHasData(){
+    // Check staff fields
+    for(const sh of SHIFTS){
+      if(v('si-'+sh+'-incharge') || v('si-'+sh+'-fitter')) return true;
+      if(getMultiStaff(sh,'chemist').length)    return true;
+      if(getMultiStaff(sh,'electrical').length) return true;
+      if(getMultiStaff(sh,'utility').length)    return true;
+      if(getMultiStaff(sh,'aim_staff').length)  return true;
+      if(getMultiStaff(sh,'gpr_staff').length)  return true;
+    }
+    // Check any production qty entered
+    const anyQty = document.querySelectorAll('input[id^="run-qty-"]');
+    for(const el of anyQty){ if(el.value && parseFloat(el.value)>0) return true; }
+    // Check any batch number entered
+    const anyBatch = document.querySelectorAll('input[id^="run-batch-"]');
+    for(const el of anyBatch){ if(el.value && el.value.trim()) return true; }
+    // Check any order selected
+    const anyOrder = document.querySelectorAll('select[id^="run-ord-"]');
+    for(const el of anyOrder){ if(el.value && el.value.trim()) return true; }
+    // Check operator names
+    const anyOp = document.querySelectorAll('input[id^="op-"]');
+    for(const el of anyOp){ if(el.value && el.value.trim()) return true; }
+    return false;
+  }
+
+  if(!formHasData() && !unsaved){
+    toast('⚠️ Nothing to save — fill data first','var(--amber)');
+    return;
+  }
+
+  // ── DATE PERMISSION CHECK ──────────────────────────────────────
+  if(!canSaveForDate(d)){
+    const isAdmin = dprUser?.role === 'admin';
+    if(isAdmin){
+      // Admin should always pass — something wrong
+      toast('⚠️ Unexpected date error','var(--red)');
+    } else {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const sel   = new Date(d+'T00:00:00');
+      if(sel > today){
+        toast('⚠️ Cannot save future dates','var(--red)');
+      } else {
+        toast('⚠️ Only today and previous 2 days allowed. Admin can edit any date.','var(--amber)');
+      }
+    }
+    return;
+  }
+
+  toast('💾 Saving...','var(--cyan)');
+
+  // Step 1 — fetch latest server data first
+  // This prevents blank form fields from overwriting real server data
+  if(serverUrl){
+    try{
+      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(5000)});
+      if(r.ok){
+        const j = await r.json();
+        if(j.ok && j.data){
+          // Write server data to localStorage — collectForm() will merge on top
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        }
+      }
+    }catch(e){ /* offline — use what we have in localStorage */ }
+  }
+
+  // Step 2 — collect live form values BEFORE writing server data to localStorage
+  // This captures what the user actually typed/entered right now
+  const liveFormSnapshot = collectLiveFormValues();
+
+  // Step 3 — merge: live form values override server data
+  // Start with server data as base, then apply live values on top
+  const serverData = loadDay(fl, d); // has fresh server data from Step 1
+  const data = mergeFormIntoData(serverData, liveFormSnapshot);
+
+  // Step 4 — save merged data locally and push to server
+  localStorage.setItem(skey(fl,d), JSON.stringify(data));
   setUnsaved(false);
-  pushToServer(fl,d,data);
   renderDayKpis();
-  toast('✓ Saved — '+fl+' '+d,'var(--green)');
+  pushToServer(fl,d,data);
 }
+// ── Collect ONLY what is currently visible/typed in the DOM ─────
+// Returns a snapshot of all live input values — does NOT read localStorage
+function collectLiveFormValues(){
+  const fl=curFloor;
+  const live = { staff:{}, machines:{} };
+  SHIFTS.forEach(sh=>{
+    live.staff[sh] = {
+      incharge:   v(`si-${sh}-incharge`) || null,
+      fitter:     v(`si-${sh}-fitter`)   || null,
+      chemist:    getMultiStaff(sh,'chemist'),
+      electrical: getMultiStaff(sh,'electrical'),
+      utility:    getMultiStaff(sh,'utility'),
+      aim_staff:  getMultiStaff(sh,'aim_staff'),
+      gpr_staff:  getMultiStaff(sh,'gpr_staff'),
+    };
+    if(!live.machines[sh]) live.machines[sh] = {};
+    getActiveMachines(fl).forEach(mc=>{
+      const mcLive = { aim: v(`aim-${sh}-${mc.id}`) || null, operator: v(`op-${sh}-${mc.id}`) || null };
+      // DT values — read directly from DOM inputs
+      DT_CATS.forEach(c=>{
+        const el = document.getElementById(`dt-${sh}-${mc.id}-${c}`);
+        mcLive[c] = el ? (el.value || null) : null;
+      });
+      // Runs — from run-row elements
+      const runEls = document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
+      if(runEls.length > 0){
+        mcLive.runs = Array.from(runEls).map(el=>{
+          const ri = el.dataset.ri;
+          const ordId = v(`run-ord-${sh}-${mc.id}-${ri}`) || '';
+          let batchNo = v(`run-batch-${sh}-${mc.id}-${ri}`) || '';
+          if(ordId && !batchNo){
+            const ord = Object.values(activeOrders).flat().find(o=>o.id===ordId);
+            if(ord) batchNo = ord.batchNumber || ord.poNumber || '';
+          }
+          return { orderId:ordId, batchNumber:batchNo, qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'', note:v(`run-note-${sh}-${mc.id}-${ri}`)||'' };
+        }).filter(r=>r.qty||r.batchNumber||r.orderId);
+      }
+      // Group operators
+      const grpOps = collectGroupOperators(sh, fl, mc.id);
+      if(grpOps !== null) mcLive.operators = grpOps;
+      live.machines[sh][mc.id] = mcLive;
+    });
+  });
+  return live;
+}
+
+// ── Merge live DOM values ON TOP of base data (from server/localStorage) ──
+// Live value wins if not null; base value wins if live is null (input not rendered)
+function mergeFormIntoData(base, live){
+  const fl = curFloor;
+  const result = JSON.parse(JSON.stringify(base)); // deep copy
+  SHIFTS.forEach(sh=>{
+    const s = live.staff[sh] || {};
+    if(s.incharge   !== null) result.shifts[sh].incharge   = s.incharge;
+    if(s.fitter     !== null) result.shifts[sh].fitter     = s.fitter;
+    if(s.chemist    && s.chemist.length)    result.shifts[sh].chemist    = s.chemist;
+    if(s.electrical && s.electrical.length) result.shifts[sh].electrical = s.electrical;
+    if(s.utility    && s.utility.length)    result.shifts[sh].utility    = s.utility;
+    if(s.aim_staff  && s.aim_staff.length)  result.shifts[sh].aim_staff  = s.aim_staff;
+    if(s.gpr_staff  && s.gpr_staff.length)  result.shifts[sh].gpr_staff  = s.gpr_staff;
+
+    getActiveMachines(fl).forEach(mc=>{
+      const mcLive = (live.machines[sh] || {})[mc.id] || {};
+      const m = migrateMachineData(result.shifts[sh].machines[mc.id] || blankMachine());
+      if(mcLive.aim      !== null && mcLive.aim      !== undefined) m.aim      = mcLive.aim;
+      if(mcLive.operator !== null && mcLive.operator !== undefined) m.operator = mcLive.operator;
+      if(mcLive.operators) m.operators = mcLive.operators;
+      // DT values — only overwrite if input existed in DOM
+      DT_CATS.forEach(c=>{
+        if(mcLive[c] !== null && mcLive[c] !== undefined) m[c] = mcLive[c];
+      });
+      // Runs — only overwrite if run rows existed in DOM
+      if(mcLive.runs && mcLive.runs.length > 0) m.runs = mcLive.runs;
+      result.shifts[sh].machines[mc.id] = m;
+    });
+  });
+  return result;
+}
+
 function collectForm(){
   const d=getDate(), fl=curFloor;
   const day=loadDay(fl,d);
   SHIFTS.forEach(sh=>{
-    day.shifts[sh].incharge=v(`si-${sh}-incharge`)||'';
-    day.shifts[sh].fitter=v(`si-${sh}-fitter`)||'';
-    day.shifts[sh].chemist=getMultiStaff(sh,'chemist');
-    day.shifts[sh].electrical=getMultiStaff(sh,'electrical');
-    day.shifts[sh].utility=getMultiStaff(sh,'utility');
-    day.shifts[sh].aim_staff=getMultiStaff(sh,'aim_staff');
-    day.shifts[sh].gpr_staff=getMultiStaff(sh,'gpr_staff');
+    // For staff fields: use form value if filled, otherwise keep existing saved value
+    // This prevents blank form (not yet rendered) from wiping real saved data
+    const formIncharge = v(`si-${sh}-incharge`);
+    const formFitter   = v(`si-${sh}-fitter`);
+    day.shifts[sh].incharge   = formIncharge   || day.shifts[sh].incharge   || '';
+    day.shifts[sh].fitter     = formFitter     || day.shifts[sh].fitter     || '';
+    const formChemist   = getMultiStaff(sh,'chemist');
+    const formElec      = getMultiStaff(sh,'electrical');
+    const formUtility   = getMultiStaff(sh,'utility');
+    const formAim       = getMultiStaff(sh,'aim_staff');
+    const formGpr       = getMultiStaff(sh,'gpr_staff');
+    day.shifts[sh].chemist    = formChemist.length   ? formChemist   : (day.shifts[sh].chemist    || []);
+    day.shifts[sh].electrical = formElec.length      ? formElec      : (day.shifts[sh].electrical || []);
+    day.shifts[sh].utility    = formUtility.length   ? formUtility   : (day.shifts[sh].utility    || []);
+    day.shifts[sh].aim_staff  = formAim.length       ? formAim       : (day.shifts[sh].aim_staff  || []);
+    day.shifts[sh].gpr_staff  = formGpr.length       ? formGpr       : (day.shifts[sh].gpr_staff  || []);
     getActiveMachines(fl).forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       m.aim=v(`aim-${sh}-${mc.id}`)||'';
@@ -779,7 +964,16 @@ function collectForm(){
       // Collect group operators (stored on each machine in the group)
       const grpOps=collectGroupOperators(sh,fl,mc.id);
       if(grpOps!==null) m.operators=grpOps;
-      DT_CATS.forEach(c=>{ m[c]=v(`dt-${sh}-${mc.id}-${c}`)||''; });
+      DT_CATS.forEach(c=>{
+        const liveVal = v(`dt-${sh}-${mc.id}-${c}`);
+        // Only overwrite if DOM input exists and has a value
+        // If input doesn't exist (section not rendered yet), keep existing saved value
+        const inputExists = !!document.getElementById(`dt-${sh}-${mc.id}-${c}`);
+        if(inputExists){
+          m[c] = liveVal || '';
+        }
+        // else: keep m[c] from loadDay() — don't overwrite with blank
+      });
       // Collect all runs from DOM
       const runEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
       if(runEls.length>0){
@@ -815,6 +1009,7 @@ function calcDayStats(fl,d){
   const day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
   let totTgt=0,totProd=0,totAim=0,totResort=0,totDT=0;
+  function r2(n){ return Math.round(n*100)/100; } // round to 2 decimal places
   SHIFTS.forEach(sh=>{
     mcs.forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
@@ -827,7 +1022,10 @@ function calcDayStats(fl,d){
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
-  const backlog = Math.max(0, totAim - totProd);
+  // Produced - AIM: positive = excess, negative = behind
+  totProd = Math.round(totProd*100)/100;
+  totAim  = Math.round(totAim*100)/100;
+  const backlog = Math.round((totProd - totAim)*100)/100;
   return {totTgt,totProd,totAim,totResort,totDT,dtPct,eff,backlog};
 }
 
@@ -934,22 +1132,37 @@ async function pushToServer(fl,d,data){
   // Always queue first so data is never lost if push fails
   dprQueuePush(fl, d, data, actuals);
   try{
-    await fetch(serverUrl+'/api/dpr/save',{
+    const r = await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({floor:fl,date:d,data,actuals}),
-      signal:AbortSignal.timeout(6000)
+      signal:AbortSignal.timeout(10000)
     });
-    setSyncBadge('synced');
-    try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
-    // Push succeeded — remove this entry from the queue
-    try{
-      const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
-      const filtered = q.filter(e=>!(e.fl===fl&&e.d===d));
-      if(filtered.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
-      else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(filtered));
-    }catch(e){}
-  }catch{ setSyncBadge('offline'); }
+    const j = await r.json();
+    if(r.ok && j.ok){
+      setSyncBadge('synced');
+      toast('✅ Saved to server — '+fl+' '+d,'var(--green)');
+      console.log('[DPR] Saved to server OK — floor:'+fl+' date:'+d);
+      try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
+      // Push succeeded — remove this entry from the queue
+      try{
+        const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
+        const filtered = q.filter(e=>!(e.fl===fl&&e.d===d));
+        if(filtered.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
+        else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(filtered));
+      }catch(e){}
+    } else {
+      // Server returned error — show it clearly
+      setSyncBadge('offline');
+      const errMsg = j?.error || ('HTTP '+r.status);
+      console.error('[DPR] Save failed:', errMsg);
+      toast('❌ Save failed: '+errMsg,'var(--red)');
+    }
+  }catch(e){
+    setSyncBadge('offline');
+    console.error('[DPR] Save network error:', e.message);
+    toast('❌ Server unreachable — data queued locally','var(--amber)');
+  }
 }
 async function fetchActiveOrders(){
   if(!serverUrl){
@@ -1109,6 +1322,17 @@ function openPlanningApp(){
   if(url) window.open(url+'/planning.html','_blank');
   else alert('Please configure Server URL in Settings tab first.');
 }
+// ── FORCE SYNC — push current data to server immediately ─────────
+async function forceSyncNow() {
+  if(!serverUrl){ toast('No server configured','var(--red)'); return; }
+  toast('⬆ Pushing data to server...','var(--cyan)');
+  const fl=curFloor, d=getDate();
+  const data=collectForm();
+  localStorage.setItem(skey(fl,d),JSON.stringify(data));
+  await pushToServer(fl,d,data);
+  await dprQueueFlush();
+}
+
 function configureServer(){
   const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'https://sunloc.up.railway.app');
   if(url===null) return;
@@ -1250,14 +1474,14 @@ function removeStaffName(btn){
 // ── SAFE RENDER: always snapshot typed form data BEFORE re-rendering ──
 // Prevents background order/DPR sync from wiping unsaved user input
 function safeRenderShifts(){
-  // If the entry form exists in DOM, collect current typed values first
+  // Only snapshot current form values if user has actually typed something
+  // NEVER snapshot blank form — it would overwrite real saved data in localStorage
   const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && shiftsArea.querySelector('.run-row')){
+  if(shiftsArea && shiftsArea.querySelector('.run-row') && unsaved){
     const fl=curFloor, d=getDate();
     try{
       const snapshot = collectForm();
       localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
-      // Keep unsaved flag — data is in localStorage but not yet on server
     }catch(e){}
   }
   renderShifts();
@@ -1280,9 +1504,9 @@ function renderDayKpis(){
   document.getElementById('dayKpis').innerHTML=`
     <div class="kpi"><div class="kpi-label">Target</div><div class="kpi-val cyan">${s.totTgt||'—'}</div><div class="kpi-sub">units/day</div></div>
     <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
-    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
-    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim||'—'}</div><div class="kpi-sub">planned today</div></div>
-    <div class="kpi"><div class="kpi-label">Net Backlog</div><div class="kpi-val ${s.backlog>0?'amber':'green'}">${s.backlog||'—'}</div><div class="kpi-sub">units behind</div></div>
+    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+Math.round((s.totProd-s.totTgt)*100)/100:'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
+    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim?parseFloat(s.totAim.toFixed(2))||'—':'—'}</div><div class="kpi-sub">planned today</div></div>
+    <div class="kpi"><div class="kpi-label">Produced − AIM</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+parseFloat(s.backlog.toFixed(2)):parseFloat(s.backlog.toFixed(2))}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
     <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
@@ -1337,10 +1561,10 @@ function renderShifts(){
       const mRaw=sd.machines[mc.id]||blankMachine();
       const m=migrateMachineData(mRaw);
       const t=tgt(fl,mc.id);
-      const p=mcTotalProd(m);
-      const a=parseFloat(m.aim||0);
-      const vs=p>0?p-t:null;
-      const bl=p>0?Math.max(0,p-a):null;
+      const p=Math.round(mcTotalProd(m)*100)/100;
+      const a=Math.round(parseFloat(m.aim||0)*100)/100;
+      const vs=p>0?Math.round((p-t)*100)/100:null;
+      const bl=p>0?Math.round((p-a)*100)/100:null;
       shTgt+=t; shProd+=p; shAim+=a;
       const mcResort=(day.resort||[]).filter(r=>r.mc===mc.id&&r.shift===sh).reduce((s,r)=>s+parseFloat(r.qty||0),0);
       shResort+=mcResort;
@@ -1413,17 +1637,20 @@ function renderShifts(){
         <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${p||'—'}</td>
         <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`}</td>
         <td><input type="number" id="aim-${sh}-${mc.id}" value="${m.aim||''}" placeholder="0" min="0" style="width:52px" step="0.01" oninput="markUnsaved();updateBacklog('${sh}','${mc.id}');updateShiftTotals('${sh}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprAimNav(event,'${sh}','${mc.id}')">  </td>
-        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);color:var(--amber)">${bl===null?'—':bl}</td>
+        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);${bl===null?'color:var(--t3)':bl>0?'color:var(--green)':bl<0?'color:var(--red)':'color:var(--t2)'}">${bl===null?'—':bl>0?'+'+bl:bl}</td>
         <td class="r" style="font-family:var(--mono);color:var(--red)">${mcResort||`<span style="color:var(--t3)">0</span>`}</td>
       </tr>`;
     });
 
-    const shVs=shProd>0?shProd-shTgt:null;
+    shProd = Math.round(shProd*100)/100;
+    shAim  = Math.round(shAim*100)/100;
+    shTgt  = Math.round(shTgt*100)/100;
+    const shVs=shProd>0?Math.round((shProd-shTgt)*100)/100:null;
     html+=`</tbody><tfoot><tr class="tot-row">
       <td colspan="4" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
       <td class="r" style="font-family:var(--mono)">${shTgt}</td>
       <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
-      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
+      <td class="r" id="shvs-${sh}">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
       <td class="r" id="shaim-${sh}" style="font-family:var(--mono)">${shAim||'—'}</td>
       <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
       <td></td>
@@ -1534,8 +1761,9 @@ function updateMcTotals(sh, mcId){
   const runQtyEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mcId}"] input[id^="run-qty-"]`);
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
+  total=Math.round(total*100)/100;
   const t=tgt(fl,mcId);
-  const vs=total>0?total-t:null;
+  const vs=total>0?Math.round((total-t)*100)/100:null;
   const totEl=document.getElementById(`tot-${sh}-${mcId}`);
   const vsEl=document.getElementById(`vs-${sh}-${mcId}`);
   if(totEl){
@@ -1559,10 +1787,20 @@ function updateShiftTotals(sh){
     const aimEl=document.getElementById(`aim-${sh}-${mc.id}`);
     shAim+=parseFloat(aimEl?.value||0);
   });
+  shProd=Math.round(shProd*100)/100;
+  shAim=Math.round(shAim*100)/100;
+  const shTgtTotal = getActiveMachines(fl).reduce((s,mc)=>s+tgt(fl,mc.id),0);
+  const shVsLive = shProd>0?Math.round((shProd-shTgtTotal)*100)/100:null;
+
   const totEl=document.getElementById(`shtot-${sh}`);
   if(totEl) totEl.textContent=shProd||'—';
-  const aimEl=document.getElementById(`shaim-${sh}`);
-  if(aimEl) aimEl.textContent=shAim||'—';
+
+  // Update VS TGT cell in shift total row
+  const vsEl=document.getElementById(`shvs-${sh}`);
+  if(vsEl) vsEl.innerHTML=shVsLive===null?'<span class="vs-zero">—</span>':shVsLive>=0?`<span class="vs-pos">+${shVsLive}</span>`:`<span class="vs-neg">${shVsLive}</span>`;
+
+  const aimEl2=document.getElementById(`shaim-${sh}`);
+  if(aimEl2) aimEl2.textContent=shAim||'—';
 }
 
 function updateBacklog(sh,mcId){
@@ -1571,12 +1809,14 @@ function updateBacklog(sh,mcId){
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
   const a=parseFloat(document.getElementById(`aim-${sh}-${mcId}`)?.value||0);
-  // Backlog = Production - AIM (positive = capsules still waiting for AIM)
-  const bl=total>0?Math.max(0,total-a):null;
+  // Backlog = Produced - AIM: positive=excess, negative=behind
+  const bl = a>0 ? Math.round((total-a)*100)/100 : (total>0?total:null);
   const el=document.getElementById(`bl-${sh}-${mcId}`);
   if(el){
-    el.textContent=bl===null?'—':bl;
-    el.style.color=bl>0?'var(--amber)':'var(--t2)';
+    if(bl===null){ el.textContent='—'; el.style.color='var(--t3)'; }
+    else if(bl>0){ el.textContent='+'+bl; el.style.color='var(--green)'; }
+    else if(bl<0){ el.textContent=bl; el.style.color='var(--red)'; }
+    else { el.textContent='0'; el.style.color='var(--t2)'; }
   }
 }
 
@@ -1622,7 +1862,7 @@ function renderDTTable(){
           return `<td style="padding:2px 3px;border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};text-align:center;background:${cellBg}">
             <input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0"
               style="width:38px;text-align:center;background:transparent;border:none;color:${cellClr};font-family:var(--mono);font-size:12px;padding:1px 0"
-              oninput="markUnsaved();updateDTSummary()">
+              oninput="markUnsaved();updateDTSummary();updateDTTotalRow()">
           </td>`;
         }).join('');
       }).join('')}
@@ -1637,12 +1877,14 @@ function renderDTTable(){
         const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
         return s+parseFloat(m[c]||0);
       },0);
-      return `<td style="padding:4px 3px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:${total>0?SHIFT_COLOR[sh]:'var(--t3)'};border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};background:${SHIFT_BG[sh]}">${total||'—'}</td>`;
+      return `<td id="dt-total-${sh}-${c}" style="padding:4px 3px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:${total>0?SHIFT_COLOR[sh]:'var(--t3)'};border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};background:${SHIFT_BG[sh]}">${total||'—'}</td>`;
     }).join('')).join('')}
   </tr>`;
 
   html += `</tbody></table></div>`;
   document.getElementById('dtTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
+  // Recalculate totals from live input values immediately after render
+  setTimeout(updateDTTotalRow, 0);
 }
 function renderDTSummary(){
   const fl=curFloor, d=getDate();
@@ -1685,6 +1927,27 @@ function renderDTSummary(){
   document.getElementById('dtSumTable').innerHTML=html;
 }
 function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
+
+// Update TOTAL row in DT table live from input values — no save/refresh needed
+function updateDTTotalRow(){
+  const mcs = getActiveMachines(curFloor);
+  SHIFTS.forEach(sh=>{
+    DT_CATS.forEach(c=>{
+      let total = 0;
+      mcs.forEach(mc=>{
+        const el = document.getElementById('dt-'+sh+'-'+mc.id+'-'+c);
+        if(el) total += parseFloat(el.value||0);
+      });
+      // Find the total cell for this shift+category
+      const totalCell = document.getElementById('dt-total-'+sh+'-'+c);
+      if(totalCell){
+        const SHIFT_COLOR = { A:'#00d4ff', B:'#00e676', C:'#ffab00' };
+        totalCell.textContent = total || '—';
+        totalCell.style.color = total > 0 ? SHIFT_COLOR[sh] : 'var(--t3)';
+      }
+    });
+  });
+}
 
 function renderRemarks(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
@@ -1959,22 +2222,83 @@ function renderTrends(){
 function renderAIM(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
-  let html=`<table class="data-table"><thead><tr><th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th><th>Backlog</th><th>Status</th></tr></thead><tbody>`;
+  let html=`<table class="data-table"><thead><tr>
+    <th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th>
+    <th>Backlog / Excess</th><th>Status</th>
+  </tr></thead><tbody>`;
+  let totalAIM=0, totalProd=0;
+
   mcs.forEach(mc=>{
-    let prod=0,aim=0;
+    let prod=0, aim=0;
     SHIFTS.forEach(sh=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       prod+=mcTotalProd(m);
       aim+=parseFloat(m.aim||0);
     });
-    const bl=aim>0?Math.max(0,aim-prod):null;
-    const st=aim===0?'<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>':
-      bl===0?'<span class="pill g">On Track</span>':
-      bl>0?`<span class="pill a">Behind by ${bl}</span>`:
-      '<span class="pill g">Ahead</span>';
-    html+=`<tr><td class="mono">${mc.id}</td><td style="color:var(--t3)">${mc.sz}</td><td class="mono">${aim||'—'}</td><td class="mono">${prod||'—'}</td><td class="mono">${bl===null?'—':bl}</td><td>${st}</td></tr>`;
+    prod=Math.round(prod*100)/100;
+    aim=Math.round(aim*100)/100;
+    totalAIM+=aim;
+    totalProd+=prod;
+
+    // Formula: Produced - AIM
+    const diff = aim>0 ? Math.round((prod - aim)*100)/100 : null;
+
+    let diffCell, statusCell;
+    if(diff===null){
+      diffCell  = `<span style="color:var(--t3)">—</span>`;
+      statusCell = `<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>`;
+    } else if(diff>0){
+      diffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:700">+${diff} Excess</span>`;
+      statusCell = `<span class="pill g">Excess +${diff}</span>`;
+    } else if(diff<0){
+      diffCell  = `<span style="color:var(--red);font-family:var(--mono);font-weight:700">${diff} Behind</span>`;
+      statusCell = `<span class="pill r">Behind ${diff}</span>`;
+    } else {
+      diffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:700">0</span>`;
+      statusCell = `<span class="pill g">On Track</span>`;
+    }
+
+    html+=`<tr>
+      <td class="mono">${mc.id}</td>
+      <td style="color:var(--t3)">${mc.sz}</td>
+      <td class="mono">${aim||'—'}</td>
+      <td class="mono">${prod||'—'}</td>
+      <td>${diffCell}</td>
+      <td>${statusCell}</td>
+    </tr>`;
   });
-  html+=`</tbody></table>`;
+
+  // ── TOTAL ROW ──────────────────────────────────────────
+  totalAIM  = Math.round(totalAIM*100)/100;
+  totalProd = Math.round(totalProd*100)/100;
+  const totalDiff = totalAIM>0 ? Math.round((totalProd - totalAIM)*100)/100 : null;
+
+  let totalDiffCell, totalStatusCell;
+  if(totalDiff===null){
+    totalDiffCell  = `<span style="color:var(--t3)">—</span>`;
+    totalStatusCell = `<span style="color:var(--t3);font-family:var(--fc);font-size:11px">No AIM</span>`;
+  } else if(totalDiff>0){
+    totalDiffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:800;font-size:14px">+${totalDiff} Excess</span>`;
+    totalStatusCell = `<span class="pill g">Excess +${totalDiff}</span>`;
+  } else if(totalDiff<0){
+    totalDiffCell  = `<span style="color:var(--red);font-family:var(--mono);font-weight:800;font-size:14px">${totalDiff} Behind</span>`;
+    totalStatusCell = `<span class="pill r">Behind ${totalDiff}</span>`;
+  } else {
+    totalDiffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:800;font-size:14px">0</span>`;
+    totalStatusCell = `<span class="pill g">On Track</span>`;
+  }
+
+  html+=`</tbody>
+  <tfoot>
+    <tr style="border-top:2px solid var(--b2);background:rgba(0,212,255,0.06)">
+      <td colspan="2" style="padding:8px 10px;font-family:var(--fc);font-weight:800;font-size:12px;letter-spacing:1px;color:var(--cyan)">TOTAL</td>
+      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--cyan)">${totalAIM||'—'}</td>
+      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--green)">${totalProd||'—'}</td>
+      <td style="padding:8px 10px">${totalDiffCell}</td>
+      <td style="padding:8px 10px">${totalStatusCell}</td>
+    </tr>
+  </tfoot>
+  </table>`;
   document.getElementById('aimTable').innerHTML=html;
 
   // AIM chart
@@ -2008,6 +2332,8 @@ function renderShiftPersonnelPerf(){
     utility:    { label:'Shift Utility',    dtCats:['hvac'],        color:'#A8E6CF' },
     gpr_staff:  { label:'Shift GPR',        dtCats:['gpr','dw'],    color:'#FFD93D' },
     aim_staff:  { label:'Shift AIM',        dtCats:[],              color:'#FF6B6B', isAIM:true },
+    fitter:     { label:'Shift Fitter',     dtCats:['mech'],        color:'#FFA07A', isSingle:true },
+    chemist:    { label:'Shift Chemist',    dtCats:['proc'],        color:'#C3A6FF', isArray:true  },
   };
 
   // Aggregate stats per role per person across all saved days
@@ -2023,13 +2349,13 @@ function renderShiftPersonnelPerf(){
       const sd=dy.shifts[sh];
       const dt=calcShiftDT(fl,date,sh);
       Object.entries(ROLE_MAP).forEach(([roleKey, roleCfg])=>{
-        const names=(sd[roleKey]||[]).filter(n=>n.trim());
+        // Handle both array fields (chemist, electrical etc) and string fields (fitter)
+        const raw = sd[roleKey];
+        const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(n=>String(n).trim());
         names.forEach(name=>{
           if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
           personStats[name].shiftsWorked++;
           if(roleCfg.isAIM){
-            // AIM performance: count AIM boxes scanned — use tracking data if available
-            // Fall back to DPR AIM column sum for this shift
             let aimSum=0;
             getActiveMachines(fl).forEach(mc=>{
               const m=migrateMachineData((sd.machines||{})[mc.id]||blankMachine());
@@ -2037,7 +2363,6 @@ function renderShiftPersonnelPerf(){
             });
             personStats[name].aimBoxes+=aimSum;
           } else {
-            // DT performance: lower DT = better
             let roleDT=0;
             roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
             personStats[name].dtMins+=roleDT;
@@ -2054,11 +2379,12 @@ function renderShiftPersonnelPerf(){
     const sd=todayDay.shifts[sh];
     const dt=calcShiftDT(fl,today,sh);
     Object.entries(ROLE_MAP).forEach(([roleKey,roleCfg])=>{
-      const names=(sd[roleKey]||[]).filter(n=>n.trim());
+      const raw = sd[roleKey];
+      const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(n=>String(n).trim());
       names.forEach(name=>{
         if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
         const already=allKeys.some(k=>k.includes(`_${fl}_${today}`));
-        if(!already){ // avoid double-counting if already saved
+        if(!already){
           personStats[name].shiftsWorked++;
           if(roleCfg.isAIM){
             let aimSum=0;
@@ -2098,7 +2424,15 @@ function renderShiftPersonnelPerf(){
     html+=`<div style="margin-bottom:20px">
       <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:${roleCfg.color};margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--b2)">
         ${roleCfg.label.toUpperCase()}
-        ${roleCfg.isAIM?'— scored on AIM lakhs inspected':'— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
+        ${roleCfg.isAIM
+          ? '— scored on AIM lakhs inspected'
+          : roleCfg.dtCats.length===0
+            ? ''
+            : roleKey==='fitter'
+              ? '— scored on linked DT (MECH)'
+              : roleKey==='chemist'
+                ? '— scored on linked DT (PROCESS)'
+                : '— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
       </div>
       <table class="data-table"><thead><tr>
         <th>Name</th>
@@ -2154,7 +2488,16 @@ function renderShiftPersonnelPerf(){
 
 function renderPerf(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  let html=`<table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
+  let html=`<table class="data-table"><thead><tr>
+    <th>Shift</th>
+    <th>Incharge</th>
+    <th>Chemist</th>
+    <th>Fitter</th>
+    <th>Production</th>
+    <th>Efficiency</th>
+    <th>DT%</th>
+    <th>Score</th>
+  </tr></thead><tbody>`;
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0;
@@ -2169,8 +2512,25 @@ function renderPerf(){
     const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
     const sc=parseInt(score);
     const scCls=sc>=80?'g':sc>=60?'a':'r';
-    html+=`<tr><td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
-      <td>${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
+
+    // Chemist — can be array or string
+    const chemistList = Array.isArray(sd.chemist)
+      ? sd.chemist.filter(n=>n&&n.trim())
+      : (sd.chemist ? [sd.chemist] : []);
+    const chemistCell = chemistList.length
+      ? chemistList.map(n=>`<span style="display:inline-block;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:4px;padding:1px 7px;font-size:11px;color:var(--t1);margin:1px 2px">${n}</span>`).join('')
+      : '<span style="color:var(--t3)">—</span>';
+
+    // Fitter — single string
+    const fitterCell = sd.fitter
+      ? `<span style="display:inline-block;background:rgba(0,230,118,0.08);border:1px solid rgba(0,230,118,0.2);border-radius:4px;padding:1px 7px;font-size:11px;color:var(--t1)">${sd.fitter}</span>`
+      : '<span style="color:var(--t3)">—</span>';
+
+    html+=`<tr>
+      <td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
+      <td style="font-weight:600">${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
+      <td>${chemistCell}</td>
+      <td>${fitterCell}</td>
       <td class="mono">${prod||'—'}</td>
       <td><span class="pill ${eff>=90?'g':eff>=75?'a':'r'}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
       <td><span class="pill ${dt.dtPct<=5?'g':dt.dtPct<=10?'a':'r'}">${dt.total>0?dt.dtPct.toFixed(1)+'%':'—'}</span></td>
@@ -2355,10 +2715,12 @@ async function fetchDpr(fl, d){
     if(!r.ok) return;
     const j = await r.json();
     if(j.ok && j.data){
-      // SERVER IS TRUTH — always use server data when it has content
+      // SERVER IS TRUTH — always use server data
+      // Only preserve currently-typed-but-unsaved data if user is actively on this floor+date
       const isCurrentView = (curFloor===fl && getDate()===d);
       if(isCurrentView){
-        const hasUnsavedTyping = unsaved;
+        const shiftsArea = document.getElementById('shiftsArea');
+        const hasUnsavedTyping = shiftsArea && shiftsArea.querySelector('.run-row') && unsaved;
         if(hasUnsavedTyping){
           // User has unsaved changes — merge keeping server as base, local as override
           const local = loadDay(fl, d);
@@ -2372,9 +2734,15 @@ async function fetchDpr(fl, d){
         // Background fetch for different floor/date — server always wins
         localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
       }
-      if(isCurrentView) renderEntry(); // Full re-render so all fields populate
+      if(isCurrentView) safeRenderShifts();
+    } else if(j.ok && !j.data){
+      // No data on server for this floor+date — clear local stale data
+      // Only if no unsaved changes
+      if(!(curFloor===fl && getDate()===d && unsaved)){
+        localStorage.removeItem(skey(fl,d));
+        if(curFloor===fl && getDate()===d) safeRenderShifts();
+      }
     }
-    // If j.ok && !j.data — server has no record yet — keep local data intact, do NOT clear
   }catch(e){}
 }
 
@@ -2407,15 +2775,40 @@ function deepMergeDpr(server, local){
 function onDateChange(){
   refreshRecentDates();
   const fl=curFloor, d=getDate();
+
+  // ── Save button — highlight based on date permission ───────────
+  updateSaveBtnStyle(d);
+
   if(serverUrl){
-    // Show loading while fetching from server — never show stale blank form
-    const shiftsArea=document.getElementById('shiftsArea');
-    if(shiftsArea) shiftsArea.innerHTML='<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
-    // fetchDpr calls renderEntry() when done — server is always source of truth
+    const shiftsArea = document.getElementById('shiftsArea');
+    if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
     fetchDpr(fl, d);
   } else {
-    // Offline — render from localStorage immediately
     renderEntry();
+  }
+}
+
+// ── Update Save button style based on whether this date is editable ──
+function updateSaveBtnStyle(d){
+  const saveBtn = document.getElementById('saveBtn');
+  if(!saveBtn) return;
+  const canEdit = canSaveForDate(d || getDate());
+  if(canEdit){
+    // Normal — green Save button
+    saveBtn.className = 'nbtn primary';
+    saveBtn.style.background = '';
+    saveBtn.style.borderColor = '';
+    saveBtn.style.color = '';
+    saveBtn.title = 'Save';
+  } else {
+    // Restricted date — grey/dim Save button, not disabled, just visually deemphasised
+    saveBtn.className = 'nbtn';
+    saveBtn.style.background = 'transparent';
+    saveBtn.style.borderColor = 'var(--t3)';
+    saveBtn.style.color = 'var(--t3)';
+    saveBtn.title = dprUser?.role === 'admin'
+      ? 'Save (Admin — all dates allowed)'
+      : 'View only — only today and previous 2 days can be edited';
   }
 }
 
@@ -2423,34 +2816,19 @@ function refreshRecentDates(){
   const sel=document.getElementById('recentDatesSelect');
   if(!sel) return;
   const fl=curFloor;
-  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  // Collect dates already in localStorage
-  const knownDates=new Set(
+  // Collect dates from localStorage
+  const localDates=[...new Set(
     Object.keys(localStorage)
-      .filter(k=>k.startsWith('dpr3_'+fl+'_'))
+      .filter(k=>k.startsWith(`dpr3_${fl}_`))
       .map(k=>k.split('_')[2])
       .filter(Boolean)
-  );
-  function buildDropdown(dates){
-    const sorted=[...dates].sort((a,b)=>b.localeCompare(a)).slice(0,90);
-    sel.innerHTML='<option value="">📅 History</option>'+
-      sorted.map(d=>{
-        const [y,m,day]=d.split('-');
-        return '<option value="'+d+'">'+parseInt(day)+' '+months[parseInt(m)-1]+' '+y+'</option>';
-      }).join('');
-  }
-  buildDropdown(knownDates); // instant from localStorage
-  // Also fetch all saved dates from server — so any device sees full history
-  if(serverUrl){
-    fetch(serverUrl+'/api/dpr/dates/'+fl,{signal:AbortSignal.timeout(5000)})
-      .then(r=>r.json())
-      .then(j=>{
-        if(j.ok && Array.isArray(j.dates)){
-          j.dates.forEach(d=>knownDates.add(d));
-          buildDropdown(knownDates);
-        }
-      }).catch(()=>{});
-  }
+  )].sort((a,b)=>b.localeCompare(a)).slice(0,60);
+  sel.innerHTML='<option value="">📅 History</option>'+
+    localDates.map(d=>{
+      const [y,m,day]=d.split('-');
+      const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return `<option value="${d}">${parseInt(day)} ${months[parseInt(m)-1]} ${y}</option>`;
+    }).join('');
 }
 
 function toggleShift(id){ const el=document.getElementById(id); if(el) el.classList.toggle('open'); }
@@ -2490,6 +2868,392 @@ function closeModal(){ document.getElementById('modal-overlay').classList.remove
 // ═══════════════════════════════════════════════════════
 // EXPORT / IMPORT
 // ═══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+// EXPORT SYSTEM — Excel + PDF
+// ══════════════════════════════════════════════════════
+
+function showExportMenu(){
+  openModal('↓ Export Reports', `
+    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+      <div style="font-family:var(--fc);font-size:10px;letter-spacing:1px;color:var(--t3);margin-bottom:4px">
+        Floor: <b style="color:var(--cyan)">${curFloor}</b> &nbsp;|&nbsp; Date: <b style="color:var(--cyan)">${getDate()}</b>
+      </div>
+
+      <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:4px;margin-bottom:2px">📊 EXCEL (.xlsx)</div>
+      <button class="nbtn" onclick="closeModal();runExport(exportDailyReportExcel)" style="text-align:left;padding:10px 14px">
+        📋 Daily Production Report — All Shifts
+      </button>
+      <button class="nbtn" onclick="closeModal();runExport(exportAimStatusExcel)" style="text-align:left;padding:10px 14px">
+        🎯 AIM Status Report
+      </button>
+      <button class="nbtn" onclick="closeModal();runExport(exportDowntimeExcel)" style="text-align:left;padding:10px 14px">
+        ⏱ Machine-wise Downtime Report
+      </button>
+      <button class="nbtn" onclick="closeModal();runExport(exportShiftPerformanceExcel)" style="text-align:left;padding:10px 14px">
+        👤 Shift Performance Report
+      </button>
+      <button class="nbtn" onclick="closeModal();runExport(exportAllShiftsExcel)" style="text-align:left;padding:10px 14px">
+        📦 Full DPR — All Data (All Sheets)
+      </button>
+
+      <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:8px;margin-bottom:2px">🖨 PDF (Print)</div>
+      <button class="nbtn" onclick="closeModal();exportPDF()" style="text-align:left;padding:10px 14px">
+        🖨 Print / Save as PDF — Daily Report
+      </button>
+
+      <div style="border-top:1px solid var(--b2);margin-top:8px;padding-top:8px">
+        <button class="nbtn" onclick="closeModal();exportData()" style="text-align:left;padding:8px 14px;font-size:11px;color:var(--t3)">
+          💾 Backup — Full JSON Export
+        </button>
+      </div>
+    </div>
+  `, [{label:'Close', fn:'closeModal()'}]);
+}
+
+// ── Helper: get day data ─────────────────────────────────────────
+function getExportData(){
+  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
+  const mcs=getActiveMachines(fl);
+  return {fl,d,day,mcs};
+}
+
+// ── Export wrapper — handles errors cleanly ─────────────────────
+function runExport(fn){
+  try{
+    const result = fn();
+    if(result && result.catch) result.catch(e=>toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)'));
+  }catch(e){
+    toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)');
+  }
+}
+
+// ── Check XLSX available ────────────────────────────────────────
+function checkXLSX(){
+  if(typeof XLSX === 'undefined'){
+    // XLSX not loaded — load it now dynamically
+    return new Promise((resolve, reject)=>{
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload = ()=>resolve(true);
+      s.onerror = ()=>reject(new Error('XLSX library failed to load'));
+      document.head.appendChild(s);
+    });
+  }
+  return Promise.resolve(true);
+}
+
+// ── EXCEL: Daily Production Report ──────────────────────────────
+async function exportDailyReportExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
+  const {fl,d,day,mcs}=getExportData();
+  const wb=XLSX.utils.book_new();
+
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    const rows=[];
+    // Header info
+    rows.push(['SUNLOC DPR  '+fl+'  Shift '+sh+'  '+d]);
+    rows.push([]);
+    rows.push(['Process Incharge', sd.incharge||'',
+               'Chemist', Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||''),
+               'Fitter', sd.fitter||'']);
+    rows.push(['Electrical', (sd.electrical||[]).join(', ')||'',
+               'Utility', (sd.utility||[]).join(', ')||'',
+               'Shift AIM', (sd.aim_staff||[]).join(', ')||'',
+               'Shift GPR', (sd.gpr_staff||[]).join(', ')||'']);
+    rows.push([]);
+    // Machine table header
+    rows.push(['MC','Size','Operator','Order/Batch','Qty (L)','Note','Target','VS Target','AIM','Backlog','Proc DT','Mech DT','Elec DT','GPR DT','HVAC DT','DW DT']);
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      const prod=Math.round(mcTotalProd(m)*100)/100;
+      const t=tgt(fl,mc.id);
+      const vs=prod>0?Math.round((prod-t)*100)/100:null;
+      const aim=parseFloat(m.aim||0);
+      const bl=aim>0?Math.round((prod-aim)*100)/100:null;
+      const runs=m.runs||[blankRun()];
+      runs.forEach((run,ri)=>{
+        rows.push([
+          ri===0?mc.id:'', ri===0?mc.sz:'', ri===0?(m.operator||''):'',
+          run.batchNumber||'', run.qty||'', run.note||'',
+          ri===0?t:'', ri===0?(vs!==null?vs:''):'',
+          ri===0?(aim||''):'', ri===0?(bl!==null?bl:''):'',
+          ri===0?(m.proc||0):'', ri===0?(m.mech||0):'', ri===0?(m.elec||0):'',
+          ri===0?(m.gpr||0):'', ri===0?(m.hvac||0):'', ri===0?(m.dw||0):''
+        ]);
+      });
+    });
+    // Totals
+    let shProd=0, shTgt=0, shAim=0;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      shProd+=mcTotalProd(m); shTgt+=tgt(fl,mc.id); shAim+=parseFloat(m.aim||0);
+    });
+    shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100;
+    rows.push(['TOTAL','','','','',shProd,'',shTgt,Math.round((shProd-shTgt)*100)/100,shAim,'','','','','','']);
+    const ws=XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols']=[{wch:8},{wch:6},{wch:14},{wch:14},{wch:8},{wch:14},{wch:7},{wch:8},{wch:8},{wch:8},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7}];
+    XLSX.utils.book_append_sheet(wb,'Shift_'+sh,ws);
+  });
+  XLSX.writeFile(wb, 'DPR_'+fl+'_'+d+'_Production.xlsx');
+  toast('✅ Excel exported','var(--green)');
+}
+
+// ── EXCEL: AIM Status ────────────────────────────────────────────
+async function exportAimStatusExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
+  const {fl,d,day,mcs}=getExportData();
+  const rows=[];
+  rows.push(['SUNLOC  AIM Status Report  '+fl+'  '+d]);
+  rows.push([]);
+  rows.push(['Machine','Size','AIM (L)','Produced (L)','Produced − AIM','Status']);
+  let totAim=0, totProd=0;
+  mcs.forEach(mc=>{
+    let prod=0,aim=0;
+    SHIFTS.forEach(sh=>{
+      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m); aim+=parseFloat(m.aim||0);
+    });
+    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
+    totAim+=aim; totProd+=prod;
+    const diff=aim>0?Math.round((prod-aim)*100)/100:null;
+    const status=aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track';
+    rows.push([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',status]);
+  });
+  totAim=Math.round(totAim*100)/100; totProd=Math.round(totProd*100)/100;
+  const totDiff=totAim>0?Math.round((totProd-totAim)*100)/100:null;
+  rows.push([]);
+  rows.push(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']);
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:8},{wch:6},{wch:10},{wch:12},{wch:14},{wch:12}];
+  XLSX.utils.book_append_sheet(wb,'AIM Status',ws);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_AIM.xlsx');
+  toast('✅ AIM Excel exported','var(--green)');
+}
+
+// ── EXCEL: Downtime ──────────────────────────────────────────────
+async function exportDowntimeExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
+  const {fl,d,day,mcs}=getExportData();
+  const rows=[];
+  rows.push(['SUNLOC  Machine-wise Downtime  '+fl+'  '+d]);
+  rows.push([]);
+  const hdr=['Machine'];
+  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>hdr.push('Shift_'+sh+' '+DT_LABELS[c])));
+  hdr.push('Total DT (min)');
+  rows.push(hdr);
+  let grandTotal=0;
+  const colTotals={}; SHIFTS.forEach(sh=>DT_CATS.forEach(c=>{colTotals[sh+c]=0;}));
+  mcs.forEach(mc=>{
+    const row=[mc.id];
+    let mcTotal=0;
+    SHIFTS.forEach(sh=>{
+      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+      DT_CATS.forEach(c=>{
+        const v=parseFloat(m[c]||0);
+        row.push(v||0); mcTotal+=v; colTotals[sh+c]+=v;
+      });
+    });
+    row.push(Math.round(mcTotal*10)/10);
+    grandTotal+=mcTotal;
+    rows.push(row);
+  });
+  // Totals row
+  const totRow=['TOTAL'];
+  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>totRow.push(Math.round(colTotals[sh+c]*10)/10)));
+  totRow.push(Math.round(grandTotal*10)/10);
+  rows.push(totRow);
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,'Downtime',ws);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_Downtime.xlsx');
+  toast('✅ Downtime Excel exported','var(--green)');
+}
+
+// ── EXCEL: Shift Performance ─────────────────────────────────────
+async function exportShiftPerformanceExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
+  const {fl,d,day,mcs}=getExportData();
+  const rows=[];
+  rows.push(['SUNLOC  Shift Performance  '+fl+'  '+d]);
+  rows.push([]);
+  rows.push(['Shift','Incharge','Chemist','Fitter','Electrical','Utility','AIM Staff','GPR Staff','Production (L)','Target (L)','Efficiency %','DT (min)','DT %','Score']);
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    let prod=0,t=0;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m); t+=tgt(fl,mc.id);
+    });
+    prod=Math.round(prod*100)/100;
+    const dt=calcShiftDT(fl,d,sh);
+    const eff=t>0?Math.round(prod/t*1000)/10:0;
+    const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
+    rows.push([
+      'Shift_'+sh,
+      sd.incharge||'',
+      Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||''),
+      sd.fitter||'',
+      (sd.electrical||[]).join(', ')||'',
+      (sd.utility||[]).join(', ')||'',
+      (sd.aim_staff||[]).join(', ')||'',
+      (sd.gpr_staff||[]).join(', ')||'',
+      prod||'', t, eff+'%', dt.total, dt.dtPct.toFixed(1)+'%', prod>0?score:''
+    ]);
+  });
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols']=[{wch:8},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:7}];
+  XLSX.utils.book_append_sheet(wb,'Shift Performance',ws);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_ShiftPerformance.xlsx');
+  toast('✅ Shift Performance exported','var(--green)');
+}
+
+// ── EXCEL: Full DPR  All sheets ────────────────────────────────
+async function exportAllShiftsExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
+  const wb=XLSX.utils.book_new();
+  // Sheet 1: Production
+  const {fl,d,day,mcs}=getExportData();
+  const summaryRows=[['SUNLOC FULL DPR  '+fl+'  '+d],[]];
+  summaryRows.push(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']);
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    let prod=0,t=0,aim=0;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m); t+=tgt(fl,mc.id); aim+=parseFloat(m.aim||0);
+    });
+    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
+    const dt=calcShiftDT(fl,d,sh);
+    summaryRows.push(['Shift_'+sh, sd.incharge||'', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'', dt.total]);
+  });
+  const summaryWs=XLSX.utils.aoa_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(wb,'Summary',summaryWs);
+  // Add individual shift sheets
+  XLSX.utils.book_append_sheet(wb,'_temp',XLSX.utils.aoa_to_sheet([[]]));
+  wb.SheetNames.pop(); // remove temp
+  // Re-use production export logic per shift
+  const wbTemp=XLSX.utils.book_new();
+  exportDailyReportExcel.__exportToWb=true;
+  // Just add all sheets manually
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    const rows=[['Shift_'+sh+'  '+fl+'  '+d],[]];
+    rows.push(['MC','Sz','Operator','Batch','Qty(L)','Note','Target','VS Tgt','AIM','Backlog','Proc','Mech','Elec','GPR','HVAC','DW']);
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      const prod=Math.round(mcTotalProd(m)*100)/100;
+      const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
+      (m.runs||[blankRun()]).forEach((run,ri)=>{
+        rows.push([ri===0?mc.id:'',ri===0?mc.sz:'',ri===0?(m.operator||''):'',
+          run.batchNumber||'',run.qty||'',run.note||'',
+          ri===0?t:'',ri===0?Math.round((prod-t)*100)/100:'',
+          ri===0?(aim||0):'',ri===0?(aim>0?Math.round((prod-aim)*100)/100:''):'',
+          ri===0?(m.proc||0):'',ri===0?(m.mech||0):'',ri===0?(m.elec||0):'',
+          ri===0?(m.gpr||0):'',ri===0?(m.hvac||0):'',ri===0?(m.dw||0):''
+        ]);
+      });
+    });
+    XLSX.utils.book_append_sheet(wb,'Shift_'+sh,XLSX.utils.aoa_to_sheet(rows));
+  });
+  // AIM sheet
+  const aimRows=[['AIM Status  '+fl+'  '+d],[]];
+  aimRows.push(['MC','Sz','AIM','Produced','Diff','Status']);
+  mcs.forEach(mc=>{
+    let prod=0,aim=0;
+    SHIFTS.forEach(sh=>{const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());prod+=mcTotalProd(m);aim+=parseFloat(m.aim||0);});
+    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
+    const diff=aim>0?Math.round((prod-aim)*100)/100:null;
+    aimRows.push([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']);
+  });
+  XLSX.utils.book_append_sheet(wb,'AIM Status',XLSX.utils.aoa_to_sheet(aimRows));
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_FULL.xlsx');
+  toast('✅ Full DPR Excel exported','var(--green)');
+}
+
+// ── PDF: Print Daily Report ──────────────────────────────────────
+function exportPDF(){
+  const {fl,d,day,mcs}=getExportData();
+  let html=`
+    <html><head><title>DPR ${fl} ${d}</title>
+    <style>
+      body{font-family:Arial,sans-serif;font-size:11px;margin:20px;color:#111}
+      h1{font-size:16px;margin-bottom:4px;color:#0a6d91}
+      h2{font-size:13px;margin:16px 0 6px;color:#0a6d91;border-bottom:2px solid #0a6d91;padding-bottom:3px}
+      table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:10px}
+      th{background:#0a6d91;color:#fff;padding:5px 7px;text-align:left;white-space:nowrap}
+      td{padding:4px 7px;border-bottom:1px solid #ddd}
+      tr:nth-child(even) td{background:#f5f9fc}
+      .tot{font-weight:700;background:#e8f4f8!important;border-top:2px solid #0a6d91}
+      .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+      .info-box{background:#f5f9fc;border:1px solid #cce;padding:6px 10px;border-radius:4px}
+      .info-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px}
+      .info-val{font-size:12px;font-weight:700;color:#111;margin-top:2px}
+      .pos{color:#16a34a}.neg{color:#dc2626}
+      @media print{@page{margin:15mm}}
+    </style></head><body>
+    <h1>📋 SUNLOC DPR  ${fl}  ${d}</h1>
+    <p style="color:#666;font-size:10px;margin-bottom:12px">Generated: ${new Date().toLocaleString('en-IN')}</p>
+  `;
+  SHIFTS.forEach(sh=>{
+    const sd=day.shifts[sh];
+    let shProd=0,shTgt=0,shAim=0;
+    html+=`<h2>SHIFT ${sh}</h2>
+    <div class="info-grid">
+      <div class="info-box"><div class="info-label">Incharge</div><div class="info-val">${sd.incharge||''}</div></div>
+      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'')}</div></div>
+      <div class="info-box"><div class="info-label">Fitter</div><div class="info-val">${sd.fitter||''}</div></div>
+      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${(sd.electrical||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${(sd.utility||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${(sd.aim_staff||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${(sd.gpr_staff||[]).join(', ')||''}</div></div>
+    </div>
+    <table><thead><tr>
+      <th>MC</th><th>Sz</th><th>Operator</th><th>Batch</th><th>Qty (L)</th><th>Note</th>
+      <th>Target</th><th>VS Tgt</th><th>AIM</th><th>Backlog/Excess</th>
+    </tr></thead><tbody>`;
+    mcs.forEach(mc=>{
+      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+      const prod=Math.round(mcTotalProd(m)*100)/100;
+      const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
+      const vs=Math.round((prod-t)*100)/100;
+      const bl=aim>0?Math.round((prod-aim)*100)/100:null;
+      shProd+=prod; shTgt+=t; shAim+=aim;
+      (m.runs||[blankRun()]).forEach((run,ri)=>{
+        html+=`<tr>
+          <td>${ri===0?`<b>${mc.id}</b>`:''}</td>
+          <td>${ri===0?mc.sz:''}</td>
+          <td>${ri===0?(m.operator||''):''}</td>
+          <td>${run.batchNumber||''}</td>
+          <td><b>${run.qty||''}</b></td>
+          <td>${run.note||''}</td>
+          <td>${ri===0?t:''}</td>
+          <td>${ri===0&&prod>0?`<span class="${vs>=0?'pos':'neg'}">${vs>=0?'+'+vs:vs}</span>`:''}</td>
+          <td>${ri===0&&aim>0?aim:''}</td>
+          <td>${ri===0&&bl!==null?`<span class="${bl>=0?'pos':'neg'}">${bl>=0?'+'+bl:bl}</span>`:''}</td>
+        </tr>`;
+      });
+    });
+    shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100; shTgt=Math.round(shTgt*100)/100;
+    const shVs=Math.round((shProd-shTgt)*100)/100;
+    html+=`<tr class="tot"><td colspan="4">SHIFT ${sh} TOTAL</td>
+      <td>${shProd||''}</td><td></td><td>${shTgt}</td>
+      <td><span class="${shVs>=0?'pos':'neg'}">${shVs>=0?'+'+shVs:shVs}</span></td>
+      <td>${shAim||''}</td>
+      <td><span class="${shProd-shAim>=0?'pos':'neg'}">${shAim>0?(shProd-shAim>=0?'+':'')+Math.round((shProd-shAim)*100)/100:''}</span></td>
+    </tr></tbody></table>`;
+  });
+  html+=`</body></html>`;
+  const w=window.open('','_blank','width=900,height=700');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(()=>w.print(),600);
+  toast('🖨 Print dialog opened','var(--cyan)');
+}
+
 function exportData(){
   const data={};
   Object.keys(localStorage).filter(k=>k.startsWith('dpr3_')||k==='dpr_targets').forEach(k=>data[k]=localStorage.getItem(k));
@@ -2562,19 +3326,41 @@ refreshRecentDates();
 function postAuthServerInit() {
   checkServer().then(async ok=>{
     if(ok){
-      // Show loading indicator while fetching from server
-      const shiftsArea = document.getElementById('shiftsArea');
-      if(shiftsArea && !shiftsArea.innerHTML.trim()){
-        shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading DPR data from server...</div>';
+      // Fetch DPR data AND active orders at the same time
+      // Then render ONCE with both — so qty/batch and order dropdowns show together
+      try{
+        const [dprRes, ordRes] = await Promise.all([
+          fetch(serverUrl+'/api/dpr/'+curFloor+'/'+getDate(),{signal:AbortSignal.timeout(6000)}).then(r=>r.json()),
+          fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)}).then(r=>r.json())
+        ]);
+        // Store DPR data into localStorage
+        if(dprRes.ok && dprRes.data){
+          localStorage.setItem(skey(curFloor,getDate()), JSON.stringify(dprRes.data));
+        }
+        // Store active orders
+        if(ordRes.ok && ordRes.orders){
+          activeOrders={};
+          ordRes.orders.filter(o=>o.machineId).forEach(o=>{
+            if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
+            activeOrders[o.machineId].push(o);
+          });
+          localStorage.setItem('dpr_active_orders', JSON.stringify(activeOrders));
+        }
+      }catch(e){
+        // Partial failure — try individual fallbacks
+        const cached=localStorage.getItem('dpr_active_orders');
+        if(cached) try{activeOrders=JSON.parse(cached);}catch{}
       }
-      // 1. Fetch today's DPR data from server first — fetchDpr calls renderEntry() on completion
-      await fetchDpr(curFloor, getDate());
-      // 2. Then fetch active orders (populates dropdowns)
-      await fetchActiveOrders();
+      // Render ONCE — everything is ready
+      renderEntry();
+      setSyncBadge('synced');
+      // Run full fetchActiveOrders in background for TEMP batch logic
+      setTimeout(()=>fetchActiveOrders().catch(()=>{}), 1000);
     } else {
-      // Offline — use localStorage cache
+      // Offline — render from localStorage cache
       const cached=localStorage.getItem('dpr_active_orders');
-      if(cached) try{activeOrders=JSON.parse(cached); renderEntry();}catch{}
+      if(cached) try{activeOrders=JSON.parse(cached);}catch{}
+      renderEntry();
     }
   });
 }
@@ -2585,7 +3371,7 @@ window.addEventListener('beforeunload',e=>{ if(unsaved){e.preventDefault();e.ret
 window.addEventListener('pageshow', (e) => {
   if (e.persisted && dprUser) {
     fetchActiveOrders();
-    fetchDpr(curFloor, getDate());
+    if (currentDate) fetchDpr(currentFloor, currentDate);
   }
 });
 
@@ -2650,8 +3436,8 @@ async function doDprLogin() {
     // Load cached orders from localStorage BEFORE renderEntry so dropdowns show saved selection
     const cachedOrders = localStorage.getItem('dpr_active_orders');
     if(cachedOrders) try{ activeOrders = JSON.parse(cachedOrders); }catch{}
-    renderEntry();
     go('entry');
+    updateSaveBtnStyle(getDate());
     postAuthServerInit();
     dprAuditLog('LOGIN', 'Logged in to DPR');
   }
@@ -2659,6 +3445,14 @@ async function doDprLogin() {
 
 function applyDprRoleRestrictions() {
   if (!dprUser) return;
+
+  // ── Date picker — only block future dates for everyone ──────────
+  const datePicker = document.getElementById('ndate');
+  if (datePicker) {
+    datePicker.max = new Date().toISOString().split('T')[0];
+    datePicker.removeAttribute('min'); // user can browse any past date freely
+  }
+
   const allowedFloors = DPR_ROLE_FLOORS[dprUser.role];
   if (!allowedFloors) return; // admin — no restrictions
 
@@ -2786,38 +3580,25 @@ async function renderDprAuditLog() {
   }
 }
 
-// Patch saveToServer to include audit + back-date check
-const _origSaveToServer = saveToServer;
-async function saveToServer() {
-  // Back-date lock for non-admin — with 2-hour shift grace window
-  if (dprUser && dprUser.role !== 'admin') {
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const selected = document.getElementById('ndate')?.value;
-    if (selected && selected !== todayStr) {
-      // Check 2-hour grace window for shift changeover
-      // Shifts: A=06:00-14:00, B=14:00-22:00, C=22:00-06:00
-      const h = now.getHours();
-      const yesterdayStr = new Date(now - 86400000).toISOString().split('T')[0];
-      // Grace periods: A shift starts 06:00 — allow B shift (prev day C) edits until 08:00
-      //                B shift starts 14:00 — allow A shift edits until 16:00
-      //                C shift starts 22:00 — allow B shift edits until 00:00
-      // For previous calendar day: only allowed during 22:00-00:00 (C shift grace for yesterday)
-      const isPrevDay = selected === yesterdayStr;
-      const inCShiftGrace = isPrevDay && h >= 0 && h < 2; // midnight to 2am = C shift carrying over
-      if (!inCShiftGrace) {
-        alert('⚠️ Back-date editing is not allowed for your role.\nOnly Admin can edit past records.\nNote: Entries for the previous shift can be made within 2 hours of shift changeover.');
-        return;
-      }
-    }
-    // Also check: non-admin cannot edit future dates
-    if (selected && selected > todayStr) {
-      alert('⚠️ Cannot enter data for future dates.');
-      return;
-    }
-  }
-  await _origSaveToServer();
-  dprAuditLog('SAVE', `Saved DPR — Floor: ${curFloor}, Date: ${document.getElementById('ndate')?.value}`);
+// ── DATE PERMISSION CHECK ────────────────────────────────────────
+// Returns true if current user is allowed to save for the selected date
+function canSaveForDate(selectedDate) {
+  if (!dprUser) return false;
+
+  // Admin — can save any date, no restriction
+  if (dprUser.role === 'admin') return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const selected = new Date(selectedDate + 'T00:00:00');
+
+  // Block future dates for everyone
+  if (selected > today) return false;
+
+  // Regular users — only today and previous 2 days allowed
+  const diffDays = Math.round((today - selected) / 86400000);
+  return diffDays <= 2;
 }
 
 // Audit page handler — called directly, no go() monkey-patch needed

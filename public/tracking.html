@@ -4219,6 +4219,7 @@ setInterval(async ()=>{
       const serverScanIds = new Set(serverScans.map(s=>s.id));
       const localOnlyScans = state.scans.filter(s=>!serverScanIds.has(s.id));
       const prevCount = state.scans.length;
+      const prevLabelCount = state.labels.length;
       const merged = [...serverScans, ...localOnlyScans];
       state.scans = merged;
       // Update batches only if server returned non-empty list
@@ -4237,11 +4238,12 @@ setInterval(async ()=>{
         dispatchRecs:state.dispatchRecs, alerts:state.alerts
       })); }catch(e){}
       setSyncBadge('synced');
-      // Re-render if scan count changed OR scans were empty before
+      // Re-render if scans OR labels changed — so Generated/Printed/Remaining updates
       // BUT skip if user is actively interacting with a form element (select/input)
       const activeTag = document.activeElement?.tagName?.toLowerCase();
       const userInteracting = activeTag === 'select' || activeTag === 'input' || activeTag === 'textarea';
-      if((state.scans.length !== prevCount || prevCount === 0) && currentPage && !userInteracting){
+      const dataChanged = state.scans.length !== prevCount || prevCount === 0 || state.labels.length !== prevLabelCount;
+      if(dataChanged && currentPage && !userInteracting){
         renderPage(currentPage);
       }
     }

@@ -753,28 +753,106 @@ function loadDay(fl,d){
     return p;
   }catch{return blankDay(fl);}
 }
-function saveDay(){
+async function saveDay(){
   const fl=curFloor, d=getDate();
-  const data=collectForm();
-  localStorage.setItem(skey(fl,d),JSON.stringify(data));
+
+  // ── GUARD: Do not save if user has not changed anything ──────────
+  // Check if there is ANY real data in the form right now
+  function formHasData(){
+    // Check staff fields
+    for(const sh of SHIFTS){
+      if(v('si-'+sh+'-incharge') || v('si-'+sh+'-fitter')) return true;
+      if(getMultiStaff(sh,'chemist').length)    return true;
+      if(getMultiStaff(sh,'electrical').length) return true;
+      if(getMultiStaff(sh,'utility').length)    return true;
+      if(getMultiStaff(sh,'aim_staff').length)  return true;
+      if(getMultiStaff(sh,'gpr_staff').length)  return true;
+    }
+    // Check any production qty entered
+    const anyQty = document.querySelectorAll('input[id^="run-qty-"]');
+    for(const el of anyQty){ if(el.value && parseFloat(el.value)>0) return true; }
+    // Check any batch number entered
+    const anyBatch = document.querySelectorAll('input[id^="run-batch-"]');
+    for(const el of anyBatch){ if(el.value && el.value.trim()) return true; }
+    // Check any order selected
+    const anyOrder = document.querySelectorAll('select[id^="run-ord-"]');
+    for(const el of anyOrder){ if(el.value && el.value.trim()) return true; }
+    // Check operator names
+    const anyOp = document.querySelectorAll('input[id^="op-"]');
+    for(const el of anyOp){ if(el.value && el.value.trim()) return true; }
+    return false;
+  }
+
+  if(!formHasData() && !unsaved){
+    toast('⚠️ Nothing to save — fill data first','var(--amber)');
+    return;
+  }
+
+  // ── DATE PERMISSION CHECK ──────────────────────────────────────
+  if(!canSaveForDate(d)){
+    const isAdmin = dprUser?.role === 'admin';
+    if(isAdmin){
+      // Admin should always pass — something wrong
+      toast('⚠️ Unexpected date error','var(--red)');
+    } else {
+      const today = new Date(); today.setHours(0,0,0,0);
+      const sel   = new Date(d+'T00:00:00');
+      if(sel > today){
+        toast('⚠️ Cannot save future dates','var(--red)');
+      } else {
+        toast('⚠️ Only today and previous 2 days allowed. Admin can edit any date.','var(--amber)');
+      }
+    }
+    return;
+  }
+
+  toast('💾 Saving...','var(--cyan)');
+
+  // Step 1 — fetch latest server data first
+  // This prevents blank form fields from overwriting real server data
+  if(serverUrl){
+    try{
+      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(5000)});
+      if(r.ok){
+        const j = await r.json();
+        if(j.ok && j.data){
+          // Write server data to localStorage — collectForm() will merge on top
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        }
+      }
+    }catch(e){ /* offline — use what we have in localStorage */ }
+  }
+
+  // Step 2 — collect form fields ON TOP of the server data
+  // Filled fields override server; blank fields keep existing server value
+  const data = collectForm();
+
+  // Step 3 — save merged data locally and push to server
+  localStorage.setItem(skey(fl,d), JSON.stringify(data));
   setUnsaved(false);
   renderDayKpis();
-  toast('💾 Saving to server...','var(--cyan)');
-  pushToServer(fl,d,data).then(()=>{
-    // toast shown inside pushToServer on success/failure
-  });
+  pushToServer(fl,d,data);
 }
 function collectForm(){
   const d=getDate(), fl=curFloor;
   const day=loadDay(fl,d);
   SHIFTS.forEach(sh=>{
-    day.shifts[sh].incharge=v(`si-${sh}-incharge`)||'';
-    day.shifts[sh].fitter=v(`si-${sh}-fitter`)||'';
-    day.shifts[sh].chemist=getMultiStaff(sh,'chemist');
-    day.shifts[sh].electrical=getMultiStaff(sh,'electrical');
-    day.shifts[sh].utility=getMultiStaff(sh,'utility');
-    day.shifts[sh].aim_staff=getMultiStaff(sh,'aim_staff');
-    day.shifts[sh].gpr_staff=getMultiStaff(sh,'gpr_staff');
+    // For staff fields: use form value if filled, otherwise keep existing saved value
+    // This prevents blank form (not yet rendered) from wiping real saved data
+    const formIncharge = v(`si-${sh}-incharge`);
+    const formFitter   = v(`si-${sh}-fitter`);
+    day.shifts[sh].incharge   = formIncharge   || day.shifts[sh].incharge   || '';
+    day.shifts[sh].fitter     = formFitter     || day.shifts[sh].fitter     || '';
+    const formChemist   = getMultiStaff(sh,'chemist');
+    const formElec      = getMultiStaff(sh,'electrical');
+    const formUtility   = getMultiStaff(sh,'utility');
+    const formAim       = getMultiStaff(sh,'aim_staff');
+    const formGpr       = getMultiStaff(sh,'gpr_staff');
+    day.shifts[sh].chemist    = formChemist.length   ? formChemist   : (day.shifts[sh].chemist    || []);
+    day.shifts[sh].electrical = formElec.length      ? formElec      : (day.shifts[sh].electrical || []);
+    day.shifts[sh].utility    = formUtility.length   ? formUtility   : (day.shifts[sh].utility    || []);
+    day.shifts[sh].aim_staff  = formAim.length       ? formAim       : (day.shifts[sh].aim_staff  || []);
+    day.shifts[sh].gpr_staff  = formGpr.length       ? formGpr       : (day.shifts[sh].gpr_staff  || []);
     getActiveMachines(fl).forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       m.aim=v(`aim-${sh}-${mc.id}`)||'';
@@ -946,6 +1024,7 @@ async function pushToServer(fl,d,data){
     const j = await r.json();
     if(r.ok && j.ok){
       setSyncBadge('synced');
+      toast('✅ Saved to server — '+fl+' '+d,'var(--green)');
       console.log('[DPR] Saved to server OK — floor:'+fl+' date:'+d);
       try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
       // Push succeeded — remove this entry from the queue
@@ -2442,11 +2521,41 @@ function deepMergeDpr(server, local){
 
 function onDateChange(){
   refreshRecentDates();
-  renderEntry(); // Render immediately from localStorage (instant)
   const fl=curFloor, d=getDate();
+
+  // ── Save button — highlight based on date permission ───────────
+  updateSaveBtnStyle(d);
+
   if(serverUrl){
-    // Silently pull from server and re-render with merged data
+    const shiftsArea = document.getElementById('shiftsArea');
+    if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
     fetchDpr(fl, d);
+  } else {
+    renderEntry();
+  }
+}
+
+// ── Update Save button style based on whether this date is editable ──
+function updateSaveBtnStyle(d){
+  const saveBtn = document.getElementById('saveBtn');
+  if(!saveBtn) return;
+  const canEdit = canSaveForDate(d || getDate());
+  if(canEdit){
+    // Normal — green Save button
+    saveBtn.className = 'nbtn primary';
+    saveBtn.style.background = '';
+    saveBtn.style.borderColor = '';
+    saveBtn.style.color = '';
+    saveBtn.title = 'Save';
+  } else {
+    // Restricted date — grey/dim Save button, not disabled, just visually deemphasised
+    saveBtn.className = 'nbtn';
+    saveBtn.style.background = 'transparent';
+    saveBtn.style.borderColor = 'var(--t3)';
+    saveBtn.style.color = 'var(--t3)';
+    saveBtn.title = dprUser?.role === 'admin'
+      ? 'Save (Admin — all dates allowed)'
+      : 'View only — only today and previous 2 days can be edited';
   }
 }
 
@@ -2661,8 +2770,8 @@ async function doDprLogin() {
     // Load cached orders from localStorage BEFORE renderEntry so dropdowns show saved selection
     const cachedOrders = localStorage.getItem('dpr_active_orders');
     if(cachedOrders) try{ activeOrders = JSON.parse(cachedOrders); }catch{}
-    renderEntry();
     go('entry');
+    updateSaveBtnStyle(getDate());
     postAuthServerInit();
     dprAuditLog('LOGIN', 'Logged in to DPR');
   }
@@ -2670,6 +2779,14 @@ async function doDprLogin() {
 
 function applyDprRoleRestrictions() {
   if (!dprUser) return;
+
+  // ── Date picker — only block future dates for everyone ──────────
+  const datePicker = document.getElementById('ndate');
+  if (datePicker) {
+    datePicker.max = new Date().toISOString().split('T')[0];
+    datePicker.removeAttribute('min'); // user can browse any past date freely
+  }
+
   const allowedFloors = DPR_ROLE_FLOORS[dprUser.role];
   if (!allowedFloors) return; // admin — no restrictions
 
@@ -2797,38 +2914,25 @@ async function renderDprAuditLog() {
   }
 }
 
-// Patch saveToServer to include audit + back-date check
-const _origSaveToServer = saveToServer;
-async function saveToServer() {
-  // Back-date lock for non-admin — with 2-hour shift grace window
-  if (dprUser && dprUser.role !== 'admin') {
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const selected = document.getElementById('ndate')?.value;
-    if (selected && selected !== todayStr) {
-      // Check 2-hour grace window for shift changeover
-      // Shifts: A=06:00-14:00, B=14:00-22:00, C=22:00-06:00
-      const h = now.getHours();
-      const yesterdayStr = new Date(now - 86400000).toISOString().split('T')[0];
-      // Grace periods: A shift starts 06:00 — allow B shift (prev day C) edits until 08:00
-      //                B shift starts 14:00 — allow A shift edits until 16:00
-      //                C shift starts 22:00 — allow B shift edits until 00:00
-      // For previous calendar day: only allowed during 22:00-00:00 (C shift grace for yesterday)
-      const isPrevDay = selected === yesterdayStr;
-      const inCShiftGrace = isPrevDay && h >= 0 && h < 2; // midnight to 2am = C shift carrying over
-      if (!inCShiftGrace) {
-        alert('⚠️ Back-date editing is not allowed for your role.\nOnly Admin can edit past records.\nNote: Entries for the previous shift can be made within 2 hours of shift changeover.');
-        return;
-      }
-    }
-    // Also check: non-admin cannot edit future dates
-    if (selected && selected > todayStr) {
-      alert('⚠️ Cannot enter data for future dates.');
-      return;
-    }
-  }
-  await _origSaveToServer();
-  dprAuditLog('SAVE', `Saved DPR — Floor: ${curFloor}, Date: ${document.getElementById('ndate')?.value}`);
+// ── DATE PERMISSION CHECK ────────────────────────────────────────
+// Returns true if current user is allowed to save for the selected date
+function canSaveForDate(selectedDate) {
+  if (!dprUser) return false;
+
+  // Admin — can save any date, no restriction
+  if (dprUser.role === 'admin') return true;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const selected = new Date(selectedDate + 'T00:00:00');
+
+  // Block future dates for everyone
+  if (selected > today) return false;
+
+  // Regular users — only today and previous 2 days allowed
+  const diffDays = Math.round((today - selected) / 86400000);
+  return diffDays <= 2;
 }
 
 // Audit page handler — called directly, no go() monkey-patch needed

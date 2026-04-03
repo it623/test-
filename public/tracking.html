@@ -3546,8 +3546,161 @@ function renderReports(){
       <div class="text-sm text-muted">Compares DPR gross production against AIM scan counts for each batch. Flags discrepancies, missing entries, and over-scans. Run at close of C shift (10pm–6am) for daily sign-off.</div>
       <button class="btn btn-sm mt-12" style="background:#dc2626;color:#fff">Generate Daily Report →</button>
     </div>
+    <div class="card cursor-pointer" onclick="renderReportG()" style="border-left:4px solid #16a34a;grid-column:span 2">
+      <div class="card-title" style="color:#16a34a">📊 Report G — Batch-wise & Department-wise A-Grade</div>
+      <div class="fw-bold mb-4">A-Grade Analysis by Batch and Department</div>
+      <div class="text-sm text-muted">Shows A-Grade output, wastage (salvage + remelt), and A-Grade % for every batch across AIM, Print Inspection stages. Filter by batch or department.</div>
+      <button class="btn btn-sm mt-12" style="background:#16a34a;color:#fff">Generate →</button>
+    </div>
   </div>
   <div id="report-output" class="mt-20"></div>`;
+}
+
+function renderReportG(){
+  const el = document.getElementById('report-output');
+  if(!el) return;
+
+  const DEPTS = ['aim','pi']; // departments that have A-Grade
+  const DEPT_LABELS = {aim:'AIM Inspection', pi:'Print Inspection'};
+
+  // Collect data per batch per dept
+  const batches = state.batches;
+  const rows = [];
+
+  batches.forEach(b=>{
+    const batchNo = b.batchNumber;
+    const ps = PACK_SIZES[String(b.size)]||1;
+    let batchTotalAGrade = 0, batchTotalWastage = 0, batchGrossIn = 0;
+
+    const deptData = DEPTS.map(dept=>{
+      const scansIn  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+      const scansOut = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='out').length;
+      const inQty    = boxToLakh(scansIn, b.size);
+      const outQty   = boxToLakh(scansOut, b.size);
+      const wastage  = state.wastage.filter(w=>w.batchNumber===batchNo&&w.dept===dept);
+      const salvage  = wastage.reduce((s,w)=>s+(w.type==='salvage'?parseFloat(w.qty||0):0),0);
+      const remelt   = wastage.reduce((s,w)=>s+(w.type==='remelt'?parseFloat(w.qty||0):0),0);
+      const totalW   = salvage + remelt;
+      const aGrade   = Math.max(0, outQty);
+      const pct      = inQty>0?(aGrade/inQty*100):0;
+      if(dept==='aim'){ batchGrossIn += inQty; }
+      batchTotalAGrade += aGrade;
+      batchTotalWastage += totalW;
+      return {dept, scansIn, scansOut, inQty:fmt(inQty), outQty:fmt(outQty), aGrade:fmt(aGrade), salvage:fmt(salvage), remelt:fmt(remelt), pct:fmt(pct,1)};
+    });
+
+    const overallPct = batchGrossIn>0?(batchTotalAGrade/batchGrossIn*100):0;
+    rows.push({b, deptData, batchTotalAGrade:fmt(batchTotalAGrade), batchTotalWastage:fmt(batchTotalWastage), overallPct:fmt(overallPct,1)});
+  });
+
+  el.innerHTML=`
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+    <div class="section-title">Report G — Batch-wise & Department-wise A-Grade</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input type="text" id="rg-search" placeholder="Search batch or customer..."
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-size:13px;width:220px"
+        oninput="filterReportG()">
+      <select id="rg-dept" onchange="filterReportG()"
+        style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-size:12px">
+        <option value="">All Departments</option>
+        <option value="aim">AIM Inspection</option>
+        <option value="pi">Print Inspection</option>
+      </select>
+      <button class="btn btn-sm btn-secondary" onclick="exportReportGExcel()">↓ Excel</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tbl-wrap"><table id="rg-table">
+      <thead>
+        <tr style="background:var(--surface2)">
+          <th rowspan="2">Batch</th>
+          <th rowspan="2">Customer</th>
+          <th rowspan="2">Size</th>
+          ${DEPTS.map(d=>`<th colspan="5" style="text-align:center;border-left:2px solid var(--border2)">${DEPT_LABELS[d]}</th>`).join('')}
+          <th colspan="3" style="text-align:center;border-left:2px solid var(--border2)">Overall</th>
+        </tr>
+        <tr style="background:var(--surface2)">
+          ${DEPTS.map(()=>`
+            <th style="border-left:2px solid var(--border2)">IN (L)</th>
+            <th>OUT (L)</th>
+            <th>Salvage</th>
+            <th>Remelt</th>
+            <th>A-Grade %</th>
+          `).join('')}
+          <th style="border-left:2px solid var(--border2)">Total A-Grade</th>
+          <th>Total Wastage</th>
+          <th>Overall %</th>
+        </tr>
+      </thead>
+      <tbody id="rg-body">
+      ${rows.map(({b,deptData,batchTotalAGrade,batchTotalWastage,overallPct})=>`
+        <tr data-batch="${(b.batchNumber||'').toLowerCase()}" data-customer="${(b.customer||'').toLowerCase()}">
+          <td class="td-bold td-mono">${b.batchNumber}</td>
+          <td>${b.customer||'-'}</td>
+          <td class="td-mono">${b.size}</td>
+          ${deptData.map(d=>`
+            <td class="td-mono" style="border-left:2px solid var(--border2)">${d.inQty}</td>
+            <td class="td-mono">${d.outQty}</td>
+            <td class="td-mono" style="color:var(--amber)">${d.salvage}</td>
+            <td class="td-mono" style="color:var(--red)">${d.remelt}</td>
+            <td class="td-mono fw-bold ${parseFloat(d.pct)>=95?'green':parseFloat(d.pct)>=90?'amber':parseFloat(d.pct)>0?'red':''}">${d.scansIn>0?d.pct+'%':'—'}</td>
+          `).join('')}
+          <td class="td-mono fw-bold green" style="border-left:2px solid var(--border2)">${batchTotalAGrade}</td>
+          <td class="td-mono" style="color:var(--amber)">${batchTotalWastage}</td>
+          <td class="td-mono fw-bold ${parseFloat(overallPct)>=95?'green':parseFloat(overallPct)>=90?'amber':parseFloat(overallPct)>0?'red':''}">${parseFloat(overallPct)>0?overallPct+'%':'—'}</td>
+        </tr>
+      `).join('')||'<tr><td colspan="14" class="text-center text-muted">No batch data available</td></tr>'}
+      </tbody>
+    </table></div>
+  </div>`;
+}
+
+function filterReportG(){
+  const search=(document.getElementById('rg-search')?.value||'').toLowerCase().trim();
+  const dept=document.getElementById('rg-dept')?.value||'';
+  const rows=document.querySelectorAll('#rg-body tr[data-batch]');
+  rows.forEach(row=>{
+    const matchSearch=!search||((row.dataset.batch||'').includes(search)||(row.dataset.customer||'').includes(search));
+    row.style.display=matchSearch?'':'none';
+  });
+}
+
+async function exportReportGExcel(){
+  try{ await checkXLSX(); }catch(e){ toast('XLSX not available','var(--red)'); return; }
+  const DEPTS=['aim','pi'];
+  const DEPT_LABELS={aim:'AIM Inspection',pi:'Print Inspection'};
+  const wb=XLSX.utils.book_new();
+  const rows=[['Report G - Batch-wise & Department-wise A-Grade'],[]];
+  const hdr=['Batch','Customer','Size'];
+  DEPTS.forEach(d=>{ hdr.push(DEPT_LABELS[d]+' IN (L)',DEPT_LABELS[d]+' OUT (L)','Salvage','Remelt','A-Grade %'); });
+  hdr.push('Total A-Grade','Total Wastage','Overall %');
+  rows.push(hdr);
+  state.batches.forEach(b=>{
+    const batchNo=b.batchNumber;
+    let totalAG=0,totalW=0,grossIn=0;
+    const row=[batchNo,b.customer||'',b.size];
+    DEPTS.forEach(dept=>{
+      const scansIn=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+      const scansOut=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='out').length;
+      const inQty=boxToLakh(scansIn,b.size);
+      const outQty=boxToLakh(scansOut,b.size);
+      const wastage=state.wastage.filter(w=>w.batchNumber===batchNo&&w.dept===dept);
+      const salvage=wastage.reduce((s,w)=>s+(w.type==='salvage'?parseFloat(w.qty||0):0),0);
+      const remelt=wastage.reduce((s,w)=>s+(w.type==='remelt'?parseFloat(w.qty||0):0),0);
+      const pct=inQty>0?(outQty/inQty*100):0;
+      if(dept==='aim') grossIn+=inQty;
+      totalAG+=outQty; totalW+=salvage+remelt;
+      row.push(fmt(inQty),fmt(outQty),fmt(salvage),fmt(remelt),inQty>0?fmt(pct,1)+'%':'');
+    });
+    const overallPct=grossIn>0?(totalAG/grossIn*100):0;
+    row.push(fmt(totalAG),fmt(totalW),grossIn>0?fmt(overallPct,1)+'%':'');
+    rows.push(row);
+  });
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb,'A-Grade Report',ws);
+  XLSX.writeFile(wb,'ReportG_AGrade_'+today()+'.xlsx');
+  toast('Excel downloaded','var(--green)');
 }
 
 function renderReportF(){

@@ -46,6 +46,7 @@
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px}
 
 /* ── LAYOUT ── */
@@ -2081,6 +2082,13 @@ function renderLabels(){
     ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
+  // If labels are empty — fetch from server first so counts are always correct
+  if(state.labels.length === 0 && serverUrl){
+    el.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text3);font-size:14px;gap:10px"><span style="display:inline-block;animation:spin 1s linear infinite">⟳</span> Loading label data from server...</div>';
+    pullFromServer().then(()=>renderLabels()).catch(()=>renderLabels());
+    return;
+  }
+
   const allBatches=state.batches.filter(b=>b.status!=='closed');
 
   // Save search value before re-render
@@ -2097,7 +2105,7 @@ function renderLabels(){
   <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px">
     <div style="position:relative;flex:1;max-width:380px">
       <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:13px">🔍</span>
-      <input type="text" id="label-search" placeholder="Search by batch, customer or size..."
+      <input type="text" id="label-search" placeholder="Search by batch number or customer..."
         style="width:100%;padding:8px 10px 8px 34px;border:1px solid var(--border2);border-radius:var(--r-sm);background:var(--surface);color:var(--text);font-size:13px;outline:none;box-shadow:var(--shadow)"
         oninput="filterLabelTable()">
     </div>
@@ -2190,10 +2198,10 @@ function filterLabelTable(){
   const rows=document.querySelectorAll('#label-table-body tr[data-batch]');
   let visible=0;
   rows.forEach(row=>{
+    // Search only batch number and customer — not size (too many false matches)
     const match=!search||(
       (row.dataset.batch||'').includes(search)||
-      (row.dataset.customer||'').includes(search)||
-      (row.dataset.size||'').includes(search)
+      (row.dataset.customer||'').includes(search)
     );
     row.style.display=match?'':'none';
     if(match) visible++;

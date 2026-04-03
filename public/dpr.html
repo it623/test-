@@ -823,7 +823,10 @@ async function saveDay(){
     }catch(e){ /* offline — use what we have in localStorage */ }
   }
 
-  // Step 2 — collect form fields ON TOP of the server data
+  // Step 2 — ensure DT table is rendered so all inputs exist in DOM
+  renderDTTable();
+
+  // Step 3 — collect form fields ON TOP of the server data
   // Filled fields override server; blank fields keep existing server value
   const data = collectForm();
 
@@ -860,7 +863,16 @@ function collectForm(){
       // Collect group operators (stored on each machine in the group)
       const grpOps=collectGroupOperators(sh,fl,mc.id);
       if(grpOps!==null) m.operators=grpOps;
-      DT_CATS.forEach(c=>{ m[c]=v(`dt-${sh}-${mc.id}-${c}`)||''; });
+      DT_CATS.forEach(c=>{
+        const liveVal = v(`dt-${sh}-${mc.id}-${c}`);
+        // Only overwrite if DOM input exists and has a value
+        // If input doesn't exist (section not rendered yet), keep existing saved value
+        const inputExists = !!document.getElementById(`dt-${sh}-${mc.id}-${c}`);
+        if(inputExists){
+          m[c] = liveVal || '';
+        }
+        // else: keep m[c] from loadDay() — don't overwrite with blank
+      });
       // Collect all runs from DOM
       const runEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
       if(runEls.length>0){

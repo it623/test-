@@ -1008,6 +1008,7 @@ function calcDayStats(fl,d){
   const day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
   let totTgt=0,totProd=0,totAim=0,totResort=0,totDT=0;
+  function r2(n){ return Math.round(n*100)/100; } // round to 2 decimal places
   SHIFTS.forEach(sh=>{
     mcs.forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
@@ -1021,6 +1022,8 @@ function calcDayStats(fl,d){
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
   // Produced - AIM: positive = excess, negative = behind
+  totProd = Math.round(totProd*100)/100;
+  totAim  = Math.round(totAim*100)/100;
   const backlog = Math.round((totProd - totAim)*100)/100;
   return {totTgt,totProd,totAim,totResort,totDT,dtPct,eff,backlog};
 }
@@ -1500,9 +1503,9 @@ function renderDayKpis(){
   document.getElementById('dayKpis').innerHTML=`
     <div class="kpi"><div class="kpi-label">Target</div><div class="kpi-val cyan">${s.totTgt||'—'}</div><div class="kpi-sub">units/day</div></div>
     <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
-    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
-    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim||'—'}</div><div class="kpi-sub">planned today</div></div>
-    <div class="kpi"><div class="kpi-label">Produced − AIM</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+s.backlog:s.backlog}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
+    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+Math.round((s.totProd-s.totTgt)*100)/100:'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
+    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim?parseFloat(s.totAim.toFixed(2))||'—':'—'}</div><div class="kpi-sub">planned today</div></div>
+    <div class="kpi"><div class="kpi-label">Produced − AIM</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+parseFloat(s.backlog.toFixed(2)):parseFloat(s.backlog.toFixed(2))}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
     <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
@@ -1559,8 +1562,8 @@ function renderShifts(){
       const t=tgt(fl,mc.id);
       const p=mcTotalProd(m);
       const a=parseFloat(m.aim||0);
-      const vs=p>0?p-t:null;
-      const bl=p>0?Math.max(0,p-a):null;
+      const vs=p>0?Math.round((p-t)*100)/100:null;
+      const bl=p>0?Math.round((p-a)*100)/100:null;
       shTgt+=t; shProd+=p; shAim+=a;
       const mcResort=(day.resort||[]).filter(r=>r.mc===mc.id&&r.shift===sh).reduce((s,r)=>s+parseFloat(r.qty||0),0);
       shResort+=mcResort;
@@ -1754,8 +1757,9 @@ function updateMcTotals(sh, mcId){
   const runQtyEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mcId}"] input[id^="run-qty-"]`);
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
+  total=Math.round(total*100)/100;
   const t=tgt(fl,mcId);
-  const vs=total>0?total-t:null;
+  const vs=total>0?Math.round((total-t)*100)/100:null;
   const totEl=document.getElementById(`tot-${sh}-${mcId}`);
   const vsEl=document.getElementById(`vs-${sh}-${mcId}`);
   if(totEl){
@@ -1779,6 +1783,8 @@ function updateShiftTotals(sh){
     const aimEl=document.getElementById(`aim-${sh}-${mc.id}`);
     shAim+=parseFloat(aimEl?.value||0);
   });
+  shProd=Math.round(shProd*100)/100;
+  shAim=Math.round(shAim*100)/100;
   const totEl=document.getElementById(`shtot-${sh}`);
   if(totEl) totEl.textContent=shProd||'—';
   const aimEl=document.getElementById(`shaim-${sh}`);
@@ -1791,12 +1797,14 @@ function updateBacklog(sh,mcId){
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
   const a=parseFloat(document.getElementById(`aim-${sh}-${mcId}`)?.value||0);
-  // Backlog = Production - AIM (positive = capsules still waiting for AIM)
-  const bl=total>0?Math.max(0,total-a):null;
+  // Backlog = Produced - AIM: positive=excess, negative=behind
+  const bl = a>0 ? Math.round((total-a)*100)/100 : (total>0?total:null);
   const el=document.getElementById(`bl-${sh}-${mcId}`);
   if(el){
-    el.textContent=bl===null?'—':bl;
-    el.style.color=bl>0?'var(--amber)':'var(--t2)';
+    if(bl===null){ el.textContent='—'; el.style.color='var(--t3)'; }
+    else if(bl>0){ el.textContent='+'+bl; el.style.color='var(--green)'; }
+    else if(bl<0){ el.textContent=bl; el.style.color='var(--red)'; }
+    else { el.textContent='0'; el.style.color='var(--t2)'; }
   }
 }
 

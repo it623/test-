@@ -1176,12 +1176,12 @@ app.post('/api/tracking/state', asyncRoute(async (req, res) => {
           `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
            ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,voided=EXCLUDED.voided,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status`,
-          [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,!!l.isPartial,!!l.isOrange,
+          [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,l.isPartial?1:0,l.isOrange?1:0,
            l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
            l.poNumber||null,l.machineId||null,l.printingMatter||null,
-           l.generated||new Date().toISOString(),!!l.printed,l.printedAt||null,
-           !!l.voided,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,
-           l.woStatus||null,l.shipTo||null,l.billTo||null,!!l.isExcess,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
+           l.generated||new Date().toISOString(),l.printed?1:0,l.printedAt||null,
+           l.voided?1:0,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,
+           l.woStatus||null,l.shipTo||null,l.billTo||null,l.isExcess?1:0,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]
         );
       }
     }

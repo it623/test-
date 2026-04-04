@@ -708,9 +708,8 @@ const SYNC = (() => {
     const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
     const isInitialLoad = prevSavedAt === 0;
 
-    if (isInitialLoad || dataChanged) {
-      render();
-    }
+    // Always render — ensures orders show even if dataChanged check gives false negative
+    render();
   }
 
   async function loadTrackingStatus() {
@@ -743,8 +742,9 @@ const SYNC = (() => {
       if (agj.ok && agj.batches) {
         window._liveAGrade = agj.batches;
         // Quietly recalc machine schedules with live A-grade data
+        // Use Quiet version to avoid triggering saveState → loadFromServer loop
         const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId))];
-        machineIds.forEach(mid => { if (mid) recalcMachineSchedule(mid); });
+        machineIds.forEach(mid => { if (mid) recalcMachineScheduleQuiet(mid); });
       }
     } catch(e) {}
   }

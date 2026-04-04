@@ -1436,6 +1436,67 @@ app.post('/api/tracking/wastage', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// POST /api/tracking/backfill — admin: insert historical scan records with backdated timestamp
+app.post('/api/tracking/backfill', asyncRoute(async (req, res) => {
+  const { batchNumber, dept, inCount, outCount, qtyPerBox, backdateTs, operator } = req.body;
+  if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'Missing batchNumber or dept' });
+  const ts = backdateTs ? new Date(backdateTs).toISOString() : new Date().toISOString();
+  const op = operator || 'admin-backfill';
+  let inserted = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Insert IN scans
+    for (let i = 0; i < (inCount || 0); i++) {
+      const id = `bf-${batchNumber}-${dept}-in-${Date.now()}-${i}`;
+      const labelId = `backfill-${batchNumber}-${i+1}`;
+      await client.query(
+        `INSERT INTO tracking_scans (id, label_id, batch_number, dept, type, ts, operator)
+         VALUES ($1,$2,$3,$4,'in',$5,$6) ON CONFLICT(id) DO NOTHING`,
+        [id, labelId, batchNumber, dept, ts, op]
+      );
+      inserted++;
+    }
+    // Insert OUT scans
+    for (let i = 0; i < (outCount || 0); i++) {
+      const id = `bf-${batchNumber}-${dept}-out-${Date.now()}-${i}`;
+      const labelId = `backfill-${batchNumber}-${i+1}`;
+      await client.query(
+        `INSERT INTO tracking_scans (id, label_id, batch_number, dept, type, ts, operator, qty)
+         VALUES ($1,$2,$3,$4,'out',$5,$6,$7) ON CONFLICT(id) DO NOTHING`,
+        [id, labelId, batchNumber, dept, ts, op, qtyPerBox || 1]
+      );
+      inserted++;
+    }
+    await client.query('COMMIT');
+  } catch(e) { await client.query('ROLLBACK'); throw e; }
+  finally { client.release(); }
+  res.json({ ok: true, inserted });
+}));
+
+// POST /api/tracking/backfill-wastage — admin: insert historical wastage with backdated timestamp
+app.post('/api/tracking/backfill-wastage', asyncRoute(async (req, res) => {
+  const { batchNumber, dept, salvage, remelt, backdateTs, operator } = req.body;
+  if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'Missing batchNumber or dept' });
+  const ts = backdateTs ? new Date(backdateTs).toISOString() : new Date().toISOString();
+  const op = operator || 'admin-backfill';
+  if (salvage > 0) {
+    const id = `bf-w-${batchNumber}-${dept}-salv-${Date.now()}`;
+    await query(
+      `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,'salvage',$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+      [id, batchNumber, dept, salvage, ts, op]
+    );
+  }
+  if (remelt > 0) {
+    const id = `bf-w-${batchNumber}-${dept}-rem-${Date.now()}`;
+    await query(
+      `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,'remelt',$4,$5,$6) ON CONFLICT(id) DO NOTHING`,
+      [id, batchNumber, dept, remelt, ts, op]
+    );
+  }
+  res.json({ ok: true });
+}));
+
 // POST /api/tracking/dispatch-record — save a dispatch record
 app.post('/api/tracking/dispatch-record', asyncRoute(async (req, res) => {
   const { record } = req.body;

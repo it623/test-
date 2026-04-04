@@ -1007,6 +1007,32 @@ function normLabel(l){
     normalTotal:   l.normal_total || null,
   };
 }
+function normDispatchRec(d){
+  return {
+    id:          d.id,
+    batchNumber: d.batch_number || d.batchNumber || '',
+    customer:    d.customer || '',
+    qty:         parseFloat(d.qty||0),
+    boxes:       parseInt(d.boxes||0),
+    vehicleNo:   d.vehicle_no  || d.vehicleNo  || '',
+    invoiceNo:   d.invoice_no  || d.invoiceNo  || '',
+    remarks:     d.remarks || '',
+    ts:          d.ts,
+    by:          d.by || null
+  };
+}
+function normWastage(w){
+  return {
+    id:          w.id,
+    batchNumber: w.batch_number || w.batchNumber || '',
+    dept:        w.dept,
+    type:        w.type,
+    qty:         parseFloat(w.qty||0),
+    ts:          w.ts,
+    by:          w.by || null
+  };
+}
+
 
 async function pullFromServer(){
   if(!serverUrl) return;
@@ -1078,8 +1104,8 @@ async function pullFromServer(){
             dept:s.dept, closed:!!s.closed,
             closedAt:s.closed_at||s.closedAt, closedBy:s.closed_by||s.closedBy||null
           }));
-          state.wastage = snap.tracking.wastage||[];
-          state.dispatchRecs = snap.tracking.dispatchRecs||[];
+          state.wastage = (snap.tracking.wastage||[]).map(normWastage);
+          state.dispatchRecs = (snap.tracking.dispatchRecs||[]).map(normDispatchRec);
           state.alerts = (snap.tracking.alerts||[]).map(a=>({
             id:a.id, labelId:a.label_id||a.labelId,
             batchNumber:a.batch_number||a.batchNumber,
@@ -1122,8 +1148,8 @@ async function pullFromServer(){
         state.labels = [...normLabels, ...localOnlyLabels];
         state.scans = tj.state.scans||[];
         state.stageClosure = tj.state.stageClosure||[];
-        state.wastage = tj.state.wastage||[];
-        state.dispatchRecs = tj.state.dispatchRecs||[];
+        state.wastage = (tj.state.wastage||[]).map(normWastage);
+        state.dispatchRecs = (tj.state.dispatchRecs||[]).map(normDispatchRec);
         state.alerts = tj.state.alerts||[];
         gotAny = true;
       }
@@ -1405,6 +1431,10 @@ function autoGenerateOrangeLabel(label, batch){
   };
   state.labels.push(orangeLabel);
   saveLocal();
+  // Push orange label to server so it survives browser clear
+  const labelForServer = {...orangeLabel, isOrange:1, isPartial:0, printed:0, voided:0, isExcess:0};
+  trkQueuePush('/api/tracking/state',{labels:[labelForServer],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+  pushToServer('/api/tracking/state',{labels:[labelForServer],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
 }
 
 function parseScanInput(raw){
@@ -1576,6 +1606,10 @@ function regeneratePartialLabel(labelId, newQty){
   newLabel.qrData = generateQRData(newLabel);
   state.labels.push(newLabel);
   saveLocal();
+  // Push regenerated label to server so it survives browser clear
+  const labelForServer = {...newLabel, isPartial:1, isOrange:newLabel.isOrange?1:0, printed:0, voided:0, isExcess:newLabel.isExcess?1:0};
+  trkQueuePush('/api/tracking/state',{labels:[labelForServer],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+  pushToServer('/api/tracking/state',{labels:[labelForServer],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
   return newLabel;
 }
 
@@ -1801,15 +1835,21 @@ function printLabel(labelId){
   if(!label) return;
   const batch = getBatch(label.batchNumber);
   const zpl = generateZPL(label,batch);
-  // Try to send to local printer bridge or download as file
+  // Helper: sync printed status to server
+  function syncPrinted(){
+    saveLocal();
+    const lfs={...label, isPartial:label.isPartial?1:0, isOrange:label.isOrange?1:0, printed:1, voided:label.voided?1:0, isExcess:label.isExcess?1:0};
+    trkQueuePush('/api/tracking/state',{labels:[lfs],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+    pushToServer('/api/tracking/state',{labels:[lfs],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+  }
   const printerUrl = localStorage.getItem('sunloc_printer_url');
   if(printerUrl){
     fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
-      .then(r=>{ if(r.ok){ label.printed=true; label.printedAt=now(); saveLocal(); renderPage(currentPage); } })
+      .then(r=>{ if(r.ok){ label.printed=true; label.printedAt=now(); syncPrinted(); renderPage(currentPage); } })
       .catch(()=>downloadZPL(zpl,label));
   } else {
     downloadZPL(zpl,label);
-    label.printed=true; label.printedAt=now(); saveLocal();
+    label.printed=true; label.printedAt=now(); syncPrinted();
   }
 }
 
@@ -1825,37 +1865,39 @@ function printBatchLabels(batchNo){
   const labels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.printed&&!l.voided&&!l.isOrange);
   if(!labels.length){alert('No unprinted labels for this batch.');return;}
   const batch = getBatch(batchNo);
-  // Concatenate all ZPL — each ^XA...^XZ is one label, printer handles sequence
   const zpl = labels.map(l=>generateZPL(l,batch)).join('\n');
+  // Helper: mark all labels printed and sync to server
+  function markAndSync(){
+    labels.forEach(l=>{l.printed=true;l.printedAt=now();});
+    saveLocal();
+    // Push all printed labels to server so printed status survives browser clear
+    const labelsForServer = labels.map(l=>({...l,
+      isPartial:l.isPartial?1:0, isOrange:l.isOrange?1:0,
+      printed:1, voided:l.voided?1:0, isExcess:l.isExcess?1:0
+    }));
+    trkQueuePush('/api/tracking/state',{labels:labelsForServer,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+    pushToServer('/api/tracking/state',{labels:labelsForServer,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+  }
   const printerUrl = localStorage.getItem('sunloc_printer_url');
   if(printerUrl){
-    // Send to printer bridge (same as individual label)
     fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
       .then(r=>{
+        markAndSync();
+        renderPage(currentPage);
         if(r.ok){
-          labels.forEach(l=>{l.printed=true;l.printedAt=now();});
-          saveLocal();
-          renderPage(currentPage);
           toast(`✅ ${labels.length} labels sent to printer`,'var(--green)');
         } else {
-          // Printer returned error — fall back to download
           downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
-          labels.forEach(l=>{l.printed=true;l.printedAt=now();});
-          saveLocal();
         }
       })
       .catch(()=>{
-        // Printer not reachable — download as file
         downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
-        labels.forEach(l=>{l.printed=true;l.printedAt=now();});
-        saveLocal();
+        markAndSync();
         renderPage(currentPage);
       });
   } else {
-    // No printer configured — download ZPL file
     downloadZPL(zpl,{batchNumber:batchNo,labelNumber:'ALL'});
-    labels.forEach(l=>{l.printed=true;l.printedAt=now();});
-    saveLocal();
+    markAndSync();
     renderPage(currentPage);
   }
 }
@@ -4803,6 +4845,22 @@ setInterval(async ()=>{
         const sLabelIds = new Set(sLabels.map(l=>l.id));
         const localLabels = state.labels.filter(l=>!sLabelIds.has(l.id));
         state.labels = [...sLabels, ...localLabels];
+      }
+      // Also update wastage from server (normalized)
+      if(snap.tracking.wastage && snap.tracking.wastage.length > 0){
+        state.wastage = snap.tracking.wastage.map(normWastage);
+      }
+      // Update dispatchRecs from server (normalized)
+      if(snap.tracking.dispatchRecs && snap.tracking.dispatchRecs.length > 0){
+        state.dispatchRecs = snap.tracking.dispatchRecs.map(normDispatchRec);
+      }
+      // Update stage closure from server
+      if(snap.tracking.stageClosure && snap.tracking.stageClosure.length > 0){
+        state.stageClosure = (snap.tracking.stageClosure||[]).map(s=>({
+          id:s.id, batchNumber:s.batch_number||s.batchNumber,
+          dept:s.dept, closed:!!s.closed,
+          closedAt:s.closed_at||s.closedAt, closedBy:s.closed_by||s.closedBy||null
+        }));
       }
       // Save merged state locally
       try{ localStorage.setItem('sunloc_tracking', JSON.stringify({

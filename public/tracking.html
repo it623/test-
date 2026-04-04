@@ -820,7 +820,7 @@ function doLogin(){
         signal: AbortSignal.timeout(3000)
       }).then(r=>r.json()).then(j=>{
         if(j.ok) {
-          sessionStorage.setItem('trk_token', j.token);
+          localStorage.setItem('trk_session', JSON.stringify({dept: currentDept, token: j.token}));
           trkAuditLog('LOGIN', `Dept: ${currentDept}`);
         }
       }).catch(()=>{});
@@ -837,6 +837,7 @@ document.getElementById('login-pin').addEventListener('keydown',e=>{ if(e.key===
 function doLogout(){
   currentDept = null;
   currentPage = null;
+  localStorage.removeItem('trk_session'); // clear persisted session
   document.getElementById('app').style.display='none';
   document.getElementById('login-page').style.display='flex';
   document.getElementById('login-err').classList.add('hidden');
@@ -4978,7 +4979,7 @@ window.addEventListener('storage', (e) => {
 // ══════════════════════════════════════════════════════
 async function trkAuditLog(action, details) {
   if (!serverUrl || !currentDept) return;
-  const token = sessionStorage.getItem('trk_token');
+  const token = JSON.parse(localStorage.getItem('trk_session')||'{}').token;
   if (!token) return;
   try {
     await fetch(serverUrl + '/api/audit/log', {
@@ -4997,7 +4998,7 @@ async function renderTrackingAuditLog() {
   const el = document.getElementById('page-settings');
   if (!el || currentDept !== 'admin') return;
 
-  const token = sessionStorage.getItem('trk_token');
+  const token = JSON.parse(localStorage.getItem('trk_session')||'{}').token;
   if (!serverUrl || !token) {
     el.innerHTML += '<div style="margin-top:16px;color:var(--text3)">Audit log requires server connection and admin login.</div>';
     return;
@@ -5093,6 +5094,20 @@ function autoFocusScanInput(dept, type) {
     }, 1000);
   }
 }
+
+// ── Restore session from localStorage on page refresh ──────────
+(function restoreSession(){
+  try {
+    const saved = localStorage.getItem('trk_session');
+    if (!saved) return;
+    const sess = JSON.parse(saved);
+    if (!sess || !sess.dept || !DEPT_INFO[sess.dept]) return;
+    currentDept = sess.dept;
+    initApp();
+  } catch(e) {
+    localStorage.removeItem('trk_session');
+  }
+})();
 
 window.addEventListener('load', () => {
   const dept = 'pi';

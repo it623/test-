@@ -3618,7 +3618,7 @@ async function doDprLogin() {
   }
 
   if (authOk) {
-    sessionStorage.setItem('dpr_session', JSON.stringify(dprUser));
+    localStorage.setItem('dpr_session', JSON.stringify(dprUser));
     applyDprRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     addDprUserBadge();
@@ -3719,7 +3719,7 @@ async function doDprLogout() {
   if (serverUrl && dprUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:dprUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
-  sessionStorage.removeItem('dpr_session');
+  localStorage.removeItem('dpr_session');
   dprUser = null;
   document.getElementById('dpr-user-badge')?.remove();
   document.getElementById('auth-pin').value = '';
@@ -3803,7 +3803,7 @@ function showDprAuditPage() {
 
 // On init — check saved session
 (function initDprAuth() {
-  const saved = sessionStorage.getItem('dpr_session');
+  const saved = localStorage.getItem('dpr_session');
   if (saved) {
     try {
       dprUser = JSON.parse(saved);

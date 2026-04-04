@@ -5868,7 +5868,7 @@ async function doLogin() {
     const j = await r.json();
     if (!j.ok) { errEl.textContent = j.error || 'Invalid PIN'; return; }
     currentUser = { username: j.username, role: j.role, token: j.token };
-    sessionStorage.setItem('plan_session', JSON.stringify(currentUser));
+    localStorage.setItem('plan_session', JSON.stringify(currentUser));
     applyRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
@@ -5983,7 +5983,7 @@ async function doLogout() {
   if (serverUrl && currentUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:currentUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
-  sessionStorage.removeItem('plan_session');
+  localStorage.removeItem('plan_session');
   currentUser = null;
   document.getElementById('user-badge-wrap')?.remove();
   document.getElementById('auth-pin').value = '';
@@ -6070,7 +6070,7 @@ function closePlanSidebar() {
 
 // ── On page init — check for saved session ──
 (function initAuth() {
-  const saved = sessionStorage.getItem('plan_session');
+  const saved = localStorage.getItem('plan_session');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);

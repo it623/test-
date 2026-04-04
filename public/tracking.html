@@ -2177,6 +2177,7 @@ function renderLabels(){
     <div class="tbl-wrap"><table id="label-status-table">
       <thead><tr>
         <th onclick="sortLabelTable('batch')" style="cursor:pointer">Batch ↕</th>
+        <th>Colour</th>
         <th onclick="sortLabelTable('customer')" style="cursor:pointer">Customer ↕</th>
         <th>Size</th>
         <th>Gross Qty</th>
@@ -2254,6 +2255,7 @@ function buildLabelRows(batches){
       data-remaining="${remaining}"
       data-maxlabels="${maxLabels}">
       <td class="td-bold td-mono">${b.batchNumber}</td>
+      <td class="text-sm" style="white-space:nowrap">${b.colour||'-'}</td>
       <td>${b.customer||'-'}</td>
       <td class="td-mono">${b.size} (${ps}L/box)</td>
       <td class="td-mono">${fmt(b.grossQty||b.qty)}L</td>
@@ -2270,7 +2272,7 @@ function buildLabelRows(batches){
         </div>
       </td>
     </tr>`;
-  }).join('')||'<tr><td colspan="10" class="text-center text-muted">No active batches from Planning App</td></tr>';
+  }).join('')||'<tr><td colspan="11" class="text-center text-muted">No active batches from Planning App</td></tr>';
 }
 
 let _labelSortCol='', _labelSortDir=1;

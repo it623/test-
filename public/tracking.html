@@ -2152,7 +2152,7 @@ function renderLabels(){
   }
 
   // Save search value before re-render
-  const _savedSearch = document.getElementById('label-search')?.value || '';
+  const _savedSearch = document.getElementById('lf-batch')?.value || '';
 
   el.innerHTML=`
   <div class="section-header">
@@ -2161,73 +2161,45 @@ function renderLabels(){
   </div>
   <div class="alert alert-info">Labels are capped by: (1) daily machine target in boxes, (2) total gross quantity planned. Gross qty amendments in Planning App automatically unlock additional labels.</div>
 
-  <!-- ── FILTER BAR ── -->
-  <div style="margin-bottom:12px;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r-sm);padding:10px 12px">
-    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-      <!-- Search -->
-      <div style="position:relative;flex:1;min-width:160px">
-        <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:12px">🔍</span>
-        <input type="text" id="label-search" placeholder="Search batch, customer..."
-          style="width:100%;padding:6px 8px 6px 28px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;outline:none"
-          oninput="filterLabelTable()">
-      </div>
-      <!-- MC filter -->
-      <select id="lf-mc" onchange="filterLabelTable()"
-        style="padding:6px 8px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;cursor:pointer">
-        <option value="">All MC</option>
-        ${[...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort((a,b)=>{const na=parseInt(a.replace(/\D/g,''))||0,nb=parseInt(b.replace(/\D/g,''))||0;return na-nb;}).map(m=>`<option value="${m.toLowerCase()}">${m}</option>`).join('')}
-      </select>
-      <!-- Size filter -->
-      <select id="lf-size" onchange="filterLabelTable()"
-        style="padding:6px 8px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;cursor:pointer">
-        <option value="">All Sizes</option>
-        ${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">Size ${s}</option>`).join('')}
-      </select>
-      <!-- Customer filter -->
-      <select id="lf-customer" onchange="filterLabelTable()"
-        style="padding:6px 8px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;cursor:pointer;max-width:160px">
-        <option value="">All Customers</option>
-        ${[...new Set(allBatches.map(b=>b.customer).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}
-      </select>
-      <!-- Colour filter -->
-      <select id="lf-colour" onchange="filterLabelTable()"
-        style="padding:6px 8px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;cursor:pointer;max-width:140px">
-        <option value="">All Colours</option>
-        ${[...new Set(allBatches.map(b=>b.colour).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}
-      </select>
-      <!-- Status filter -->
-      <select id="lf-status" onchange="filterLabelTable()"
-        style="padding:6px 8px;border:1px solid var(--border2);border-radius:4px;background:var(--surface);color:var(--text);font-size:12px;cursor:pointer">
-        <option value="">All Status</option>
-        <option value="no-labels">No Labels</option>
-        <option value="partial">Partial</option>
-        <option value="complete">Complete</option>
-        <option value="has-remaining">Has Remaining</option>
-        <option value="unprinted">Has Unprinted</option>
-      </select>
-      <!-- Clear -->
-      <button class="btn btn-sm btn-secondary" onclick="clearLabelFilters()" style="padding:6px 10px">✕ Clear</button>
-      <span id="label-result-count" style="font-size:12px;color:var(--text3);white-space:nowrap;margin-left:4px"></span>
-    </div>
+  <!-- result count -->
+  <div style="margin-bottom:6px;display:flex;justify-content:space-between;align-items:center">
+    <span id="label-result-count" style="font-size:12px;color:var(--text3)"></span>
+    <button class="btn btn-sm btn-secondary" onclick="clearLabelFilters()" style="padding:4px 10px;font-size:11px">✕ Clear Filters</button>
   </div>
 
   <div class="card">
     <div class="card-title">Active Batches — Label Status</div>
     <div class="tbl-wrap"><table id="label-status-table">
-      <thead><tr>
-        <th onclick="sortLabelTable('batch')" style="cursor:pointer">Batch ↕</th>
-        <th>MC No</th>
-        <th>Colour</th>
-        <th onclick="sortLabelTable('customer')" style="cursor:pointer">Customer ↕</th>
-        <th>Size</th>
-        <th>Gross Qty</th>
-        <th>Max Labels</th>
-        <th>Generated</th>
-        <th>Printed</th>
-        <th onclick="sortLabelTable('remaining')" style="cursor:pointer">Remaining ↕</th>
-        <th>Daily Cap</th>
-        <th>Actions</th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th onclick="sortLabelTable('batch')" style="cursor:pointer">Batch ↕</th>
+          <th>MC No</th>
+          <th>Colour</th>
+          <th onclick="sortLabelTable('customer')" style="cursor:pointer">Customer ↕</th>
+          <th>Size</th>
+          <th>Gross Qty</th>
+          <th>Max Labels</th>
+          <th>Generated</th>
+          <th>Printed</th>
+          <th onclick="sortLabelTable('remaining')" style="cursor:pointer">Remaining ↕</th>
+          <th>Daily Cap</th>
+          <th>Actions</th>
+        </tr>
+        <tr style="background:var(--surface2)">
+          <td><input type="text" id="lf-batch" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Batch..." oninput="filterLabelTable()"></td>
+          <td><select id="lf-mc" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort((a,b)=>{const na=parseInt(a.replace(/\D/g,''))||0,nb=parseInt(b.replace(/\D/g,''))||0;return na-nb;}).map(m=>`<option value="${m.toLowerCase()}">${m}</option>`).join('')}</select></td>
+          <td><select id="lf-colour" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.colour).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}</select></td>
+          <td><input type="text" id="lf-customer" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Customer..." oninput="filterLabelTable()"></td>
+          <td><select id="lf-size" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td>
+          <td></td>
+          <td></td>
+          <td><select id="lf-status" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option><option value="no-labels">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      </thead>
       <tbody id="label-table-body">
       ${buildLabelRows(allBatches)}
       </tbody>
@@ -2236,7 +2208,7 @@ function renderLabels(){
 
   // Restore search value after re-render and apply filter
   if(_savedSearch){
-    const si = document.getElementById('label-search');
+    const si = document.getElementById('lf-batch');
     if(si){ si.value = _savedSearch; filterLabelTable(); }
   } else {
     updateLabelCount(allBatches.length);
@@ -2327,11 +2299,11 @@ function sortLabelTable(col){
 }
 
 function filterLabelTable(){
-  const search=(document.getElementById('label-search')?.value||'').toLowerCase().trim();
+  const fBatch=(document.getElementById('lf-batch')?.value||'').toLowerCase().trim();
   const fMc=(document.getElementById('lf-mc')?.value||'').toLowerCase();
-  const fSize=document.getElementById('lf-size')?.value||'';
-  const fCustomer=(document.getElementById('lf-customer')?.value||'').toLowerCase();
   const fColour=(document.getElementById('lf-colour')?.value||'').toLowerCase();
+  const fCustomer=(document.getElementById('lf-customer')?.value||'').toLowerCase().trim();
+  const fSize=document.getElementById('lf-size')?.value||'';
   const fStatus=document.getElementById('lf-status')?.value||'';
 
   const rows=document.querySelectorAll('#label-table-body tr[data-batch]');
@@ -2347,11 +2319,11 @@ function filterLabelTable(){
     const remaining=parseInt(row.dataset.remaining||0);
     const maxLabels=parseInt(row.dataset.maxlabels||0);
 
-    const matchSearch=!search||(batch.includes(search)||customer.includes(search)||mc.includes(search)||colour.includes(search));
+    const matchBatch=!fBatch||batch.includes(fBatch);
     const matchMc=!fMc||mc===fMc;
-    const matchSize=!fSize||size===fSize;
-    const matchCustomer=!fCustomer||customer===fCustomer;
     const matchColour=!fColour||colour.includes(fColour);
+    const matchCustomer=!fCustomer||customer.includes(fCustomer);
+    const matchSize=!fSize||size===fSize;
 
     let matchStatus=true;
     if(fStatus==='no-labels') matchStatus=generated===0;
@@ -2360,7 +2332,7 @@ function filterLabelTable(){
     else if(fStatus==='has-remaining') matchStatus=remaining>0;
     else if(fStatus==='unprinted') matchStatus=printed<generated;
 
-    const show=matchSearch&&matchMc&&matchSize&&matchCustomer&&matchColour&&matchStatus;
+    const show=matchBatch&&matchMc&&matchColour&&matchCustomer&&matchSize&&matchStatus;
     row.style.display=show?'':'none';
     if(show) visible++;
   });
@@ -2381,7 +2353,7 @@ function updateLabelCount(visible, total){
 }
 
 function clearLabelFilters(){
-  ['label-search','lf-mc','lf-size','lf-customer','lf-colour','lf-status'].forEach(id=>{
+  ['lf-batch','lf-mc','lf-colour','lf-customer','lf-size','lf-status'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.value='';
   });

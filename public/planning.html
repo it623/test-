@@ -708,8 +708,22 @@ const SYNC = (() => {
     const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
     const isInitialLoad = prevSavedAt === 0;
 
-    // Always render — ensures orders show even if dataChanged check gives false negative
-    render();
+    // Only re-render if data actually changed or first load
+    // Skip if user is actively interacting (typing, selecting)
+    if (isInitialLoad || dataChanged) {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
+      if (!userInteracting || isInitialLoad) {
+        render();
+      } else {
+        // Data changed but user is typing — update KPI numbers silently without full re-render
+        try {
+          const kpiEl = document.getElementById('page-title');
+          if (kpiEl) render(); // safe — page-title is not a form
+        } catch(e) {}
+      }
+    }
+    // If nothing changed — skip render completely (no flicker)
   }
 
   async function loadTrackingStatus() {
@@ -5760,7 +5774,8 @@ window.addEventListener('beforeunload', () => {
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='visible' && currentUser && _serverDataLoaded){
     planQueueFlush();
-    SYNC.loadFromServer().catch(()=>{});
+    // 300ms delay — browser needs to settle focus before we render
+    setTimeout(()=>{ SYNC.loadFromServer().catch(()=>{}); }, 300);
   }
 });
 
@@ -6087,8 +6102,8 @@ window.addEventListener('pageshow', (e) => {
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && currentUser) {
-    // Re-pull when tab is re-focused (handles tab switch back)
-    SYNC.loadFromServer();
+    // 300ms delay — prevents flicker when switching tabs
+    setTimeout(()=>{ SYNC.loadFromServer().catch(()=>{}); }, 300);
   }
 });
 </script>

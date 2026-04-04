@@ -1533,8 +1533,11 @@ async function renderEntry(){
   const fl=curFloor, d=getDate();
 
   // Step 1 — show loading spinner IMMEDIATELY (sync, no await needed)
+  // But only if user is NOT currently typing — never interrupt active input
+  const activeTagRE = document.activeElement?.tagName?.toLowerCase();
+  const userTypingRE = activeTagRE === 'input' || activeTagRE === 'select' || activeTagRE === 'textarea';
   const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && serverUrl){
+  if(shiftsArea && serverUrl && !userTypingRE){
     shiftsArea.innerHTML = '<div style="padding:24px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px;text-align:center">⟳ Loading from server...</div>';
   }
 
@@ -1567,8 +1570,13 @@ async function renderEntry(){
 async function safeRenderShifts(){
   const fl=curFloor, d=getDate();
 
-  // Snapshot any unsaved DOM input first
-  if(unsaved){
+  // Never re-render if user is actively typing in a form field
+  const activeTag = document.activeElement?.tagName?.toLowerCase();
+  const activeId = document.activeElement?.id || '';
+  const userTyping = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
+
+  // Snapshot any unsaved DOM input first (before any server fetch overwrites localStorage)
+  if(unsaved && userTyping){
     const shiftsArea = document.getElementById('shiftsArea');
     if(shiftsArea && shiftsArea.querySelector('.run-row')){
       try{
@@ -1576,6 +1584,9 @@ async function safeRenderShifts(){
         localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
       }catch(e){}
     }
+    // User is actively typing — skip re-render completely to avoid disruption
+    // The data is already snapshotted — it will be picked up on next save
+    return;
   }
 
   // Fetch from server if no unsaved changes
@@ -1591,10 +1602,16 @@ async function safeRenderShifts(){
     }catch(e){}
   }
 
-  renderShifts();
-  renderDTTable();
-  renderDTSummary();
-  renderDayKpis();
+  // Only re-render if not interacting
+  if(!userTyping){
+    renderShifts();
+    renderDTTable();
+    renderDTSummary();
+    renderDayKpis();
+  } else {
+    // User started typing since we began — just update KPIs silently
+    renderDayKpis();
+  }
 }
 
 function renderDayKpis(){
@@ -2882,7 +2899,7 @@ async function fetchDpr(fl, d){
         // Background fetch for different floor/date — server always wins
         localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
       }
-      if(isCurrentView) safeRenderShifts();
+      if(isCurrentView && !document.activeElement?.tagName?.match(/^(input|select|textarea)$/i)) safeRenderShifts();
     } else if(j.ok && !j.data){
       // Server has no data for this floor+date
       // NEVER delete localStorage — user may have just saved and server fetch ran before write completed

@@ -1116,7 +1116,14 @@ async function pullFromServer(){
         saveLocal();
         setSyncBadge('synced');
         try{ sunlocChannel.postMessage({type:'TRACKING_SYNCED',ts:Date.now()}); }catch(e){}
-        if(currentPage) renderPage(currentPage);
+        // Only re-render if user is not actively scanning/typing
+        if(currentPage) {
+          const activeTag = document.activeElement?.tagName?.toLowerCase();
+          const scanInputFocused = document.activeElement?.classList?.contains('scan-input');
+          const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea' || scanInputFocused;
+          if(!userInteracting) renderPage(currentPage);
+          else updateCountersOnly(); // update numbers silently without full re-render
+        }
         return;
       }
     }
@@ -1159,7 +1166,13 @@ async function pullFromServer(){
   if(gotAny){
     saveLocal();
     setSyncBadge('synced');
-    if(currentPage) renderPage(currentPage);
+    if(currentPage) {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const scanInputFocused = document.activeElement?.classList?.contains('scan-input');
+      const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea' || scanInputFocused;
+      if(!userInteracting) renderPage(currentPage);
+      else updateCountersOnly();
+    }
   } else {
     setSyncBadge('offline');
   }
@@ -4817,6 +4830,67 @@ window.addEventListener('beforeunload', () => {
   } catch(e) {}
 });
 
+// ── SILENT COUNTER UPDATE — updates numbers without full re-render ──────────
+// Called during background sync when user is actively interacting (scanning/typing)
+// Updates: dashboard KPIs, batch tracker counts, label counts — NO DOM recreation
+function updateCountersOnly(){
+  try{
+    // Update sync badge
+    setSyncBadge('synced');
+
+    // If on dashboard — update KPI numbers in-place
+    if(currentPage === 'dashboard'){
+      const totalLabels = state.labels.filter(l=>!l.voided&&!l.isOrange).length;
+      const packed = state.scans.filter(s=>s.dept==='packing'&&s.type==='out').length;
+      const dispatched = state.scans.filter(s=>s.dept==='dispatch'&&s.type==='out').length;
+      const el1 = document.querySelector('.kpi-value[data-key="labels"]');
+      const el2 = document.querySelector('.kpi-value[data-key="packed"]');
+      const el3 = document.querySelector('.kpi-value[data-key="dispatched"]');
+      if(el1) el1.textContent = totalLabels;
+      if(el2) el2.textContent = packed;
+      if(el3) el3.textContent = dispatched;
+    }
+
+    // If on a scan page — update recent scans list without touching scan inputs
+    if(['aim','printing','pi','packing','dispatch'].includes(currentPage)){
+      const recentEl = document.getElementById('recent-scans-'+currentPage);
+      if(recentEl){
+        const deptScans = [...state.scans].filter(s=>s.dept===currentPage)
+          .sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5);
+        if(deptScans.length){
+          recentEl.innerHTML = deptScans.map(s=>{
+            const lbl=state.labels.find(l=>l.id===s.labelId);
+            const timeStr=new Date(s.ts).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+            return `<div style="display:flex;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--border);font-size:13px">
+              <span style="font-weight:700;font-family:monospace">${s.batchNumber}/${lbl?.labelNumber||'?'}</span>
+              <span style="color:${s.type==='in'?'#2196f3':'#00c853'};font-weight:600">${s.type.toUpperCase()}</span>
+              <span style="color:var(--text3);font-size:11px">${timeStr}</span>
+            </div>`;
+          }).join('');
+        }
+      }
+    }
+
+    // If on labels page — update generated/remaining counts in label rows
+    if(currentPage === 'labels'){
+      document.querySelectorAll('#label-table-body tr[data-batch]').forEach(row=>{
+        const batchNo = row.dataset.batch?.toUpperCase();
+        if(!batchNo) return;
+        const generated = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange).length;
+        const printed = state.labels.filter(l=>l.batchNumber===batchNo&&l.printed&&!l.voided&&!l.isOrange).length;
+        const maxLabels = parseInt(row.dataset.maxlabels||0);
+        const remaining = Math.max(0, maxLabels - generated);
+        // Update data attributes and visible cells without rebuilding the row
+        row.dataset.generated = generated;
+        row.dataset.printed = printed;
+        row.dataset.remaining = remaining;
+        const genCell = row.querySelector('.mono.fw-bold');
+        if(genCell) genCell.textContent = generated;
+      });
+    }
+  }catch(e){} // silent — never break user interaction
+}
+
 // Auto sync every 10 seconds — ensures cross-device scan visibility
 setInterval(async ()=>{
   if(!serverUrl || !currentDept) return;
@@ -4874,8 +4948,12 @@ setInterval(async ()=>{
       const activeTag = document.activeElement?.tagName?.toLowerCase();
       const userInteracting = activeTag === 'select' || activeTag === 'input' || activeTag === 'textarea';
       const dataChanged = state.scans.length !== prevCount || prevCount === 0 || state.labels.length !== prevLabelCount || prevLabelCount === 0;
-      if(dataChanged && currentPage && !userInteracting){
-        renderPage(currentPage);
+      if(dataChanged && currentPage){
+        if(!userInteracting){
+          renderPage(currentPage); // full re-render only if not interacting
+        } else {
+          updateCountersOnly(); // update numbers only — no screen flicker
+        }
       }
     }
   }catch(e){ setSyncBadge('offline'); }

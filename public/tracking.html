@@ -1014,7 +1014,10 @@ async function pullFromServer(){
   // Before pulling — push any local labels not yet on server
   // This auto-saves labels generated offline or before server was available
   if(state.labels.length > 0){
-    const labelsToSync = state.labels.filter(l=>!l.isOrange);
+    const labelsToSync = state.labels.filter(l=>!l.isOrange).map(l=>({...l,
+      isPartial:l.isPartial?1:0, isOrange:l.isOrange?1:0,
+      printed:l.printed?1:0, voided:l.voided?1:0, isExcess:l.isExcess?1:0
+    }));
     if(labelsToSync.length > 0){
       fetch(serverUrl+'/api/tracking/state',{
         method:'POST',
@@ -1524,12 +1527,16 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
 
   state.labels.push(...newLabels);
   saveLocal();
-  // Push new labels to server immediately
+  // Push new labels to server immediately — convert booleans to integers for PostgreSQL
+  const newLabelsForServer = newLabels.map(l=>({...l,
+    isPartial:l.isPartial?1:0, isOrange:l.isOrange?1:0,
+    printed:l.printed?1:0, voided:l.voided?1:0, isExcess:l.isExcess?1:0
+  }));
   if(serverUrl){
     fetch(serverUrl+'/api/tracking/state',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({labels:newLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+      body:JSON.stringify({labels:newLabelsForServer,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
       signal:AbortSignal.timeout(10000)
     }).then(r=>r.json()).then(j=>{
       if(j.ok){
@@ -2439,26 +2446,38 @@ function confirmQtyEdit(labelId, batchNo){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label){ alert('Label not found'); return; }
   const oldQty = label.qty;
-  label.qty = newQty;
+  // Store as string with 2 decimal places — matches how labels are generated
+  label.qty = newQty.toFixed(2);
   label.qtyEditReason = reason;
   label.qtyEditAt = now();
   label.qtyEditBy = currentDept;
   saveLocal();
+  // Build clean label object for server — ensure booleans are 0/1
+  const labelForServer = {
+    ...label,
+    isPartial: label.isPartial?1:0,
+    isOrange:  label.isOrange?1:0,
+    printed:   label.printed?1:0,
+    voided:    label.voided?1:0,
+    isExcess:  label.isExcess?1:0,
+  };
   if(serverUrl){
     fetch(serverUrl+'/api/tracking/state',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({labels:[label],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+      body:JSON.stringify({labels:[labelForServer],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
       signal:AbortSignal.timeout(8000)
     }).then(r=>r.json()).then(j=>{
       if(j.ok){
         toast('Qty updated: '+oldQty+'L to '+newQty+'L','var(--green)');
         renderPage('labels'); closeModal(); viewBatchLabels(batchNo);
       } else {
-        toast('Save failed','var(--red)');
+        console.error('[QtyEdit] Server error:', j);
+        toast('Save failed: '+(j.error||'unknown'),'var(--red)');
         label.qty=oldQty; saveLocal(); closeModal(); viewBatchLabels(batchNo);
       }
-    }).catch(()=>{
+    }).catch(e=>{
+      console.error('[QtyEdit] Network error:', e.message);
       toast('Network error','var(--red)');
       label.qty=oldQty; saveLocal(); closeModal(); viewBatchLabels(batchNo);
     });
@@ -2480,7 +2499,7 @@ function openRegenPartial(labelId){
 function openDamagedReprint(labelId){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label) return;
-  openModal('🔄 Damaged Label Reprint Request', `
+  openModal('🔄 Damaged Label Reprint Request', 'Void original and generate replacement label', `
     <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;padding:12px;margin-bottom:14px">
       <div style="font-size:12px;color:var(--text3);margin-bottom:6px">LABEL BEING REPLACED</div>
       <div style="font-family:var(--mono);font-size:13px">Label #${label.labelNumber} — Batch ${label.batchNumber}</div>

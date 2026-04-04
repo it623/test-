@@ -2416,6 +2416,22 @@ function viewBatchLabels(batchNo){
   `,[{label:'Close',cls:'btn-secondary',fn:'closeModal()'}]);
 }
 
+// Simple toast notification for tracking app
+function toast(msg, color){
+  let t = document.getElementById('trk-toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'trk-toast';
+    t.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;transition:opacity 0.3s;box-shadow:0 4px 12px rgba(0,0,0,0.3);color:#fff';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.background = color||'#16a34a';
+  t.style.opacity = '1';
+  clearTimeout(t._t);
+  t._t = setTimeout(()=>{ t.style.opacity='0'; }, 2500);
+}
+
 function openQtyEdit(labelId, batchNo){
   const label = state.labels.find(l=>l.id===labelId);
   if(!label) return;

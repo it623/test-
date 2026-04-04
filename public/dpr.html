@@ -1471,33 +1471,75 @@ function removeStaffName(btn){
   markUnsaved();
 }
 
-// ── SAFE RENDER: always snapshot typed form data BEFORE re-rendering ──
-// Prevents background order/DPR sync from wiping unsaved user input
-function safeRenderShifts(){
-  // Only snapshot current form values if user has actually typed something
-  // NEVER snapshot blank form — it would overwrite real saved data in localStorage
-  const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && shiftsArea.querySelector('.run-row') && unsaved){
-    const fl=curFloor, d=getDate();
-    try{
-      const snapshot = collectForm();
-      localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
-    }catch(e){}
-  }
-  renderShifts();
-  // Also re-render DT table so downtime values show correctly after data fetch
-  renderDTTable();
-  renderDTSummary();
-  renderDayKpis();
-}
+// ── SERVER-FIRST renderEntry ─────────────────────────────────────
+// Shows loading spinner immediately (sync), then fetches server data, then renders.
+// Safe to call without await — spinner shows instantly regardless.
+async function renderEntry(){
+  const fl=curFloor, d=getDate();
 
-function renderEntry(){
+  // Step 1 — show loading spinner IMMEDIATELY (sync, no await needed)
+  const shiftsArea = document.getElementById('shiftsArea');
+  if(shiftsArea && serverUrl){
+    shiftsArea.innerHTML = '<div style="padding:24px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px;text-align:center">⟳ Loading from server...</div>';
+  }
+
+  // Step 2 — fetch latest data from server (async)
+  if(serverUrl){
+    try{
+      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(8000)});
+      if(r.ok){
+        const j = await r.json();
+        if(j.ok && j.data){
+          // Server data always wins — write to localStorage as cache
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        }
+        // If j.data is null = no record on server yet — localStorage stays as-is (may be blank)
+      }
+    }catch(e){ /* offline — fall through to render from localStorage cache */ }
+  }
+
+  // Step 3 — render from localStorage (has fresh server data if fetch succeeded)
   renderDayKpis();
   renderShifts();
   renderDTTable();
   renderDTSummary();
   renderRemarks();
   renderResort();
+}
+
+// ── Sync-only render: fetch server data then re-render (used by auto-refresh) ──
+// Skips re-render if user has unsaved changes to avoid disrupting typing
+async function safeRenderShifts(){
+  const fl=curFloor, d=getDate();
+
+  // Snapshot any unsaved DOM input first
+  if(unsaved){
+    const shiftsArea = document.getElementById('shiftsArea');
+    if(shiftsArea && shiftsArea.querySelector('.run-row')){
+      try{
+        const snapshot = collectForm();
+        localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
+      }catch(e){}
+    }
+  }
+
+  // Fetch from server if no unsaved changes
+  if(serverUrl && !unsaved){
+    try{
+      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(6000)});
+      if(r.ok){
+        const j = await r.json();
+        if(j.ok && j.data){
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        }
+      }
+    }catch(e){}
+  }
+
+  renderShifts();
+  renderDTTable();
+  renderDTSummary();
+  renderDayKpis();
 }
 
 function renderDayKpis(){
@@ -2686,15 +2728,10 @@ function loadRecord(fl, d){
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
   document.getElementById(`ftab-${fl}`)?.classList.add('on');
   go('entry');
-  // Always fetch from server — ensures any device sees saved data for this date
   updateSaveBtnStyle(d);
-  if(serverUrl){
-    const shiftsArea = document.getElementById('shiftsArea');
-    if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
-    fetchDpr(fl, d);
-  } else {
-    renderEntry();
-  }
+  const shiftsArea = document.getElementById('shiftsArea');
+  if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
+  renderEntry();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2745,8 +2782,10 @@ function setFloor(fl){
   curFloor=fl;
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
   document.getElementById('ftab-'+fl)?.classList.add('on');
-  renderEntry(); // Render immediately from localStorage
-  fetchDpr(fl, getDate()); // Then silently sync from server
+  // Show loading then fetch from server
+  const shiftsArea = document.getElementById('shiftsArea');
+  if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data from server...</div>';
+  renderEntry();
 }
 
 // ── Fetch DPR data for a floor+date from server, merge into localStorage, re-render ──
@@ -2817,18 +2856,10 @@ function deepMergeDpr(server, local){
 function onDateChange(){
   refreshRecentDates();
   const fl=curFloor, d=getDate();
-
-  // ── Save button — highlight based on date permission ───────────
   updateSaveBtnStyle(d);
-
-  if(serverUrl){
-    const shiftsArea = document.getElementById('shiftsArea');
-    if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
-    // Fetch DPR data from server for this date — works on any device
-    fetchDpr(fl, d);
-  } else {
-    renderEntry();
-  }
+  const shiftsArea = document.getElementById('shiftsArea');
+  if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
+  renderEntry();
 }
 
 // ── Update Save button style based on whether this date is editable ──
@@ -3391,44 +3422,38 @@ refreshRecentDates();
 function postAuthServerInit() {
   checkServer().then(async ok=>{
     if(ok){
-      // Show loading indicator immediately
+      // Show loading immediately
       const shiftsArea = document.getElementById('shiftsArea');
       if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data from server...</div>';
 
-      // Fetch DPR data AND active orders at the same time
+      // Load active orders first (for batch dropdowns)
       try{
-        const [dprRes, ordRes] = await Promise.all([
-          fetch(serverUrl+'/api/dpr/'+curFloor+'/'+getDate(),{signal:AbortSignal.timeout(6000)}).then(r=>r.json()),
-          fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)}).then(r=>r.json())
-        ]);
-        // SERVER IS ALWAYS TRUTH — store DPR data from server
-        if(dprRes.ok && dprRes.data){
-          localStorage.setItem(skey(curFloor,getDate()), JSON.stringify(dprRes.data));
-        }
-        // Store active orders
-        if(ordRes.ok && ordRes.orders){
-          activeOrders={};
-          ordRes.orders.filter(o=>o.machineId).forEach(o=>{
-            if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
-            activeOrders[o.machineId].push(o);
-          });
-          localStorage.setItem('dpr_active_orders', JSON.stringify(activeOrders));
+        const r = await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
+        if(r.ok){
+          const j = await r.json();
+          if(j.ok && j.orders){
+            activeOrders={};
+            j.orders.filter(o=>o.machineId).forEach(o=>{
+              if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
+              activeOrders[o.machineId].push(o);
+            });
+            localStorage.setItem('dpr_active_orders', JSON.stringify(activeOrders));
+          }
         }
       }catch(e){
-        // Partial failure — use cached orders
         const cached=localStorage.getItem('dpr_active_orders');
         if(cached) try{activeOrders=JSON.parse(cached);}catch{}
       }
-      // Render with fresh server data
-      renderEntry();
+
+      // renderEntry fetches DPR data from server then renders — server is always truth
+      await renderEntry();
       setSyncBadge('synced');
-      // Run full fetchActiveOrders in background for TEMP batch logic
       setTimeout(()=>fetchActiveOrders().catch(()=>{}), 1000);
     } else {
-      // Offline — render from localStorage cache
+      // Offline — use localStorage cache
       const cached=localStorage.getItem('dpr_active_orders');
       if(cached) try{activeOrders=JSON.parse(cached);}catch{}
-      renderEntry();
+      await renderEntry();
       toast('⚠️ Server offline — showing cached data','var(--amber)');
     }
   });
@@ -3696,11 +3721,8 @@ function showDprAuditPage() {
 setInterval(async () => {
   if (dprUser) {
     try { await fetchActiveOrders(); } catch(e) {}
-    // Sync DPR data from server — but ONLY if user has no unsaved changes
-    // This prevents background fetch from overwriting data the user just typed
-    if (!unsaved) {
-      try { await fetchDpr(curFloor, getDate()); } catch(e) {}
-    }
+    // safeRenderShifts fetches from server then re-renders (skips if unsaved changes)
+    if(!unsaved) try { await safeRenderShifts(); } catch(e) {}
   }
 }, 30*1000);
 
@@ -3709,9 +3731,9 @@ document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='visible'){
     dprQueueFlush();
     if(dprUser) fetchActiveOrders().catch(()=>{});
-    // Only sync from server on tab focus if no unsaved changes
+    // Re-sync from server on tab focus if no unsaved changes
     if(dprUser && !unsaved){
-      fetchDpr(curFloor, getDate()).catch(()=>{});
+      safeRenderShifts().catch(()=>{});
     }
   }
 });

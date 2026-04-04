@@ -557,6 +557,12 @@ app.get('/api/dpr/dates/:floor', asyncRoute(async (req, res) => {
   res.json({ ok: true, dates: rows.map(r => r.date) });
 }));
 
+// GET DPR history — all saved floor+date records (used by History page on any device)
+app.get('/api/dpr/history', asyncRoute(async (req, res) => {
+  const rows = await queryAll('SELECT floor, date, saved_at FROM dpr_records ORDER BY date DESC, floor ASC');
+  res.json({ ok: true, records: rows.map(r => ({ floor: r.floor, date: r.date, savedAt: r.saved_at })) });
+}));
+
 // GET actuals for a machine
 app.get('/api/actuals/machine/:machineId', asyncRoute(async (req, res) => {
   const rows = await queryAll(

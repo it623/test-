@@ -5780,8 +5780,11 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 // Check TEMP batch alerts every 5 minutes
-setInterval(checkPlanningTempAlerts, 5*60*1000);
-setTimeout(checkPlanningTempAlerts, 2000);
+// ── TEMP batch alert: show for 1 min every 2 hours ─────────────
+// Runs every 2 hours. When TEMP batches exist: shows banner for 60s then auto-hides.
+const TEMP_ALERT_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
+const TEMP_ALERT_VISIBLE  = 60 * 1000;           // 1 minute visible
+let _tempAlertTimer = null; // auto-hide timer
 
 async function checkPlanningTempAlerts(){
   const serverUrl = localStorage.getItem('sunloc_server_url')||'';
@@ -5800,16 +5803,30 @@ async function checkPlanningTempAlerts(){
     if(j.ok && j.count > 0){
       const machines = [...new Set(j.batches.map(b=>b.machine_id))];
       const maxDays = Math.max(...j.batches.map(b=>b.daysActive));
-      // Also count W/O orders
       const woCount = (state.orders||[]).filter(o=>o.woStatus==='wo'&&o.status!=='closed').length;
       const woText = woCount > 0 ? ` · ${woCount} W/O order${woCount>1?'s':''} awaiting customer` : '';
-      banner.style.display = 'flex';
       banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} unreconciled</strong>
         — Machines: ${machines.join(', ')} — Up to ${maxDays} day${maxDays>1?'s':''} without planned orders.${woText}
         <span style="color:var(--accent);margin-left:6px;text-decoration:underline">→ Go to Reconciliation</span>`;
+
+      // Show banner
+      banner.style.display = 'flex';
+
+      // Clear any previous auto-hide timer
+      if(_tempAlertTimer) clearTimeout(_tempAlertTimer);
+
+      // Auto-hide after 1 minute
+      _tempAlertTimer = setTimeout(() => {
+        if(banner) banner.style.display = 'none';
+        _tempAlertTimer = null;
+      }, TEMP_ALERT_VISIBLE);
+
     } else {
+      // No TEMP batches — always hide
       if(banner) banner.style.display = 'none';
+      if(_tempAlertTimer){ clearTimeout(_tempAlertTimer); _tempAlertTimer = null; }
     }
+    // Check pending reconciliation requests for admin badge
     if(currentUser && currentUser.role === 'admin'){
       try{
         const r2 = await fetch(serverUrl+'/api/reconciliation/pending',{headers:{'x-session-token':currentUser.token||''},signal:AbortSignal.timeout(4000)});
@@ -5822,6 +5839,11 @@ async function checkPlanningTempAlerts(){
     }
   }catch(e){}
 }
+
+// First check: 2 seconds after login (one-time notification)
+setTimeout(checkPlanningTempAlerts, 2000);
+// Then every 2 hours
+setInterval(checkPlanningTempAlerts, TEMP_ALERT_INTERVAL);
 
 // ══════════════════════════════════════════════════════
 // AUTH SYSTEM — Planning Suite

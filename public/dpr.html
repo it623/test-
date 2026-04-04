@@ -3869,11 +3869,19 @@ window.addEventListener('beforeunload', () => {
   } catch(e) {}
 });
 
-// ── TEMP Batch PC Code Prompt (one-time per TEMP batch) ────────
+// ── TEMP Batch PC Code Prompt — show once, remind every 2 hours ─
 const _tempPromptShown = new Set();
+const TEMP_PROMPT_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
 
 async function promptTempBatchDetails(tempBatchId, machineId) {
+  // Already shown this session
   if (_tempPromptShown.has(tempBatchId)) return;
+
+  // Check if dismissed recently (within 2 hours) — persisted across page refresh
+  const dismissKey = 'dpr_temp_dismissed_' + tempBatchId;
+  const lastDismissed = parseInt(localStorage.getItem(dismissKey) || '0');
+  if (Date.now() - lastDismissed < TEMP_PROMPT_INTERVAL) return;
+
   _tempPromptShown.add(tempBatchId);
   openModal('⚠️ TEMP Batch — Enter PC Code', `
     <div style="padding:4px 0">
@@ -3896,7 +3904,7 @@ async function promptTempBatchDetails(tempBatchId, machineId) {
     </div>
   `, [
     { label: 'Save', fn: 'saveTempBatchDetails(\'' + tempBatchId + '\')' },
-    { label: 'Skip', fn: 'closeModal()' }
+    { label: 'Skip', fn: 'localStorage.setItem(\'dpr_temp_dismissed_' + tempBatchId + '\',Date.now());closeModal()' }
   ]);
 }
 
@@ -3929,6 +3937,8 @@ async function saveTempBatchDetails(tempBatchId) {
           if (o.id === tempBatchId) { o.colour = colour; o.pcCode = pcCode; o.colourConfirmed = true; }
         });
       });
+      // Mark as permanently confirmed — never prompt again for this TEMP batch
+      localStorage.setItem('dpr_temp_dismissed_' + tempBatchId, Date.now() + (365 * 24 * 60 * 60 * 1000));
       closeModal();
       renderEntry();
       dprAuditLog('TEMP_DETAILS_SET', 'TEMP ' + tempBatchId + ': PC Code=' + pcCode + ', Colour=' + (colour||'—'));

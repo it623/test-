@@ -247,6 +247,13 @@ async function runMigrations() {
         );
         CREATE INDEX IF NOT EXISTS idx_backups_ts ON planning_state_backups(backed_up_at DESC);
       `},
+      { version: 8, name: 'dpr_settings', sql: `
+        CREATE TABLE IF NOT EXISTS dpr_settings (
+          key TEXT PRIMARY KEY,
+          value_json TEXT NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+      `},
     ];
 
     for (const m of migrations) {
@@ -561,6 +568,28 @@ app.get('/api/dpr/dates/:floor', asyncRoute(async (req, res) => {
 app.get('/api/dpr/history', asyncRoute(async (req, res) => {
   const rows = await queryAll('SELECT floor, date, saved_at FROM dpr_records ORDER BY date DESC, floor ASC');
   res.json({ ok: true, records: rows.map(r => ({ floor: r.floor, date: r.date, savedAt: r.saved_at })) });
+}));
+
+// GET DPR settings (machine config, targets, active machines) — persisted on server
+app.get('/api/dpr/settings', asyncRoute(async (req, res) => {
+  const rows = await queryAll('SELECT key, value_json FROM dpr_settings');
+  const settings = {};
+  rows.forEach(r => { try { settings[r.key] = JSON.parse(r.value_json); } catch(e) {} });
+  res.json({ ok: true, settings });
+}));
+
+// POST DPR settings — save one or more settings keys to server
+app.post('/api/dpr/settings', asyncRoute(async (req, res) => {
+  const { settings } = req.body;
+  if (!settings || typeof settings !== 'object') return res.status(400).json({ ok: false, error: 'Missing settings' });
+  for (const [key, value] of Object.entries(settings)) {
+    await queryOne(
+      `INSERT INTO dpr_settings (key, value_json) VALUES ($1, $2)
+       ON CONFLICT(key) DO UPDATE SET value_json=EXCLUDED.value_json, updated_at=NOW()`,
+      [key, JSON.stringify(value)]
+    );
+  }
+  res.json({ ok: true });
 }));
 
 // GET actuals for a machine

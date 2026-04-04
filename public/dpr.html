@@ -524,6 +524,8 @@ function saveCustomMachines() {
     if (changed.length) custom[fl] = changed;
   });
   localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
+  // Push to server so machine config is not lost on browser clear
+  pushDprSettings({ dpr_custom_machines: custom });
 }
 
 let FLOORS = loadFloors();
@@ -629,6 +631,7 @@ function setMachineActive(fl, mcId, active){
     if(active){ if(!cfg[fl].includes(mcId)) cfg[fl].push(mcId); }
     else { cfg[fl]=cfg[fl].filter(id=>id!==mcId); }
     localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
+    pushDprSettings({ dpr_active_machines: cfg });
   }catch{}
 }
 
@@ -638,6 +641,7 @@ function resetAllMachinesActive(fl){
     const cfg=saved?JSON.parse(saved):{};
     cfg[fl]=getActiveMachines(fl).map(m=>m.id);
     localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
+    pushDprSettings({ dpr_active_machines: cfg });
   }catch{}
 }
 
@@ -1164,6 +1168,56 @@ async function pushToServer(fl,d,data){
     toast('❌ Server unreachable — data queued locally','var(--amber)');
   }
 }
+// ── DPR SETTINGS SYNC — push/pull machine config, targets, active machines ──
+async function pushDprSettings(settingsObj) {
+  if (!serverUrl) return;
+  try {
+    await fetch(serverUrl + '/api/dpr/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: settingsObj }),
+      signal: AbortSignal.timeout(5000)
+    });
+  } catch(e) {} // silent — settings are secondary
+}
+
+async function loadDprSettings() {
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/dpr/settings', { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j.ok || !j.settings) return;
+
+    // Restore custom machines
+    if (j.settings.dpr_custom_machines) {
+      localStorage.setItem('dpr_custom_machines', JSON.stringify(j.settings.dpr_custom_machines));
+      // Re-apply to FLOORS
+      Object.entries(j.settings.dpr_custom_machines).forEach(([flKey, machines]) => {
+        if (!FLOORS[flKey]) return;
+        machines.forEach(cm => {
+          const existing = FLOORS[flKey].machines.find(m => m.id === cm.id);
+          if (existing) existing.sz = cm.sz;
+          else FLOORS[flKey].machines.push({ id: cm.id, sz: cm.sz });
+        });
+        FLOORS[flKey].machines = sortMachines(FLOORS[flKey].machines);
+      });
+    }
+
+    // Restore active machines per floor
+    if (j.settings.dpr_active_machines) {
+      localStorage.setItem('dpr_active_machines', JSON.stringify(j.settings.dpr_active_machines));
+    }
+
+    // Restore targets
+    if (j.settings.dpr_targets) {
+      localStorage.setItem('dpr_targets', JSON.stringify(j.settings.dpr_targets));
+      Object.assign(targets, j.settings.dpr_targets);
+    }
+
+  } catch(e) {}
+}
+
 async function fetchActiveOrders(){
   if(!serverUrl){
     const cached=localStorage.getItem('dpr_active_orders');
@@ -1204,6 +1258,7 @@ async function fetchActiveOrders(){
       });
       if(autoFilled){
         localStorage.setItem(skey(fl,d),JSON.stringify(dayData));
+        pushToServer(fl,d,dayData);
       }
 
       // Cache locally
@@ -1721,6 +1776,7 @@ function addRun(sh, mcId){
   data.shifts[sh].machines[mcId]=m;
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   markUnsaved();
+  pushToServer(fl,d,data);
 
   // Inject new run row directly into DOM without full re-render (avoids shift collapse)
   const runsContainer=document.getElementById(`runs-${sh}-${mcId}`);
@@ -1763,6 +1819,7 @@ function removeRun(sh, mcId, ri){
   data.shifts[sh].machines[mcId]=m;
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   markUnsaved();
+  pushToServer(fl,d,data);
   renderShifts();
   document.getElementById(`sb-${sh}`)?.classList.add('open');
 }
@@ -2070,6 +2127,8 @@ function saveRemarkEdit(i){
   day.remarks[i].text=el.value;
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   markUnsaved();
+  // Push to server so remark edit is not lost on restart
+  pushToServer(fl,d,day);
 }
 function addRemark(){
   const fl=curFloor;
@@ -2086,6 +2145,8 @@ function addRemark(){
       day.remarks.push({shift:v('rem-shift'),mc,text:v('rem-text'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
       closeModal();renderRemarks();markUnsaved();
+      // Push to server immediately so remark is permanent
+      pushToServer(fl,d,day);
     }},
     {label:'Cancel',fn:closeModal}
   ]);
@@ -2096,6 +2157,8 @@ function deleteRemark(i){
   day.remarks.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   renderRemarks();
+  // Push to server so deletion is permanent
+  pushToServer(fl,d,day);
 }
 
 function renderResort(){
@@ -2131,6 +2194,8 @@ function addResort(){
       day.resort.push({mc:v('rs-mc'),shift:v('rs-shift'),reason:v('rs-reason'),qty:parseFloat(v('rs-qty')),note:v('rs-note'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
       closeModal();renderResort();renderDayKpis();renderShifts();markUnsaved();
+      // Push to server immediately so re-sort entry is permanent
+      pushToServer(fl,d,day);
     }},
     {label:'Cancel',fn:closeModal}
   ]);
@@ -2140,6 +2205,8 @@ function deleteResort(i){
   day.resort.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   renderResort();renderDayKpis();renderShifts();
+  // Push to server so deletion is permanent
+  pushToServer(fl,d,day);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2751,7 +2818,7 @@ function renderSettings(){
     html+=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px">`;
     getActiveMachines(fl).forEach(mc=>{
       const k=`${fl}_${mc.id}`;
-      html+=`<div class="field-grp"><label>${mc.id} (${mc.sz})</label><input type="number" value="${targets[k]||8}" min="1" onchange="targets['${k}']=parseFloat(this.value)||8;localStorage.setItem('dpr_targets',JSON.stringify(targets));toast('Target updated','var(--green)')"></div>`;
+      html+=`<div class="field-grp"><label>${mc.id} (${mc.sz})</label><input type="number" value="${targets[k]||8}" min="1" onchange="targets['${k}']=parseFloat(this.value)||8;localStorage.setItem('dpr_targets',JSON.stringify(targets));pushDprSettings({dpr_targets:targets});toast('Target updated','var(--green)')"></div>`;
     });
     html+=`</div></div>`;
   });
@@ -3360,11 +3427,26 @@ function exportData(){
 function importData(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
-  reader.onload=e=>{
+  reader.onload=async e=>{
     try{
       const data=JSON.parse(e.target.result);
+      // Write all keys to localStorage
       Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
-      toast('Import successful!','var(--green)');
+      toast('Import successful — pushing to server...','var(--cyan)');
+      // Push every DPR record to server so data is permanently saved
+      const dprKeys=Object.keys(data).filter(k=>k.startsWith('dpr3_'));
+      let pushed=0;
+      for(const k of dprKeys){
+        try{
+          const parts=k.split('_'); // dpr3_GF_2026-04-01
+          const fl=parts[1], d=parts[2];
+          if(!fl||!d) continue;
+          const dayData=JSON.parse(data[k]);
+          await pushToServer(fl,d,dayData);
+          pushed++;
+        }catch(e){}
+      }
+      toast(`✅ Imported & pushed ${pushed} records to server`,'var(--green)');
       renderEntry();
     }catch{toast('Invalid file','var(--red)');}
     input.value='';
@@ -3425,6 +3507,9 @@ function postAuthServerInit() {
       // Show loading immediately
       const shiftsArea = document.getElementById('shiftsArea');
       if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data from server...</div>';
+
+      // Load settings from server first (machine config, targets, active machines)
+      await loadDprSettings();
 
       // Load active orders first (for batch dropdowns)
       try{
@@ -3746,8 +3831,23 @@ window.addEventListener('beforeunload', () => {
     const d = getDate();
     const data = collectForm();
     localStorage.setItem(skey(curFloor,d), JSON.stringify(data));
-    dprQueuePush(curFloor, d, data, []);
-    const blob = new Blob([JSON.stringify({floor:curFloor,date:d,data,actuals:[]})], {type:'application/json'});
+    // Build actuals from current form so production qty is included
+    const actuals=[];
+    Object.keys(FLOORS).forEach(f=>{
+      if(!data.shifts) return;
+      SHIFTS.forEach(sh=>{
+        const sd=data.shifts[sh]; if(!sd) return;
+        FLOORS[f]?.machines.forEach(mc=>{
+          const m=migrateMachineData(sd.machines?.[mc.id]||blankMachine());
+          (m.runs||[]).forEach((run,ri)=>{
+            const qty=parseFloat(run.qty||0);
+            if(qty>0) actuals.push({floor:f,machineId:mc.id,shift:sh,orderId:run.orderId||null,batchNumber:run.batchNumber||null,qty,runIndex:ri});
+          });
+        });
+      });
+    });
+    dprQueuePush(curFloor, d, data, actuals);
+    const blob = new Blob([JSON.stringify({floor:curFloor,date:d,data,actuals})], {type:'application/json'});
     navigator.sendBeacon && navigator.sendBeacon(url+'/api/dpr/save', blob);
   } catch(e) {}
 });

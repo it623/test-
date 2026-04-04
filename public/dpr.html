@@ -1485,6 +1485,10 @@ function safeRenderShifts(){
     }catch(e){}
   }
   renderShifts();
+  // Also re-render DT table so downtime values show correctly after data fetch
+  renderDTTable();
+  renderDTSummary();
+  renderDayKpis();
 }
 
 function renderEntry(){
@@ -2952,15 +2956,15 @@ async function exportDailyReportExcel(){
     const sd=day.shifts[sh];
     const rows=[];
     // Header info
-    rows.push(['SUNLOC DPR — '+fl+' — Shift '+sh+' — '+d]);
+    rows.push(['SUNLOC DPR  '+fl+'  Shift '+sh+'  '+d]);
     rows.push([]);
-    rows.push(['Process Incharge', sd.incharge||'—',
-               'Chemist', Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'—'),
-               'Fitter', sd.fitter||'—']);
-    rows.push(['Electrical', (sd.electrical||[]).join(', ')||'—',
-               'Utility', (sd.utility||[]).join(', ')||'—',
-               'Shift AIM', (sd.aim_staff||[]).join(', ')||'—',
-               'Shift GPR', (sd.gpr_staff||[]).join(', ')||'—']);
+    rows.push(['Process Incharge', sd.incharge||'',
+               'Chemist', Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||''),
+               'Fitter', sd.fitter||'']);
+    rows.push(['Electrical', (sd.electrical||[]).join(', ')||'',
+               'Utility', (sd.utility||[]).join(', ')||'',
+               'Shift AIM', (sd.aim_staff||[]).join(', ')||'',
+               'Shift GPR', (sd.gpr_staff||[]).join(', ')||'']);
     rows.push([]);
     // Machine table header
     rows.push(['MC','Size','Operator','Order/Batch','Qty (L)','Note','Target','VS Target','AIM','Backlog','Proc DT','Mech DT','Elec DT','GPR DT','HVAC DT','DW DT']);
@@ -2976,8 +2980,8 @@ async function exportDailyReportExcel(){
         rows.push([
           ri===0?mc.id:'', ri===0?mc.sz:'', ri===0?(m.operator||''):'',
           run.batchNumber||'', run.qty||'', run.note||'',
-          ri===0?t:'', ri===0?(vs!==null?vs:'—'):'',
-          ri===0?(aim||'—'):'', ri===0?(bl!==null?bl:'—'):'',
+          ri===0?t:'', ri===0?(vs!==null?vs:''):'',
+          ri===0?(aim||''):'', ri===0?(bl!==null?bl:''):'',
           ri===0?(m.proc||0):'', ri===0?(m.mech||0):'', ri===0?(m.elec||0):'',
           ri===0?(m.gpr||0):'', ri===0?(m.hvac||0):'', ri===0?(m.dw||0):''
         ]);
@@ -2993,9 +2997,9 @@ async function exportDailyReportExcel(){
     rows.push(['TOTAL','','','','',shProd,'',shTgt,Math.round((shProd-shTgt)*100)/100,shAim,'','','','','','']);
     const ws=XLSX.utils.aoa_to_sheet(rows);
     ws['!cols']=[{wch:8},{wch:6},{wch:14},{wch:14},{wch:8},{wch:14},{wch:7},{wch:8},{wch:8},{wch:8},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7}];
-    XLSX.utils.book_append_sheet(wb,'Shift '+sh,ws);
+    XLSX.utils.book_append_sheet(wb,'Shift_'+sh,ws);
   });
-  XLSX.writeFile(wb, `DPR_${fl}_${d}_Production.xlsx`);
+  XLSX.writeFile(wb, 'DPR_'+fl+'_'+d+'_Production.xlsx');
   toast('✅ Excel exported','var(--green)');
 }
 
@@ -3004,7 +3008,7 @@ async function exportAimStatusExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
-  rows.push(['SUNLOC — AIM Status Report — '+fl+' — '+d]);
+  rows.push(['SUNLOC  AIM Status Report  '+fl+'  '+d]);
   rows.push([]);
   rows.push(['Machine','Size','AIM (L)','Produced (L)','Produced − AIM','Status']);
   let totAim=0, totProd=0;
@@ -3018,17 +3022,17 @@ async function exportAimStatusExcel(){
     totAim+=aim; totProd+=prod;
     const diff=aim>0?Math.round((prod-aim)*100)/100:null;
     const status=aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track';
-    rows.push([mc.id,mc.sz,aim||'—',prod||'—',diff!==null?(diff>0?'+'+diff:diff):'—',status]);
+    rows.push([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',status]);
   });
   totAim=Math.round(totAim*100)/100; totProd=Math.round(totProd*100)/100;
   const totDiff=totAim>0?Math.round((totProd-totAim)*100)/100:null;
   rows.push([]);
-  rows.push(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'—',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']);
+  rows.push(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']);
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:8},{wch:6},{wch:10},{wch:12},{wch:14},{wch:12}];
   XLSX.utils.book_append_sheet(wb,'AIM Status',ws);
-  XLSX.writeFile(wb,`DPR_${fl}_${d}_AIM.xlsx`);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_AIM.xlsx');
   toast('✅ AIM Excel exported','var(--green)');
 }
 
@@ -3037,10 +3041,10 @@ async function exportDowntimeExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
-  rows.push(['SUNLOC — Machine-wise Downtime — '+fl+' — '+d]);
+  rows.push(['SUNLOC  Machine-wise Downtime  '+fl+'  '+d]);
   rows.push([]);
   const hdr=['Machine'];
-  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>hdr.push('Shift '+sh+' '+DT_LABELS[c])));
+  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>hdr.push('Shift_'+sh+' '+DT_LABELS[c])));
   hdr.push('Total DT (min)');
   rows.push(hdr);
   let grandTotal=0;
@@ -3067,7 +3071,7 @@ async function exportDowntimeExcel(){
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb,'Downtime',ws);
-  XLSX.writeFile(wb,`DPR_${fl}_${d}_Downtime.xlsx`);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_Downtime.xlsx');
   toast('✅ Downtime Excel exported','var(--green)');
 }
 
@@ -3076,7 +3080,7 @@ async function exportShiftPerformanceExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
-  rows.push(['SUNLOC — Shift Performance — '+fl+' — '+d]);
+  rows.push(['SUNLOC  Shift Performance  '+fl+'  '+d]);
   rows.push([]);
   rows.push(['Shift','Incharge','Chemist','Fitter','Electrical','Utility','AIM Staff','GPR Staff','Production (L)','Target (L)','Efficiency %','DT (min)','DT %','Score']);
   SHIFTS.forEach(sh=>{
@@ -3091,32 +3095,32 @@ async function exportShiftPerformanceExcel(){
     const eff=t>0?Math.round(prod/t*1000)/10:0;
     const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
     rows.push([
-      'Shift '+sh,
-      sd.incharge||'—',
-      Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'—'),
-      sd.fitter||'—',
-      (sd.electrical||[]).join(', ')||'—',
-      (sd.utility||[]).join(', ')||'—',
-      (sd.aim_staff||[]).join(', ')||'—',
-      (sd.gpr_staff||[]).join(', ')||'—',
-      prod||'—', t, eff+'%', dt.total, dt.dtPct.toFixed(1)+'%', prod>0?score:'—'
+      'Shift_'+sh,
+      sd.incharge||'',
+      Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||''),
+      sd.fitter||'',
+      (sd.electrical||[]).join(', ')||'',
+      (sd.utility||[]).join(', ')||'',
+      (sd.aim_staff||[]).join(', ')||'',
+      (sd.gpr_staff||[]).join(', ')||'',
+      prod||'', t, eff+'%', dt.total, dt.dtPct.toFixed(1)+'%', prod>0?score:''
     ]);
   });
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:8},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:7}];
   XLSX.utils.book_append_sheet(wb,'Shift Performance',ws);
-  XLSX.writeFile(wb,`DPR_${fl}_${d}_ShiftPerformance.xlsx`);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_ShiftPerformance.xlsx');
   toast('✅ Shift Performance exported','var(--green)');
 }
 
-// ── EXCEL: Full DPR — All sheets ────────────────────────────────
+// ── EXCEL: Full DPR  All sheets ────────────────────────────────
 async function exportAllShiftsExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const wb=XLSX.utils.book_new();
   // Sheet 1: Production
   const {fl,d,day,mcs}=getExportData();
-  const summaryRows=[['SUNLOC FULL DPR — '+fl+' — '+d],[]];
+  const summaryRows=[['SUNLOC FULL DPR  '+fl+'  '+d],[]];
   summaryRows.push(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']);
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
@@ -3127,7 +3131,7 @@ async function exportAllShiftsExcel(){
     });
     prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
     const dt=calcShiftDT(fl,d,sh);
-    summaryRows.push(['Shift '+sh, sd.incharge||'—', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'—', dt.total]);
+    summaryRows.push(['Shift_'+sh, sd.incharge||'', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'', dt.total]);
   });
   const summaryWs=XLSX.utils.aoa_to_sheet(summaryRows);
   XLSX.utils.book_append_sheet(wb,'Summary',summaryWs);
@@ -3140,7 +3144,7 @@ async function exportAllShiftsExcel(){
   // Just add all sheets manually
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
-    const rows=[['Shift '+sh+' — '+fl+' — '+d],[]];
+    const rows=[['Shift_'+sh+'  '+fl+'  '+d],[]];
     rows.push(['MC','Sz','Operator','Batch','Qty(L)','Note','Target','VS Tgt','AIM','Backlog','Proc','Mech','Elec','GPR','HVAC','DW']);
     mcs.forEach(mc=>{
       const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
@@ -3156,20 +3160,20 @@ async function exportAllShiftsExcel(){
         ]);
       });
     });
-    XLSX.utils.book_append_sheet(wb,'Shift '+sh,XLSX.utils.aoa_to_sheet(rows));
+    XLSX.utils.book_append_sheet(wb,'Shift_'+sh,XLSX.utils.aoa_to_sheet(rows));
   });
   // AIM sheet
-  const aimRows=[['AIM Status — '+fl+' — '+d],[]];
+  const aimRows=[['AIM Status  '+fl+'  '+d],[]];
   aimRows.push(['MC','Sz','AIM','Produced','Diff','Status']);
   mcs.forEach(mc=>{
     let prod=0,aim=0;
     SHIFTS.forEach(sh=>{const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());prod+=mcTotalProd(m);aim+=parseFloat(m.aim||0);});
     prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
     const diff=aim>0?Math.round((prod-aim)*100)/100:null;
-    aimRows.push([mc.id,mc.sz,aim||'—',prod||'—',diff!==null?(diff>0?'+'+diff:diff):'—',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']);
+    aimRows.push([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']);
   });
   XLSX.utils.book_append_sheet(wb,'AIM Status',XLSX.utils.aoa_to_sheet(aimRows));
-  XLSX.writeFile(wb,`DPR_${fl}_${d}_FULL.xlsx`);
+  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_FULL.xlsx');
   toast('✅ Full DPR Excel exported','var(--green)');
 }
 
@@ -3194,7 +3198,7 @@ function exportPDF(){
       .pos{color:#16a34a}.neg{color:#dc2626}
       @media print{@page{margin:15mm}}
     </style></head><body>
-    <h1>📋 SUNLOC DPR — ${fl} — ${d}</h1>
+    <h1>📋 SUNLOC DPR  ${fl}  ${d}</h1>
     <p style="color:#666;font-size:10px;margin-bottom:12px">Generated: ${new Date().toLocaleString('en-IN')}</p>
   `;
   SHIFTS.forEach(sh=>{
@@ -3202,13 +3206,13 @@ function exportPDF(){
     let shProd=0,shTgt=0,shAim=0;
     html+=`<h2>SHIFT ${sh}</h2>
     <div class="info-grid">
-      <div class="info-box"><div class="info-label">Incharge</div><div class="info-val">${sd.incharge||'—'}</div></div>
-      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'—')}</div></div>
-      <div class="info-box"><div class="info-label">Fitter</div><div class="info-val">${sd.fitter||'—'}</div></div>
-      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${(sd.electrical||[]).join(', ')||'—'}</div></div>
-      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${(sd.utility||[]).join(', ')||'—'}</div></div>
-      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${(sd.aim_staff||[]).join(', ')||'—'}</div></div>
-      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${(sd.gpr_staff||[]).join(', ')||'—'}</div></div>
+      <div class="info-box"><div class="info-label">Incharge</div><div class="info-val">${sd.incharge||''}</div></div>
+      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'')}</div></div>
+      <div class="info-box"><div class="info-label">Fitter</div><div class="info-val">${sd.fitter||''}</div></div>
+      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${(sd.electrical||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${(sd.utility||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${(sd.aim_staff||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${(sd.gpr_staff||[]).join(', ')||''}</div></div>
     </div>
     <table><thead><tr>
       <th>MC</th><th>Sz</th><th>Operator</th><th>Batch</th><th>Qty (L)</th><th>Note</th>
@@ -3225,9 +3229,9 @@ function exportPDF(){
         html+=`<tr>
           <td>${ri===0?`<b>${mc.id}</b>`:''}</td>
           <td>${ri===0?mc.sz:''}</td>
-          <td>${ri===0?(m.operator||'—'):''}</td>
-          <td>${run.batchNumber||'—'}</td>
-          <td><b>${run.qty||'—'}</b></td>
+          <td>${ri===0?(m.operator||''):''}</td>
+          <td>${run.batchNumber||''}</td>
+          <td><b>${run.qty||''}</b></td>
           <td>${run.note||''}</td>
           <td>${ri===0?t:''}</td>
           <td>${ri===0&&prod>0?`<span class="${vs>=0?'pos':'neg'}">${vs>=0?'+'+vs:vs}</span>`:''}</td>
@@ -3239,10 +3243,10 @@ function exportPDF(){
     shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100; shTgt=Math.round(shTgt*100)/100;
     const shVs=Math.round((shProd-shTgt)*100)/100;
     html+=`<tr class="tot"><td colspan="4">SHIFT ${sh} TOTAL</td>
-      <td>${shProd||'—'}</td><td></td><td>${shTgt}</td>
+      <td>${shProd||''}</td><td></td><td>${shTgt}</td>
       <td><span class="${shVs>=0?'pos':'neg'}">${shVs>=0?'+'+shVs:shVs}</span></td>
-      <td>${shAim||'—'}</td>
-      <td><span class="${shProd-shAim>=0?'pos':'neg'}">${shAim>0?(shProd-shAim>=0?'+':'')+Math.round((shProd-shAim)*100)/100:'—'}</span></td>
+      <td>${shAim||''}</td>
+      <td><span class="${shProd-shAim>=0?'pos':'neg'}">${shAim>0?(shProd-shAim>=0?'+':'')+Math.round((shProd-shAim)*100)/100:''}</span></td>
     </tr></tbody></table>`;
   });
   html+=`</body></html>`;

@@ -701,6 +701,8 @@ const SYNC = (() => {
     } catch {}
 
     await loadTrackingStatus();
+    await loadLiveAGrade();
+    await loadDispatchActuals();
 
     const newOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
     const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
@@ -731,7 +733,47 @@ const SYNC = (() => {
     } catch(e) {}
   }
 
-  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus };
+  // ── Pull live A-Grade from Tracking module ──────────────────
+  async function loadLiveAGrade() {
+    if (!_url) return;
+    try {
+      const ag = await fetch(_url + '/api/tracking/agrade-summary', { signal: AbortSignal.timeout(5000) });
+      if (!ag.ok) return;
+      const agj = await ag.json();
+      if (agj.ok && agj.batches) {
+        window._liveAGrade = agj.batches;
+        // Quietly recalc machine schedules with live A-grade data
+        const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId))];
+        machineIds.forEach(mid => { if (mid) recalcMachineSchedule(mid); });
+      }
+    } catch(e) {}
+  }
+
+  // ── Pull dispatch actuals from Tracking module ───────────────
+  async function loadDispatchActuals() {
+    if (!_url) return;
+    try {
+      const da = await fetch(_url + '/api/tracking/dispatch-actuals', { signal: AbortSignal.timeout(5000) });
+      if (!da.ok) return;
+      const dj = await da.json();
+      if (dj.ok && dj.actuals) {
+        const actualsMap = {};
+        dj.actuals.forEach(a => { actualsMap[a.batch_number] = parseFloat(a.dispatched_qty)||0; });
+        state.dispatchPlans.forEach(dp => {
+          if (dp.batchNumber && actualsMap[dp.batchNumber] !== undefined) {
+            const trackingActual = actualsMap[dp.batchNumber];
+            if (trackingActual > (dp.actualDispatched||0)) {
+              dp.actualDispatched = trackingActual;
+              if (dp.actualDispatched >= dp.qty) dp.status = 'dispatched';
+              else if (dp.actualDispatched > 0) dp.status = 'partial';
+            }
+          }
+        });
+      }
+    } catch(e) {}
+  }
+
+  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus, loadLiveAGrade, loadDispatchActuals };
 })();
 
 // Load from localStorage (with server enrichment on init)
@@ -928,6 +970,27 @@ function recalcAllMachines() {
   const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
   machineIds.forEach(mid => recalcMachineSchedule(mid));
   saveState();
+}
+
+function recalcMachineScheduleQuiet(machineId) {
+  // Same as recalcMachineSchedule but doesn't save or re-render — used for live A-grade updates
+  const mc = getMachine(machineId);
+  if (!mc) return;
+  const orders = getMachineOrders(machineId);
+  let cursor = null;
+  for (const ord of orders) {
+    if (ord.status === 'closed') continue;
+    if (!cursor) cursor = new Date(ord.startDate || today());
+    else ord.startDate = new Date(cursor);
+    const sc = calcOrderSchedule(ord, mc);
+    ord.grossQty   = sc.grossQty;
+    ord.aimOut     = sc.aimOut;
+    ord.printOut   = sc.printOut;
+    ord.piOut      = sc.piOut;
+    ord.daysNeeded = sc.daysNeeded;
+    ord.endDate    = calcEndDate(ord.startDate, sc.daysNeeded);
+    cursor = new Date(ord.endDate);
+  }
 }
 
 function recalcMachineSchedule(machineId) {

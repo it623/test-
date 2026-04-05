@@ -4327,31 +4327,32 @@ function renderReportE(){
     const floorKey = getMachineFloor(mc) || '';
     const batches = allBatches.filter(b=>b.machineId===mc);
     batches.forEach(b=>{
-        // Filter scans by date if a filter is set
-        const scansForBatch = filterDate
-          ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
-          : getScansForBatch(b.batchNumber);
-        const grossProd=b.actualProd||0;
-        const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
-        const aimOutQty=boxToLakh(aimOut,b.size);
-        const aimW=getTotalWastage(b.batchNumber,'aim');
-        const aimIn=aimOutQty+aimW.total;
-        const manW=getTotalWastage(b.batchNumber,'manual');
-        const totalAG=aimOutQty+(manW.total>0?boxToLakh(scansForBatch.filter(s=>s.dept==='manual'&&s.type==='out').length,b.size):0);
-        const aGradePct=aimIn>0?(totalAG/aimIn*100):0;
-        const wip=Math.max(0,grossProd-aimIn);
-        const printingTD=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='printing'&&s.type==='out').length,b.size):0;
-        const piOut=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='pi'&&s.type==='out').length,b.size):0;
-        const printW=getTotalWastage(b.batchNumber,'printing');
-        const piW=getTotalWastage(b.batchNumber,'pi');
-        const packUnptd=!b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
-        const packPtd=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
-        const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
-        rows.push({machine:mc,floor:floorKey,batchNo:b.batchNumber,size:b.size,plannedQty:b.qty||0,grossProd:fmt(grossProd),aimRunTotal:fmt(aimIn),aimSalvage:fmt(aimW.salvage),aimRemelt:fmt(aimW.remelt),aimAGrade:fmt(aimOutQty),aimAGradePct:fmt(aGradePct,1),manInspect:fmt(manW.total),totalAGrade:fmt(totalAG),aGradePctUnptd:fmt(aGradePct,1),wip:fmt(wip),availUnptd:fmt(!b.isPrinted?totalAG:0),availPrint:fmt(b.isPrinted?totalAG:0),
-          printingTD:fmt(printingTD),printRej:fmt(printW.salvage),piInspect:fmt(piOut),piSalRem:fmt(piW.salvage),packingUP:fmt(packUnptd),packingPTD:fmt(packPtd),dispatch:fmt(disp)});
-        floorTotals.grossProd+=grossProd; floorTotals.aimIn+=aimIn; floorTotals.aimAGrade+=aimOutQty;
-        floorTotals.totalAGrade+=totalAG; floorTotals.printingTD+=printingTD; floorTotals.piInspect+=piOut;
-        floorTotals.packing_up+=packUnptd; floorTotals.packing_ptd+=packPtd; floorTotals.dispatch+=disp;
+      const scansForBatch = filterDate
+        ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
+        : getScansForBatch(b.batchNumber);
+      const grossProd=b.actualProd||0;
+      const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
+      const aimOutQty=boxToLakh(aimOut,b.size);
+      const aimW=getTotalWastage(b.batchNumber,'aim');
+      const aimIn=aimOutQty+aimW.total;
+      const manW=getTotalWastage(b.batchNumber,'manual');
+      const totalAG=aimOutQty+(manW.total>0?boxToLakh(scansForBatch.filter(s=>s.dept==='manual'&&s.type==='out').length,b.size):0);
+      const aGradePct=aimIn>0?(totalAG/aimIn*100):0;
+      const wip=Math.max(0,grossProd-aimIn);
+      const printingTD=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='printing'&&s.type==='out').length,b.size):0;
+      const piOut=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='pi'&&s.type==='out').length,b.size):0;
+      const printW=getTotalWastage(b.batchNumber,'printing');
+      const piW=getTotalWastage(b.batchNumber,'pi');
+      const packUnptd=!b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+      const packPtd=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+      const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
+      rows.push({machine:mc,floor:floorKey,batchNo:b.batchNumber,size:b.size,plannedQty:b.qty||0,
+        grossProd:fmt(grossProd),aimRunTotal:fmt(aimIn),aimSalvage:fmt(aimW.salvage),aimRemelt:fmt(aimW.remelt),
+        aimAGrade:fmt(aimOutQty),aimAGradePct:fmt(aGradePct,1),manInspect:fmt(manW.total),
+        totalAGrade:fmt(totalAG),aGradePctUnptd:fmt(aGradePct,1),wip:fmt(wip),
+        availUnptd:fmt(!b.isPrinted?totalAG:0),availPrint:fmt(b.isPrinted?totalAG:0),
+        printingTD:fmt(printingTD),printRej:fmt(printW.salvage),piInspect:fmt(piOut),
+        piSalRem:fmt(piW.salvage),packingUP:fmt(packUnptd),packingPTD:fmt(packPtd),dispatch:fmt(disp)});
     });
   });
   let html=`<div class="card"><div class="section-title mb-4">Report E — Machine-wise Production Tracking Sheet</div>

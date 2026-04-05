@@ -3911,11 +3911,27 @@ function renderReportG(){
 function filterReportG(){
   const search=(document.getElementById('rg-search')?.value||'').toLowerCase().trim();
   const dept=document.getElementById('rg-dept')?.value||'';
+  // Filter rows by batch/customer search
   const rows=document.querySelectorAll('#rg-body tr[data-batch]');
   rows.forEach(row=>{
-    const matchSearch=!search||((row.dataset.batch||'').includes(search)||(row.dataset.customer||'').includes(search));
+    const matchSearch=!search||
+      ((row.dataset.batch||'').toLowerCase().includes(search)||
+       (row.dataset.customer||'').toLowerCase().includes(search));
     row.style.display=matchSearch?'':'none';
   });
+  // Show/hide department column groups
+  const aimCols=document.querySelectorAll('.rg-col-aim');
+  const piCols=document.querySelectorAll('.rg-col-pi');
+  if(dept==='aim'){
+    aimCols.forEach(c=>c.style.display='');
+    piCols.forEach(c=>c.style.display='none');
+  } else if(dept==='pi'){
+    aimCols.forEach(c=>c.style.display='none');
+    piCols.forEach(c=>c.style.display='');
+  } else {
+    aimCols.forEach(c=>c.style.display='');
+    piCols.forEach(c=>c.style.display='');
+  }
 }
 
 async function exportReportGExcel(){
@@ -4133,8 +4149,9 @@ function renderReportC(){
       const packedQty=boxToLakh(packedOut,b.size);
       const grossProd=b.actualProd||0;
       let statusBadge='';
-      if(wipDays===0&&packedOut>0&&dispatchedOut>0) statusBadge='<span class="badge badge-green">✅ Dispatched</span>';
-      else if(wipDays===0&&packedOut===0) statusBadge='<span class="badge badge-gray">⏳ Production</span>';
+      const dispatchedQty=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
+      if(b.status==='closed'||dispatchedQty>0&&packedOut>0) statusBadge='<span class="badge badge-green">✅ Dispatched</span>';
+      else if(packedOut===0&&wipDays===0) statusBadge='<span class="badge badge-gray">⏳ Production</span>';
       else if(wipDays<=std) statusBadge='<span class="badge badge-blue">🔵 In Progress</span>';
       else statusBadge='<span class="badge badge-amber">⚠️ Pending</span>';
       html+=`<tr>
@@ -4181,8 +4198,16 @@ function renderReportD(){
     <tbody>
     ${stages.map(dept=>{
       const wip=stageWIP[dept];
-      const avgSize=1.5;
-      const qty=wip*avgSize;
+      // Calculate actual qty using real scan data weighted by batch size
+      const deptScans=state.scans.filter(s=>s.dept===dept&&s.type==='in');
+      const wipQty=deptScans.reduce((sum,s)=>{
+        const b=getBatch(s.batchNumber);
+        return sum+(b?boxToLakh(1,b.size):1);
+      },0) - state.scans.filter(s=>s.dept===dept&&s.type==='out').reduce((sum,s)=>{
+        const b=getBatch(s.batchNumber);
+        return sum+(b?boxToLakh(1,b.size):1);
+      },0);
+      const qty=Math.max(0,wipQty);
       return `<tr><td class="fw-bold">${DEPT_LABELS[dept]}</td><td class="td-mono">${wip}</td><td class="td-mono">${fmt(qty)}</td><td class="td-mono">${totalGross>0?fmt(qty/totalGross*100,1):0}%</td></tr>`;
     }).join('')}
     </tbody>
@@ -4443,37 +4468,72 @@ function exportReportD(){
 }
 
 function exportReportE(){
-  // Full Excel export matching existing format
   const wb=XLSX.utils.book_new();
-  // Summary sheet
   const summaryRows=[];
-  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
-    floor.machines.forEach(mc=>{
-      state.batches.filter(b=>b.machineId===mc&&!b.deleted).forEach(b=>{
-        const grossProd=b.actualProd||0;
-        const aimOut=boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size);
-        const aimW=getTotalWastage(b.batchNumber,'aim');
-        const aimIn=aimOut+aimW.total;
-        const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
-        const wip=Math.max(0,grossProd-aimIn);
-        summaryRows.push({'M/C NO':mc,'SIZE':b.size,'PLANNED QUANTITY (lac)':fmt(b.qty),'TOTAL PRODUCTION (lac)':fmt(grossProd),'AIM TOTAL RUN (lac)':fmt(aimIn),'SALVAGE':fmt(aimW.salvage),'REMELT':fmt(aimW.remelt),'A GRADE QTY (lac)':fmt(aimOut),'AIM A GRADE %':fmt(aGradePct,2),'TOTAL A GRADE QTY (lac)':fmt(aimOut),'A GRADE % (UNPTD)':fmt(aGradePct,2),'WIP (lac)':fmt(wip),'PACKING UNPTD (lac)':fmt(!b.isPrinted?boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0),'PACKING PTD (lac)':fmt(b.isPrinted?boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),'FLOOR':floorKey});
-      });
+
+  // Use ALL active batches directly — no floor/machine matching needed
+  const activeBatches = state.batches.filter(b=>!b.deleted&&b.status!=='closed');
+  // Group by machineId
+  const byMachine={};
+  activeBatches.forEach(b=>{
+    const mc=b.machineId||'Unknown';
+    if(!byMachine[mc]) byMachine[mc]=[];
+    byMachine[mc].push(b);
+  });
+
+  // Summary sheet — one row per batch
+  activeBatches.forEach(b=>{
+    const mc=b.machineId||'';
+    const floorKey=getMachineFloor(mc)||'';
+    const grossProd=b.actualProd||0;
+    const aimOut=boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size);
+    const aimW=getTotalWastage(b.batchNumber,'aim');
+    const aimIn=aimOut+aimW.total;
+    const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
+    const wip=Math.max(0,grossProd-aimIn);
+    const packScans=getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length;
+    const packQty=boxToLakh(packScans,b.size);
+    const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
+    summaryRows.push({
+      'FLOOR':floorKey,'M/C NO':mc,'BATCH NO':b.batchNumber,
+      'CUSTOMER':b.customer||'','SIZE':b.size,
+      'PLANNED QTY (lac)':fmt(b.qty),
+      'GROSS PROD (lac)':fmt(grossProd),
+      'AIM RUN (lac)':fmt(aimIn),
+      'SALVAGE (lac)':fmt(aimW.salvage),
+      'REMELT (lac)':fmt(aimW.remelt),
+      'A GRADE (lac)':fmt(aimOut),
+      'A GRADE %':fmt(aGradePct,2),
+      'WIP (lac)':fmt(wip),
+      'PACKING UNPTD (lac)':fmt(!b.isPrinted?packQty:0),
+      'PACKING PTD (lac)':fmt(b.isPrinted?packQty:0),
+      'DISPATCH (lac)':fmt(disp),
+      'STATUS':b.status||''
     });
   });
-  const wsSummary=XLSX.utils.json_to_sheet(summaryRows);
+
+  const wsSummary=XLSX.utils.json_to_sheet(summaryRows.length?summaryRows:[{'Note':'No active batches found'}]);
   XLSX.utils.book_append_sheet(wb,wsSummary,'Summary');
+
   // Per machine sheets
-  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
-    floor.machines.forEach(mc=>{
-      const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
-      if(!batches.length) return;
-      const mcRows=batches.map(b=>({
-        'DATE':today(),'BATCH NO':b.batchNumber,'COLOR CODE':b.colour||'','CUSTOMER NAME':b.customer||'','PLANT QUANTITY (lac)':fmt(b.qty),'PRODUCT CODE':b.pcCode||'','PRODUCTION (lac)':fmt(b.actualProd||0),'AIM A GRADE (lac)':fmt(boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size)),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))
-      }));
-      const wsName=mc.replace('.','');
-      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName.slice(0,31));
-    });
+  Object.entries(byMachine).forEach(([mc,batches])=>{
+    const mcRows=batches.map(b=>({
+      'DATE':today(),
+      'BATCH NO':b.batchNumber,
+      'CUSTOMER':b.customer||'',
+      'COLOR':b.colour||'',
+      'PC CODE':b.pcCode||'',
+      'SIZE':b.size,
+      'PLANNED QTY (lac)':fmt(b.qty),
+      'GROSS PROD (lac)':fmt(b.actualProd||0),
+      'AIM A GRADE (lac)':fmt(boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size)),
+      'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),
+      'STATUS':b.status||''
+    }));
+    const wsName=(mc||'Unknown').replace(/[\.\/:*?[\]]/g,'').slice(0,31);
+    if(wsName) XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName);
   });
+
   xlsxSaveAs(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
 }
 

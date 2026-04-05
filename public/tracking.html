@@ -4320,11 +4320,13 @@ function renderReportE(){
   const allScanDates = [...new Set(state.scans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
 
   const rows=[];
-  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
-    let floorTotals={grossProd:0,aimIn:0,aimSalvage:0,aimAGrade:0,manualInspect:0,totalAGrade:0,availUnptd:0,availPrint:0,printingTD:0,printRej:0,piInspect:0,piSalRem:0,packing_up:0,packing_ptd:0,dispatch:0};
-    floor.machines.forEach(mc=>{
-      const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
-      batches.forEach(b=>{
+  // Group all batches by machine directly — avoids FLOORS.machines ID mismatch
+  const allBatches = state.batches.filter(b=>!b.deleted);
+  const machineIds = [...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort();
+  machineIds.forEach(mc=>{
+    const floorKey = getMachineFloor(mc) || '';
+    const batches = allBatches.filter(b=>b.machineId===mc);
+    batches.forEach(b=>{
         // Filter scans by date if a filter is set
         const scansForBatch = filterDate
           ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
@@ -4350,7 +4352,6 @@ function renderReportE(){
         floorTotals.grossProd+=grossProd; floorTotals.aimIn+=aimIn; floorTotals.aimAGrade+=aimOutQty;
         floorTotals.totalAGrade+=totalAG; floorTotals.printingTD+=printingTD; floorTotals.piInspect+=piOut;
         floorTotals.packing_up+=packUnptd; floorTotals.packing_ptd+=packPtd; floorTotals.dispatch+=disp;
-      });
     });
   });
   let html=`<div class="card"><div class="section-title mb-4">Report E — Machine-wise Production Tracking Sheet</div>
@@ -4472,7 +4473,7 @@ function exportReportE(){
   const summaryRows=[];
 
   // Use ALL active batches directly — no floor/machine matching needed
-  const activeBatches = state.batches.filter(b=>!b.deleted&&b.status!=='closed');
+  const activeBatches = state.batches.filter(b=>!b.deleted);
   // Group by machineId
   const byMachine={};
   activeBatches.forEach(b=>{

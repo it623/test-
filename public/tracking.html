@@ -3950,8 +3950,8 @@ async function exportReportGExcel(){
     rows.push(row);
   });
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb,'A-Grade Report',ws);
-  XLSX.writeFile(wb,'ReportG_AGrade_'+today()+'.xlsx');
+  XLSX.utils.book_append_sheet(wb,ws,'A-Grade Report');
+  xlsxSaveAs(wb,'ReportG_AGrade_'+today()+'.xlsx');
   toast('Excel downloaded','var(--green)');
 }
 
@@ -4347,7 +4347,7 @@ function renderReportE(){
       <td class="td-mono fw-bold">${r.aimAGrade}</td><td class="td-mono">${r.aimAGradePct}%</td><td class="td-mono">${r.manInspect}</td>
       <td class="td-mono fw-bold">${r.totalAGrade}</td><td class="td-mono fw-bold">${r.aGradePctUnptd}%</td>
       <td class="td-mono">${r.wip}</td><td class="td-mono">${r.availUnptd}</td><td class="td-mono">${r.availPrint}</td>
-      <td class="td-mono">${r.printTD}</td><td class="td-mono">${r.printRej}</td><td class="td-mono">${r.piInspect}</td>
+      <td class="td-mono">${r.printingTD}</td><td class="td-mono">${r.printRej}</td><td class="td-mono">${r.piInspect}</td>
       <td class="td-mono">${r.piSalRem}</td><td class="td-mono">${r.packingUP}</td><td class="td-mono">${r.packingPTD}</td>
       <td class="td-mono fw-bold">${r.dispatch}</td>
     </tr>`).join('')||'<tr><td colspan="24" class="text-center text-muted">No data yet</td></tr>'}
@@ -4359,11 +4359,42 @@ function renderReportE(){
 }
 
 // Export functions
+// ── Check XLSX library available ────────────────────────────────
+async function checkXLSX(){
+  if(typeof XLSX === 'undefined'){
+    return new Promise((resolve,reject)=>{
+      const s=document.createElement('script');
+      s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s.onload=()=>resolve(true);
+      s.onerror=()=>reject(new Error('XLSX library failed to load'));
+      document.head.appendChild(s);
+    });
+  }
+  return Promise.resolve(true);
+}
+
+// ── Safe XLSX download — uses Blob fallback to avoid writeFile bug ─
+function xlsxSaveAs(wb, filename){
+  try{
+    XLSX.writeFile(wb, filename);
+  }catch(e1){
+    try{
+      const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+      const blob=new Blob([wbout],{type:'application/octet-stream'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=filename;
+      document.body.appendChild(a); a.click();
+      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
+    }catch(e2){ toast('Export failed: '+e2.message,'var(--red)'); }
+  }
+}
+
 function exportToExcel(rows, filename, sheetName){
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.json_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb,ws,sheetName||'Report');
-  XLSX.writeFile(wb,filename);
+  xlsxSaveAs(wb,filename);
 }
 
 function exportReportA(){
@@ -4443,7 +4474,7 @@ function exportReportE(){
       XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName.slice(0,31));
     });
   });
-  XLSX.writeFile(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
+  xlsxSaveAs(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
 }
 
 function exportTrackerReport(){

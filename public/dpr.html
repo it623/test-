@@ -1026,7 +1026,7 @@ function calcDayStats(fl,d){
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
-  // Produced - AIM: positive = excess, negative = behind
+  // BACKLOG: positive = excess, negative = behind
   totProd = Math.round(totProd*100)/100;
   totAim  = Math.round(totAim*100)/100;
   const backlog = Math.round((totProd - totAim)*100)/100;
@@ -1624,7 +1624,7 @@ function renderDayKpis(){
     <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
     <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+Math.round((s.totProd-s.totTgt)*100)/100:'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
     <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim?parseFloat(s.totAim.toFixed(2))||'—':'—'}</div><div class="kpi-sub">planned today</div></div>
-    <div class="kpi"><div class="kpi-label">Produced − AIM</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+parseFloat(s.backlog.toFixed(2)):parseFloat(s.backlog.toFixed(2))}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
+    <div class="kpi"><div class="kpi-label">BACKLOG</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+parseFloat(s.backlog.toFixed(2)):parseFloat(s.backlog.toFixed(2))}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
     <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
@@ -1929,7 +1929,7 @@ function updateBacklog(sh,mcId){
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
   const a=parseFloat(document.getElementById(`aim-${sh}-${mcId}`)?.value||0);
-  // Backlog = Produced - AIM: positive=excess, negative=behind
+  // Backlog = BACKLOG: positive=excess, negative=behind
   const bl = a>0 ? Math.round((total-a)*100)/100 : (total>0?total:null);
   const el=document.getElementById(`bl-${sh}-${mcId}`);
   if(el){
@@ -2370,7 +2370,7 @@ function renderAIM(){
     totalAIM+=aim;
     totalProd+=prod;
 
-    // Formula: Produced - AIM
+    // Formula: BACKLOG
     const diff = aim>0 ? Math.round((prod - aim)*100)/100 : null;
 
     let diffCell, statusCell;
@@ -2621,8 +2621,6 @@ function renderPerf(){
   let html=`<table class="data-table"><thead><tr>
     <th>Shift</th>
     <th>Incharge</th>
-    <th>Chemist</th>
-    <th>Fitter</th>
     <th>Production</th>
     <th>Efficiency</th>
     <th>DT%</th>
@@ -2643,24 +2641,9 @@ function renderPerf(){
     const sc=parseInt(score);
     const scCls=sc>=80?'g':sc>=60?'a':'r';
 
-    // Chemist — can be array or string
-    const chemistList = Array.isArray(sd.chemist)
-      ? sd.chemist.filter(n=>n&&n.trim())
-      : (sd.chemist ? [sd.chemist] : []);
-    const chemistCell = chemistList.length
-      ? chemistList.map(n=>`<span style="display:inline-block;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:4px;padding:1px 7px;font-size:11px;color:var(--t1);margin:1px 2px">${n}</span>`).join('')
-      : '<span style="color:var(--t3)">—</span>';
-
-    // Fitter — single string
-    const fitterCell = sd.fitter
-      ? `<span style="display:inline-block;background:rgba(0,230,118,0.08);border:1px solid rgba(0,230,118,0.2);border-radius:4px;padding:1px 7px;font-size:11px;color:var(--t1)">${sd.fitter}</span>`
-      : '<span style="color:var(--t3)">—</span>';
-
     html+=`<tr>
       <td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
       <td style="font-weight:600">${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
-      <td>${chemistCell}</td>
-      <td>${fitterCell}</td>
       <td class="mono">${prod||'—'}</td>
       <td><span class="pill ${eff>=90?'g':eff>=75?'a':'r'}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
       <td><span class="pill ${dt.dtPct<=5?'g':dt.dtPct<=10?'a':'r'}">${dt.total>0?dt.dtPct.toFixed(1)+'%':'—'}</span></td>
@@ -3091,6 +3074,31 @@ function showExportMenu(){
 }
 
 // ── Helper: get day data ─────────────────────────────────────────
+// ── Safe array join — handles string, array, null for export ────
+function safeJoin(val, sep=', '){
+  if(!val) return '';
+  if(Array.isArray(val)) return val.filter(Boolean).join(sep);
+  if(typeof val === 'string') return val;
+  return String(val);
+}
+
+// ── Safe cell value — XLSX only accepts string, number, boolean, null ──
+// Converts anything else (objects, arrays, undefined) to safe types
+function safeCell(val){
+  if(val === null || val === undefined || val === '') return '';
+  if(typeof val === 'number') return isFinite(val) ? val : '';
+  if(typeof val === 'boolean') return val ? 1 : 0;
+  if(typeof val === 'string') return val;
+  if(Array.isArray(val)) return val.filter(Boolean).join(', ');
+  if(typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
+// ── Safe row — sanitizes every cell in a row array ──────────────
+function safeRow(arr){
+  return arr.map(safeCell);
+}
+
 function getExportData(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
@@ -3101,8 +3109,14 @@ function getExportData(){
 function runExport(fn){
   try{
     const result = fn();
-    if(result && result.catch) result.catch(e=>toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)'));
+    if(result && result.catch) result.catch(e=>{
+      console.error('[EXPORT ERROR]', e);
+      console.error('[EXPORT STACK]', e?.stack);
+      toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)');
+    });
   }catch(e){
+    console.error('[EXPORT ERROR SYNC]', e);
+    console.error('[EXPORT STACK]', e?.stack);
     toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)');
   }
 }
@@ -3110,7 +3124,6 @@ function runExport(fn){
 // ── Check XLSX available ────────────────────────────────────────
 function checkXLSX(){
   if(typeof XLSX === 'undefined'){
-    // XLSX not loaded — load it now dynamically
     return new Promise((resolve, reject)=>{
       const s = document.createElement('script');
       s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
@@ -3120,6 +3133,30 @@ function checkXLSX(){
     });
   }
   return Promise.resolve(true);
+}
+
+// ── Safe XLSX file download — avoids XLSX.writeFile bug in 0.18.5 ──
+// Uses XLSX.write() to get binary data then creates Blob manually
+function xlsxSaveAs(wb, filename){
+  try {
+    // Try native writeFile first
+    XLSX.writeFile(wb, filename);
+  } catch(e1) {
+    // Fallback: manual Blob download (avoids indexOf bug in XLSX 0.18.5)
+    try {
+      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+      const blob = new Blob([wbout], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    } catch(e2) {
+      throw new Error('Excel download failed: ' + (e2.message || String(e2)));
+    }
+  }
 }
 
 // ── EXCEL: Daily Production Report ──────────────────────────────
@@ -3132,18 +3169,18 @@ async function exportDailyReportExcel(){
     const sd=day.shifts[sh];
     const rows=[];
     // Header info
-    rows.push(['SUNLOC DPR  '+fl+'  Shift '+sh+'  '+d]);
+    rows.push(safeRow(['SUNLOC DPR  '+fl+'  Shift '+sh+'  '+d]));
     rows.push([]);
-    rows.push(['Process Incharge', sd.incharge||'',
-               'Chemist', Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||''),
-               'Fitter', sd.fitter||'']);
-    rows.push(['Electrical', (sd.electrical||[]).join(', ')||'',
-               'Utility', (sd.utility||[]).join(', ')||'',
-               'Shift AIM', (sd.aim_staff||[]).join(', ')||'',
-               'Shift GPR', (sd.gpr_staff||[]).join(', ')||'']);
+    rows.push(safeRow(['Process Incharge', sd.incharge||'',
+               'Chemist', safeJoin(sd.chemist),
+               'Fitter', sd.fitter||'']));
+    rows.push(safeRow(['Electrical', safeJoin(sd.electrical),
+               'Utility', safeJoin(sd.utility),
+               'Shift AIM', safeJoin(sd.aim_staff),
+               'Shift GPR', safeJoin(sd.gpr_staff)]));
     rows.push([]);
     // Machine table header
-    rows.push(['MC','Size','Operator','Order/Batch','Qty (L)','Note','Target','VS Target','AIM','Backlog','Proc DT','Mech DT','Elec DT','GPR DT','HVAC DT','DW DT']);
+    rows.push(safeRow(['MC','Size','Operator','Order/Batch','Qty (L)','Note','Target','VS Target','AIM','Backlog','Proc DT','Mech DT','Elec DT','GPR DT','HVAC DT','DW DT']));
     mcs.forEach(mc=>{
       const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
       const prod=Math.round(mcTotalProd(m)*100)/100;
@@ -3153,14 +3190,14 @@ async function exportDailyReportExcel(){
       const bl=aim>0?Math.round((prod-aim)*100)/100:null;
       const runs=m.runs||[blankRun()];
       runs.forEach((run,ri)=>{
-        rows.push([
+        rows.push(safeRow([
           ri===0?mc.id:'', ri===0?mc.sz:'', ri===0?(m.operator||''):'',
           run.batchNumber||'', run.qty||'', run.note||'',
           ri===0?t:'', ri===0?(vs!==null?vs:''):'',
           ri===0?(aim||''):'', ri===0?(bl!==null?bl:''):'',
           ri===0?(m.proc||0):'', ri===0?(m.mech||0):'', ri===0?(m.elec||0):'',
           ri===0?(m.gpr||0):'', ri===0?(m.hvac||0):'', ri===0?(m.dw||0):''
-        ]);
+        ]));
       });
     });
     // Totals
@@ -3170,12 +3207,12 @@ async function exportDailyReportExcel(){
       shProd+=mcTotalProd(m); shTgt+=tgt(fl,mc.id); shAim+=parseFloat(m.aim||0);
     });
     shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100;
-    rows.push(['TOTAL','','','','',shProd,'',shTgt,Math.round((shProd-shTgt)*100)/100,shAim,'','','','','','']);
+    rows.push(safeRow(['TOTAL','','','','',shProd,'',shTgt,Math.round((shProd-shTgt)*100)/100,shAim,'','','','','','']));
     const ws=XLSX.utils.aoa_to_sheet(rows);
     ws['!cols']=[{wch:8},{wch:6},{wch:14},{wch:14},{wch:8},{wch:14},{wch:7},{wch:8},{wch:8},{wch:8},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7}];
-    XLSX.utils.book_append_sheet(wb,'Shift_'+sh,ws);
+    XLSX.utils.book_append_sheet(wb,ws,'Shift_'+sh);
   });
-  XLSX.writeFile(wb, 'DPR_'+fl+'_'+d+'_Production.xlsx');
+  xlsxSaveAs(wb, 'DPR_'+fl+'_'+d+'_Production.xlsx');
   toast('✅ Excel exported','var(--green)');
 }
 
@@ -3184,9 +3221,9 @@ async function exportAimStatusExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
-  rows.push(['SUNLOC  AIM Status Report  '+fl+'  '+d]);
+  rows.push(safeRow(['SUNLOC  AIM Status Report  '+fl+'  '+d]));
   rows.push([]);
-  rows.push(['Machine','Size','AIM (L)','Produced (L)','Produced − AIM','Status']);
+  rows.push(safeRow(['Machine','Size','AIM (L)','Produced (L)','Produced − AIM','Status']));
   let totAim=0, totProd=0;
   mcs.forEach(mc=>{
     let prod=0,aim=0;
@@ -3198,17 +3235,17 @@ async function exportAimStatusExcel(){
     totAim+=aim; totProd+=prod;
     const diff=aim>0?Math.round((prod-aim)*100)/100:null;
     const status=aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track';
-    rows.push([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',status]);
+    rows.push(safeRow([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',status]));
   });
   totAim=Math.round(totAim*100)/100; totProd=Math.round(totProd*100)/100;
   const totDiff=totAim>0?Math.round((totProd-totAim)*100)/100:null;
   rows.push([]);
-  rows.push(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']);
+  rows.push(safeRow(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']));
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:8},{wch:6},{wch:10},{wch:12},{wch:14},{wch:12}];
-  XLSX.utils.book_append_sheet(wb,'AIM Status',ws);
-  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_AIM.xlsx');
+  XLSX.utils.book_append_sheet(wb,ws,'AIM Status');
+  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_AIM.xlsx');
   toast('✅ AIM Excel exported','var(--green)');
 }
 
@@ -3217,7 +3254,7 @@ async function exportDowntimeExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
-  rows.push(['SUNLOC  Machine-wise Downtime  '+fl+'  '+d]);
+  rows.push(safeRow(['SUNLOC  Machine-wise Downtime  '+fl+'  '+d]));
   rows.push([]);
   const hdr=['Machine'];
   SHIFTS.forEach(sh=>DT_CATS.forEach(c=>hdr.push('Shift_'+sh+' '+DT_LABELS[c])));
@@ -3246,8 +3283,8 @@ async function exportDowntimeExcel(){
   rows.push(totRow);
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb,'Downtime',ws);
-  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_Downtime.xlsx');
+  XLSX.utils.book_append_sheet(wb,ws,'Downtime');
+  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_Downtime.xlsx');
   toast('✅ Downtime Excel exported','var(--green)');
 }
 
@@ -3256,9 +3293,9 @@ async function exportShiftPerformanceExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const {fl,d,day,mcs}=getExportData();
   const rows=[];
-  rows.push(['SUNLOC  Shift Performance  '+fl+'  '+d]);
+  rows.push(safeRow(['SUNLOC  Shift Performance  '+fl+'  '+d]));
   rows.push([]);
-  rows.push(['Shift','Incharge','Chemist','Fitter','Electrical','Utility','AIM Staff','GPR Staff','Production (L)','Target (L)','Efficiency %','DT (min)','DT %','Score']);
+  rows.push(safeRow(['Shift','Incharge','Electrical','Utility','AIM Staff','GPR Staff','Production (L)','Target (L)','Efficiency %','DT (min)','DT %','Score']));
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0;
@@ -3270,23 +3307,21 @@ async function exportShiftPerformanceExcel(){
     const dt=calcShiftDT(fl,d,sh);
     const eff=t>0?Math.round(prod/t*1000)/10:0;
     const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
-    rows.push([
+    rows.push(safeRow([
       'Shift_'+sh,
       sd.incharge||'',
-      Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||''),
-      sd.fitter||'',
-      (sd.electrical||[]).join(', ')||'',
-      (sd.utility||[]).join(', ')||'',
-      (sd.aim_staff||[]).join(', ')||'',
-      (sd.gpr_staff||[]).join(', ')||'',
+      safeJoin(sd.electrical),
+      safeJoin(sd.utility),
+      safeJoin(sd.aim_staff),
+      safeJoin(sd.gpr_staff),
       prod||'', t, eff+'%', dt.total, dt.dtPct.toFixed(1)+'%', prod>0?score:''
-    ]);
+    ]));
   });
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:8},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:7}];
-  XLSX.utils.book_append_sheet(wb,'Shift Performance',ws);
-  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_ShiftPerformance.xlsx');
+  XLSX.utils.book_append_sheet(wb,ws,'Shift Performance');
+  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_ShiftPerformance.xlsx');
   toast('✅ Shift Performance exported','var(--green)');
 }
 
@@ -3297,7 +3332,7 @@ async function exportAllShiftsExcel(){
   // Sheet 1: Production
   const {fl,d,day,mcs}=getExportData();
   const summaryRows=[['SUNLOC FULL DPR  '+fl+'  '+d],[]];
-  summaryRows.push(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']);
+  summaryRows.push(safeRow(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']));
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0,aim=0;
@@ -3307,12 +3342,12 @@ async function exportAllShiftsExcel(){
     });
     prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
     const dt=calcShiftDT(fl,d,sh);
-    summaryRows.push(['Shift_'+sh, sd.incharge||'', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'', dt.total]);
+    summaryRows.push(safeRow(['Shift_'+sh, sd.incharge||'', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'', dt.total]));
   });
   const summaryWs=XLSX.utils.aoa_to_sheet(summaryRows);
-  XLSX.utils.book_append_sheet(wb,'Summary',summaryWs);
+  XLSX.utils.book_append_sheet(wb,summaryWs,'Summary');
   // Add individual shift sheets
-  XLSX.utils.book_append_sheet(wb,'_temp',XLSX.utils.aoa_to_sheet([[]]));
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([[]]),'_temp');
   wb.SheetNames.pop(); // remove temp
   // Re-use production export logic per shift
   const wbTemp=XLSX.utils.book_new();
@@ -3321,35 +3356,35 @@ async function exportAllShiftsExcel(){
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     const rows=[['Shift_'+sh+'  '+fl+'  '+d],[]];
-    rows.push(['MC','Sz','Operator','Batch','Qty(L)','Note','Target','VS Tgt','AIM','Backlog','Proc','Mech','Elec','GPR','HVAC','DW']);
+    rows.push(safeRow(['MC','Sz','Operator','Batch','Qty(L)','Note','Target','VS Tgt','AIM','Backlog','Proc','Mech','Elec','GPR','HVAC','DW']));
     mcs.forEach(mc=>{
       const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
       const prod=Math.round(mcTotalProd(m)*100)/100;
       const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
       (m.runs||[blankRun()]).forEach((run,ri)=>{
-        rows.push([ri===0?mc.id:'',ri===0?mc.sz:'',ri===0?(m.operator||''):'',
+        rows.push(safeRow([ri===0?mc.id:'',ri===0?mc.sz:'',ri===0?(m.operator||''):'',
           run.batchNumber||'',run.qty||'',run.note||'',
           ri===0?t:'',ri===0?Math.round((prod-t)*100)/100:'',
           ri===0?(aim||0):'',ri===0?(aim>0?Math.round((prod-aim)*100)/100:''):'',
           ri===0?(m.proc||0):'',ri===0?(m.mech||0):'',ri===0?(m.elec||0):'',
           ri===0?(m.gpr||0):'',ri===0?(m.hvac||0):'',ri===0?(m.dw||0):''
-        ]);
+        ]));
       });
     });
-    XLSX.utils.book_append_sheet(wb,'Shift_'+sh,XLSX.utils.aoa_to_sheet(rows));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Shift_'+sh);
   });
   // AIM sheet
   const aimRows=[['AIM Status  '+fl+'  '+d],[]];
-  aimRows.push(['MC','Sz','AIM','Produced','Diff','Status']);
+  aimRows.push(safeRow(['MC','Sz','AIM','Produced','Diff','Status']));
   mcs.forEach(mc=>{
     let prod=0,aim=0;
     SHIFTS.forEach(sh=>{const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());prod+=mcTotalProd(m);aim+=parseFloat(m.aim||0);});
     prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
     const diff=aim>0?Math.round((prod-aim)*100)/100:null;
-    aimRows.push([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']);
+    aimRows.push(safeRow([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']));
   });
-  XLSX.utils.book_append_sheet(wb,'AIM Status',XLSX.utils.aoa_to_sheet(aimRows));
-  XLSX.writeFile(wb,'DPR_'+fl+'_'+d+'_FULL.xlsx');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aimRows),'AIM Status');
+  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_FULL.xlsx');
   toast('✅ Full DPR Excel exported','var(--green)');
 }
 
@@ -3383,12 +3418,12 @@ function exportPDF(){
     html+=`<h2>SHIFT ${sh}</h2>
     <div class="info-grid">
       <div class="info-box"><div class="info-label">Incharge</div><div class="info-val">${sd.incharge||''}</div></div>
-      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${Array.isArray(sd.chemist)?sd.chemist.join(', '):(sd.chemist||'')}</div></div>
+      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${safeJoin(sd.chemist)}</div></div>
       <div class="info-box"><div class="info-label">Fitter</div><div class="info-val">${sd.fitter||''}</div></div>
-      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${(sd.electrical||[]).join(', ')||''}</div></div>
-      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${(sd.utility||[]).join(', ')||''}</div></div>
-      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${(sd.aim_staff||[]).join(', ')||''}</div></div>
-      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${(sd.gpr_staff||[]).join(', ')||''}</div></div>
+      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${safeJoin(sd.electrical)}</div></div>
+      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${safeJoin(sd.utility)}</div></div>
+      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${safeJoin(sd.aim_staff)}</div></div>
+      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${safeJoin(sd.gpr_staff)}</div></div>
     </div>
     <table><thead><tr>
       <th>MC</th><th>Sz</th><th>Operator</th><th>Batch</th><th>Qty (L)</th><th>Note</th>

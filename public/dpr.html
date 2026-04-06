@@ -1548,20 +1548,10 @@ async function renderEntry(){
       if(r.ok){
         const j = await r.json();
         if(j.ok && j.data){
-          // Only overwrite localStorage if server has >= local production
-          // Prevents race condition: save completes → auto-sync fetches stale server data → wipes form
-          const local = loadDay(fl, d);
-          const localProd = totalProdFromDay(local);
-          const serverProd = totalProdFromDay(j.data);
-          if(serverProd >= localProd){
-            localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-          } else {
-            // Local has more — keep it, push back to fix server
-            console.log('[renderEntry] Local prod '+localProd+' > server prod '+serverProd+' — protecting local data');
-            pushToServer(fl, d, local);
-          }
+          // Server data always wins — write to localStorage as cache
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
         }
-        // If j.data is null = no record on server yet — localStorage stays as-is
+        // If j.data is null = no record on server yet — localStorage stays as-is (may be blank)
       }
     }catch(e){ /* offline — fall through to render from localStorage cache */ }
   }
@@ -1582,6 +1572,7 @@ async function safeRenderShifts(){
 
   // Never re-render if user is actively typing in a form field
   const activeTag = document.activeElement?.tagName?.toLowerCase();
+  const activeId = document.activeElement?.id || '';
   const userTyping = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
 
   // Snapshot any unsaved DOM input first (before any server fetch overwrites localStorage)
@@ -1594,6 +1585,7 @@ async function safeRenderShifts(){
       }catch(e){}
     }
     // User is actively typing — skip re-render completely to avoid disruption
+    // The data is already snapshotted — it will be picked up on next save
     return;
   }
 
@@ -1604,20 +1596,7 @@ async function safeRenderShifts(){
       if(r.ok){
         const j = await r.json();
         if(j.ok && j.data){
-          // ── SAFETY: never replace local data with server data that has LESS production ──
-          // This prevents a race condition where the server returns stale data just after a save
-          const local = loadDay(fl, d);
-          const localProd = totalProdFromDay(local);
-          const serverProd = totalProdFromDay(j.data);
-          if(serverProd >= localProd){
-            // Server has same or more data — safe to use
-            localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-          } else {
-            // Local has more production — server is stale, skip overwrite
-            // Push local data back to server to fix the discrepancy
-            console.log('[safeRender] Local prod '+localProd+' > server prod '+serverProd+' — keeping local, pushing to server');
-            pushToServer(fl, d, local);
-          }
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
         }
       }
     }catch(e){}
@@ -1630,22 +1609,9 @@ async function safeRenderShifts(){
     renderDTSummary();
     renderDayKpis();
   } else {
+    // User started typing since we began — just update KPIs silently
     renderDayKpis();
   }
-}
-
-// Sum total production across all shifts and machines for a day object
-function totalProdFromDay(day){
-  if(!day || !day.shifts) return 0;
-  let total = 0;
-  Object.values(day.shifts).forEach(sh=>{
-    if(!sh || !sh.machines) return;
-    Object.values(sh.machines).forEach(mc=>{
-      const m = migrateMachineData(mc || blankMachine());
-      total += mcTotalProd(m);
-    });
-  });
-  return total;
 }
 
 function renderDayKpis(){
@@ -2897,35 +2863,32 @@ async function fetchDpr(fl, d){
     if(!r.ok) return;
     const j = await r.json();
     if(j.ok && j.data){
+      // SERVER IS TRUTH — always use server data
+      // Only preserve currently-typed-but-unsaved data if user is actively on this floor+date
       const isCurrentView = (curFloor===fl && getDate()===d);
-      const local = loadDay(fl, d);
-      const localProd = totalProdFromDay(local);
-      const serverProd = totalProdFromDay(j.data);
-
-      if(isCurrentView && unsaved){
-        // User has unsaved changes — always merge, local overrides server
-        const merged = deepMergeDpr(j.data, local);
-        localStorage.setItem(skey(fl,d), JSON.stringify(merged));
-      } else if(serverProd >= localProd){
-        // Server has same or more production — safe to use server data
-        localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+      if(isCurrentView){
+        const shiftsArea = document.getElementById('shiftsArea');
+        const hasUnsavedTyping = shiftsArea && shiftsArea.querySelector('.run-row') && unsaved;
+        if(hasUnsavedTyping){
+          // User has unsaved changes — merge keeping server as base, local as override
+          const local = loadDay(fl, d);
+          const merged = deepMergeDpr(j.data, local);
+          localStorage.setItem(skey(fl,d), JSON.stringify(merged));
+        } else {
+          // No unsaved changes — server data wins completely
+          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        }
       } else {
-        // Local has MORE production than server — server is stale (race condition after save)
-        // Keep local data and push it back to server to fix the discrepancy
-        console.log('[fetchDpr] Local prod '+localProd+' > server prod '+serverProd+' — keeping local');
-        pushToServer(fl, d, local);
-        // Still render from local (which is correct)
+        // Background fetch for different floor/date — server always wins
+        localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
       }
-
-      if(isCurrentView && !document.activeElement?.tagName?.match(/^(input|select|textarea)$/i)){
-        renderShifts();
-        renderDayKpis();
-        renderDTSummary();
-      }
+      if(isCurrentView && !document.activeElement?.tagName?.match(/^(input|select|textarea)$/i)) safeRenderShifts();
     } else if(j.ok && !j.data){
-      // Server has no data — never wipe local data (save may still be in flight)
-      if(curFloor===fl && getDate()===d && !unsaved && totalProdFromDay(loadDay(fl,d))===0){
-        renderShifts(); renderDayKpis();
+      // Server has no data for this floor+date
+      // NEVER delete localStorage — user may have just saved and server fetch ran before write completed
+      // Only re-render if we are currently viewing this floor+date and there is no local data either
+      if(curFloor===fl && getDate()===d && !unsaved){
+        safeRenderShifts();
       }
     }
   }catch(e){}
@@ -2960,8 +2923,6 @@ function deepMergeDpr(server, local){
 function onDateChange(){
   refreshRecentDates();
   const fl=curFloor, d=getDate();
-  // Remember the date the user is viewing — restore on next page load
-  localStorage.setItem('dpr_last_date', d);
   updateSaveBtnStyle(d);
   const shiftsArea = document.getElementById('shiftsArea');
   if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
@@ -3589,9 +3550,7 @@ function renderDprSearch(){
 // ═══════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════
-// Restore last viewed date — so refreshing the page shows the same date the user was on
-const _lastDate = localStorage.getItem('dpr_last_date');
-document.getElementById('ndate').value = (_lastDate && _lastDate <= today()) ? _lastDate : today();
+document.getElementById('ndate').value=today();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
 function postAuthServerInit() {

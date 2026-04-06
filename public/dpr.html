@@ -1024,6 +1024,7 @@ function calcDayStats(fl,d){
     });
   });
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
+  totResort = Math.round(totResort*100)/100;
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
   // BACKLOG: positive = excess, negative = behind
@@ -1548,10 +1549,23 @@ async function renderEntry(){
       if(r.ok){
         const j = await r.json();
         if(j.ok && j.data){
-          // Server data always wins — write to localStorage as cache
-          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+          // Only overwrite localStorage if we have no unsaved changes
+          // If user has unsaved data in localStorage, merge server as base + local on top
+          if(!unsaved){
+            // No unsaved changes — server is truth, overwrite local cache
+            localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+          } else {
+            // Has unsaved changes — merge: server as base, local snapshot on top
+            const localData = loadDay(fl,d);
+            const liveSnap = collectLiveFormValues();
+            const merged = mergeFormIntoData(j.data, liveSnap);
+            // Preserve remarks and resort from localStorage (not in live form)
+            if(localData.remarks && localData.remarks.length) merged.remarks = localData.remarks;
+            if(localData.resort && localData.resort.length) merged.resort = localData.resort;
+            localStorage.setItem(skey(fl,d), JSON.stringify(merged));
+          }
         }
-        // If j.data is null = no record on server yet — localStorage stays as-is (may be blank)
+        // If j.data is null = no record on server yet — localStorage stays as-is
       }
     }catch(e){ /* offline — fall through to render from localStorage cache */ }
   }
@@ -1625,7 +1639,7 @@ function renderDayKpis(){
     <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+Math.round((s.totProd-s.totTgt)*100)/100:'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
     <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim?parseFloat(s.totAim.toFixed(2))||'—':'—'}</div><div class="kpi-sub">planned today</div></div>
     <div class="kpi"><div class="kpi-label">BACKLOG</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+parseFloat(s.backlog.toFixed(2)):parseFloat(s.backlog.toFixed(2))}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
-    <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
+    <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${Math.round(s.totResort*100)/100}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
 }
@@ -3864,6 +3878,21 @@ setInterval(async () => {
 }, 30*1000);
 
 setInterval(dprQueueFlush, 5*1000); // flush queue every 5s
+
+// Auto-snapshot unsaved form data to localStorage every 10s
+// This ensures data survives page refresh even if user forgets to click Save
+// Note: this saves to localStorage only — server save still requires clicking Save
+setInterval(()=>{
+  if(unsaved && curFloor && dprUser){
+    try{
+      const d = getDate();
+      const snapshot = collectForm();
+      if(snapshot && snapshot.shifts) {
+        localStorage.setItem(skey(curFloor,d), JSON.stringify(snapshot));
+      }
+    }catch(e){}
+  }
+}, 10*1000); // every 10 seconds
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='visible'){
     dprQueueFlush();
@@ -3881,8 +3910,9 @@ window.addEventListener('beforeunload', () => {
   if (!url || !curFloor) return;
   try {
     const d = getDate();
+    // Always snapshot current form first — even if user cancels, localStorage is fresh
     const data = collectForm();
-    localStorage.setItem(skey(curFloor,d), JSON.stringify(data));
+    if(data && data.shifts) localStorage.setItem(skey(curFloor,d), JSON.stringify(data));
     // Build actuals from current form so production qty is included
     const actuals=[];
     Object.keys(FLOORS).forEach(f=>{

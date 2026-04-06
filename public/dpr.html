@@ -2923,6 +2923,8 @@ function deepMergeDpr(server, local){
 function onDateChange(){
   refreshRecentDates();
   const fl=curFloor, d=getDate();
+  // Remember the date the user is viewing — restore on next page load
+  localStorage.setItem('dpr_last_date', d);
   updateSaveBtnStyle(d);
   const shiftsArea = document.getElementById('shiftsArea');
   if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
@@ -3550,7 +3552,9 @@ function renderDprSearch(){
 // ═══════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════
-document.getElementById('ndate').value=today();
+// Restore last viewed date — so refreshing the page shows the same date the user was on
+const _lastDate = localStorage.getItem('dpr_last_date');
+document.getElementById('ndate').value = (_lastDate && _lastDate <= today()) ? _lastDate : today();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
 function postAuthServerInit() {

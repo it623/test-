@@ -2015,10 +2015,11 @@ function onRunOrderChange(sh, mcId, ri){
           rowEl.appendChild(infoEl);
         }
         const actual=Math.round((ord.actualQty||0)*100)/100;
-        const grossQty=Math.round((mo.grossQty||0)*100)/100;
+        const grossQty=Math.round((ord.grossQty||0)*100)/100;
         const remaining=Math.max(0,Math.round((grossQty-actual)*100)/100);
+        const remColor=remaining<=0?'var(--green)':remaining<grossQty*0.2?'var(--amber)':'var(--cyan)';
         infoEl.textContent=`Gross:${grossQty}L Prod:${actual}L Rem:${remaining}L`;
-        infoEl.style.color='var(--green)';
+        infoEl.style.color=remColor;
       }
     }
   }

@@ -1889,30 +1889,27 @@ function generateZPL(label, batch){
     const pm = label.printingMatter || batch?.printingMatter || batch?.pcCode || '';
     const containerNum = Math.abs(label.labelNumber||0);
     const qrContent = label.qrData || (batchNo+'-OL-'+containerNum);
+    // Orange label: 4" x 1" at 203dpi = 812 x 203 dots
+    // Physically orange paper — print black text directly, no fill needed
     return `^XA
 ^CI28
-^PW800
-^LL400
+^PW812
+^LL203
 ^MMT
 ^PON
 ^LH0,0
-^FO0,0^GB800,400,400^FS
-^CF0,38
-^FR
-^FO20,18^FDBatch NO.^FS
-^FO260,18^FD:  ${batchNo}^FS
-^FO20,72^FDContainer NO.^FS
-^FO260,72^FD:  ${containerNum}^FS
-^FO20,126^FDPrinted^FS
-^FO260,126^FD:^FS
-^CF0,44
-^FO20,172^FD${pm}^FS
-^CF0,70
-^FO20,280^FDQ^FS
-^CF0,38
-^FO85,296^FDRELEASED^FS
-^FO500,370^FB260,1,0,R^FDSIGNATURE^FS
-^FO540,18^BQN,2,6^FDLA,${qrContent}^FS
+^CF0,28
+^FO8,8^FDBatch NO.    :  ${batchNo}^FS
+^FO8,44^FDContainer NO.:  ${containerNum}^FS
+^FO8,80^FDPrinted      :^FS
+^CF0,32
+^FO8,118^FD${pm}^FS
+^CF0,55
+^FO8,160^FDQ^FS
+^CF0,26
+^FO58,172^FDRELEASED^FS
+^FO480,178^FB280,1,0,R^FDSIGNATURE^FS
+^FO600,8^BQN,2,4^FDLA,${qrContent}^FS
 ^XZ`;
   }
 
@@ -2396,6 +2393,23 @@ async function regenerateOrangeLabelsFromScans(){
   return count;
 }
 
+
+function reprintOrangeLabel(labelId){
+  const label = state.labels.find(l=>l.id===labelId);
+  if(!label) return;
+  const batch = getBatch(label.batchNumber) || {};
+  const zpl = generateZPL(label, batch);
+  const printerUrl = localStorage.getItem('sunloc_printer_url');
+  if(printerUrl){
+    fetch(printerUrl,{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl})
+      .then(r=>{ if(r.ok) toast('🟠 Orange label reprinted','var(--orange)'); })
+      .catch(()=>{ downloadZPL(zpl, label); toast('📥 ZPL downloaded for reprint','var(--orange)'); });
+  } else {
+    downloadZPL(zpl, label);
+    toast('📥 ZPL downloaded for reprint','var(--orange)');
+  }
+}
+
 function renderLabels(){
   const el=document.getElementById('page-labels');
 
@@ -2521,7 +2535,12 @@ function renderLabels(){
           <td class="td-mono">${fmt(l.qty)}</td>
           <td class="text-sm">${fmtDateTime(l.generated)}</td>
           <td>${l.printed?`<span class="badge badge-green">✅ Printed ${fmtDateTime(l.printedAt)}</span>`:'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>'}</td>
-          <td>${!l.printed?`<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel('${l.id}');renderLabels()">🖨️ Print</button>`:'—'}</td>
+          <td>
+              ${!l.printed
+                ? `<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel('${l.id}');renderLabels()">🖨️ Print</button>`
+                : `<button class="btn btn-sm btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="reprintOrangeLabel('${l.id}')">🔄 Reprint</button>`
+              }
+            </td>
         </tr>`;
       }).join('')}
       </tbody>

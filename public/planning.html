@@ -1412,8 +1412,8 @@ function renderOrderRow(ord, idx, mc) {
     <td class="text-mono text-dim">${idx}</td>
     <td class="text-mono" style="white-space:nowrap">
       ${woBadge}
-      ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}<span style="color:var(--accent);font-weight:700;letter-spacing:0.3px">${ord.poNumber||'-'}</span>
-      ${ord.batchNumber?`<br><span style="color:#60a5fa;font-weight:600;font-size:12px">${ord.batchNumber}</span>`:''}
+      ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}<span style="color:#e2e8f8;font-weight:700;letter-spacing:0.3px">${ord.poNumber||'-'}</span>
+      ${ord.batchNumber?`<br><span style="color:#e2e8f8;font-weight:600;font-size:12px;font-family:var(--mono)">${ord.batchNumber}</span>`:''}
     </td>
     <td style="font-weight:500">${isWO
       ? '<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>'

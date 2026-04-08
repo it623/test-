@@ -444,6 +444,19 @@ input[type=number]{font-family:var(--mono)}
 .cursor-pointer{cursor:pointer}
 .text-center{text-align:center}
 .overflow-hidden{overflow:hidden}
+/* ── Sticky columns in reports ── */
+.tbl-wrap { overflow-x:auto; max-width:100%; }
+.tbl-wrap table { border-collapse:collapse; min-width:100%; }
+.tbl-wrap th, .tbl-wrap td { white-space:nowrap; }
+.sticky-col { position:sticky; background:var(--surface,#1a1e28); z-index:2; }
+.sticky-col-1 { left:0;   min-width:70px;  box-shadow:1px 0 0 var(--border,#2a2f3f); }
+.sticky-col-2 { left:70px; min-width:55px; box-shadow:1px 0 0 var(--border,#2a2f3f); }
+.sticky-col-3 { left:125px; min-width:80px; box-shadow:1px 0 0 var(--border,#2a2f3f); }
+.sticky-col-4 { left:205px; min-width:50px; box-shadow:1px 0 0 var(--border,#2a2f3f); }
+.sticky-col-5 { left:255px; min-width:90px; box-shadow:2px 0 6px rgba(0,0,0,0.3); }
+thead .sticky-col { z-index:3; background:var(--surface2,#222736); }
+
+
 </style>
 </head>
 <body>
@@ -811,6 +824,8 @@ function canScanDept(batchNo, dept){
   });
   return anyNotYetIn;
 }
+
+
 
 function checkAlerts(){
   const newAlerts = [];
@@ -4150,9 +4165,9 @@ function renderReportG(){
     <div class="tbl-wrap"><table id="rg-table">
       <thead>
         <tr style="background:var(--surface2)">
-          <th rowspan="2">Batch</th>
-          <th rowspan="2">Customer</th>
-          <th rowspan="2">Size</th>
+          <th rowspan="2" class="sticky-col sticky-col-1">Batch</th>
+          <th rowspan="2" class="sticky-col sticky-col-2" style="min-width:140px">Customer</th>
+          <th rowspan="2" class="sticky-col sticky-col-3">Size</th>
           ${DEPTS.map(d=>`<th colspan="5" style="text-align:center;border-left:2px solid var(--border2)">${DEPT_LABELS[d]}</th>`).join('')}
           <th colspan="3" style="text-align:center;border-left:2px solid var(--border2)">Overall</th>
         </tr>
@@ -4343,7 +4358,9 @@ function renderReportF(){
 
     <div class="tbl-wrap"><table>
       <thead><tr>
-        <th>Batch No.</th><th>Customer</th><th>Size</th>
+        <th class="sticky-col sticky-col-1">Batch No.</th>
+        <th class="sticky-col sticky-col-2">Customer</th>
+        <th class="sticky-col sticky-col-3">Size</th>
         <th>DPR Qty (L)</th><th>DPR Boxes</th>
         <th>AIM Scans Today</th><th>AIM Total</th><th>Packed Out Today</th>
         <th>Status</th>
@@ -4393,7 +4410,7 @@ function renderReportB(){
     const batchSet=[...new Set(inScans.map(s=>s.batchNumber))];
     html+=`<div class="mb-16"><div class="card-title" style="color:${DEPT_CONFIG[dept].color}">${DEPT_CONFIG[dept].label}</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Boxes IN</th><th>Boxes OUT</th><th>WIP Boxes</th><th>WIP Qty (L)</th><th>Time in Dept</th><th>Status</th></tr></thead><tbody>`;
+      <thead><tr><th class="sticky-col sticky-col-1">Batch</th><th class="sticky-col sticky-col-2" style="min-width:140px">Customer</th><th>Boxes IN</th><th>Boxes OUT</th><th>WIP Boxes</th><th>WIP Qty (L)</th><th>Time in Dept</th><th>Status</th></tr></thead><tbody>`;
     batchSet.forEach(batchNo=>{
       const batch=getBatch(batchNo);
       const inn=inScans.filter(s=>s.batchNumber===batchNo).length;
@@ -4404,8 +4421,8 @@ function renderReportB(){
       const hrs=firstIn?hoursAgo(firstIn.ts):0;
       const alerts=state.alerts.filter(a=>a.batchNumber===batchNo&&a.dept===dept).length;
       html+=`<tr>
-        <td class="td-bold td-mono">${batchNo}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
-        <td class="text-sm">${batch?.customer||'-'}</td>
+        <td class="td-bold td-mono sticky-col sticky-col-1">${batchNo}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
+        <td class="text-sm sticky-col sticky-col-2" style="min-width:140px">${batch?.customer||'-'}</td>
         <td class="td-mono">${inn}</td><td class="td-mono">${out}</td>
         <td class="td-mono fw-bold">${wip}</td>
         <td class="td-mono">${fmt(wipQty)}</td>
@@ -4422,7 +4439,7 @@ function renderReportB(){
 
 function renderReportC(){
   let html=`<div class="card"><div class="section-title mb-16">Report C — Machine-wise WIP Status</div><div class="tbl-wrap"><table>
-    <thead><tr><th>Machine</th><th>Floor</th><th>Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
+    <thead><tr><th class="sticky-col sticky-col-1">Machine</th><th class="sticky-col sticky-col-2">Floor</th><th class="sticky-col sticky-col-3">Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
   const machines=[...new Set(state.batches.map(b=>b.machineId).filter(Boolean))].sort();
   machines.forEach(mc=>{
     const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
@@ -4439,9 +4456,9 @@ function renderReportC(){
       else if(wipDays<=std) statusBadge='<span class="badge badge-blue">🔵 In Progress</span>';
       else statusBadge='<span class="badge badge-amber">⚠️ Pending</span>';
       html+=`<tr>
-        <td class="td-bold td-mono">${mc}</td>
-        <td class="td-mono">${getMachineFloor(mc)}</td>
-        <td class="td-mono">${b.batchNumber}</td>
+        <td class="td-bold td-mono sticky-col sticky-col-1">${mc}</td>
+        <td class="td-mono sticky-col sticky-col-2">${getMachineFloor(mc)}</td>
+        <td class="td-mono sticky-col sticky-col-3">${b.batchNumber}</td>
         <td class="text-sm">${b.customer||'-'}</td>
         <td class="td-mono">${fmt(grossProd)}</td>
         <td class="td-mono">${fmt(packedQty)}</td>
@@ -4530,9 +4547,9 @@ function renderReportA(){
     if(scanDates.length>0){
       dayHistoryHtml=`<div style="margin-top:12px">
         <div style="font-size:11px;font-weight:600;color:var(--text3);letter-spacing:.8px;margin-bottom:8px">DAY-WISE SCAN HISTORY</div>
-        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <div style="overflow-x:auto"><div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead><tr style="background:var(--surface3)">
-            <th style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border)">Date</th>
+            <th class="sticky-col sticky-col-1" style="padding:6px 10px;text-align:left;border-bottom:1px solid var(--border);min-width:90px">Date</th>
             ${getBatchFlow(b).map(d=>`<th style="padding:6px 10px;text-align:center;border-bottom:1px solid var(--border)">${DEPT_LABELS[d]||d}</th>`).join('')}
           </tr></thead><tbody>
           ${scanDates.map(date=>{
@@ -4558,7 +4575,7 @@ function renderReportA(){
               return `<td style="padding:6px 10px;text-align:center;font-family:var(--mono);font-size:11px">IN:${inn} / OUT:${out}</td>`;
             }).join('')}
           </tr></tfoot>
-        </table></div>
+        </table></div></div>
       </div>`;
     }
 
@@ -4648,12 +4665,23 @@ function renderReportE(){
     </select>
     ${filterDate?`<button class="btn btn-ghost btn-sm" onclick="window._rptEDate='';renderReportE()">✕ Show All</button>`:''}
   </div>
-  <div class="tbl-wrap"><table>
-    <thead><tr><th>Machine</th><th>Floor</th><th>Batch</th><th>Size</th><th>Planned (L)</th><th>Gross Prod</th><th>AIM Run</th><th>AIM Sal</th><th>AIM Remelt</th><th>AIM A-Grade</th><th>AIM %</th><th>Manual Insp</th><th>Total A-Grade</th><th>A-Grade %</th><th>WIP</th><th>Avail UNPTD</th><th>Avail PTD</th><th>Print TD</th><th>Print Rej</th><th>PI Inspect</th><th>PI Sal/Rem</th><th>Pack UNPTD</th><th>Pack PTD</th><th>Dispatch</th></tr></thead>
+  <div class="tbl-wrap"><div class="tbl-wrap"><table>
+    <thead><tr>
+      <th class="sticky-col sticky-col-1">Machine</th>
+      <th class="sticky-col sticky-col-2">Floor</th>
+      <th class="sticky-col sticky-col-3">Batch</th>
+      <th class="sticky-col sticky-col-4">Size</th>
+      <th class="sticky-col sticky-col-5">Planned (L)</th>
+      <th>Gross Prod</th><th>AIM Run</th><th>AIM Sal</th><th>AIM Remelt</th><th>AIM A-Grade</th><th>AIM %</th><th>Manual Insp</th><th>Total A-Grade</th><th>A-Grade %</th><th>WIP</th><th>Avail UNPTD</th><th>Avail PTD</th><th>Print TD</th><th>Print Rej</th><th>PI Inspect</th><th>PI Sal/Rem</th><th>Pack UNPTD</th><th>Pack PTD</th><th>Dispatch</th>
+    </tr></thead>
     <tbody>
     ${rows.map(r=>`<tr>
-      <td class="td-bold td-mono">${r.machine}</td><td class="td-mono">${r.floor}</td><td class="td-mono">${r.batchNo}</td>
-      <td class="td-mono">${r.size}</td><td class="td-mono">${fmt(r.plannedQty)}</td><td class="td-mono">${r.grossProd}</td>
+      <td class="td-bold td-mono sticky-col sticky-col-1">${r.machine}</td>
+      <td class="td-mono sticky-col sticky-col-2">${r.floor}</td>
+      <td class="td-mono sticky-col sticky-col-3">${r.batchNo}</td>
+      <td class="td-mono sticky-col sticky-col-4">${r.size}</td>
+      <td class="td-mono sticky-col sticky-col-5">${fmt(r.plannedQty)}</td>
+      <td class="td-mono">${r.grossProd}</td>
       <td class="td-mono">${r.aimRunTotal}</td><td class="td-mono">${r.aimSalvage}</td><td class="td-mono">${r.aimRemelt}</td>
       <td class="td-mono fw-bold">${r.aimAGrade}</td><td class="td-mono">${r.aimAGradePct}%</td><td class="td-mono">${r.manInspect}</td>
       <td class="td-mono fw-bold">${r.totalAGrade}</td><td class="td-mono fw-bold">${r.aGradePctUnptd}%</td>
@@ -4663,7 +4691,7 @@ function renderReportE(){
       <td class="td-mono fw-bold">${r.dispatch}</td>
     </tr>`).join('')||'<tr><td colspan="24" class="text-center text-muted">No data yet</td></tr>'}
     </tbody>
-  </table></div>
+  </table></div></div>
   <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportE()">📥 Export Excel (matches current format)</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
@@ -4754,73 +4782,67 @@ function exportReportD(){
 }
 
 function exportReportE(){
-  const wb=XLSX.utils.book_new();
-  const summaryRows=[];
+  const wb = XLSX.utils.book_new();
+  const filterDate = window._rptEDate || '';
+  const allBatches = state.batches.filter(b=>!b.deleted);
+  const machineIds = [...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort();
+  const rows = [];
 
-  // Use ALL active batches directly — no floor/machine matching needed
-  const activeBatches = state.batches.filter(b=>!b.deleted);
-  // Group by machineId
-  const byMachine={};
-  activeBatches.forEach(b=>{
-    const mc=b.machineId||'Unknown';
-    if(!byMachine[mc]) byMachine[mc]=[];
-    byMachine[mc].push(b);
-  });
-
-  // Summary sheet — one row per batch
-  activeBatches.forEach(b=>{
-    const mc=b.machineId||'';
-    const floorKey=getMachineFloor(mc)||'';
-    const grossProd=b.actualProd||0;
-    const aimOut=boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size);
-    const aimW=getTotalWastage(b.batchNumber,'aim');
-    const aimIn=aimOut+aimW.total;
-    const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
-    const wip=Math.max(0,grossProd-aimIn);
-    const packScans=getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length;
-    const packQty=boxToLakh(packScans,b.size);
-    const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
-    summaryRows.push({
-      'FLOOR':floorKey,'M/C NO':mc,'BATCH NO':b.batchNumber,
-      'CUSTOMER':b.customer||'','SIZE':b.size,
-      'PLANNED QTY (lac)':fmt(b.qty),
-      'GROSS PROD (lac)':fmt(grossProd),
-      'AIM RUN (lac)':fmt(aimIn),
-      'SALVAGE (lac)':fmt(aimW.salvage),
-      'REMELT (lac)':fmt(aimW.remelt),
-      'A GRADE (lac)':fmt(aimOut),
-      'A GRADE %':fmt(aGradePct,2),
-      'WIP (lac)':fmt(wip),
-      'PACKING UNPTD (lac)':fmt(!b.isPrinted?packQty:0),
-      'PACKING PTD (lac)':fmt(b.isPrinted?packQty:0),
-      'DISPATCH (lac)':fmt(disp),
-      'STATUS':b.status||''
+  // Build ALL columns — same as screen table
+  machineIds.forEach(mc=>{
+    const floorKey = getMachineFloor(mc)||'';
+    allBatches.filter(b=>b.machineId===mc).forEach(b=>{
+      const scansForBatch = filterDate
+        ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
+        : getScansForBatch(b.batchNumber);
+      const grossProd=b.actualProd||0;
+      const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
+      const aimOutQty=boxToLakh(aimOut,b.size);
+      const aimW=getTotalWastage(b.batchNumber,'aim');
+      const aimIn=aimOutQty+aimW.total;
+      const manW=getTotalWastage(b.batchNumber,'manual');
+      const totalAG=aimOutQty+(manW.total>0?boxToLakh(scansForBatch.filter(s=>s.dept==='manual'&&s.type==='out').length,b.size):0);
+      const aGradePct=aimIn>0?(totalAG/aimIn*100):0;
+      const wip=Math.max(0,grossProd-aimIn);
+      const printingTD=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='printing'&&s.type==='out').length,b.size):0;
+      const piOut=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='pi'&&s.type==='out').length,b.size):0;
+      const printW=getTotalWastage(b.batchNumber,'printing');
+      const piW=getTotalWastage(b.batchNumber,'pi');
+      const packUnptd=!b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+      const packPtd=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+      const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
+      rows.push({
+        'MACHINE':mc,'FLOOR':floorKey,'BATCH':b.batchNumber,'SIZE':b.size,
+        'PLANNED (L)':b.qty||0,
+        'GROSS PROD':grossProd,
+        'AIM RUN':parseFloat(fmt(aimIn)),
+        'AIM SAL':parseFloat(fmt(aimW.salvage)),
+        'AIM REMELT':parseFloat(fmt(aimW.remelt)),
+        'AIM A-GRADE':parseFloat(fmt(aimOutQty)),
+        'AIM %':parseFloat(fmt(aGradePct,1)),
+        'MANUAL INSP':parseFloat(fmt(manW.total)),
+        'TOTAL A-GRADE':parseFloat(fmt(totalAG)),
+        'A-GRADE %':parseFloat(fmt(aGradePct,1)),
+        'WIP':parseFloat(fmt(wip)),
+        'AVAIL UNPTD':parseFloat(fmt(!b.isPrinted?totalAG:0)),
+        'AVAIL PTD':parseFloat(fmt(b.isPrinted?totalAG:0)),
+        'PRINT TD':parseFloat(fmt(printingTD)),
+        'PRINT REJ':parseFloat(fmt(printW.salvage)),
+        'PI INSPECT':parseFloat(fmt(piOut)),
+        'PI SAL/REM':parseFloat(fmt(piW.salvage)),
+        'PACK UNPTD':parseFloat(fmt(packUnptd)),
+        'PACK PTD':parseFloat(fmt(packPtd)),
+        'DISPATCH':parseFloat(fmt(disp))
+      });
     });
   });
 
-  const wsSummary=XLSX.utils.json_to_sheet(summaryRows.length?summaryRows:[{'Note':'No active batches found'}]);
-  XLSX.utils.book_append_sheet(wb,wsSummary,'Summary');
-
-  // Per machine sheets
-  Object.entries(byMachine).forEach(([mc,batches])=>{
-    const mcRows=batches.map(b=>({
-      'DATE':today(),
-      'BATCH NO':b.batchNumber,
-      'CUSTOMER':b.customer||'',
-      'COLOR':b.colour||'',
-      'PC CODE':b.pcCode||'',
-      'SIZE':b.size,
-      'PLANNED QTY (lac)':fmt(b.qty),
-      'GROSS PROD (lac)':fmt(b.actualProd||0),
-      'AIM A GRADE (lac)':fmt(boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size)),
-      'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),
-      'STATUS':b.status||''
-    }));
-    const wsName=(mc||'Unknown').replace(/[\.\/:*?[\]]/g,'').slice(0,31);
-    if(wsName) XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName);
-  });
-
-  xlsxSaveAs(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
+  const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{'Note':'No data'}]);
+  // Auto column widths
+  const cols = rows.length ? Object.keys(rows[0]) : [];
+  ws['!cols'] = cols.map(k=>({ wch: Math.max(k.length, 10) }));
+  XLSX.utils.book_append_sheet(wb, ws, 'Report E');
+  xlsxSaveAs(wb, `ReportE_${filterDate||today()}.xlsx`);
 }
 
 function exportTrackerReport(){

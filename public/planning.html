@@ -703,7 +703,6 @@ const SYNC = (() => {
     await loadTrackingStatus();
     await loadLiveAGrade();
     await loadDispatchActuals();
-    await loadDprBatchClosed();
 
     const newOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
     const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
@@ -715,7 +714,9 @@ const SYNC = (() => {
       const activeTag = document.activeElement?.tagName?.toLowerCase();
       const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
       if (!userInteracting || isInitialLoad) {
-        render();
+            const allMachineIds=[...new Set((state.orders||[]).filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
+    allMachineIds.forEach(mid=>recalcMachineScheduleQuiet(mid));
+    render();
       } else {
         // Data changed but user is typing — update KPI numbers silently without full re-render
         try {
@@ -788,25 +789,7 @@ const SYNC = (() => {
     } catch(e) {}
   }
 
-  // ── Pull DPR batch-closed status — gates Planning close button ──
-  async function loadDprBatchClosed() {
-    if (!_url) return;
-    try {
-      const dc = await fetch(_url + '/api/dpr/batch-closed', { signal: AbortSignal.timeout(5000) });
-      if (!dc.ok) return;
-      const dcj = await dc.json();
-      if (dcj.ok && dcj.closed) {
-        window._dprClosedBatches = {};
-        dcj.closed.forEach(c => {
-          window._dprClosedBatches[c.order_id] = { closedAt: c.closed_at, closedBy: c.closed_by };
-        });
-      }
-    } catch(e) {
-      window._dprClosedBatches = window._dprClosedBatches || {};
-    }
-  }
-
-  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus, loadLiveAGrade, loadDispatchActuals, loadDprBatchClosed };
+  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus, loadLiveAGrade, loadDispatchActuals };
 })();
 
 // Load from localStorage (with server enrichment on init)
@@ -936,22 +919,46 @@ function getPcByCode(size, code) {
 }
 
 // Calculate order schedule
+
+// Stage wastage factors (standard defaults, overridden by live tracking actuals)
+const STD_AIM_WASTE   = 0.07;  // 7% AIM wastage standard
+const STD_PRINT_WASTE = 0.01;  // 1% printing machine wastage
+const STD_PI_WASTE    = 0.01;  // 1% print inspection wastage
+
 function calcOrderSchedule(order, mc) {
-  // Gross Qty = Net / (aGrade/100) — for unprinted
-  // Gross Qty = Net * 1.07 * 1.02 — for printed (then unprinted=gross/1.07, printed=unprinted/1.02)
-  const aGradePct = (order.aGrade || mc.aGrade) / 100;
-  let grossQty, unprinted, printed;
+  // Use live A-grade from tracking if available, else use order/machine default
+  const liveAG   = window._liveAGrade && window._liveAGrade[order.batchNumber];
+  // AIM factor: actual if available, else 1/(1 - STD_AIM_WASTE) = 1/0.93 ≈ 1.0753
+  const aimFactor   = (liveAG?.aim?.aGradePct != null)
+    ? (100 / liveAG.aim.aGradePct)
+    : (order.aGrade || mc.aGrade) ? (100 / (order.aGrade || mc.aGrade)) : (1 / (1 - STD_AIM_WASTE));
+  const printFactor = (liveAG?.printing?.aGradePct != null)
+    ? (100 / liveAG.printing.aGradePct) : (1 + STD_PRINT_WASTE);
+  const piFactor    = (liveAG?.pi?.aGradePct != null)
+    ? (100 / liveAG.pi.aGradePct) : (1 + STD_PI_WASTE);
+
+  let grossQty, aimOut, printOut, piOut;
   if (order.isPrinted) {
-    grossQty = order.qty * 1.07 * 1.02;
-    unprinted = grossQty / 1.07;
-    printed = unprinted / 1.02;
+    // Gross → AIM → Printing → PI → Order Qty
+    piOut    = order.qty;
+    printOut = piOut    * piFactor;
+    aimOut   = printOut * printFactor;
+    grossQty = aimOut   * aimFactor;
   } else {
-    grossQty = order.qty / aGradePct;
-    unprinted = order.qty;
-    printed = null;
+    // Gross → AIM → Order Qty (packing direct)
+    aimOut   = order.qty;
+    grossQty = aimOut * aimFactor;
+    printOut = null;
+    piOut    = null;
   }
-  const daysNeeded = grossQty / mc.cap;
-  return {grossQty, unprinted, printed, daysNeeded, aGradePct};
+  // Remaining gross = total gross minus what's already been produced (from DPR actuals)
+  // This makes endDate shift out when production is slow and pull in when fast
+  const alreadyProduced = Math.min(order.actualQty || 0, grossQty);
+  const remainingGross  = Math.max(0, grossQty - alreadyProduced);
+  const daysNeeded = remainingGross / mc.cap;
+  const aGradePct  = 1 / aimFactor * 100;
+  return { grossQty, aimOut, printOut, piOut, daysNeeded, aGradePct,
+           aimFactor, printFactor, piFactor };
 }
 
 // Recalculate end date for an order given start date and machine
@@ -1354,8 +1361,6 @@ function renderOrderRow(ord, idx, mc) {
   const isRunning = ord.status === 'running';
   const isWO = ord.woStatus === 'wo';
   const isWOReconciled = ord.woStatus === 'wo-reconciled';
-  // DPR batch-close gate — Planning close button requires DPR to be closed first
-  const dprClosed = window._dprClosedBatches && ord.id ? window._dprClosedBatches[ord.id] : null;
   const statusBadge = `<select class="status-select" onchange="changeOrderStatus('${ord.id}','${mc.id}',this.value)" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer">
     <option value="pending" ${ord.status==='pending'?'selected':''}>Pending</option>
     <option value="running" ${ord.status==='running'?'selected':''}>In Production</option>
@@ -1363,15 +1368,9 @@ function renderOrderRow(ord, idx, mc) {
   </select>`;
   const ptdBadge = ord.isPrinted ? '<span class="badge badge-ptd">PTD</span>' : '<span class="badge badge-up">UP</span>';
   const grossQty = ord.grossQty ? fmt(ord.grossQty) : '-';
-  // Close requires: not already closed, production ≥99%, AND DPR has been closed first
-  const canClose = !isClosed && ord.actualProd >= (ord.qty * 0.99) && !!dprClosed;
+  const canClose = !isClosed && ord.actualProd >= (ord.qty * 0.99);
   const woBadge = isWO ? '<span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span>' :
                   isWOReconciled ? '<span class="badge badge-completed" style="font-size:10px">✅ W/O Assigned</span>' : '';
-  // DPR status badge shown in Actions column
-  const dprBadge = isClosed ? '' :
-    dprClosed
-      ? `<span class="badge badge-green" style="font-size:9px" title="Closed by ${dprClosed.closedBy||'DPR'}">🔒 DPR Closed</span>`
-      : `<span class="badge badge-pending" style="font-size:9px" title="Close in DPR first">⏳ DPR Open</span>`;
   return `<tr class="${isClosed?'closed':''}" style="${isWO?'background:rgba(255,171,0,0.03);border-left:3px solid rgba(255,171,0,0.4)':''}">
     <td class="text-mono text-dim">${idx}</td>
     <td class="text-mono" style="white-space:nowrap">
@@ -1409,9 +1408,7 @@ function renderOrderRow(ord, idx, mc) {
       style="width:130px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px"
       onchange="updateOrderRemark('${ord.id}',this.value)"></td>
     <td style="white-space:nowrap">
-      ${dprBadge ? `<div style="margin-bottom:4px">${dprBadge}</div>` : ''}
       ${canClose?`<button class="btn btn-success btn-sm" onclick="closeOrder('${ord.id}','${mc.id}')">✓ Close</button> `:''}
-      ${!isClosed&&!dprClosed&&ord.actualProd>0?`<span style="font-size:10px;color:var(--text3)">Close in DPR first</span>`:''}
       ${isWO?`<button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${ord.id}')">🔶 Assign Customer</button> `:''}
       <button class="btn btn-ghost btn-sm" onclick="editOrder('${ord.id}')">✏️</button>
       <button class="btn btn-danger btn-sm" style="padding:5px 7px" onclick="deleteOrder('${ord.id}','${mc.id}')">✕</button>
@@ -2438,12 +2435,7 @@ function renderPrinting() {
             <thead><tr>
               <th>Customer</th><th>Batch No</th><th>PC Code</th><th>Size</th><th>Colour</th>
               <th>Print Matter</th><th>Linear/Circ</th><th>Order Qty (L)</th><th>Qty to Print (L)</th>
-              <th>Daily Cap (L)</th><th>Printed to Date</th>
-                  <th style="color:var(--accent)" title="From Tracking">AIM Out ↗</th>
-                  <th style="color:var(--accent)" title="From Tracking">Print In ↗</th>
-                  <th style="color:var(--accent2)" title="From Tracking">Print Out ↗</th>
-                  <th style="color:var(--accent3)" title="From Tracking">Pending</th>
-                  <th>Salvage (kg)</th><th>Salvage %</th><th>Balance</th>
+              <th>Daily Cap (L)</th><th>Printed to Date</th><th>Salvage (kg)</th><th>Salvage %</th><th>Balance</th>
               <th>Start Date</th><th>End Date</th><th>Status</th><th>Zone</th><th>Remarks</th><th>Actions</th>
             </tr></thead>
             <tbody>
@@ -2478,13 +2470,6 @@ function renderPrintRow(p, pm) {
   const statusBadge = p.status==='completed'?'<span class="badge badge-completed">Completed</span>':
     p.status==='running'?'<span class="badge badge-running">Running</span>':
     '<span class="badge badge-pending">Pending</span>';
-  // Live scan data from Tracking — populated by loadLiveAGrade()
-  const live = window._liveAGrade && p.batchNumber ? (window._liveAGrade[p.batchNumber]||{}) : {};
-  const liveAimOut   = live.aim?.outQty   || 0;
-  const livePrintIn  = live.printing?.inQty  || 0;
-  const livePrintOut = live.printing?.outQty || 0;
-  const pendingAtPrinter = Math.max(0, livePrintIn - livePrintOut);
-  const aimVsPlan = p.qtyToPrint ? liveAimOut - (p.qtyToPrint||0) : null;
   return `<tr>
     <td style="font-weight:500">${p.customer||'-'}</td>
     <td class="text-mono">${p.batchNumber||'-'}</td>
@@ -2502,19 +2487,6 @@ function renderPrintRow(p, pm) {
     <td style="white-space:nowrap">
       <span style="font-family:var(--mono);font-size:13px;color:var(--text)">${fmt(p.printedToDate||0)}</span>
       <span style="font-size:9px;padding:1px 4px;border-radius:2px;margin-left:3px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.2)">Auto</span>
-    </td>
-    <td class="text-mono" style="color:var(--accent);white-space:nowrap" title="AIM Scan Out — available for printing">
-      ${liveAimOut>0?fmt(liveAimOut)+'L':'<span style="color:var(--text3)">—</span>'}
-      ${aimVsPlan!==null&&liveAimOut>0?`<div style="font-size:10px;color:${aimVsPlan>=0?'var(--accent2)':'var(--accent4)'}">${aimVsPlan>=0?'+':''}${fmt(aimVsPlan)} vs plan</div>`:''}
-    </td>
-    <td class="text-mono" style="white-space:nowrap" title="Printing Scan In — received at printer">
-      ${livePrintIn>0?fmt(livePrintIn)+'L':'<span style="color:var(--text3)">—</span>'}
-    </td>
-    <td class="text-mono" style="color:var(--accent2);white-space:nowrap" title="Printing Scan Out — completed printing">
-      ${livePrintOut>0?fmt(livePrintOut)+'L':'<span style="color:var(--text3)">—</span>'}
-    </td>
-    <td class="text-mono" style="color:${pendingAtPrinter>0?'var(--accent3)':'var(--text3)'};white-space:nowrap" title="Pending at printer = Print In − Print Out">
-      ${livePrintIn>0?fmt(pendingAtPrinter)+'L':'<span style="color:var(--text3)">—</span>'}
     </td>
     <td class="text-mono ${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);return kg>0?'text-accent':''})()}">${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);return kg>0?fmt(kg,2)+' kg':'—'})()}</td>
     <td class="text-mono ${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);const out=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.totalOutput||0),0);const pct=out>0?(kg/out*100):0;return pct>2?'text-red':'';})()}">${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);const out=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.totalOutput||0),0);const pct=out>0?(kg/out*100):0;return out>0?fmt(pct,2)+'%':'—'})()}</td>
@@ -5472,6 +5444,9 @@ function renderSearch() {
 // =============================
 // SETTINGS PAGE
 // =============================
+
+
+
 function renderSettings() {
   document.getElementById('topbar-actions').innerHTML = '';
   document.getElementById('content').innerHTML = `

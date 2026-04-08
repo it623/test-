@@ -1784,19 +1784,7 @@ app.get('/api/admin/backups', asyncRoute(async (req, res) => {
   res.json({ ok: true, backups: rows });
 }));
 
-// POST /api/admin/restore-backup/:id — restore a specific backup
-app.post('/api/admin/restore-backup/:id', asyncRoute(async (req, res) => {
-  const session = await verifyToken(req.headers['x-session-token']);
-  if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
-  const backup = await queryOne('SELECT * FROM planning_state_backups WHERE id=$1', [req.params.id]);
-  if (!backup) return res.status(404).json({ ok: false, error: 'Backup not found' });
-  // Save a backup of current state first before restoring
-  const current = await queryOne('SELECT state_json FROM planning_state WHERE id=1');
-  if (current) await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'pre-restore')`, [current.state_json]);
-  await query(`INSERT INTO planning_state (id, state_json) VALUES (1, $1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()`, [backup.state_json]);
-  await logAudit(session.username, session.role, 'planning', 'RESTORE_BACKUP', `Restored backup id=${req.params.id} from ${backup.backed_up_at}`);
-  res.json({ ok: true, message: `Restored backup from ${backup.backed_up_at}` });
-}));
+
 
 // ─── SPA Catch-all (must be LAST route) ───────────────────────
 app.get('*', (req, res) => {

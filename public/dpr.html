@@ -4025,6 +4025,7 @@ setInterval(async () => {
 }, 30*1000);
 
 setInterval(dprQueueFlush, 5*1000); // flush queue every 5s
+
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='visible'){
     dprQueueFlush();

@@ -468,7 +468,7 @@ app.get('/api/orders/active', asyncRoute(async (req, res) => {
       id: o.id, batchNumber: o.batchNumber || '', poNumber: o.poNumber || '',
       customer: o.customer || '', machineId: o.machineId || '',
       size: o.size || '', colour: o.colour || '',
-      qty: o.qty || 0, actualQty: o.actualQty || 0, status: o.status || 'pending',
+      qty: o.qty || 0, grossQty: o.grossQty || 0, actualQty: o.actualQty || 0, status: o.status || 'pending',
     }));
   res.json({ ok: true, orders });
 }));

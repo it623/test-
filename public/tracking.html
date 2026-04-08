@@ -444,11 +444,16 @@ input[type=number]{font-family:var(--mono)}
 .cursor-pointer{cursor:pointer}
 .text-center{text-align:center}
 .overflow-hidden{overflow:hidden}
-/* ── Sticky columns in reports ── */
 /* ── Sticky columns ── */
-.sticky-col { position:sticky; z-index:2; background:var(--surface,#13161d); }
-thead .sticky-col { z-index:3; background:var(--surface2,#1a1e28); }
-tbody tr:hover .sticky-col { background:var(--surface3,#222736); }
+.tbl-wrap { position: relative; }
+.sticky-col {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+tbody tr .sticky-col { background: var(--surface, #0a0f1e); }
+tbody tr:hover .sticky-col { background: var(--surface2, #141a2e); }
+thead tr .sticky-col { z-index: 3; background: var(--surface2, #0f1628); }
 
 
 </style>
@@ -4053,20 +4058,27 @@ function renderBatchDetail(batch){
 function fixStickyColumns(container){
   const table = container ? container.querySelector('table') : null;
   if(!table) return;
-  const rows = table.querySelectorAll('tr');
-  rows.forEach(row=>{
-    let offset = 0;
-    row.querySelectorAll('th.sticky-col, td.sticky-col').forEach(cell=>{
-      cell.style.left = offset + 'px';
-      // Add shadow only to last sticky col in this row
-      cell.style.boxShadow = '';
-      offset += cell.offsetWidth;
-    });
-    // Add shadow to last sticky cell
-    const stickyCells = row.querySelectorAll('th.sticky-col, td.sticky-col');
-    if(stickyCells.length > 0){
-      stickyCells[stickyCells.length-1].style.boxShadow = '3px 0 6px rgba(0,0,0,0.35)';
+  // Use first header row to measure column widths
+  const firstRow = table.querySelector('thead tr');
+  if(!firstRow) return;
+  let offset = 0;
+  let colNum = 1;
+  firstRow.querySelectorAll('th').forEach(th=>{
+    if(th.classList.contains('sticky-col')){
+      th.style.left = offset + 'px';
+      // Set CSS variable on table for data rows
+      table.style.setProperty('--sc'+colNum+'-left', offset+'px');
+      offset += th.offsetWidth;
+      colNum++;
     }
+  });
+  // Now set left on all data row sticky cells too
+  table.querySelectorAll('tbody tr').forEach(row=>{
+    let o = 0, c = 1;
+    row.querySelectorAll('td.sticky-col').forEach(td=>{
+      td.style.left = table.style.getPropertyValue('--sc'+c+'-left') || o+'px';
+      c++;
+    });
   });
 }
 

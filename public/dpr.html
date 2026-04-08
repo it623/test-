@@ -341,8 +341,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 <div id="page-analytics" class="page">
   <div class="agrid">
     <div class="card"><div class="card-title">Production vs Target</div><div class="chart-wrap"><canvas id="ch-pvt"></canvas></div></div>
-    <div class="card"><div class="card-title">Downtime by Category</div><div class="chart-wrap"><canvas id="ch-dt"></canvas></div></div>
-    <div class="card"><div class="card-title">Downtime % per Department <span style="font-size:10px;color:var(--t3);font-weight:400">(max 1,440 min/day each)</span></div><div class="chart-wrap"><canvas id="ch-dt-pct"></canvas></div></div>
+    
+    <div class="card"><div class="card-title">Downtime % per Department</div><div class="chart-wrap"><canvas id="ch-dtpct"></canvas></div></div><div class="card"><div class="card-title">Downtime by Category</div><div class="chart-wrap"><canvas id="ch-dt"></canvas></div></div>
     <div class="card"><div class="card-title">Machine Efficiency %</div><div class="chart-wrap"><canvas id="ch-eff"></canvas></div></div>
     <div class="card"><div class="card-title">Re-Sort by Root Cause</div><div class="chart-wrap"><canvas id="ch-rs"></canvas></div></div>
   </div>
@@ -386,7 +386,23 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
 <!-- ═══ HISTORY ═══════════════════════════════════════════ -->
 <div id="page-history" class="page">
-  <div class="card"><div class="card-title">All Saved Records</div><div id="historyList"></div></div>
+  <div class="card"><div class="card-title">All Saved Records</div>    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div class="field-grp" style="margin:0">
+        <label style="font-size:10px;color:var(--t3);font-family:var(--fc);letter-spacing:.8px">DATE</label>
+        <input type="date" id="hist-filter-date" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px" onchange="filterHistory()">
+      </div>
+      <div class="field-grp" style="margin:0">
+        <label style="font-size:10px;color:var(--t3);font-family:var(--fc);letter-spacing:.8px">FLOOR</label>
+        <select id="hist-filter-floor" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px" onchange="filterHistory()">
+          <option value="">All Floors</option>
+          <option value="GF">Ground Floor</option>
+          <option value="1F">First Floor (FF)</option>
+          <option value="2F">Second Floor (SF)</option>
+        </select>
+      </div>
+      <button class="btn-sm" style="margin-top:14px" onclick="document.getElementById('hist-filter-date').value='';document.getElementById('hist-filter-floor').value='';filterHistory()">Clear</button>
+    </div>
+    <div id="historyList"></div></div>
 </div>
 
 <!-- ═══ SETTINGS ══════════════════════════════════════════ -->
@@ -434,12 +450,6 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="section-title" style="margin-bottom:12px">Machine Management</div>
     <div class="section-sub" style="margin-bottom:12px">Enable or disable machines per floor. Disabled machines are hidden from entry and analytics. Admin only.</div>
     <div id="machine-settings-area"></div>
-  </div>
-
-  <div class="card">
-    <div class="section-title" style="margin-bottom:8px">Manpower Master</div>
-    <div class="section-sub" style="margin-bottom:12px">Add or remove team member names. Changes apply to all drop-down menus in data entry. Admin only.</div>
-    <div id="manpower-settings-area"></div>
   </div>
 
   <div class="card">
@@ -652,140 +662,6 @@ function resetAllMachinesActive(fl){
   }catch{}
 }
 
-// ─── Manpower Master ──────────────────────────────────────────────────────────
-// Staff name lists per floor/role — used to populate operator/incharge dropdowns.
-// Admins can add/remove names; stored in localStorage so they persist across sessions.
-const MANPOWER_MASTER = {
-  common: {
-    hvac:       ['Pawan','Monu Kumar','Sunil Saini','Pradeep Kumar'],
-    electrical: ['Mr. Narendra Singh','Mr. Arun Solanki','Mr. Anil Singh Rajput',
-                 'Mr. Sachin Sharma','Manog Gaur','Jitendra Sharma','Gajendra Pal Singh'],
-    chemist:    ['Satyendra Singh','Manish Kumar Saini','Govind Singh','Satyendra Sharma',
-                 'Devendra Naruka','Anurag Saini','Mukesh Chand Jat','Rajendra Singh',
-                 'Mohit Saini','Ramsingh Yadav','Duli Chand Jatav','Dharam Chand Saini',
-                 'Kamal Kishore Tiwari','Hoti Lal Meena','Narayan Lal Saini'],
-  },
-  GF: {
-    incharge: ['Mr. Ashwani Saini','Mr. Bhupendra Sharma','Mr. OM Prakash Yadav','Mr. Lakhan Singh'],
-    operator: ['Mr. Jitin Kumar Saini','Mr. Anil Meena','Mr. Sube Singh Jaat',
-               'Mr. Shiv Shanker Saini','Mr. Ramesh Jatav','Mr. Satya Jeet Roy',
-               'Mr. Manish Gurjar','Mr. Girraj Kishore Saini','Mr. Atendra Singh',
-               'Mr. Anju Ram','Mr. Manish Mishra','Anil Tiwari','Shri Chand',
-               'Dilip Verma','Amit Kumar Meena','Rahul Saini'],
-    fitter:   ['Dharmendra Sain','Naresh Chand Jangid','Rakesh Kumar',
-               'Ghanshyam Saini','Babu Lal Pushpad'],
-    aim_staff:['Himanshu','Sachin','Mahesh Chand Saini','Manish Jain'],
-    gpr_staff:['Om Prakash Saini','Sanjay Sharma','Mangelal Sharma','Dinesh Kumar Saini'],
-  },
-  '1F': {
-    incharge: ['Mr. Sanjay Lodha','Mr. Sunil Sharma','Mr. Rajesh Jangid','Mr. Jeetu Saini'],
-    operator: ['Mr. Dharmveer Prajapat','Mr. Pramod Kumar','Mr. Sunil Saini',
-               'Mr. Devendra Kumar Saini','Mr. Somendra Singh Yadav','Mr. Puneet Nawariya',
-               'Mr. Hittesh Kumar','Mr. Tarun Sharma','Mr. Rakesh Yogi','Mr. Subhash Gupta',
-               'Mr. Devendra Kumar','Mr. Bhura Ram Meena','Mr. Jitendra Saini',
-               'Mr. Rajesh Malawliya','Mr. Vinod Kumar Sharma','Mr. Deepak Saini',
-               'Mr. Rinku Saini','Mr. Satyendra Kumar Sharma','Mr. Hoshyar Singh',
-               'Mr. Satish Kumar','Mr. Anil Prajapat','Mr. Jagdish Prasad Sharma',
-               'Mahesh Verma','Mr. Trilok Saini','Mr. Amit Kumar','Sandeep Choudhary','Sohan Lal'],
-    fitter:   ['Mr. Anil Yadav','Mr. Dharmendra Sain','Mr. Pankaj Sharma',
-               'Mr. Yogesh Singh','Mr. Rinku'],
-    aim_staff:['Dilip Biswas','Mahendra Singh','Amit Sharma','Sunil Bairwa','Jitin Sharma','Hukam Singh'],
-    gpr_staff:['Daleep Gurjar','Karan Tiwari','Bablu','Vikas','Kedar Singh',
-               'Siya Ram Yadav','Bijendra Pratap Singh'],
-  },
-};
-MANPOWER_MASTER['2F'] = MANPOWER_MASTER['1F']; // SF shares FF lists
-
-// Returns names for a role on a given floor (includes any admin additions)
-function getMasterNames(fl, role){
-  if(MANPOWER_MASTER.common[role]) return getCustomNames(role, MANPOWER_MASTER.common[role]);
-  const flData = MANPOWER_MASTER[fl] || MANPOWER_MASTER['1F'];
-  return getCustomNames(`${fl}_${role}`, flData[role] || []);
-}
-
-function getCustomNames(key, defaults){
-  try{
-    const saved = localStorage.getItem('dpr_manpower_'+key);
-    if(saved) return JSON.parse(saved);
-  }catch{}
-  return [...defaults];
-}
-
-function getDefaultsForKey(storeKey){
-  if(MANPOWER_MASTER.common[storeKey]) return MANPOWER_MASTER.common[storeKey];
-  const parts = storeKey.split('_');
-  const fl = parts[0];
-  const role = parts.slice(1).join('_');
-  return (MANPOWER_MASTER[fl]||{})[role] || [];
-}
-
-function renderManpowerSettings(){
-  const container = document.getElementById('manpower-settings-area');
-  if(!container) return;
-  const ROLES = [
-    { key:'hvac',       label:'HVAC / Utility Team',     scope:'common' },
-    { key:'electrical', label:'Electrical Team',          scope:'common' },
-    { key:'chemist',    label:'QA / Shift Chemist Team',  scope:'common' },
-    { key:'incharge',   label:'GF — Shift Incharge',     scope:'GF' },
-    { key:'operator',   label:'GF — Machine Operators',   scope:'GF' },
-    { key:'fitter',     label:'GF — Shift Fitters',       scope:'GF' },
-    { key:'aim_staff',  label:'GF — AIM Team',            scope:'GF' },
-    { key:'gpr_staff',  label:'GF — GPR Team',            scope:'GF' },
-    { key:'incharge',   label:'FF/SF — Shift Incharge',   scope:'1F' },
-    { key:'operator',   label:'FF/SF — Machine Operators', scope:'1F' },
-    { key:'fitter',     label:'FF/SF — Shift Fitters',    scope:'1F' },
-    { key:'aim_staff',  label:'FF/SF — AIM Team',         scope:'1F' },
-    { key:'gpr_staff',  label:'FF/SF — GPR Team',         scope:'1F' },
-  ];
-  let html = '';
-  ROLES.forEach(({key, label, scope})=>{
-    const storeKey = scope === 'common' ? key : `${scope}_${key}`;
-    const defaults = scope === 'common' ? MANPOWER_MASTER.common[key] : (MANPOWER_MASTER[scope]||{})[key] || [];
-    const names = getCustomNames(storeKey, defaults);
-    html += `<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--b1)">
-      <div style="font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">${label}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
-        ${names.map((n,i)=>`<span style="display:flex;align-items:center;gap:3px;padding:3px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;font-size:11px">
-          ${esc(n)}
-          <button onclick="removeManpowerName('${storeKey}',${i})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 1px;line-height:1">✕</button>
-        </span>`).join('')}
-      </div>
-      <div style="display:flex;gap:6px">
-        <input type="text" id="mp-new-${storeKey}" placeholder="Add name..." style="flex:1;font-size:11px;padding:4px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;color:var(--t1)"
-          onkeydown="if(event.key==='Enter')addManpowerName('${storeKey}')">
-        <button onclick="addManpowerName('${storeKey}')" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);cursor:pointer">+ Add</button>
-        <button onclick="resetManpowerNames('${storeKey}')" style="padding:4px 8px;font-size:10px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer" title="Reset to defaults">Reset</button>
-      </div>
-    </div>`;
-  });
-  container.innerHTML = html;
-}
-
-function addManpowerName(storeKey){
-  const inp = document.getElementById('mp-new-'+storeKey);
-  const name = inp?.value.trim();
-  if(!name) return;
-  const names = getCustomNames(storeKey, getDefaultsForKey(storeKey));
-  if(!names.includes(name)){
-    names.push(name);
-    localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
-  }
-  inp.value = '';
-  renderManpowerSettings();
-}
-
-function removeManpowerName(storeKey, idx){
-  const names = getCustomNames(storeKey, getDefaultsForKey(storeKey));
-  names.splice(idx, 1);
-  localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
-  renderManpowerSettings();
-}
-
-function resetManpowerNames(storeKey){
-  localStorage.removeItem('dpr_manpower_'+storeKey);
-  renderManpowerSettings();
-}
-
 function renderMachineSettings(){
   const container=document.getElementById('machine-settings-area');
   if(!container) return;
@@ -799,6 +675,11 @@ function renderMachineSettings(){
         <button onclick="resetAllMachinesActive('${fl}');renderMachineSettings();renderEntry()"
           style="font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
       </div>
+  <div class="card">
+    <div class="card-title">Manpower Master</div>
+    <div class="text-sm text-muted" style="margin-bottom:12px">Manage staff name lists shown in shift dropdowns.</div>
+    <div id="manpower-settings-area"></div>
+  </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
         ${flData.machines.map(m=>{
           const on=active.includes(m.id);
@@ -878,6 +759,108 @@ function removeMachine(fl, mcId) {
   toast(`${mcId} removed`,'var(--yellow)');
 }
 
+
+// ─── Manpower Master ─────────────────────────────────────────────────────────
+const MANPOWER_MASTER = {
+  common: {
+    hvac:       ['Pawan','Monu Kumar','Sunil Saini','Pradeep Kumar'],
+    electrical: ['Mr. Narendra Singh','Mr. Arun Solanki','Mr. Anil Singh Rajput',
+                 'Mr. Sachin Sharma','Manog Gaur','Jitendra Sharma','Gajendra Pal Singh'],
+    chemist:    ['Satyendra Singh','Manish Kumar Saini','Govind Singh','Satyendra Sharma',
+                 'Devendra Naruka','Anurag Saini','Mukesh Chand Jat','Rajendra Singh',
+                 'Mohit Saini','Ramsingh Yadav','Duli Chand Jatav','Dharam Chand Saini',
+                 'Kamal Kishore Tiwari','Hoti Lal Meena','Narayan Lal Saini'],
+  },
+  GF: {
+    incharge: ['Mr. Ashwani Saini','Mr. Bhupendra Sharma','Mr. OM Prakash Yadav','Mr. Lakhan Singh'],
+    operator: ['Mr. Jitin Kumar Saini','Mr. Anil Meena','Mr. Sube Singh Jaat',
+               'Mr. Shiv Shanker Saini','Mr. Ramesh Jatav','Mr. Satya Jeet Roy',
+               'Mr. Manish Gurjar','Mr. Girraj Kishore Saini','Mr. Atendra Singh',
+               'Mr. Anju Ram','Mr. Manish Mishra','Anil Tiwari','Shri Chand',
+               'Dilip Verma','Amit Kumar Meena','Rahul Saini'],
+    fitter:   ['Dharmendra Sain','Naresh Chand Jangid','Rakesh Kumar',
+               'Ghanshyam Saini','Babu Lal Pushpad'],
+    aim_staff:['Himanshu','Sachin','Mahesh Chand Saini','Manish Jain'],
+    gpr_staff:['Om Prakash Saini','Sanjay Sharma','Mangelal Sharma','Dinesh Kumar Saini'],
+  },
+  '1F': {
+    incharge: ['Mr. Sanjay Lodha','Mr. Sunil Sharma','Mr. Rajesh Jangid','Mr. Jeetu Saini'],
+    operator: ['Mr. Dharmveer Prajapat','Mr. Pramod Kumar','Mr. Sunil Saini',
+               'Mr. Devendra Kumar Saini','Mr. Somendra Singh Yadav','Mr. Puneet Nawariya',
+               'Mr. Hittesh Kumar','Mr. Tarun Sharma','Mr. Rakesh Yogi','Mr. Subhash Gupta',
+               'Mr. Devendra Kumar','Mr. Bhura Ram Meena','Mr. Jitendra Saini',
+               'Mr. Rajesh Malawliya','Mr. Vinod Kumar Sharma','Mr. Deepak Saini',
+               'Mr. Rinku Saini','Mr. Satyendra Kumar Sharma','Mr. Hoshyar Singh',
+               'Mr. Satish Kumar','Mr. Anil Prajapat','Mr. Jagdish Prasad Sharma',
+               'Mahesh Verma','Mr. Trilok Saini','Mr. Amit Kumar','Sandeep Choudhary','Sohan Lal'],
+    fitter:   ['Mr. Anil Yadav','Mr. Dharmendra Sain','Mr. Pankaj Sharma',
+               'Mr. Yogesh Singh','Mr. Rinku'],
+    aim_staff:['Dilip Biswas','Mahendra Singh','Amit Sharma','Sunil Bairwa','Jitin Sharma','Hukam Singh'],
+    gpr_staff:['Daleep Gurjar','Karan Tiwari','Bablu','Vikas','Kedar Singh',
+               'Siya Ram Yadav','Bijendra Pratap Singh'],
+  },
+};
+// 2F uses same master as 1F
+MANPOWER_MASTER['2F'] = MANPOWER_MASTER['1F'];
+
+function getMasterNames(fl, role){
+  // Common roles: same across all floors
+  if(MANPOWER_MASTER.common[role]) return getCustomNames(role, MANPOWER_MASTER.common[role]);
+  // Floor-specific: fall back to 1F list for 2F
+  const flData = MANPOWER_MASTER[fl] || MANPOWER_MASTER['1F'];
+  return getCustomNames(`${fl}_${role}`, flData[role] || []);
+}
+
+function getCustomNames(key, defaults){
+  try{
+    const saved = localStorage.getItem('dpr_manpower_'+key);
+    if(saved) return JSON.parse(saved);
+  }catch{}
+  return [...defaults];
+}
+
+function getDefaultsForKey(storeKey){
+  // common roles: key is just the role name
+  if(MANPOWER_MASTER.common[storeKey]) return MANPOWER_MASTER.common[storeKey];
+  // floor-specific: key is fl_role
+  const parts = storeKey.split('_');
+  const fl = parts[0];
+  const role = parts.slice(1).join('_');
+  return (MANPOWER_MASTER[fl]||{})[role] || [];
+}
+
+function addManpowerName(storeKey){
+  const inp = document.getElementById('mp-new-'+storeKey);
+  const name = inp?.value.trim();
+  if(!name) return;
+  const defaults = getDefaultsForKey(storeKey);
+  const names = getCustomNames(storeKey, defaults);
+  if(!names.includes(name)){
+    names.push(name);
+    localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
+  }
+  inp.value = '';
+  renderManpowerSettings();
+}
+
+function removeManpowerName(storeKey, idx){
+  const defaults = getDefaultsForKey(storeKey);
+  const names = getCustomNames(storeKey, defaults);
+  names.splice(idx, 1);
+  localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
+  renderManpowerSettings();
+}
+
+function saveCustomNames(fl, role, names){
+  const key = MANPOWER_MASTER.common[role] ? role : `${fl}_${role}`;
+  localStorage.setItem('dpr_manpower_'+key, JSON.stringify(names));
+}
+
+function resetManpowerNames(storeKey){
+  localStorage.removeItem('dpr_manpower_'+storeKey);
+  renderManpowerSettings();
+}
+
 function blankMachine(){ return {runs:[blankRun()], aim:'', operator:'', proc:'', mech:'', elec:'', gpr:'', hvac:'', dw:''}; }
 function blankShift(fl){
   const s={incharge:'',fitter:'',chemist:'',
@@ -918,6 +901,10 @@ function loadDay(fl,d){
     return p;
   }catch{return blankDay(fl);}
 }
+
+// Alias: saveToServer → saveDay (compatibility)
+const saveToServer = saveDay;
+
 async function saveDay(){
   const fl=curFloor, d=getDate();
 
@@ -1165,6 +1152,7 @@ function calcDayStats(fl,d){
     });
   });
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
+  totResort=Math.round(totResort*100)/100;
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
   // BACKLOG: positive = excess, negative = behind
@@ -1322,7 +1310,36 @@ async function pushDprSettings(settingsObj) {
   } catch(e) {} // silent — settings are secondary
 }
 
-async function loadDprSettings() {
+async function setMachineSize(fl, mcId, newSz){
+  // Update in FLOORS definition directly (persisted to localStorage)
+  const mc = FLOORS[fl]?.machines.find(m=>m.id===mcId);
+  if(!mc) return;
+  mc.sz = newSz;
+  // Persist override
+  try{
+    const saved = localStorage.getItem('dpr_machine_sizes')||'{}';
+    const cfg = JSON.parse(saved);
+    if(!cfg[fl]) cfg[fl]={};
+    cfg[fl][mcId] = newSz;
+    localStorage.setItem('dpr_machine_sizes', JSON.stringify(cfg));
+  }catch{}
+}
+
+function loadMachineSizes(){
+  try{
+    const saved = localStorage.getItem('dpr_machine_sizes');
+    if(!saved) return;
+    const cfg = JSON.parse(saved);
+    Object.entries(cfg).forEach(([fl, mcs])=>{
+      Object.entries(mcs).forEach(([mcId, sz])=>{
+        const mc = FLOORS[fl]?.machines.find(m=>m.id===mcId);
+        if(mc) mc.sz = sz;
+      });
+    });
+  }catch{}
+}
+
+function loadDprSettings() {
   if (!serverUrl) return;
   try {
     const r = await fetch(serverUrl + '/api/dpr/settings', { signal: AbortSignal.timeout(5000) });
@@ -1769,6 +1786,15 @@ function renderDayKpis(){
     <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
+}
+
+function syncStaffSelects(sh, role, values){
+  const container = document.getElementById(`ms-${sh}-${role}`);
+  if(!container) return;
+  const selects = container.querySelectorAll('select.ms-input');
+  selects.forEach((sel, i)=>{
+    if(values && values[i]) sel.value = values[i];
+  });
 }
 
 function renderShifts(){
@@ -2405,24 +2431,6 @@ function renderAnalytics(){
     datasets:[{data:DT_CATS.map(c=>dtCats[c]),backgroundColor:CHART_COLORS,borderWidth:0}]
   },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}}},responsive:true,maintainAspectRatio:false}});
 
-  // Downtime % per Department (NEW) — shows each DT category as % of max daily minutes
-  const DT_MAX_MINS = 1440; // 24h × 60min — theoretical max downtime per dept per day
-  const dtPcts = {};
-  DT_CATS.forEach(c => dtPcts[c] = Math.min(100, (dtCats[c] / DT_MAX_MINS * 100)));
-  newChart('ch-dt-pct',{type:'bar',data:{
-    labels:DT_CATS.map(c=>DT_LABELS[c]),
-    datasets:[{
-      label:'DT %',
-      data:DT_CATS.map(c=>parseFloat(dtPcts[c].toFixed(1))),
-      backgroundColor:DT_CATS.map(c=>dtPcts[c]>10?'rgba(255,76,76,0.7)':dtPcts[c]>5?'rgba(255,171,0,0.7)':'rgba(0,212,100,0.7)'),
-      borderRadius:4,
-    }]
-  },options:{...chartOpts(),plugins:{...chartOpts().plugins,
-    tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y}% (${dtCats[DT_CATS[ctx.dataIndex]]} min / ${DT_MAX_MINS} min)`}}},
-    scales:{y:{min:0,max:Math.max(20,Math.ceil(Math.max(...DT_CATS.map(c=>dtPcts[c]))/5)*5),
-      ticks:{color:'#7a8ba8',callback:v=>v+'%'},grid:{color:'rgba(255,255,255,0.04)'}},
-      x:{ticks:{color:'#7a8ba8'},grid:{display:false}}}}});
-
   // Efficiency
   const effData=mcs.map(mc=>{
     let prod=0;SHIFTS.forEach(sh=>{
@@ -2894,7 +2902,19 @@ function renderPerf(){
 // ═══════════════════════════════════════════════════════
 // HISTORY
 // ═══════════════════════════════════════════════════════
-async function renderHistory(){
+async 
+function filterHistory(){
+  const dateVal  = (document.getElementById('hist-filter-date')?.value||'').trim();
+  const floorVal = (document.getElementById('hist-filter-floor')?.value||'').trim();
+  const rows = document.querySelectorAll('#historyList [data-date]');
+  rows.forEach(row=>{
+    const matchDate  = !dateVal  || (row.dataset.date||'')=== dateVal;
+    const matchFloor = !floorVal || (row.dataset.floor||'')=== floorVal;
+    row.style.display = (matchDate && matchFloor) ? '' : 'none';
+  });
+}
+
+function renderHistory(){
   const el = document.getElementById('historyList');
   el.innerHTML = '<div style="padding:12px;color:var(--t3);font-family:var(--fc);font-size:12px">⟳ Loading records...</div>';
 
@@ -2985,8 +3005,6 @@ function renderSettings(){
 
   // Machine settings
   renderMachineSettings();
-  // Manpower master names
-  renderManpowerSettings();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3714,6 +3732,114 @@ function renderDprSearch(){
 document.getElementById('ndate').value=today();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
+async function updateTempAlertBanner(){
+  if(!serverUrl) return;
+  try{
+    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
+    const j = await r.json();
+    let banner = document.getElementById('temp-alert-banner');
+    if(!banner){
+      banner = document.createElement('div');
+      banner.id = 'temp-alert-banner';
+      banner.style.cssText = 'position:fixed;top:var(--nav);left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-bottom:2px solid var(--amber);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px';
+      document.body.appendChild(banner);
+    }
+    if(j.ok && j.count > 0){
+      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
+      banner.style.display = 'flex';
+      banner.innerHTML = `⚠️ <strong style="color:var(--amber)">${j.count} TEMP batch${j.count>1?'es':''} active</strong>
+        — Machines: ${machines.join(', ')} — No planned orders assigned.
+        <span style="color:var(--amber);margin-left:4px">Planning entry + Admin reconciliation required.</span>`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }catch(e){}
+}
+
+function renderManpowerSettings(){
+  const container = document.getElementById('manpower-settings-area');
+  if(!container) return;
+
+  // Define all roles and their labels + scope
+  const ROLES = [
+    // Common across all floors
+    { key:'hvac',       label:'HVAC / Utility Team',    scope:'common' },
+    { key:'electrical', label:'Electrical Team',         scope:'common' },
+    { key:'chemist',    label:'QA / Shift Chemist Team', scope:'common' },
+    // GF specific
+    { key:'incharge',   label:'GF — Shift Incharge',    scope:'GF' },
+    { key:'operator',   label:'GF — Machine Operators',  scope:'GF' },
+    { key:'fitter',     label:'GF — Shift Fitters',      scope:'GF' },
+    { key:'aim_staff',  label:'GF — AIM Team',           scope:'GF' },
+    { key:'gpr_staff',  label:'GF — GPR Team',           scope:'GF' },
+    // FF/SF specific
+    { key:'incharge',   label:'FF/SF — Shift Incharge',  scope:'1F' },
+    { key:'operator',   label:'FF/SF — Machine Operators',scope:'1F' },
+    { key:'fitter',     label:'FF/SF — Shift Fitters',   scope:'1F' },
+    { key:'aim_staff',  label:'FF/SF — AIM Team',        scope:'1F' },
+    { key:'gpr_staff',  label:'FF/SF — GPR Team',        scope:'1F' },
+  ];
+
+  let html = '';
+  ROLES.forEach(({key, label, scope})=>{
+    const fl = scope === 'common' ? null : scope;
+    const storeKey = scope === 'common' ? key : `${scope}_${key}`;
+    const defaults = scope === 'common'
+      ? MANPOWER_MASTER.common[key]
+      : (MANPOWER_MASTER[scope]||{})[key] || [];
+    const names = getCustomNames(storeKey, defaults);
+
+    html += `<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--b1)">
+      <div style="font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">${label}</div>
+      <div id="mp-list-${storeKey}" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+        ${names.map((n,i)=>`<span style="display:flex;align-items:center;gap:3px;padding:3px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;font-size:11px">
+          ${esc(n)}
+          <button onclick="removeManpowerName('${storeKey}',${i})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 1px;line-height:1">✕</button>
+        </span>`).join('')}
+      </div>
+      <div style="display:flex;gap:6px">
+        <input type="text" id="mp-new-${storeKey}" placeholder="Add name..." style="flex:1;font-size:11px;padding:4px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;color:var(--t1)"
+          onkeydown="if(event.key==='Enter')addManpowerName('${storeKey}')">
+        <button onclick="addManpowerName('${storeKey}')" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);cursor:pointer">+ Add</button>
+        <button onclick="resetManpowerNames('${storeKey}')" style="padding:4px 8px;font-size:10px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer" title="Reset to default list">Reset</button>
+      </div>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+async function saveToServer() {
+  // Back-date lock for non-admin — with 2-hour shift grace window
+  if (dprUser && dprUser.role !== 'admin') {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const selected = document.getElementById('ndate')?.value;
+    if (selected && selected !== todayStr) {
+      // Check 2-hour grace window for shift changeover
+      // Shifts: A=06:00-14:00, B=14:00-22:00, C=22:00-06:00
+      const h = now.getHours();
+      const yesterdayStr = new Date(now - 86400000).toISOString().split('T')[0];
+      // Grace periods: A shift starts 06:00 — allow B shift (prev day C) edits until 08:00
+      //                B shift starts 14:00 — allow A shift edits until 16:00
+      //                C shift starts 22:00 — allow B shift edits until 00:00
+      // For previous calendar day: only allowed during 22:00-00:00 (C shift grace for yesterday)
+      const isPrevDay = selected === yesterdayStr;
+      const inCShiftGrace = isPrevDay && h >= 0 && h < 2; // midnight to 2am = C shift carrying over
+      if (!inCShiftGrace) {
+        alert('⚠️ Back-date editing is not allowed for your role.\nOnly Admin can edit past records.\nNote: Entries for the previous shift can be made within 2 hours of shift changeover.');
+        return;
+      }
+    }
+    // Also check: non-admin cannot edit future dates
+    if (selected && selected > todayStr) {
+      alert('⚠️ Cannot enter data for future dates.');
+      return;
+    }
+  }
+  await _origSaveToServer();
+  dprAuditLog('SAVE', `Saved DPR — Floor: ${curFloor}, Date: ${document.getElementById('ndate')?.value}`);
+}
+
 function postAuthServerInit() {
   checkServer().then(async ok=>{
     if(ok){
@@ -4024,7 +4150,21 @@ setInterval(async () => {
   }
 }, 30*1000);
 
-setInterval(dprQueueFlush, 5*1000); // flush queue every 5s
+setInterval(dprQueueFlush, 5*1000);
+// Auto-snapshot unsaved form data to localStorage every 10s
+// Protects against accidental page refresh before clicking Save
+setInterval(()=>{
+  if(unsaved && curFloor && dprUser){
+    try{
+      const d = getDate();
+      const snapshot = collectForm();
+      if(snapshot && snapshot.shifts){
+        localStorage.setItem(skey(curFloor,d), JSON.stringify(snapshot));
+      }
+    }catch(e){}
+  }
+}, 10*1000);
+ // flush queue every 5s
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState==='visible'){
     dprQueueFlush();

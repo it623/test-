@@ -9,19 +9,19 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 :root {
-  --bg: #0d0f14;
-  --surface: #13161d;
-  --surface2: #1a1e28;
-  --surface3: #222736;
-  --border: #2a2f3f;
-  --accent: #f0a500;
-  --accent2: #3b82f6;
-  --accent3: #10b981;
-  --accent4: #ef4444;
-  --accent5: #8b5cf6;
-  --text: #e8eaf0;
-  --text2: #9aa0b8;
-  --text3: #5a6080;
+  --bg: #f0f4f8;
+  --surface: #ffffff;
+  --surface2: #f7f9fc;
+  --surface3: #eef2f7;
+  --border: #e2e8f0;
+  --accent: #d97706;
+  --accent2: #2563eb;
+  --accent3: #059669;
+  --accent4: #dc2626;
+  --accent5: #7c3aed;
+  --text: #0f172a;
+  --text2: #334155;
+  --text3: #64748b;
   --mono: 'DM Mono', monospace;
   --head: 'Syne', sans-serif;
   --body: 'DM Sans', sans-serif;
@@ -34,7 +34,7 @@ html, body { height:100%; background:var(--bg); color:var(--text); font-family:v
 #app { display:flex; height:100vh; overflow:hidden; }
 #sidebar { width:220px; min-width:220px; background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; overflow-y:auto; overflow-x:hidden; }
 #main { flex:1; overflow:hidden; display:flex; flex-direction:column; }
-#topbar { background:var(--surface); border-bottom:1px solid var(--border); padding:0 24px; height:56px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; gap:8px; min-width:0; }
+#topbar { background:var(--surface); border-bottom:1px solid var(--border); padding:0 24px; height:56px; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
 #content { flex:1; overflow-y:auto; padding:24px; }
 
 /* SIDEBAR */
@@ -45,21 +45,21 @@ html, body { height:100%; background:var(--bg); color:var(--text); font-family:v
 .nav-section { padding:4px 8px; font-size:10px; font-family:var(--mono); color:var(--text3); letter-spacing:1px; text-transform:uppercase; margin:8px 0 4px; }
 .nav-item { display:flex; align-items:center; gap:10px; padding:9px 16px; cursor:pointer; border-radius:6px; margin:1px 8px; color:var(--text2); font-size:13px; font-weight:500; transition:all 0.15s; }
 .nav-item:hover { background:var(--surface2); color:var(--text); }
-.nav-item.active { background:linear-gradient(135deg, rgba(240,165,0,0.15), rgba(240,165,0,0.08)); color:var(--accent); border:1px solid rgba(240,165,0,0.2); }
+.nav-item.active { background:#fffbeb; color:var(--accent); border:1px solid #fde68a; font-weight:700; }
 .nav-item .icon { width:16px; text-align:center; font-size:14px; }
 .nav-badge { margin-left:auto; background:var(--accent); color:#000; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:10px; font-weight:600; }
 
 /* TOPBAR */
-.topbar-title { font-family:var(--head); font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
-.topbar-actions { display:flex; gap:6px; align-items:center; flex-shrink:0; flex-wrap:nowrap; }
-.btn { padding:7px 16px; border-radius:6px; border:none; cursor:pointer; font-family:var(--body); font-size:13px; font-weight:500; transition:all 0.15s; display:inline-flex; align-items:center; gap:6px; }
-.btn-primary { background:var(--accent); color:#000; }
-.btn-primary:hover { background:#e09600; }
+.topbar-title { font-family:var(--head); font-size:16px; font-weight:700; }
+.topbar-actions { display:flex; gap:8px; align-items:center; }
+.btn { padding:7px 16px; border-radius:6px; border:none; cursor:pointer; font-family:var(--body); font-size:13px; font-weight:600; transition:all 0.15s; display:inline-flex; align-items:center; gap:6px; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:#b45309; }
 .btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
 .btn-secondary:hover { background:var(--surface3); }
 .btn-success { background:var(--accent3); color:#fff; }
 .btn-danger { background:var(--accent4); color:#fff; }
-.btn-sm { padding:5px 10px; font-size:12px; }
+.btn-sm { padding:5px 10px; font-size:12px; font-weight:600; }
 .btn-ghost { background:transparent; color:var(--text2); border:1px solid var(--border); }
 .btn-ghost:hover { border-color:var(--accent); color:var(--accent); }
 
@@ -79,44 +79,44 @@ html, body { height:100%; background:var(--bg); color:var(--text); font-family:v
 /* TABLES */
 .table-wrap { overflow-x:auto; border-radius:8px; border:1px solid var(--border); }
 table { width:100%; border-collapse:collapse; font-size:13px; }
-thead th { background:var(--surface2); padding:10px 12px; text-align:left; font-family:var(--mono); font-size:11px; color:var(--text3); letter-spacing:0.5px; text-transform:uppercase; border-bottom:1px solid var(--border); white-space:nowrap; }
-tbody td { padding:9px 12px; border-bottom:1px solid rgba(42,47,63,0.5); color:var(--text); vertical-align:middle; }
+thead th { background:#f1f5f9; padding:10px 12px; text-align:left; font-family:var(--mono); font-size:11px; color:#334155; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; border-bottom:2px solid var(--border); white-space:nowrap; position:sticky; top:0; z-index:2; }
+tbody td { padding:9px 12px; border-bottom:1px solid var(--border); color:var(--text); font-weight:500; vertical-align:middle; }
 tbody tr:last-child td { border-bottom:none; }
-tbody tr:hover td { background:rgba(255,255,255,0.02); }
+tbody tr:hover td { background:#f8fafc; }
 tbody tr.closed td { opacity:0.5; }
 tbody tr.closed td:first-child { text-decoration:line-through; }
 
 /* STATUS BADGES */
-.badge { padding:3px 8px; border-radius:20px; font-size:11px; font-family:var(--mono); font-weight:500; display:inline-block; }
-.badge-running { background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.2); }
-.badge-pending { background:rgba(240,165,0,0.12); color:#f0a500; border:1px solid rgba(240,165,0,0.2); }
-.badge-completed { background:rgba(16,185,129,0.12); color:#34d399; border:1px solid rgba(16,185,129,0.2); }
-.badge-closed { background:rgba(90,96,128,0.2); color:var(--text3); border:1px solid var(--border); }
-.badge-ptd { background:rgba(139,92,246,0.12); color:#a78bfa; border:1px solid rgba(139,92,246,0.2); }
-.badge-up { background:rgba(16,185,129,0.1); color:#34d399; border:1px solid rgba(16,185,129,0.15); }
+.badge { padding:3px 8px; border-radius:20px; font-size:11px; font-family:var(--mono); font-weight:600; display:inline-block; }
+.badge-running { background:#dbeafe; color:#1d4ed8; border:1px solid #bfdbfe; }
+.badge-pending { background:#fef3c7; color:#92400e; border:1px solid #fde68a; }
+.badge-completed { background:#d1fae5; color:#065f46; border:1px solid #a7f3d0; }
+.badge-closed { background:#f1f5f9; color:#475569; border:1px solid var(--border); }
+.badge-ptd { background:#ede9fe; color:#5b21b6; border:1px solid #ddd6fe; }
+.badge-up { background:#d1fae5; color:#065f46; border:1px solid #a7f3d0; }
 
 /* FORMS */
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
 .form-group { display:flex; flex-direction:column; gap:5px; }
-.form-group label { font-size:11px; color:var(--text3); font-family:var(--mono); text-transform:uppercase; letter-spacing:0.5px; }
-.form-control { background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-family:var(--body); font-size:13px; outline:none; transition:border-color 0.15s; width:100%; }
-.form-control:focus { border-color:var(--accent); }
-.form-control option { background:var(--surface2); }
+.form-group label { font-size:11px; color:#475569; font-family:var(--mono); font-weight:700; text-transform:uppercase; letter-spacing:0.5px; }
+.form-control { background:#fff; border:1px solid var(--border); border-radius:6px; padding:8px 12px; color:var(--text); font-family:var(--body); font-size:13px; font-weight:500; outline:none; transition:border-color 0.15s; width:100%; }
+.form-control:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(217,119,6,0.1); }
+.form-control option { background:#fff; color:var(--text); }
 select.form-control { cursor:pointer; }
 
 /* MODAL */
-.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(4px); z-index:1000; display:flex; align-items:center; justify-content:center; }
-.modal { background:var(--surface); border:1px solid var(--border); border-radius:12px; width:90%; max-width:700px; max-height:90vh; overflow-y:auto; }
+.modal-overlay { position:fixed; inset:0; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); z-index:1000; display:flex; align-items:center; justify-content:center; }
+.modal { background:var(--surface); border:1px solid var(--border); border-radius:12px; width:90%; max-width:700px; max-height:90vh; overflow-y:auto; box-shadow:0 20px 40px rgba(0,0,0,0.15); }
 .modal-header { padding:20px 24px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-.modal-title { font-family:var(--head); font-size:16px; font-weight:700; }
+.modal-title { font-family:var(--head); font-size:16px; font-weight:700; color:var(--text); }
 .modal-body { padding:24px; }
 .modal-footer { padding:16px 24px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; }
 .modal-close { background:none; border:none; color:var(--text2); cursor:pointer; font-size:20px; line-height:1; }
 
 /* TABS */
 .tabs { display:flex; gap:2px; background:var(--surface2); border-radius:8px; padding:3px; margin-bottom:20px; border:1px solid var(--border); width:fit-content; }
-.tab { padding:6px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:500; color:var(--text2); transition:all 0.15s; white-space:nowrap; }
-.tab.active { background:var(--surface3); color:var(--text); }
+.tab { padding:6px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; color:var(--text2); transition:all 0.15s; white-space:nowrap; }
+.tab.active { background:#fff; color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,0.1); }
 
 /* PROGRESS BAR */
 .progress-bar { height:4px; background:var(--surface3); border-radius:2px; overflow:hidden; }
@@ -125,10 +125,10 @@ select.form-control { cursor:pointer; }
 .progress-fill.green { background:var(--accent3); }
 
 /* ALERT */
-.alert { padding:10px 14px; border-radius:6px; font-size:13px; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
-.alert-warn { background:rgba(240,165,0,0.1); border:1px solid rgba(240,165,0,0.2); color:#f0a500; }
-.alert-info { background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.2); color:#60a5fa; }
-.alert-success { background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.2); color:#34d399; }
+.alert { padding:10px 14px; border-radius:6px; font-size:13px; font-weight:500; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.alert-warn { background:#fffbeb; border:1px solid #fde68a; color:#92400e; }
+.alert-info { background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; }
+.alert-success { background:#f0fdf4; border:1px solid #bbf7d0; color:#166534; }
 
 /* MACHINE GANTT */
 .gantt-row { display:flex; align-items:center; gap:0; margin-bottom:2px; }
@@ -139,24 +139,24 @@ select.form-control { cursor:pointer; }
 
 /* CALENDAR */
 .cal-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:4px; }
-.cal-header { text-align:center; padding:6px; font-family:var(--mono); font-size:10px; color:var(--text3); text-transform:uppercase; }
-.cal-day { min-height:80px; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:6px; cursor:pointer; transition:border-color 0.15s; }
+.cal-header { text-align:center; padding:6px; font-family:var(--mono); font-size:10px; color:var(--text3); font-weight:700; text-transform:uppercase; }
+.cal-day { min-height:80px; background:#fff; border:1px solid var(--border); border-radius:6px; padding:6px; cursor:pointer; transition:border-color 0.15s; }
 .cal-day:hover { border-color:var(--accent); }
-.cal-day.today { border-color:var(--accent2); }
-.cal-day.has-trucks { border-color:var(--accent3); background:rgba(16,185,129,0.05); }
-.cal-day-num { font-family:var(--mono); font-size:11px; color:var(--text3); margin-bottom:4px; }
-.cal-chip { background:rgba(240,165,0,0.15); color:var(--accent); font-size:9px; padding:2px 4px; border-radius:3px; margin-top:2px; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.cal-chip.blue { background:rgba(59,130,246,0.15); color:#60a5fa; }
-.cal-chip.green { background:rgba(16,185,129,0.15); color:#34d399; }
-.cal-chip.purple { background:rgba(139,92,246,0.15); color:#a78bfa; }
+.cal-day.today { border-color:var(--accent2); background:#eff6ff; }
+.cal-day.has-trucks { border-color:var(--accent3); background:#f0fdf4; }
+.cal-day-num { font-family:var(--mono); font-size:11px; font-weight:700; color:var(--text3); margin-bottom:4px; }
+.cal-chip { background:#fef3c7; color:#92400e; font-size:9px; font-weight:600; padding:2px 4px; border-radius:3px; margin-top:2px; font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cal-chip.blue { background:#dbeafe; color:#1d4ed8; }
+.cal-chip.green { background:#d1fae5; color:#065f46; }
+.cal-chip.purple { background:#ede9fe; color:#5b21b6; }
 
 /* SUMMARY TABLE */
 .summary-table { border-collapse:collapse; width:100%; font-size:12px; }
-.summary-table th { background:var(--surface3); padding:8px 10px; font-family:var(--mono); font-size:10px; color:var(--text3); text-transform:uppercase; border:1px solid var(--border); }
-.summary-table td { padding:7px 10px; border:1px solid var(--border); color:var(--text); text-align:right; }
-.summary-table td:first-child { text-align:left; font-weight:500; color:var(--text); }
-.summary-table tr.total-row td { background:var(--surface2); font-weight:600; color:var(--accent); }
-.summary-table .highlight { color:var(--accent3); font-weight:600; }
+.summary-table th { background:#f1f5f9; padding:8px 10px; font-family:var(--mono); font-size:10px; font-weight:700; color:#334155; text-transform:uppercase; border:1px solid var(--border); }
+.summary-table td { padding:7px 10px; border:1px solid var(--border); color:var(--text); font-weight:500; text-align:right; }
+.summary-table td:first-child { text-align:left; font-weight:600; color:var(--text); }
+.summary-table tr.total-row td { background:var(--surface2); font-weight:700; color:var(--accent); }
+.summary-table .highlight { color:var(--accent3); font-weight:700; }
 
 /* MISC */
 .section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
@@ -272,6 +272,7 @@ input[type="file"] { display:none; }
   .summary-table td, .summary-table th { padding: 6px 8px; font-size: 11px; }
 
   /* ── User badge ── */
+  #user-badge-wrap { top: 6px; right: 8px; }
   #user-badge { font-size: 11px; padding: 3px 8px; }
 
   /* ── Auth overlay card ── */
@@ -355,7 +356,7 @@ input[type="file"] { display:none; }
     <div class="nav-item" onclick="navigate('dispatch-customer')"><span class="icon">👤</span> Customer View</div>
     <div class="nav-item" onclick="navigate('dispatch-export')"><span class="icon">📥</span> Dispatch Export</div>
     <div class="nav-item" onclick="navigate('order-tracker')"><span class="icon">📊</span> Order Tracker</div>
-    <div class="nav-item" onclick="event.stopPropagation();openTrackingApp()" style="color:var(--accent2)"><span class="icon">🏷️</span> Tracking Suite ↗</div>
+    <div class="nav-item" onclick="openTrackingApp()" style="color:var(--accent2)"><span class="icon">🏷️</span> Tracking Suite ↗</div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Masters</div>
     <div class="nav-item" onclick="navigate('machines')"><span class="icon">🔧</span> Machine Master</div>
@@ -403,8 +404,6 @@ const ZONE_MAP_RAW = {"GREATER NOIDA":"NORTH","THANE":"WEST","KALKA":"BADDI","KA
 // MASTER DATA
 // =============================
 const MACHINE_MASTER = [
-  {id:'MC7',  size:'4', cap:15, aGrade:93},
-  {id:'MC8',  size:'4', cap:15, aGrade:93},
   {id:'MC14', size:'3', cap:15, aGrade:93},
   {id:'MC15', size:'2', cap:15, aGrade:93},
   {id:'MC16', size:'2', cap:15, aGrade:93},
@@ -451,33 +450,6 @@ const PRINT_MACHINES = [
 const PACK_SIZES = {'00':75000,'0':100000,'1':125000,'2':175000,'3':225000,'0EL':100000,'4':175000,'5':175000};
 const CAPSULE_COLOURS = ['White/White','White/Yellow','White/Clear','Yellow/Yellow','Clear/Clear','Orange/White','Orange/Orange','Blue/White','Blue/Blue','Green/White','Green/Green','Pink/White','Pink/Pink','Red/White','Red/Red','Purple/White','Purple/Purple','Brown/White','Black/White','Maroon/White'];
 const SIZES = ['00','0','0EL','1','2','3','4','5'];
-// Customer Master — Ship To → Bill To mapping
-// Populated from existing orders + manually editable in Settings
-// Format: { 'SHIP TO NAME': 'BILL TO NAME' } — leave blank if same as Ship To
-const CUSTOMER_BILL_TO_MAP_DEFAULT = {};
-
-function getCustomerList() {
-  // Merge: order history + custom master stored in state
-  const fromOrders = [...new Set(
-    state.orders.filter(o=>!o.deleted && (o.shipTo||o.customer))
-                 .map(o => o.shipTo||o.customer)
-  )].sort();
-  const fromMaster = Object.keys(state.customerMaster||{});
-  return [...new Set([...fromMaster, ...fromOrders])].sort();
-}
-
-function getBillTo(shipTo) {
-  // Look up bill-to from state customer master, fallback to order history
-  if (!shipTo) return '';
-  const master = state.customerMaster || {};
-  if (master[shipTo] !== undefined) return master[shipTo];
-  // Try to find from recent orders
-  const recent = [...state.orders]
-    .filter(o => (o.shipTo||o.customer) === shipTo && o.billTo)
-    .sort((a,b)=>new Date(b.startDate||0)-new Date(a.startDate||0));
-  return recent.length ? recent[0].billTo : '';
-}
-
 const ZONES = ['BADDI','BADDI + JAMMU','BADDI+JAMMU','NORTH','SOUTH','EAST','WEST','DELHI','MUMBAI','RAJASTHAN','ALWAR','NEPAL','BANGLADESH','LOCAL','EXPORT'];
 const EXPORT_ZONES = ['EXPORT','BANGLADESH','NEPAL','MUMBAI']; // export zones: dispatch only when full container/indent complete
 // getTruckCapacity() is read from state so it's configurable in Settings
@@ -549,7 +521,6 @@ let state = {
   zoneCapacities: {},      // { zoneName: boxes } — per-zone override, falls back to truckCapacity
   activeMonth: null,       // 'YYYY-MM' — current active planning month
   archives: [],            // [{month, closedAt, data:{orders,printOrders,dispatchPlans,dailyPrinting}}]
-  customerMaster: {},     // { 'Ship To Name': 'Bill To Name' } — customer bill-to mapping
 };
 
 // ─── SERVER SYNC ──────────────────────────────────────────────
@@ -566,41 +537,8 @@ function sanitizeServerUrl(url) {
   }
 }
 
-// ── OFFLINE RETRY QUEUE (defined before SYNC so SYNC.push can reference it) ──
-const PLAN_QUEUE_KEY = 'sunloc_plan_push_queue';
-function planQueuePush(stateObj) {
-  try {
-    const q = JSON.parse(localStorage.getItem(PLAN_QUEUE_KEY)||'[]');
-    q.splice(0, q.length, { ts: Date.now(), state: stateObj });
-    localStorage.setItem(PLAN_QUEUE_KEY, JSON.stringify(q));
-  } catch(e) {}
-}
-async function planQueueFlush() {
-  try {
-    const raw = localStorage.getItem(PLAN_QUEUE_KEY);
-    if (!raw) return;
-    const q = JSON.parse(raw);
-    if (!q.length) return;
-    const url = localStorage.getItem('sunloc_server_url')||'';
-    if (!url) return;
-    const r = await fetch(url+'/api/health',{signal:AbortSignal.timeout(3000)});
-    if (!r.ok) return;
-    const latest = q[q.length-1];
-    const resp = await fetch(url+'/api/planning/state',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({state: latest.state}),
-      signal: AbortSignal.timeout(8000)
-    });
-    if (resp.ok) {
-      localStorage.removeItem(PLAN_QUEUE_KEY);
-      try{ sunlocChannel.postMessage({type:'PLANNING_SAVED',ts:Date.now()}); }catch(e){}
-      console.log('[Plan] Offline queue flushed');
-    }
-  } catch(e) {}
-}
-
 const SYNC = (() => {
-  let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
+  let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
   let _online = false, _lastCheck = 0;
 
   async function online() {
@@ -627,8 +565,6 @@ const SYNC = (() => {
 
   async function push(stateObj) {
     if (!_url) return;
-    // Always queue first — survives if push fails or page closes mid-request
-    planQueuePush(stateObj);
     // Force fresh connectivity check on every push attempt
     _lastCheck = 0;
     if (!(await online())) return;
@@ -640,8 +576,6 @@ const SYNC = (() => {
         signal: AbortSignal.timeout(6000)
       });
       _online = true; updateBadge();
-      // Push succeeded — clear the queue
-      localStorage.removeItem(PLAN_QUEUE_KEY);
     } catch { _online = false; updateBadge(); }
   }
 
@@ -657,7 +591,7 @@ const SYNC = (() => {
   }
 
   function configure() {
-    const newUrl = prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.', _url || 'https://sunloc.up.railway.app');
+    const newUrl = prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.', _url);
     if (newUrl === null) return;
     _url = sanitizeServerUrl(newUrl);
     localStorage.setItem('sunloc_server_url', _url);
@@ -667,64 +601,17 @@ const SYNC = (() => {
 
   async function loadFromServer() {
     const serverState = await pull();
-
-    // SERVER IS ALWAYS TRUTH
-    // If server returns null (empty DB or network fail) — still mark as loaded
-    // but NEVER push localStorage orders back to server automatically
-    if (!serverState) {
-      // Server unreachable or empty — use localStorage as display only
-      // but block any auto-push to prevent stale data contaminating server
-      _serverDataLoaded = false;
-      return;
-    }
-
-    const prevOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
-    const prevSavedAt = state._serverSavedAt || 0;
-    const serverSavedAt = serverState._serverSavedAt || serverState.savedAt || 0;
-
-    serverState._serverSavedAt = Date.now();
-
-    // Always take server orders — never merge with localStorage orders
-    // This prevents old/deleted orders from coming back via localStorage push
+    if (!serverState) return;
     Object.assign(state, serverState);
-    state.orders = serverState.orders || [];
-    state.printOrders = serverState.printOrders || [];
-    state.dispatchPlans = serverState.dispatchPlans || [];
     state.pcCodes = PC_CODES_RAW;
     state.zoneMap = ZONE_MAP_RAW;
-    _serverDataLoaded = true;
-
-    try {
-      const s = {...serverState};
-      delete s.pcCodes; delete s.zoneMap;
-      localStorage.setItem('sunloc_state', JSON.stringify(s));
-    } catch {}
-
+    // Persist locally too
+    try { const s = {...serverState}; delete s.pcCodes; delete s.zoneMap; localStorage.setItem('sunloc_state', JSON.stringify(s)); } catch {}
+    // Recalc all machine schedules — actualQty from DPR affects remaining daysNeeded and endDate
+    const allMachineIds = [...new Set((state.orders||[]).filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
+    allMachineIds.forEach(mid => recalcMachineScheduleQuiet(mid));
     await loadTrackingStatus();
-    await loadLiveAGrade();
-    await loadDispatchActuals();
-    await loadDprBatchClosed();
-
-    const newOrderCount = (state.orders||[]).filter(o=>!o.deleted).length;
-    const dataChanged = newOrderCount !== prevOrderCount || serverSavedAt > prevSavedAt;
-    const isInitialLoad = prevSavedAt === 0;
-
-    // Only re-render if data actually changed or first load
-    // Skip if user is actively interacting (typing, selecting)
-    if (isInitialLoad || dataChanged) {
-      const activeTag = document.activeElement?.tagName?.toLowerCase();
-      const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
-      if (!userInteracting || isInitialLoad) {
-        render();
-      } else {
-        // Data changed but user is typing — update KPI numbers silently without full re-render
-        try {
-          const kpiEl = document.getElementById('page-title');
-          if (kpiEl) render(); // safe — page-title is not a form
-        } catch(e) {}
-      }
-    }
-    // If nothing changed — skip render completely (no flicker)
+    render();
   }
 
   async function loadTrackingStatus() {
@@ -745,114 +632,87 @@ const SYNC = (() => {
         }
       });
     } catch(e) {}
-  }
-
-  // ── Pull live A-Grade from Tracking module ──────────────────
-  async function loadLiveAGrade() {
-    if (!_url) return;
+    // Pull A-grade actuals from Tracking — updates live yield calculations
     try {
       const ag = await fetch(_url + '/api/tracking/agrade-summary', { signal: AbortSignal.timeout(5000) });
-      if (!ag.ok) return;
-      const agj = await ag.json();
-      if (agj.ok && agj.batches) {
-        window._liveAGrade = agj.batches;
-        // Quietly recalc machine schedules with live A-grade data
-        // Use Quiet version to avoid triggering saveState → loadFromServer loop
-        const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId))];
-        machineIds.forEach(mid => { if (mid) recalcMachineScheduleQuiet(mid); });
+      if (ag.ok) {
+        const agj = await ag.json();
+        if (agj.ok && agj.batches) {
+          window._liveAGrade = agj.batches;
+          // Recalculate all machine schedules with live A-grade
+          const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId))];
+          machineIds.forEach(mid => {
+            if (mid) recalcMachineScheduleQuiet(mid);
+          });
+        }
       }
     } catch(e) {}
-  }
 
-  // ── Pull dispatch actuals from Tracking module ───────────────
-  async function loadDispatchActuals() {
-    if (!_url) return;
+    // Also pull dispatch actuals from Tracking
     try {
       const da = await fetch(_url + '/api/tracking/dispatch-actuals', { signal: AbortSignal.timeout(5000) });
-      if (!da.ok) return;
-      const dj = await da.json();
-      if (dj.ok && dj.actuals) {
-        const actualsMap = {};
-        dj.actuals.forEach(a => { actualsMap[a.batch_number] = parseFloat(a.dispatched_qty)||0; });
-        state.dispatchPlans.forEach(dp => {
-          if (dp.batchNumber && actualsMap[dp.batchNumber] !== undefined) {
-            const trackingActual = actualsMap[dp.batchNumber];
-            if (trackingActual > (dp.actualDispatched||0)) {
-              dp.actualDispatched = trackingActual;
-              if (dp.actualDispatched >= dp.qty) dp.status = 'dispatched';
-              else if (dp.actualDispatched > 0) dp.status = 'partial';
+      if (da.ok) {
+        const dj = await da.json();
+        if (dj.ok && dj.actuals) {
+          // Build lookup: batchNumber -> dispatchedQty
+          const actualsMap = {};
+          dj.actuals.forEach(a => { actualsMap[a.batch_number] = a.dispatched_qty||0; });
+          // Update dispatch plans with actual quantities from Tracking
+          state.dispatchPlans.forEach(dp => {
+            if (dp.batchNumber && actualsMap[dp.batchNumber] !== undefined) {
+              const trackingActual = actualsMap[dp.batchNumber];
+              // Only update if tracking shows MORE than what planning has recorded
+              // (tracking is the authoritative source for actual dispatches)
+              if (trackingActual > (dp.actualDispatched||0)) {
+                dp.actualDispatched = trackingActual;
+                if (dp.actualDispatched >= dp.qty) dp.status = 'dispatched';
+                else if (dp.actualDispatched > 0) dp.status = 'partial';
+              }
             }
-          }
-        });
+          });
+        }
+      }
+    } catch(e) {}
+
+    // Pull DPR batch-closed status — gates Planning close button
+    try {
+      const dc = await fetch(_url + '/api/dpr/batch-closed', { signal: AbortSignal.timeout(5000) });
+      if (dc.ok) {
+        const dcj = await dc.json();
+        if (dcj.ok && dcj.closed) {
+          window._dprClosedBatches = {};
+          dcj.closed.forEach(c => { window._dprClosedBatches[c.order_id] = { closedAt: c.closed_at, closedBy: c.closed_by }; });
+        }
       }
     } catch(e) {}
   }
 
-  // ── Pull DPR batch-closed status — gates Planning close button ──
-  async function loadDprBatchClosed() {
-    if (!_url) return;
-    try {
-      const dc = await fetch(_url + '/api/dpr/batch-closed', { signal: AbortSignal.timeout(5000) });
-      if (!dc.ok) return;
-      const dcj = await dc.json();
-      if (dcj.ok && dcj.closed) {
-        window._dprClosedBatches = {};
-        dcj.closed.forEach(c => {
-          window._dprClosedBatches[c.order_id] = { closedAt: c.closed_at, closedBy: c.closed_by };
-        });
-      }
-    } catch(e) {
-      window._dprClosedBatches = window._dprClosedBatches || {};
-    }
-  }
-
-  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus, loadLiveAGrade, loadDispatchActuals, loadDprBatchClosed };
+  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus };
 })();
 
 // Load from localStorage (with server enrichment on init)
 function loadState() {
-  // Load ONLY master data from localStorage (machines, packSizes, customers)
-  // NEVER load orders from localStorage — orders must always come from server
   try {
     const saved = localStorage.getItem('sunloc_state');
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Only restore master/config data — NOT orders (they must come from server)
-      if (parsed.machineMaster) state.machineMaster = parsed.machineMaster;
-      if (parsed.printMachineMaster) state.printMachineMaster = parsed.printMachineMaster;
-      if (parsed.packSizes) state.packSizes = parsed.packSizes;
-      if (parsed.truckCapacity) state.truckCapacity = parsed.truckCapacity;
-      if (parsed.customerMaster) state.customerMaster = parsed.customerMaster;
-      if (parsed.zoneCapacities) state.zoneCapacities = parsed.zoneCapacities;
+      Object.assign(state, parsed);
       state.pcCodes = PC_CODES_RAW;
       state.zoneMap = ZONE_MAP_RAW;
-      // Orders, printOrders, dispatchPlans come from server ONLY
-      state.orders = [];
-      state.printOrders = [];
-      state.dispatchPlans = [];
     }
   } catch(e) {}
-
-  // Always pull from server — orders always come from here
-  SYNC.loadFromServer().then(() => {
-    // Server pull done — render() was called inside loadFromServer
-  }).catch(() => {
-    // Server unreachable — render with master data only (no orders from localStorage)
-    render();
-  });
-
+  // Async: try server (enriches actuals from DPR)
+  setTimeout(() => SYNC.loadFromServer(), 500);
+  // Push local state to server immediately on load — ensures server is always up to date
+  setTimeout(() => { if (state.orders && state.orders.length > 0) { const toSave = {...state}; delete toSave.pcCodes; delete toSave.zoneMap; SYNC.push(toSave); } }, 1500);
   // Check for month rollover after state is loaded
-  setTimeout(() => initMonthlyArchive(), 1000);
+  setTimeout(() => initMonthlyArchive(), 800);
 }
 
 function openTrackingApp() {
   const url = localStorage.getItem('sunloc_server_url') || '';
-  if (url) {
-    // Open in same tab to prevent accidental new tab spawning
-    window.location.href = url + '/tracking.html';
-  } else {
-    alert('Please configure the Server URL in Settings first.');
-  }
+  if (url) window.open(url + '/tracking.html', '_blank');
+  else alert('Please configure the Server URL in Settings first.');
 }
 
 function saveState() {
@@ -861,53 +721,24 @@ function saveState() {
     delete toSave.pcCodes;
     delete toSave.zoneMap;
     localStorage.setItem('sunloc_state', JSON.stringify(toSave));
-
-    // CRITICAL GUARD: never push to server until confirmed server data is loaded.
-    // Prevents empty/stale state from overwriting DB after history clear or fresh login.
-    if (!_serverDataLoaded) {
-      console.log('[saveState] push blocked — waiting for server data to load first');
-      return;
-    }
-
-    // Stale-push guard: if not synced from server in >10 min, pull first then push
-    const lastSync = state._serverSavedAt || 0;
-    const staleThreshold = 2 * 60 * 1000; // 2 min — keep data fresh across all devices
-    if (Date.now() - lastSync > staleThreshold) {
-      SYNC.loadFromServer().then(() => {
-        const fresh = {...state};
-        delete fresh.pcCodes;
-        delete fresh.zoneMap;
-        SYNC.push(fresh);
-      });
-    } else {
-      SYNC.push(toSave);
-    }
+    SYNC.push(toSave); // async push to server — non-blocking
     auditLog('SAVE', `Saved planning state — page: ${state.currentPage}`);
-    // Notify other tabs (tracking, DPR) that planning data changed
-    try{ sunlocChannel.postMessage({type:'PLANNING_SAVED', ts:Date.now()}); }catch(e){}
   } catch(e) {}
 }
-
-// ── BROADCAST CHANNEL — notify all tabs on save ─────────────────
-const sunlocChannel = (() => {
-  try {
-    const ch = new BroadcastChannel('sunloc_sync');
-    ch.onmessage = (e) => {
-      const msg = e.data;
-      // If tracking saved new data, refresh WIP display only if not on a data-entry page
-      if (msg.type === 'TRACKING_SYNCED' && currentUser && _serverDataLoaded) {
-        // Only refresh tracking status numbers — never full render from broadcast
-        try{ SYNC.loadTrackingStatus(); }catch(ex){}
-      }
-    };
-    return ch;
-  } catch(e) { return { postMessage: ()=>{} }; }
-})();
 
 // =============================
 // HELPERS
 // =============================
 function fmt(n, dec=2) { return n==null?'-':(+n).toFixed(dec); }
+function fmtColour(colour){
+  if(!colour) return '-';
+  const parts = colour.split('/');
+  if(parts.length>=2){
+    const cap=(parts[0]||'').trim(), body=(parts[1]||'').trim();
+    return `<span style="font-size:10px;font-weight:600;color:var(--accent)">${cap}</span><span style="color:var(--text3);margin:0 2px">/</span><span style="font-size:10px;font-weight:600;color:var(--accent2)">${body}</span>`;
+  }
+  return `<span style="font-size:12px">${colour}</span>`;
+}
 function fmtDate(d) {
   if (!d) return '-';
   const dt = d instanceof Date ? d : new Date(d);
@@ -936,22 +767,45 @@ function getPcByCode(size, code) {
 }
 
 // Calculate order schedule
+// Stage wastage factors (standard defaults, overridden by live tracking actuals)
+const STD_AIM_WASTE    = 0.07;  // 7% AIM wastage
+const STD_PRINT_WASTE  = 0.01;  // 1% printing machine wastage
+const STD_PI_WASTE     = 0.01;  // 1% print inspection wastage
+
 function calcOrderSchedule(order, mc) {
-  // Gross Qty = Net / (aGrade/100) — for unprinted
-  // Gross Qty = Net * 1.07 * 1.02 — for printed (then unprinted=gross/1.07, printed=unprinted/1.02)
-  const aGradePct = (order.aGrade || mc.aGrade) / 100;
-  let grossQty, unprinted, printed;
+  // Use live A-grade from tracking if available, else use order/machine default
+  const liveAG   = window._liveAGrade && window._liveAGrade[order.batchNumber];
+  // AIM factor: actual if available, else 1/(1 - STD_AIM_WASTE) = 1/0.93 ≈ 1.0753
+  const aimFactor   = (liveAG?.aim?.aGradePct != null)
+    ? (100 / liveAG.aim.aGradePct)
+    : (order.aGrade || mc.aGrade) ? (100 / (order.aGrade || mc.aGrade)) : (1 / (1 - STD_AIM_WASTE));
+  const printFactor = (liveAG?.printing?.aGradePct != null)
+    ? (100 / liveAG.printing.aGradePct) : (1 + STD_PRINT_WASTE);
+  const piFactor    = (liveAG?.pi?.aGradePct != null)
+    ? (100 / liveAG.pi.aGradePct) : (1 + STD_PI_WASTE);
+
+  let grossQty, aimOut, printOut, piOut;
   if (order.isPrinted) {
-    grossQty = order.qty * 1.07 * 1.02;
-    unprinted = grossQty / 1.07;
-    printed = unprinted / 1.02;
+    // Gross → AIM → Printing → PI → Order Qty
+    piOut    = order.qty;
+    printOut = piOut    * piFactor;
+    aimOut   = printOut * printFactor;
+    grossQty = aimOut   * aimFactor;
   } else {
-    grossQty = order.qty / aGradePct;
-    unprinted = order.qty;
-    printed = null;
+    // Gross → AIM → Order Qty (packing direct)
+    aimOut   = order.qty;
+    grossQty = aimOut * aimFactor;
+    printOut = null;
+    piOut    = null;
   }
-  const daysNeeded = grossQty / mc.cap;
-  return {grossQty, unprinted, printed, daysNeeded, aGradePct};
+  // Remaining gross = total gross minus what's already been produced (from DPR actuals)
+  // This makes endDate shift out when production is slow and pull in when fast
+  const alreadyProduced = Math.min(order.actualQty || 0, grossQty);
+  const remainingGross  = Math.max(0, grossQty - alreadyProduced);
+  const daysNeeded = remainingGross / mc.cap;
+  const aGradePct  = 1 / aimFactor * 100;
+  return { grossQty, aimOut, printOut, piOut, daysNeeded, aGradePct,
+           aimFactor, printFactor, piFactor };
 }
 
 // Recalculate end date for an order given start date and machine
@@ -995,16 +849,20 @@ function autoGenBatchNumber(machineId) {
 function getMachineOrders(machineId) {
   return state.orders
     .filter(o=>o.machineId===machineId && !o.deleted)
-    .sort((a,b)=>new Date(a.startDate)-new Date(b.startDate));
+    .sort((a,b)=>{
+      // Primary: sort by serial number in batch number (e.g. 26N50 → 50)
+      const getSerial = o => {
+        const m = (o.batchNumber||'').match(/^(\d{2}[A-Z]+)(\d+)$/);
+        return m ? parseInt(m[2]) : 99999;
+      };
+      const diff = getSerial(a) - getSerial(b);
+      if (diff !== 0) return diff;
+      // Secondary: sort by startDate
+      return new Date(a.startDate) - new Date(b.startDate);
+    });
 }
 
 // Recalculate all order dates on a machine after any change
-function recalcAllMachines() {
-  const machineIds = [...new Set(state.orders.filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
-  machineIds.forEach(mid => recalcMachineSchedule(mid));
-  saveState();
-}
-
 function recalcMachineScheduleQuiet(machineId) {
   // Same as recalcMachineSchedule but doesn't save or re-render — used for live A-grade updates
   const mc = getMachine(machineId);
@@ -1016,12 +874,12 @@ function recalcMachineScheduleQuiet(machineId) {
     if (!cursor) cursor = new Date(ord.startDate || today());
     else ord.startDate = new Date(cursor);
     const sc = calcOrderSchedule(ord, mc);
-    ord.grossQty   = sc.grossQty;
-    ord.aimOut     = sc.aimOut;
-    ord.printOut   = sc.printOut;
-    ord.piOut      = sc.piOut;
-    ord.daysNeeded = sc.daysNeeded;
-    ord.endDate    = calcEndDate(ord.startDate, sc.daysNeeded);
+    ord.grossQty    = sc.grossQty;
+    ord.aimOut      = sc.aimOut;
+    ord.printOut    = sc.printOut;
+    ord.piOut       = sc.piOut;
+    ord.daysNeeded  = sc.daysNeeded;
+    ord.endDate     = calcEndDate(ord.startDate, sc.daysNeeded);
     cursor = new Date(ord.endDate);
   }
 }
@@ -1034,9 +892,7 @@ function recalcMachineSchedule(machineId) {
   for (const ord of orders) {
     if (ord.status === 'closed') continue;
     if (!cursor) {
-      // First order — use its existing startDate or today
       cursor = new Date(ord.startDate || today());
-      ord.startDate = new Date(cursor); // always set startDate explicitly
     } else {
       ord.startDate = new Date(cursor);
     }
@@ -1082,33 +938,6 @@ function recalcPrintSchedule() {
   // Recalc dispatch
   recalcDispatch();
 }
-
-// ── Fetch actual dispatch from Tracking Module ──────────────────
-let trackingDispatchActuals = {}; // batchNumber → {qty, boxes, records:[]}
-
-async function fetchTrackingDispatch(){
-  try{
-    const serverUrl = localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app';
-    const r = await fetch(serverUrl+'/api/tracking/state', {signal:AbortSignal.timeout(8000)});
-    if(!r.ok) return;
-    const j = await r.json();
-    const recs = j.state?.dispatchRecs || [];
-    // Group by batch number
-    trackingDispatchActuals = {};
-    recs.forEach(d=>{
-      const bn = d.batch_number || d.batchNumber;
-      if(!bn) return;
-      if(!trackingDispatchActuals[bn]) trackingDispatchActuals[bn] = {qty:0, boxes:0, records:[]};
-      trackingDispatchActuals[bn].qty   += parseFloat(d.qty||0);
-      trackingDispatchActuals[bn].boxes += parseInt(d.boxes||0);
-      trackingDispatchActuals[bn].records.push(d);
-    });
-  }catch(e){ console.warn('[Dispatch] Could not fetch tracking actuals:', e.message); }
-}
-
-// Fetch on load and every 2 minutes
-fetchTrackingDispatch();
-setInterval(fetchTrackingDispatch, 2*60*1000);
 
 function recalcDispatch() {
   // Update dispatch dates dynamically based on expected end dates (tentative)
@@ -1281,9 +1110,9 @@ function renderProduction() {
   const topActions = document.getElementById('topbar-actions');
 
   topActions.innerHTML = `
-    <button class="btn btn-ghost btn-sm" onclick="importSAP()" style="padding:5px 10px;font-size:12px">📥 Import SAP</button>
-    <button class="btn btn-secondary btn-sm" onclick="exportProdPlan()" style="padding:5px 10px;font-size:12px">📤 Export</button>
-    <button class="btn btn-primary btn-sm" onclick="showAddOrderModal()" style="padding:5px 10px;font-size:12px">+ New Order</button>
+    <button class="btn btn-ghost btn-sm" onclick="importSAP()">📥 Import SAP</button>
+    <button class="btn btn-secondary btn-sm" onclick="exportProdPlan()">📤 Export</button>
+    <button class="btn btn-primary btn-sm" onclick="showAddOrderModal()">+ New Order</button>
   `;
 
   // Group by machine
@@ -1324,7 +1153,7 @@ function renderProduction() {
                 <tr>
                   <th>#</th><th>PO / Batch</th><th>Customer</th><th>Size</th><th>PC Code</th><th>Colour</th>
                   <th>PTD/UP</th><th>Print Matter Cap</th><th>Print Matter Body</th><th>Ink Cap</th><th>Ink Body</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
-                  <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>Status</th><th>Remarks</th><th>Actions</th>
+                  <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>AIM Out ↗</th><th>Status</th><th>DPR Status</th><th>Remarks</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1354,8 +1183,6 @@ function renderOrderRow(ord, idx, mc) {
   const isRunning = ord.status === 'running';
   const isWO = ord.woStatus === 'wo';
   const isWOReconciled = ord.woStatus === 'wo-reconciled';
-  // DPR batch-close gate — Planning close button requires DPR to be closed first
-  const dprClosed = window._dprClosedBatches && ord.id ? window._dprClosedBatches[ord.id] : null;
   const statusBadge = `<select class="status-select" onchange="changeOrderStatus('${ord.id}','${mc.id}',this.value)" style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer">
     <option value="pending" ${ord.status==='pending'?'selected':''}>Pending</option>
     <option value="running" ${ord.status==='running'?'selected':''}>In Production</option>
@@ -1363,15 +1190,22 @@ function renderOrderRow(ord, idx, mc) {
   </select>`;
   const ptdBadge = ord.isPrinted ? '<span class="badge badge-ptd">PTD</span>' : '<span class="badge badge-up">UP</span>';
   const grossQty = ord.grossQty ? fmt(ord.grossQty) : '-';
-  // Close requires: not already closed, production ≥99%, AND DPR has been closed first
+  // Live A-grade flag for this order's batch
+  const liveAG = window._liveAGrade && ord.batchNumber ? (window._liveAGrade[ord.batchNumber]||{}) : {};
+  const liveAimPct = liveAG.aim?.aGradePct;
+  const stdAimPct = ord.aGrade || mc?.aGrade || 93;
+  const extraNeeded = (liveAimPct != null && liveAimPct < stdAimPct && ord.grossQty)
+    ? Math.max(0, (ord.qty / (liveAimPct/100)) - ord.grossQty) : 0;
+  const extraFlag = extraNeeded > 0.05
+    ? `<div style="font-size:10px;color:var(--accent4);margin-top:2px">⚠️ +${fmt(extraNeeded,2)}L extra needed (actual AIM: ${fmt(liveAimPct,1)}%)</div>` : '';
+  // For unprinted: show AIM scan out vs planned
+  const liveAimOut = liveAG.aim?.outQty || 0;
+  const aimProgress = (!ord.isPrinted && liveAimOut > 0 && ord.grossQty)
+    ? `<div style="font-size:10px;color:var(--accent);margin-top:2px">AIM Out: ${fmt(liveAimOut)}L / ${fmt(ord.grossQty)}L planned</div>` : '';
+  const dprClosed = window._dprClosedBatches && ord.id ? window._dprClosedBatches[ord.id] : null;
   const canClose = !isClosed && ord.actualProd >= (ord.qty * 0.99) && !!dprClosed;
   const woBadge = isWO ? '<span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span>' :
                   isWOReconciled ? '<span class="badge badge-completed" style="font-size:10px">✅ W/O Assigned</span>' : '';
-  // DPR status badge shown in Actions column
-  const dprBadge = isClosed ? '' :
-    dprClosed
-      ? `<span class="badge badge-green" style="font-size:9px" title="Closed by ${dprClosed.closedBy||'DPR'}">🔒 DPR Closed</span>`
-      : `<span class="badge badge-pending" style="font-size:9px" title="Close in DPR first">⏳ DPR Open</span>`;
   return `<tr class="${isClosed?'closed':''}" style="${isWO?'background:rgba(255,171,0,0.03);border-left:3px solid rgba(255,171,0,0.4)':''}">
     <td class="text-mono text-dim">${idx}</td>
     <td class="text-mono" style="white-space:nowrap">
@@ -1387,14 +1221,14 @@ function renderOrderRow(ord, idx, mc) {
     }</td>
     <td class="text-mono">${ord.size||'-'}</td>
     <td class="text-mono text-accent">${ord.pcCode||'-'}</td>
-    <td style="white-space:nowrap;font-size:12px">${ord.colour||'-'}</td>
+    <td style="white-space:nowrap">${fmtColour(ord.colour)}</td>
     <td>${ptdBadge}</td>
     <td style="font-size:11px">${(ord.printMatter||'').split('/')[0]?.trim()||'-'}</td>
     <td style="font-size:11px">${(ord.printMatter||'').split('/')[1]?.trim()||'-'}</td>
     <td style="font-size:11px;color:var(--accent3)">${ord.inkCap||'-'}</td>
     <td style="font-size:11px;color:var(--accent3)">${ord.inkBody||'-'}</td>
     <td class="text-mono fw-bold">${fmt(ord.qty)}</td>
-    <td class="text-mono text-blue">${grossQty}</td>
+    <td class="text-mono text-blue">${grossQty}${extraFlag}${aimProgress}</td>
     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.startDate)}</td>
     <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.endDate)}</td>
     <td class="text-sm">${ord.packing||'-'}</td>
@@ -1404,12 +1238,22 @@ function renderOrderRow(ord, idx, mc) {
         style="width:70px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px;font-family:var(--mono)"
         onchange="updateActualProd('${ord.id}',this.value,'${mc.id}')">
     </td>
+    <td class="text-mono" style="color:var(--accent2);white-space:nowrap" title="AIM Scan Out — live from Tracking">
+      ${liveAimOut>0?`<strong>${fmt(liveAimOut)}L</strong>`:'<span style="color:var(--text3)">—</span>'}
+    </td>
     <td>${statusBadge}</td>
     <td><input type="text" value="${ord.remarks||''}" placeholder="Add remark..."
       style="width:130px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px"
       onchange="updateOrderRemark('${ord.id}',this.value)"></td>
     <td style="white-space:nowrap">
-      ${dprBadge ? `<div style="margin-bottom:4px">${dprBadge}</div>` : ''}
+      ${isClosed
+        ? '<span class="badge badge-completed">✅ Closed</span>'
+        : dprClosed
+          ? '<span class="badge badge-green" style="font-size:9px" title="Closed by '+( dprClosed.closedBy||'DPR')+'">🔒 DPR Closed</span>'
+          : '<span class="badge badge-pending" style="font-size:9px" title="Close in DPR first">⏳ DPR Open</span>'
+      }
+    </td>
+    <td style="white-space:nowrap">
       ${canClose?`<button class="btn btn-success btn-sm" onclick="closeOrder('${ord.id}','${mc.id}')">✓ Close</button> `:''}
       ${!isClosed&&!dprClosed&&ord.actualProd>0?`<span style="font-size:10px;color:var(--text3)">Close in DPR first</span>`:''}
       ${isWO?`<button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${ord.id}')">🔶 Assign Customer</button> `:''}
@@ -1438,7 +1282,7 @@ function updateActualProd(ordId, val, machineId) {
   if (ord) {
     ord.actualProd = parseFloat(val)||0;
     if (ord.actualProd > 0 && ord.status === 'pending') ord.status = 'running';
-    saveState();
+    recalcMachineSchedule(machineId);
   }
 }
 
@@ -1450,6 +1294,17 @@ function updateOrderRemark(ordId, val) {
 function changeOrderStatus(ordId, machineId, newStatus) {
   const ord = state.orders.find(o=>o.id===ordId);
   if (!ord) return;
+  // Max 2 consecutive In Production orders per machine
+  if (newStatus === 'running') {
+    const runningCount = state.orders.filter(o=>o.machineId===machineId&&o.status==='running'&&o.id!==ordId&&!o.deleted).length;
+    if (runningCount >= 2) {
+      alert('⚠️ Maximum 2 orders can be In Production simultaneously on this machine.\n\nPlease close one of the current running orders before starting a new one.');
+      // Reset the select back to previous value
+      const sel = document.querySelector(`select[onchange*="${ordId}"]`);
+      if (sel) sel.value = ord.status;
+      return;
+    }
+  }
   ord.status = newStatus;
   if (newStatus === 'closed') {
     ord.closedDate = new Date();
@@ -1543,25 +1398,11 @@ function showAddOrderModal(machineId, existingOrder) {
       </div>
       <div class="form-group">
         <label>Ship To (Customer Name) ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
-        <input class="form-control" id="fo-customer" list="customer-list-datalist"
-          value="${ord.shipTo||ord.customer||''}"
-          placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'Type or select customer name'}"
-          ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}
-          oninput="onShipToInput(this.value)"
-          onchange="onShipToInput(this.value)">
-        <datalist id="customer-list-datalist">
-          ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
-        </datalist>
+        <input class="form-control" id="fo-customer" value="${ord.shipTo||ord.customer||''}" placeholder="${ord.woStatus==='wo'?'Will be assigned via Reconciliation':'e.g. M/S ACME LIFETECH LLP'}" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
       </div>
       <div class="form-group">
-        <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To — auto-filled from customer master)</span> ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
-        <input class="form-control" id="fo-billto" list="billto-list-datalist"
-          value="${ord.billTo||''}"
-          placeholder="Auto-filled from customer history — leave blank if same as Ship To"
-          ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
-        <datalist id="billto-list-datalist">
-          ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
-        </datalist>
+        <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span> ${ord.woStatus==='wo'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">LOCKED — W/O</span>':''}</label>
+        <input class="form-control" id="fo-billto" value="${ord.billTo||''}" placeholder="e.g. M/S ACME PHARMA PVT LTD — leave blank if same as Ship To" ${ord.woStatus==='wo'?'disabled style="opacity:0.5"':''}>
       </div>
       <div class="form-group">
         <label>Machine</label>
@@ -1584,7 +1425,7 @@ function showAddOrderModal(machineId, existingOrder) {
       </div>
       <div class="form-group">
         <label>Colour (Cap / Body)</label>
-        <input class="form-control" id="fo-colour" value="${ord.colour||''}" placeholder="Auto-filled from PC Code or type manually">
+        <input class="form-control" id="fo-colour" value="${ord.colour||''}" placeholder="Auto-filled from PC Code" readonly style="opacity:0.8;cursor:default">
       </div>
       <div class="form-group">
         <label>Printed / Unprinted</label>
@@ -1669,37 +1510,6 @@ function showAddOrderModal(machineId, existingOrder) {
 function updatePoType(sel) {
   const grp = document.getElementById('fo-ponum-group');
   if (grp) grp.style.display = sel.value === 'verbal' ? 'none' : '';
-}
-
-function onWocShipToInput(val) {
-  if (!val || !val.trim()) return;
-  const billTo = getBillTo(val.trim());
-  const billToInput = document.getElementById('woc-billto');
-  if (billToInput && !billToInput.value && billTo) {
-    billToInput.value = billTo;
-  }
-}
-
-function onShipToInput(val) {
-  if (!val || !val.trim()) return;
-  const billTo = getBillTo(val.trim());
-  const billToInput = document.getElementById('fo-billto');
-  if (billToInput && !billToInput.value && billTo) {
-    billToInput.value = billTo;
-  }
-  // Save to customer master on blur so it learns new customers
-}
-
-// Called when order is saved — update customer master with ship/bill mapping
-function learnCustomer(shipTo, billTo) {
-  if (!shipTo) return;
-  if (!state.customerMaster) state.customerMaster = {};
-  // Only update if bill-to is provided or not yet in master
-  if (billTo !== undefined) {
-    state.customerMaster[shipTo.trim()] = billTo ? billTo.trim() : '';
-  } else if (!(shipTo.trim() in state.customerMaster)) {
-    state.customerMaster[shipTo.trim()] = '';
-  }
 }
 
 function toggleWOMode(isWO) {
@@ -1839,9 +1649,6 @@ function saveOrderModal(existingId, defaultMachine) {
     state.orders.push(ord);
   }
 
-  // Learn customer ship-to/bill-to mapping for future autocomplete
-  learnCustomer(ord.shipTo||ord.customer, ord.billTo||'');
-
   // Auto-create print order if PTD
   if (isPrinted && !state.printOrders.find(p=>p.productionOrderId===ord.id)) {
     const printStart = new Date(startDate);
@@ -1932,162 +1739,51 @@ function saveOrderModal(existingId, defaultMachine) {
 // SAP IMPORT
 // =============================
 function importSAP() {
-  openModal('📥 Import SAP / Bulk Upload Orders', `
-    <div class="alert alert-info" style="font-size:13px;margin-bottom:14px">
-      Upload an Excel or CSV file to bulk import production orders. Use the template for the correct column format.
+  openModal('Import from SAP / Upload Template', `
+    <div style="margin-bottom:16px">
+      <div class="alert alert-info">Upload an Excel file exported from SAP B1, or use the Sunloc standard template.</div>
     </div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
-      <button class="btn btn-secondary btn-sm" onclick="downloadSAPTemplate()">📥 Download Template</button>
-      <button class="btn btn-primary btn-sm" onclick="document.getElementById('sap-file-input').click()">📤 Upload Excel / CSV</button>
-      <input id="sap-file-input" type="file" accept=".xlsx,.xls,.csv" style="display:none">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px">
+      <button class="btn btn-secondary" onclick="downloadSAPTemplate()">📥 Download SAP Template</button>
+      <label class="btn btn-primary" style="cursor:pointer">
+        📤 Upload SAP Export
+        <input type="file" accept=".xlsx,.xls,.csv" onchange="processSAPFile(this)">
+      </label>
     </div>
-    <div style="background:var(--surface2,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:12px">
-      <b>Required:</b> Customer, Size, Qty_Lakhs, Machine_ID (e.g. MC21 or MC.21), Printed_YN (Y/N) &nbsp;|&nbsp; <b>Optional:</b> PO_Number (auto-generated if blank),
-      <b>Optional:</b> Batch_Number, PC_Code, Colour, Zone, Packing, Printing_Matter, Remarks
+    <div class="alert alert-warn">
+      <strong>Template Columns:</strong> PO Number, Batch Number, Customer, Size, PC Code, Colour, Printed (Y/N), Qty (Lakhs), Packing, Zone, Printing Matter, Remarks
     </div>
     <div id="sap-preview"></div>
   `, [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
-
-  // Attach file input handler AFTER modal HTML is in DOM
-  setTimeout(() => {
-    const inp = document.getElementById('sap-file-input');
-    if (inp) inp.addEventListener('change', function(){ processSAPFile(this); });
-  }, 50);
 }
 
 function downloadSAPTemplate() {
-  const machines = (state.machineMaster||[]).map(m=>m.id).join(', ') || 'MC20,MC30,MC31';
+  const headers = ['PO_Number','Batch_Number','Customer','Size','PC_Code','Colour','Printed_YN','Qty_Lakhs','Machine_ID','Packing','Zone','Printing_Matter','Remarks'];
+  const sample = ['26ZD23','BT001','ALKEM','2','21065','PU/WH','N','100','MC30','HDCL','BADDI','',''];
   const wb = XLSX.utils.book_new();
-  // Main template sheet
-  const headers = ['PO_Number','Batch_Number','Customer','Size','PC_Code','Colour','Printed_YN','Qty_Lakhs','Machine_ID','Zone','Packing','Printing_Matter','Remarks'];
-  const samples = [
-    ['PO-2026-001','','ALKEM LABS','2','21065','PU/WH','N','100','MC30','BADDI','HDCL','',''],
-    ['PO-2026-002','','CIPLA','0','30012','CL/CL','N','75','MC20','PUNE','HDCL','','Rush order'],
-    ['PO-2026-003','26ZH035','M/S IRIAL MAGM','00','','CL.TR/CL.TR','Y','50','MC31','DELHI','PTD','SUNLOC 00','Printed capsule'],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...samples]);
-  // Column widths
-  ws['!cols'] = headers.map(h => ({wch: Math.max(h.length+2, 15)}));
-  XLSX.utils.book_append_sheet(wb, ws, 'Orders_Import');
-  // Instructions sheet
-  const instrRows = [
-    ['COLUMN','REQUIRED','DESCRIPTION','VALID VALUES / EXAMPLE'],
-    ['PO_Number','Yes','Customer Purchase Order number','PO-2026-001'],
-    ['Batch_Number','No','Leave blank for auto-generation','26ZH035'],
-    ['Customer','Yes','Full customer name','ALKEM LABS'],
-    ['Size','Yes','Capsule size code','00, 0, 1, 2, 3, 0EL'],
-    ['PC_Code','No','Product / PC code','21065'],
-    ['Colour','No','Cap/Body colour','PU/WH, CL/CL, CL.TR/CL.TR'],
-    ['Printed_YN','Yes','Is this a printed (PTD) order?','Y or N'],
-    ['Qty_Lakhs','Yes','Order quantity in Lakhs','100'],
-    ['Machine_ID','Yes','Machine to run on',''+machines],
-    ['Zone','No','Dispatch zone','BADDI, PUNE, DELHI, EXPORT'],
-    ['Packing','No','Packing type','HDCL, PTD'],
-    ['Printing_Matter','No','Text to print on capsule','SUNLOC 00'],
-    ['Remarks','No','Any additional notes','Rush order'],
-  ];
-  const wsInstr = XLSX.utils.aoa_to_sheet(instrRows);
-  wsInstr['!cols'] = [15,10,35,30].map(w=>({wch:w}));
-  XLSX.utils.book_append_sheet(wb, wsInstr, 'Instructions');
-  XLSX.writeFile(wb, 'Sunloc_Bulk_Order_Template.xlsx');
+  const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+  XLSX.utils.book_append_sheet(wb, ws, 'SAP_Import');
+  XLSX.writeFile(wb, 'Sunloc_SAP_Import_Template.xlsx');
 }
 
 function processSAPFile(input) {
   const file = input.files[0];
   if (!file) return;
-  const preview = document.getElementById('sap-preview');
-  preview.innerHTML = '<div style="color:var(--text3);padding:8px">Reading file...</div>';
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
       const wb = XLSX.read(e.target.result, {type:'binary'});
-      // Use first sheet that is not "Instructions"
-      const sheetName = wb.SheetNames.find(n => !n.toLowerCase().includes('instruct')) || wb.SheetNames[0];
-      const ws = wb.Sheets[sheetName];
+      const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
-      if (!rows.length) { preview.innerHTML = '<div class="alert alert-warn">⚠️ File is empty or has no data rows.</div>'; return; }
-
-      // Validate each row
-      const validRows = [], errorRows = [];
-      const existingPOs = new Set(state.orders.filter(o=>!o.deleted).map(o=>o.poNumber).filter(Boolean));
-      rows.forEach((row, i) => {
-        const errors = [];
-        // Flexible column name matching
-        const po = String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || row['Order Number'] || row['po_number'] || '').trim();
-        const customer = String(row.Customer || row['Customer Name'] || row['Ship To'] || row['ShipTo'] || row['CUSTOMER'] || '').trim();
-        const size = String(row.Size || row['Cap Size'] || row['SIZE'] || '').trim();
-        const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty_Lakhs'] || row['Qty'] || row['QTY'] || row['Quantity'] || 0);
-        // Normalize machine ID — strip dots, spaces (MC.21 → MC21, MC 21 → MC21)
-        const machineRaw = String(row.Machine_ID || row['Machine ID'] || row['Machine'] || row['MC'] || row['MACHINE'] || '').trim();
-        const machineId = machineRaw.replace(/[\s\.]+/g,'').toUpperCase();
-        const printed = (row.Printed_YN || row['Printed (Y/N)'] || row['Printed_YN'] || row['PTD'] || row['Printed'] || 'N').toString().toUpperCase().trim();
-        const printedNorm = printed.startsWith('Y') ? 'Y' : 'N';
-
-        // PO Number is optional — auto-generated if blank
-        if (!customer) errors.push('Missing Customer');
-        if (!size) errors.push('Missing Size');
-        if (!qty || qty <= 0) errors.push('Invalid Qty_Lakhs');
-        if (!machineId) errors.push('Missing Machine_ID');
-        if (!getMachine(machineId) && machineId) errors.push(`Machine ${machineId} not found`);
-        if (!['Y','N'].includes(printedNorm)) errors.push('Printed_YN must be Y or N');
-        if (existingPOs.has(po)) errors.push(`PO ${po} already exists — will skip`);
-
-        if (errors.length) errorRows.push({row: i+2, po, customer, errors});
-        else validRows.push(row);
-      });
-
-      // Build preview HTML
-      let html = '';
-      if (validRows.length) {
-        html += `<div class="alert alert-success" style="margin-bottom:8px">✅ <strong>${validRows.length} orders ready to import</strong></div>`;
-        html += `<div style="max-height:220px;overflow-y:auto;border:1px solid var(--border,#e0e0e0);border-radius:6px;margin-bottom:12px">
-          <table style="width:100%;font-size:12px;border-collapse:collapse">
-          <thead><tr style="background:var(--surface2,#f5f5f5)">
-            <th style="padding:6px 8px;text-align:left">PO Number</th>
-            <th style="padding:6px 8px;text-align:left">Customer</th>
-            <th style="padding:6px 8px">Size</th>
-            <th style="padding:6px 8px">Qty (L)</th>
-            <th style="padding:6px 8px">Machine</th>
-            <th style="padding:6px 8px">PTD?</th>
-            <th style="padding:6px 8px;text-align:left">Batch</th>
-          </tr></thead><tbody>
-          ${validRows.map((r,i)=>{
-            const po = String(r.PO_Number||r['PO Number']||r['PO No']||r['PO No.']||r['PO#']||r['Order No']||'').trim();
-            const cust = String(r.Customer||'').trim();
-            const size = String(r.Size||'').trim();
-            const qty = parseFloat(r.Qty_Lakhs||r['Qty (Lakhs)']||0);
-            const mid = String(r.Machine_ID||r['Machine ID']||'').trim();
-            const ptd = (r.Printed_YN||r['Printed (Y/N)']||'N').toString().toUpperCase().trim();
-            const batch = String(r.Batch_Number||r['Batch Number']||'').trim() || '<i style="color:var(--text3)">auto</i>';
-            const bg = i%2===0?'':'background:var(--surface2,#fafafa)';
-            return `<tr style="${bg}">
-              <td style="padding:5px 8px;font-family:monospace">${po}</td>
-              <td style="padding:5px 8px">${cust}</td>
-              <td style="padding:5px 8px;text-align:center">${size}</td>
-              <td style="padding:5px 8px;text-align:center;font-weight:600">${qty}</td>
-              <td style="padding:5px 8px;text-align:center;font-family:monospace">${mid}</td>
-              <td style="padding:5px 8px;text-align:center">${ptd==='Y'?'✅ Y':'N'}</td>
-              <td style="padding:5px 8px;font-family:monospace">${batch}</td>
-            </tr>`;
-          }).join('')}
-          </tbody></table></div>`;
-      }
-      if (errorRows.length) {
-        html += `<div class="alert alert-warn" style="margin-bottom:8px">⚠️ <strong>${errorRows.length} rows have issues and will be skipped:</strong>
-          <ul style="margin:6px 0 0 16px;font-size:12px">
-            ${errorRows.map(e=>`<li>Row ${e.row} (${e.po||'no PO'} / ${e.customer||'no customer'}): ${e.errors.join(', ')}</li>`).join('')}
-          </ul></div>`;
-      }
-      if (validRows.length) {
-        // Store rows on window to avoid large inline JSON
-        window._sapImportRows = validRows;
-        html += `<button class="btn btn-primary" onclick="confirmSAPImport(window._sapImportRows)" style="margin-top:4px">
-          ✓ Import ${validRows.length} Order${validRows.length>1?'s':''} Now
-        </button>`;
-      }
-      preview.innerHTML = html;
+      const preview = document.getElementById('sap-preview');
+      preview.innerHTML = `<div class="alert alert-success">✓ Found ${rows.length} orders to import</div>
+        <div class="table-wrap" style="max-height:200px;overflow-y:auto">
+        <table><thead><tr>${Object.keys(rows[0]||{}).map(k=>`<th>${k}</th>`).join('')}</tr></thead>
+        <tbody>${rows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td>${v}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table></div>
+        <div class="mt-4"><button class="btn btn-primary" onclick="confirmSAPImport(${JSON.stringify(rows).replace(/"/g,'&quot;')})">✓ Import ${rows.length} Orders</button></div>`;
     } catch(err) {
-      preview.innerHTML = `<div class="alert alert-warn">❌ Error reading file: ${err.message}</div>`;
+      document.getElementById('sap-preview').innerHTML = `<div class="alert alert-warn">Error reading file: ${err.message}</div>`;
     }
   };
   reader.readAsBinaryString(file);
@@ -2098,13 +1794,12 @@ function confirmSAPImport(rows) {
   const machinesAffected = new Set();
 
   for (const row of rows) {
-    const machineRaw = String(row.Machine_ID || row['Machine ID'] || row['Machine'] || row['MC'] || '').trim();
-    const machineId = machineRaw.replace(/[\s\.]+/g,'').toUpperCase();
+    const machineId = String(row.Machine_ID || row['Machine ID'] || '').trim();
     const mc = getMachine(machineId);
-    const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty'] || row['QTY'] || 0);
+    const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || 0);
     if (!qty) continue;
 
-    const isPrinted = (row.Printed_YN || row['Printed (Y/N)'] || row['PTD'] || row['Printed'] || 'N').toString().toUpperCase().startsWith('Y');
+    const isPrinted = (row.Printed_YN || row['Printed (Y/N)'] || 'N').toUpperCase() === 'Y';
     const size = String(row.Size || '');
     const ag = mc?.aGrade || 93;
     const grossQty = isPrinted ? qty*1.07*1.02 : qty/(ag/100);
@@ -2129,10 +1824,9 @@ function confirmSAPImport(rows) {
       id: uid(),
       machineId,
       poType: 'po',
-      poNumber: String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim(),
+      poNumber: String(row.PO_Number || row['PO Number'] || '').trim(),
       batchNumber,
-      customer: String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),
-      shipTo:   String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim(),
+      customer: String(row.Customer || '').trim(),
       size,
       pcCode: String(row.PC_Code || row['PC Code'] || '').trim(),
       colour: String(row.Colour || '').trim(),
@@ -2147,7 +1841,6 @@ function confirmSAPImport(rows) {
     };
 
     state.orders.push(ord);
-    learnCustomer(ord.shipTo||ord.customer, ord.billTo||'');
     machinesAffected.add(machineId);
 
     // Auto-create print order if PTD
@@ -2213,11 +1906,7 @@ function confirmSAPImport(rows) {
   if (machinesAffected.size === 0) saveState();
 
   closeModal();
-  const msg = imported === rows.length
-    ? `✅ Imported ${imported} order${imported>1?'s':''} successfully!\n\nBatch numbers, print/dispatch plans auto-created.`
-    : `✅ Imported ${imported} of ${rows.length} orders.\n(${rows.length-imported} skipped — duplicate PO numbers.)`;
-  alert(msg);
-  window._sapImportRows = null;
+  alert(`✓ Imported ${imported} orders successfully. Batch numbers, print orders and dispatch plans auto-created.`);
   render();
 }
 
@@ -2478,19 +2167,20 @@ function renderPrintRow(p, pm) {
   const statusBadge = p.status==='completed'?'<span class="badge badge-completed">Completed</span>':
     p.status==='running'?'<span class="badge badge-running">Running</span>':
     '<span class="badge badge-pending">Pending</span>';
-  // Live scan data from Tracking — populated by loadLiveAGrade()
+  // Get live scan data from tracking for this batch
   const live = window._liveAGrade && p.batchNumber ? (window._liveAGrade[p.batchNumber]||{}) : {};
-  const liveAimOut   = live.aim?.outQty   || 0;
+  const liveAimOut   = live.aim?.outQty  || 0;
   const livePrintIn  = live.printing?.inQty  || 0;
   const livePrintOut = live.printing?.outQty || 0;
   const pendingAtPrinter = Math.max(0, livePrintIn - livePrintOut);
   const aimVsPlan = p.qtyToPrint ? liveAimOut - (p.qtyToPrint||0) : null;
+
   return `<tr>
     <td style="font-weight:500">${p.customer||'-'}</td>
     <td class="text-mono">${p.batchNumber||'-'}</td>
     <td class="text-mono text-accent">${p.pcCode||'-'}</td>
     <td class="text-mono">${p.size||'-'}</td>
-    <td style="font-size:12px">${p.colour||'-'}</td>
+    <td>${fmtColour(p.colour)}</td>
     <td style="font-size:12px">${p.printMatter||'-'}</td>
     <td><select class="form-control" style="width:90px;padding:3px 6px;font-size:12px" onchange="updatePrintField('${p.id}','printType',this.value)">
       <option value="C" ${p.printType==='C'?'selected':''}>Circular</option>
@@ -2513,7 +2203,7 @@ function renderPrintRow(p, pm) {
     <td class="text-mono" style="color:var(--accent2);white-space:nowrap" title="Printing Scan Out — completed printing">
       ${livePrintOut>0?fmt(livePrintOut)+'L':'<span style="color:var(--text3)">—</span>'}
     </td>
-    <td class="text-mono" style="color:${pendingAtPrinter>0?'var(--accent3)':'var(--text3)'};white-space:nowrap" title="Pending at printer = Print In − Print Out">
+    <td class="text-mono" style="color:${pendingAtPrinter>0?'var(--accent3)':'var(--text3)'};white-space:nowrap" title="Pending at printer = Print In - Print Out">
       ${livePrintIn>0?fmt(pendingAtPrinter)+'L':'<span style="color:var(--text3)">—</span>'}
     </td>
     <td class="text-mono ${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);return kg>0?'text-accent':''})()}">${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);return kg>0?fmt(kg,2)+' kg':'—'})()}</td>
@@ -2758,7 +2448,10 @@ function renderDailyPrinting() {
             <th>Date</th><th>Batch / Print Order</th><th>Machine</th><th>Size</th><th>PC Code</th><th>Print Matter</th>
             <th>Shift A (Qty L)</th><th>Shift B (Qty L)</th><th>Shift C (Qty L)</th><th>Total Qty (L)</th>
             <th>Shift A (kg)</th><th>Shift B (kg)</th><th>Shift C (kg)</th><th>Total Output (kg)</th>
-            <th>Salvage (kg)</th><th>Salvage %</th><th>Cumul. Salvage %</th><th>Remarks</th>
+            <th>Salvage (kg)</th><th>Salvage %</th><th>Cumul. Salvage %</th>
+            <th style="color:var(--accent)" title="Print Scan Out from Tracking">Scan Out ↗</th>
+            <th style="color:${discrepancy>1?'var(--accent4)':'var(--accent2)'}" title="Manual log vs Tracking scan — should match">Reconciliation</th>
+            <th>Remarks</th>
           </tr></thead>
           <tbody>
             ${logs.map((l,i)=>{
@@ -2785,6 +2478,22 @@ function renderDailyPrinting() {
                 <td class="text-mono ${(l.salvagePct||0)>2?'text-red':''}">${fmt(l.salvage,2)}</td>
                 <td class="text-mono ${(l.salvagePct||0)>2?'text-red':''}">${fmt(l.salvagePct,2)}%</td>
                 <td class="text-mono ${cumPct>2?'text-red':'text-green'}">${cumPct}%</td>
+                <td class="text-sm" style="white-space:nowrap">${(()=>{
+                  const liveAG = window._liveAGrade && l.batchNumber ? (window._liveAGrade[l.batchNumber]||{}) : {};
+                  const scanOut = liveAG.printing?.outQty || 0;
+                  return scanOut > 0 ? '<span style="color:var(--accent)">'+fmt(scanOut)+'L</span>' : '<span style="color:var(--text3)">—</span>';
+                })()}</td>
+                <td class="text-sm">${(()=>{
+                  const liveAG = window._liveAGrade && l.batchNumber ? (window._liveAGrade[l.batchNumber]||{}) : {};
+                  const scanOut = liveAG.printing?.outQty || 0;
+                  const manualQty = l.totalQtyLakhs || 0;
+                  if(!scanOut || !manualQty) return '<span style="color:var(--text3)">—</span>';
+                  const diff = Math.abs(manualQty - scanOut);
+                  const pct = (diff/scanOut*100).toFixed(1);
+                  return diff < 0.05
+                    ? '<span style="color:var(--accent2)">✓ Match</span>'
+                    : '<span style="color:var(--accent4)">⚠️ Gap: '+fmt(diff,2)+'L ('+pct+'%)</span>';
+                })()}</td>
                 <td class="text-sm">${l.remarks||'-'}</td>
               </tr>`;
             }).join('')}
@@ -2812,7 +2521,7 @@ function showDailyPrintingModal() {
         <label>Batch Number</label>
         <select class="form-control" id="dl-batch" onchange="onDLBatchChange()">
           <option value="">-- Select Batch --</option>
-          ${(state.printOrders||[]).filter(p=>p.status!=='completed'&&p.machineId===state.printMachineMaster[0]?.id).map(p=>`<option value="${p.id}">${p.batchNumber||p.pcCode||p.id} (${fmt(p.qtyToPrint||0,1)}L)</option>`).join('')}
+          ${(state.printOrders||[]).filter(p=>p.status!=='completed'&&p.machineId===state.printMachineMaster[0]?.id).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||'')).map(p=>`<option value="${p.id}">${p.batchNumber||p.pcCode||p.id} (${fmt(p.qtyToPrint||0,1)}L)</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -2884,7 +2593,7 @@ function refreshDLBatchDropdown() {
   const machineId = document.getElementById('dl-machine')?.value;
   const batchSel = document.getElementById('dl-batch');
   if (!batchSel) return;
-  const filtered = (state.printOrders||[]).filter(p => p.status !== 'completed' && p.machineId === machineId);
+  const filtered = (state.printOrders||[]).filter(p => p.status !== 'completed' && p.machineId === machineId).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||''));
   batchSel.innerHTML = '<option value="">-- Select Batch --</option>' +
     filtered.map(p => `<option value="${p.id}">${p.batchNumber||p.pcCode||p.id} (${fmt(p.qtyToPrint||0,1)}L)</option>`).join('');
   // Clear auto-populated fields when machine changes
@@ -3178,9 +2887,7 @@ function renderDispatch() {
               <thead><tr>
                 <th>Customer</th><th>Batch No</th><th>PC Code</th><th>Month</th><th>Colour</th>
                 <th>Size</th><th>PTD/UP</th><th>Zone</th><th>Qty (L)</th><th>Boxes</th>
-                <th>Planned Date</th><th>Dispatched (L)</th><th>Pending (L)</th>
-                <th style="color:#00e676;background:rgba(0,230,118,0.06)">📦 Tracking Actual</th>
-                <th>Status</th><th>Remarks</th><th>Actions</th>
+                <th>Planned Date</th><th>Dispatched (L)</th><th>Pending (L)</th><th>Status</th><th>Remarks</th><th>Actions</th>
               </tr></thead>
               <tbody>
                 ${zPlans.map(p=>renderDispatchRow(p)).join('')}
@@ -3226,7 +2933,7 @@ function renderDispatchRow(p) {
     <td class="text-mono">${p.batchNumber||'-'}</td>
     <td class="text-mono text-accent">${p.pcCode||'-'}</td>
     <td class="text-mono text-dim">${month}</td>
-    <td style="font-size:12px">${p.colour||'-'}</td>
+    <td>${fmtColour(p.colour)}</td>
     <td class="text-mono">${p.size||'-'}</td>
     <td>${p.packing==='PTD'?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
     <td class="text-sm">${p.zone||'-'}</td>
@@ -3237,17 +2944,6 @@ function renderDispatchRow(p) {
       style="width:70px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px;font-family:var(--mono)"
       onchange="updateDispatchActual('${p.id}',this.value)"></td>
     <td class="text-mono ${(p.qty-(p.actualDispatched||0))>0?'text-accent':''}">${isDispatched?'<span style="color:var(--accent3)">—</span>':fmt(Math.max(0,p.qty-(p.actualDispatched||0)))}</td>
-    <td class="text-mono">
-      ${(()=>{
-        const ta = trackingDispatchActuals[p.batchNumber];
-        if(!ta || ta.qty===0) return '<span style="color:var(--text3);font-size:11px">—</span>';
-        const diff = ta.qty - (p.qty||0);
-        const diffClr = diff>=0?'var(--accent3)':'var(--accent4)';
-        return `<div style="font-weight:700;color:var(--accent3)">${fmt(ta.qty)}L</div>
-                <div style="font-size:10px;color:var(--text3)">${ta.boxes} boxes</div>
-                <div style="font-size:10px;color:${diffClr}">${diff>=0?'+':''}${fmt(diff)}L vs plan</div>`;
-      })()}
-    </td>
     <td>${statusBadge}</td>
     <td><input type="text" value="${p.remarks||''}" placeholder="Remarks..."
       style="width:120px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px"
@@ -4197,7 +3893,7 @@ function renderDispatchCustomer() {
                     <td class="text-mono">${p.batchNumber||'-'}</td>
                     <td class="text-mono text-accent">${p.pcCode||'-'}</td>
                     <td class="text-mono">${p.size||'-'}</td>
-                    <td style="font-size:12px">${p.colour||'-'}</td>
+                    <td>${fmtColour(p.colour)}</td>
                     <td>${p.packing==='PTD'?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
                     <td class="text-sm">${p.zone||'-'}</td>
                     <td class="text-mono fw-bold">${fmt(p.qty)}</td>
@@ -4621,7 +4317,7 @@ function renderOrderTracker() {
     .filter(o => !fStatus   || o.status === fStatus)
     .filter(o => !fCustomer || o.customer === fCustomer)
     .filter(o => !fZone     || o.zone === fZone)
-    .sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
+    .sort((a,b) => (a.batchNumber||'').localeCompare(b.batchNumber||''));
 
   // KPI summary
   const allOrders = state.orders.filter(o=>!o.deleted);
@@ -4996,20 +4692,11 @@ function openAssignCustomerModal(orderId) {
       <div class="form-grid">
         <div class="form-group">
           <label>Ship To (Customer Name) <span style="color:var(--accent4)">*</span></label>
-          <input class="form-control" id="woc-customer" list="woc-customer-list"
-            placeholder="Type or select customer name"
-            oninput="onWocShipToInput(this.value)">
-          <datalist id="woc-customer-list">
-            ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
-          </datalist>
+          <input class="form-control" id="woc-customer" placeholder="e.g. M/S ACME LIFETECH LLP">
         </div>
         <div class="form-group">
           <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span></label>
-          <input class="form-control" id="woc-billto" list="woc-billto-list"
-            placeholder="Auto-filled — leave blank if same as Ship To">
-          <datalist id="woc-billto-list">
-            ${getCustomerList().map(c=>`<option value="${c.replace(/"/g,'&quot;')}"></option>`).join('')}
-          </datalist>
+          <input class="form-control" id="woc-billto" placeholder="Leave blank if same as Ship To">
         </div>
         <div class="form-group">
           <label>PO / Reference Number</label>
@@ -5074,30 +4761,23 @@ async function renderReconciliation() {
   const content = document.getElementById('content');
   content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Loading TEMP batches...</div>';
 
-  let tempBatches = [], pendingRequests = [], history = [], woPendingRequests = [], woHistory = [];
+  let tempBatches = [], pendingRequests = [], history = [];
   if (serverUrl) {
-    // Each fetch is independent — one failure never blocks the whole page
-    const safeFetch = async (url, opts={}) => {
-      try {
-        const r = await fetch(url, {...opts, signal: AbortSignal.timeout(8000)});
-        if (!r.ok) return null;
-        return await r.json();
-      } catch(e) { console.warn('Recon fetch failed:', url, e.message); return null; }
-    };
-    const hdrs = {'x-session-token': currentUser?.token||''};
-    const isAdminUser = currentUser?.role === 'admin';
-    const [j1, j2, j3, j4, j5] = await Promise.all([
-      safeFetch(serverUrl+'/api/temp-batches/active'),
-      isAdminUser ? safeFetch(serverUrl+'/api/reconciliation/pending', {headers:hdrs}) : Promise.resolve(null),
-      safeFetch(serverUrl+'/api/reconciliation/history', {headers:hdrs}),
-      isAdminUser ? safeFetch(serverUrl+'/api/wo/pending', {headers:hdrs}) : Promise.resolve(null),
-      safeFetch(serverUrl+'/api/wo/history', {headers:hdrs})
-    ]);
-    if(j1?.ok) tempBatches = j1.batches||[];
-    if(j2?.ok) pendingRequests = j2.requests||[];
-    if(j3?.ok) history = (j3.requests||[]).slice(0,20);
-    if(j4?.ok) woPendingRequests = j4.requests||[];
-    if(j5?.ok) woHistory = (j5.requests||[]).slice(0,20);
+    try {
+      const [r1, r2, r3, r4, r5] = await Promise.all([
+        fetch(serverUrl+'/api/temp-batches/active', {signal:AbortSignal.timeout(5000)}),
+        currentUser?.role==='admin' ? fetch(serverUrl+'/api/reconciliation/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
+        fetch(serverUrl+'/api/reconciliation/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
+        currentUser?.role==='admin' ? fetch(serverUrl+'/api/wo/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
+        fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)})
+      ]);
+      const j1 = await r1.json(); if(j1.ok) tempBatches = j1.batches;
+      if(r2){ const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; }
+      const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20);
+      let woPendingRequests = [], woHistory = [];
+      if(r4){ const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; }
+      if(r5){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
+    } catch(e) { content.innerHTML = `<div class="alert alert-warn">⚠️ Could not load data: ${e.message}</div>`; return; }
   }
 
   _reconTempBatches = tempBatches;
@@ -5149,7 +4829,7 @@ async function renderReconciliation() {
               <label>Map to Existing Order (or enter below for new)</label>
               <select class="form-control" id="recon-order-select" onchange="onReconOrderSelect(this.value)">
                 <option value="">-- Enter new order details below --</option>
-                ${state.orders.filter(o=>o.status!=='closed'&&!o.deleted).map(o=>`<option value="${o.id}">${o.batchNumber||o.id} — ${o.customer} — Sz${o.size} — ${fmt(o.qty)}L</option>`).join('')}
+                ${state.orders.filter(o=>o.status!=='closed'&&!o.deleted).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||'')).map(o=>`<option value="${o.id}">${o.batchNumber||o.id} — ${o.customer} — Sz${o.size} — ${fmt(o.qty)}L</option>`).join('')}
               </select>
             </div>
           </div>
@@ -5212,7 +4892,7 @@ async function renderReconciliation() {
             ${woOrders.map(o=>`<tr style="border-left:3px solid rgba(255,171,0,0.5)">
               <td class="text-mono text-accent">${o.batchNumber||o.id}</td>
               <td class="text-mono">${o.size}</td>
-              <td style="font-size:12px">${o.colour||'—'}</td>
+              <td>${fmtColour(o.colour)}</td>
               <td class="text-mono">${o.pcCode||'—'}</td>
               <td class="text-mono">${fmt(o.qty)}</td>
               <td class="text-mono" style="font-size:11px">${fmtDate(o.startDate)}</td>
@@ -5532,96 +5212,14 @@ function renderSettings() {
 
     </div>
     <div class="card mt-4">
-      <div class="card-title">👥 Customer Master — Ship To / Bill To Mapping</div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
-        Auto-populated from order history. Add or edit Bill To names here. When creating a new order, Bill To is auto-filled based on this list.
-      </div>
-      <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border,#e0e0e0);border-radius:6px;margin-bottom:10px">
-        <table style="width:100%;font-size:13px;border-collapse:collapse">
-          <thead><tr style="background:var(--surface2)">
-            <th style="padding:6px 10px;text-align:left">Ship To (Customer Name)</th>
-            <th style="padding:6px 10px;text-align:left">Bill To (if different)</th>
-            <th style="padding:6px 10px;width:60px"></th>
-          </tr></thead>
-          <tbody id="customer-master-tbody">
-            ${(()=>{
-              const master = state.customerMaster||{};
-              const fromOrders = [...new Set(state.orders.filter(o=>!o.deleted&&(o.shipTo||o.customer)).map(o=>o.shipTo||o.customer))];
-              const allKeys = [...new Set([...Object.keys(master),...fromOrders])].sort();
-              if(!allKeys.length) return '<tr><td colspan="3" style="padding:12px;text-align:center;color:var(--text3)">No customers yet — add orders to populate</td></tr>';
-              return allKeys.map((k,i)=>`<tr style="${i%2===0?'':'background:var(--surface2)'}">
-                <td style="padding:5px 10px;font-weight:500">${k}</td>
-                <td style="padding:5px 4px"><input value="${(master[k]||'').replace(/"/g,'&quot;')}" placeholder="Same as Ship To" data-shipto="${k.replace(/"/g,'&quot;')}"
-                  style="width:100%;border:1px solid var(--border,#e0e0e0);border-radius:4px;padding:3px 6px;font-size:12px;background:var(--surface)"
-                  onchange="updateCustomerBillTo(this)"></td>
-                <td style="padding:5px 8px;text-align:center"><button onclick="removeCustomer('${k.replace(/'/g,"\\'")}');renderSettings()" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px">✕</button></td>
-              </tr>`).join('');
-            })()}
-          </tbody>
-        </table>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input id="new-customer-name" placeholder="Add new customer name" style="flex:2;min-width:180px;padding:6px 10px;border:1px solid var(--border,#e0e0e0);border-radius:6px;font-size:13px;background:var(--surface)">
-        <input id="new-customer-billto" placeholder="Bill To (if different)" style="flex:2;min-width:180px;padding:6px 10px;border:1px solid var(--border,#e0e0e0);border-radius:6px;font-size:13px;background:var(--surface)">
-        <button class="btn btn-primary btn-sm" onclick="addCustomerToMaster()">+ Add</button>
-      </div>
-    </div>
-
-    <div class="card mt-4">
       <div class="card-title">Data Management</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap">
         <button class="btn btn-secondary" onclick="exportAllData()">📤 Export All Data (JSON)</button>
         <label class="btn btn-secondary" style="cursor:pointer">📥 Import Data (JSON)<input type="file" accept=".json" onchange="importAllData(this)"></label>
-        <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear Local Data</button>
+        <button class="btn btn-danger" onclick="clearAllData()">🗑️ Clear All Data</button>
       </div>
     </div>
-
-    ${currentUser?.role==='admin' ? `
-    <div class="card mt-4" style="border:2px solid #dc2626">
-      <div class="card-title" style="color:#dc2626">🔴 Fresh Start — Wipe All Data</div>
-      <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
-        <strong>✅ Preserved:</strong> Machine Master, Pack Sizes, Truck Config, Zones, Users &amp; PINs.<br>
-        <strong>🗑️ Deleted:</strong> Orders, Labels, Scans, DPR Records, Dispatch Plans, TEMP Batches.
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">
-        <button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="doPurgeTemp()">🧹 Clear TEMP Batches only</button>
-        <button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="doPurgeLabels()">🧹 Clear Labels &amp; Scans only</button>
-      </div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:10px">For full wipe (new FY), type the confirmation and click Wipe All:</div>
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <input id="reset-confirm-input" type="text" placeholder='Type  RESET-ALL-DATA  to confirm'
-          style="padding:8px 12px;border:1px solid #dc2626;border-radius:6px;font-family:monospace;font-size:13px;width:280px;background:var(--surface2)">
-        <button class="btn btn-danger" onclick="doFullReset()">🗑️ Wipe All Data Now</button>
-      </div>
-      <div id="reset-result" style="margin-top:10px"></div>
-    </div>` : ''}
   `;
-}
-
-function updateCustomerBillTo(input) {
-  const shipTo = input.dataset.shipto;
-  if (!shipTo) return;
-  if (!state.customerMaster) state.customerMaster = {};
-  state.customerMaster[shipTo] = input.value.trim();
-  saveState();
-}
-
-function addCustomerToMaster() {
-  const name = document.getElementById('new-customer-name')?.value?.trim();
-  const billTo = document.getElementById('new-customer-billto')?.value?.trim() || '';
-  if (!name) { alert('Please enter a customer name'); return; }
-  if (!state.customerMaster) state.customerMaster = {};
-  state.customerMaster[name] = billTo;
-  saveState();
-  document.getElementById('new-customer-name').value = '';
-  document.getElementById('new-customer-billto').value = '';
-  renderSettings();
-}
-
-function removeCustomer(name) {
-  if (!state.customerMaster) return;
-  delete state.customerMaster[name];
-  saveState();
 }
 
 function updatePackSize(sz, val) {
@@ -5659,82 +5257,6 @@ function saveAllTruckCaps() {
   render();
 }
 
-async function doPurgeTemp() {
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
-  if (!serverUrl || !currentUser?.token) { alert('Not connected to server'); return; }
-  if (!confirm('Clear all TEMP batches from the server? This will hide the unreconciled banner.')) return;
-  const r = await fetch(serverUrl+'/api/admin/purge-temp', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ token: currentUser.token }),
-    signal: AbortSignal.timeout(8000)
-  });
-  const j = await r.json();
-  alert(j.ok ? '✅ TEMP batches cleared. Refresh to update.' : '❌ '+j.error);
-  if(j.ok) setTimeout(()=>checkPlanningTempAlerts(), 500);
-}
-
-async function doPurgeLabels() {
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
-  if (!serverUrl || !currentUser?.token) { alert('Not connected to server'); return; }
-  if (!confirm('Clear all tracking labels and scans from the server? Labels Generated will reset to 0.')) return;
-  const r = await fetch(serverUrl+'/api/admin/purge-labels', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ token: currentUser.token }),
-    signal: AbortSignal.timeout(8000)
-  });
-  const j = await r.json();
-  if(j.ok){
-    localStorage.removeItem('sunloc_tracking');
-    alert('✅ Labels and scans cleared.');
-  } else { alert('❌ '+j.error); }
-}
-
-async function doFullReset() {
-  const confirm = document.getElementById('reset-confirm-input')?.value?.trim();
-  const resultEl = document.getElementById('reset-result');
-  if (confirm !== 'RESET-ALL-DATA') {
-    resultEl.innerHTML = '<span style="color:#dc2626">❌ Type exactly: RESET-ALL-DATA</span>';
-    return;
-  }
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
-  if (!serverUrl) { resultEl.innerHTML = '<span style="color:#dc2626">❌ No server connected</span>'; return; }
-  if (!window.confirm('⚠️ FINAL WARNING\n\nThis will permanently delete ALL orders, scans, labels, DPR records and batches from the server.\n\nThis CANNOT be undone.\n\nClick OK to proceed.')) return;
-
-  resultEl.innerHTML = '<span style="color:var(--text3)">⏳ Wiping server data...</span>';
-  try {
-    const r = await fetch(serverUrl + '/api/admin/reset-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: currentUser?.token || '', confirm: 'RESET-ALL-DATA' }),
-      signal: AbortSignal.timeout(15000)
-    });
-    const j = await r.json();
-    if (j.ok) {
-      // Clear operational localStorage only — preserve server URL and session
-      localStorage.removeItem('sunloc_tracking');
-      localStorage.removeItem('sunloc_plan_push_queue');
-      localStorage.removeItem('sunloc_trk_push_queue');
-      localStorage.removeItem('sunloc_dpr_push_queue');
-      localStorage.removeItem('dpr_active_orders');
-      // Reset only operational state — preserve master data
-      state.orders = [];
-      state.printOrders = [];
-      state.dispatchPlans = [];
-      state.dispatchRecords = [];
-      state.dailyPrinting = [];
-      state.activeMonth = null;
-      // machineMaster, printMachineMaster, packSizes, truckCapacity, zoneCapacities, archives preserved
-      saveState();
-      resultEl.innerHTML = '<span style="color:#16a34a">✅ All data wiped successfully. Reloading...</span>';
-      setTimeout(() => location.reload(), 2000);
-    } else {
-      resultEl.innerHTML = `<span style="color:#dc2626">❌ ${j.error}</span>`;
-    }
-  } catch(e) {
-    resultEl.innerHTML = `<span style="color:#dc2626">❌ Error: ${e.message}</span>`;
-  }
-}
-
 function exportAllData() {
   const data = JSON.stringify({orders:state.orders, printOrders:state.printOrders, dailyPrinting:state.dailyPrinting, dispatchPlans:state.dispatchPlans, machineMaster:state.machineMaster, printMachineMaster:state.printMachineMaster, packSizes:state.packSizes}, null, 2);
   const blob = new Blob([data], {type:'application/json'});
@@ -5765,14 +5287,11 @@ function importAllData(input) {
 }
 
 function clearAllData() {
-  if (!confirm('⚠️ This clears the LOCAL browser cache only. Server data is safe. Continue?')) return;
-  if (!confirm('Confirm: only browser cache will be cleared. Server is NOT affected.')) return;
-  // Clear local cache only — server data remains intact
-  localStorage.removeItem('sunloc_state');
+  if (!confirm('⚠️ This will delete ALL planning data. Are you sure?')) return;
+  if (!confirm('This action cannot be undone. Confirm again to proceed.')) return;
   state.orders=[];state.printOrders=[];state.dailyPrinting=[];state.dispatchPlans=[];
-  alert('Browser cache cleared.\nServer data is SAFE — reloading from server now...');
-  // Reload from server immediately so data comes back
-  loadState();
+  localStorage.removeItem('sunloc_state');
+  alert('All data cleared');
   render();
 }
 
@@ -5799,46 +5318,11 @@ loadState();
 setTimeout(() => SYNC.online().then(() => SYNC.updateBadge()), 800);
 
 // Refresh tracking WIP every 3 minutes
-setInterval(async()=>{try{await SYNC.loadTrackingStatus();}catch(e){}},60*1000); // tracking status every 60s — no re-render
-
-// Auto-refresh planning state from server every 30 seconds
-setInterval(async()=>{
-  if(currentUser && _serverDataLoaded){
-    try{ await SYNC.loadFromServer(); }catch(e){}
-  }
-}, 30*1000);
-
-setInterval(planQueueFlush, 5*1000); // flush queue every 5s
-
-// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
-window.addEventListener('beforeunload', () => {
-  if (!_serverDataLoaded) return;
-  const url = localStorage.getItem('sunloc_server_url')||'';
-  if (!url) return;
-  try {
-    const toSave = {...state};
-    delete toSave.pcCodes; delete toSave.zoneMap;
-    planQueuePush(toSave);
-    const blob = new Blob([JSON.stringify({state:toSave})], {type:'application/json'});
-    navigator.sendBeacon && navigator.sendBeacon(url+'/api/planning/state', blob);
-  } catch(e) {}
-});
-
-// Sync immediately when tab becomes visible
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState==='visible' && currentUser && _serverDataLoaded){
-    planQueueFlush();
-    // 300ms delay — browser needs to settle focus before we render
-    setTimeout(()=>{ SYNC.loadFromServer().catch(()=>{}); }, 300);
-  }
-});
+setInterval(async()=>{try{await SYNC.loadTrackingStatus();render();}catch(e){}},180000);
 
 // Check TEMP batch alerts every 5 minutes
-// ── TEMP batch alert: show for 1 min every 2 hours ─────────────
-// Runs every 2 hours. When TEMP batches exist: shows banner for 60s then auto-hides.
-const TEMP_ALERT_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
-const TEMP_ALERT_VISIBLE  = 60 * 1000;           // 1 minute visible
-let _tempAlertTimer = null; // auto-hide timer
+setInterval(checkPlanningTempAlerts, 5*60*1000);
+setTimeout(checkPlanningTempAlerts, 2000);
 
 async function checkPlanningTempAlerts(){
   const serverUrl = localStorage.getItem('sunloc_server_url')||'';
@@ -5857,30 +5341,16 @@ async function checkPlanningTempAlerts(){
     if(j.ok && j.count > 0){
       const machines = [...new Set(j.batches.map(b=>b.machine_id))];
       const maxDays = Math.max(...j.batches.map(b=>b.daysActive));
+      // Also count W/O orders
       const woCount = (state.orders||[]).filter(o=>o.woStatus==='wo'&&o.status!=='closed').length;
       const woText = woCount > 0 ? ` · ${woCount} W/O order${woCount>1?'s':''} awaiting customer` : '';
+      banner.style.display = 'flex';
       banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} unreconciled</strong>
         — Machines: ${machines.join(', ')} — Up to ${maxDays} day${maxDays>1?'s':''} without planned orders.${woText}
         <span style="color:var(--accent);margin-left:6px;text-decoration:underline">→ Go to Reconciliation</span>`;
-
-      // Show banner
-      banner.style.display = 'flex';
-
-      // Clear any previous auto-hide timer
-      if(_tempAlertTimer) clearTimeout(_tempAlertTimer);
-
-      // Auto-hide after 1 minute
-      _tempAlertTimer = setTimeout(() => {
-        if(banner) banner.style.display = 'none';
-        _tempAlertTimer = null;
-      }, TEMP_ALERT_VISIBLE);
-
     } else {
-      // No TEMP batches — always hide
       if(banner) banner.style.display = 'none';
-      if(_tempAlertTimer){ clearTimeout(_tempAlertTimer); _tempAlertTimer = null; }
     }
-    // Check pending reconciliation requests for admin badge
     if(currentUser && currentUser.role === 'admin'){
       try{
         const r2 = await fetch(serverUrl+'/api/reconciliation/pending',{headers:{'x-session-token':currentUser.token||''},signal:AbortSignal.timeout(4000)});
@@ -5894,11 +5364,6 @@ async function checkPlanningTempAlerts(){
   }catch(e){}
 }
 
-// First check: 2 seconds after login (one-time notification)
-setTimeout(checkPlanningTempAlerts, 2000);
-// Then every 2 hours
-setInterval(checkPlanningTempAlerts, TEMP_ALERT_INTERVAL);
-
 // ══════════════════════════════════════════════════════
 // AUTH SYSTEM — Planning Suite
 // ══════════════════════════════════════════════════════
@@ -5911,27 +5376,23 @@ const PLAN_ROLE_NAV = {
   admin: null // null = all pages
 };
 
-// ── Server-load state guard ───────────────────────────────────
-// Set to false until we have confirmed server data — blocks saveState from pushing empty data
-let _serverDataLoaded = false;
-
 async function doLogin() {
   const role = document.getElementById('auth-role').value;
   const pin = document.getElementById('auth-pin').value;
   const errEl = document.getElementById('auth-error');
   errEl.textContent = '';
   if (!pin) { errEl.textContent = 'Please enter your PIN'; return; }
-  const serverUrl = localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app';
+  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
   if (!serverUrl) {
     // Offline fallback — simple hardcoded check
     const defaults = {Planning_Manager:'3333',Printing_Manager:'4444',Dispatch_Manager:'5555',Plan_Admin:'9999'};
     if (defaults[role] !== pin) { errEl.textContent = 'Invalid PIN'; return; }
+    // Normalise role key to match PLAN_ROLE_NAV
     const roleMap = {Planning_Manager:'planning_manager', Printing_Manager:'printing_manager', Dispatch_Manager:'dispatch_manager', Plan_Admin:'admin'};
     currentUser = { username: role, role: roleMap[role] || 'planning_manager', token: null };
     applyRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
-    _serverDataLoaded = true; // offline mode — localStorage is source of truth
     render();
     return;
   }
@@ -5944,16 +5405,11 @@ async function doLogin() {
     const j = await r.json();
     if (!j.ok) { errEl.textContent = j.error || 'Invalid PIN'; return; }
     currentUser = { username: j.username, role: j.role, token: j.token };
-    localStorage.setItem('plan_session', JSON.stringify(currentUser));
+    sessionStorage.setItem('plan_session', JSON.stringify(currentUser));
     applyRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     updateUserBadge();
-    // Show loading state — do NOT render stale data yet
-    const content = document.getElementById('content');
-    if (content) content.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:300px;color:var(--text3);font-family:var(--mono);font-size:13px;">⟳ Loading orders from server...</div>';
-    // Pull from server FIRST — only render + allow saves after server data is confirmed
-    await SYNC.loadFromServer();
-    _serverDataLoaded = true;
+    render();
     auditLog('LOGIN', 'Logged in to Planning Suite');
   } catch(e) {
     errEl.textContent = 'Cannot reach server — check connection';
@@ -5989,23 +5445,19 @@ function applyRoleRestrictions() {
 function updateUserBadge() {
   const topbar = document.getElementById('topbar-actions');
   if (!topbar || !currentUser) return;
-  // Add user badge inline in topbar-actions (before last button)
+  // Add user badge to topbar if not already there
   if (!document.getElementById('user-badge')) {
     const badge = document.createElement('div');
     badge.id = 'user-badge';
     badge.className = 'auth-user-badge';
     badge.onclick = showUserMenu;
-    badge.style.cssText = 'flex-shrink:0;white-space:nowrap;font-size:12px;padding:4px 10px';
     badge.innerHTML = `👤 ${currentUser.username} <span style="color:var(--text3);font-size:10px">[${currentUser.role}]</span> ▾`;
-    // Insert into topbar-actions as first child
-    const topbarActions = document.getElementById('topbar-actions');
-    if (topbarActions) {
-      topbarActions.insertBefore(badge, topbarActions.firstChild);
-    }
-  } else {
-    // Update existing badge
-    const badge = document.getElementById('user-badge');
-    if (badge) badge.innerHTML = `👤 ${currentUser.username} <span style="color:var(--text3);font-size:10px">[${currentUser.role}]</span> ▾`;
+    // Insert at start of body as fixed element
+    const fixed = document.createElement('div');
+    fixed.id = 'user-badge-wrap';
+    fixed.style.cssText = 'position:fixed;top:10px;right:16px;z-index:500';
+    fixed.appendChild(badge);
+    document.body.appendChild(fixed);
   }
 }
 
@@ -6059,7 +5511,7 @@ async function doLogout() {
   if (serverUrl && currentUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:currentUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
-  localStorage.removeItem('plan_session');
+  sessionStorage.removeItem('plan_session');
   currentUser = null;
   document.getElementById('user-badge-wrap')?.remove();
   document.getElementById('auth-pin').value = '';
@@ -6146,19 +5598,14 @@ function closePlanSidebar() {
 
 // ── On page init — check for saved session ──
 (function initAuth() {
-  const saved = localStorage.getItem('plan_session');
+  const saved = sessionStorage.getItem('plan_session');
   if (saved) {
     try {
       currentUser = JSON.parse(saved);
       document.getElementById('auth-overlay').classList.add('hidden');
       applyRoleRestrictions();
       updateUserBadge();
-      // Show loading state immediately — do NOT render stale localStorage data
-      // Always pull from server first, then render with fresh data
-      const content = document.getElementById('content');
-      if (content) content.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text3);font-family:var(--mono);font-size:13px;">⟳ Loading orders from server...</div>';
-      // loadState already calls SYNC.loadFromServer() which calls render() when done
-      loadState();
+      render();
       return;
     } catch(e) {}
   }
@@ -6166,21 +5613,14 @@ function closePlanSidebar() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// ── Page lifecycle: re-sync when tab becomes visible or page is shown from cache ──
-// This handles browser back/forward navigation and tab switching
-window.addEventListener('pageshow', (e) => {
-  // e.persisted = true means page was restored from browser cache (back/forward)
-  if (e.persisted && currentUser) {
-    // Pull latest from server to ensure we show current data
-    SYNC.loadFromServer();
+// Save prompt on close
+window.addEventListener('beforeunload', e => {
+  if (currentUser) {
+    auditLog('SESSION_CLOSE', 'Browser tab/window closed');
   }
-});
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && currentUser) {
-    // 300ms delay — prevents flicker when switching tabs
-    setTimeout(()=>{ SYNC.loadFromServer().catch(()=>{}); }, 300);
-  }
+  // Always prompt if there's unsaved state
+  e.preventDefault();
+  e.returnValue = 'You may have unsaved changes. Are you sure you want to leave?';
 });
 </script>
 </body>

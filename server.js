@@ -254,8 +254,8 @@ async function runMigrations() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
       `},
-      // v9: DPR batch-close table — tracks which orders have been closed in DPR
-      //     Used by Planning to gate the Planning close button
+      // v9: DPR batch-close — tracks which orders have been closed in DPR
+      //     Planning uses this to gate its own close button
       { version: 9, name: 'dpr_batch_closed', sql: `
         CREATE TABLE IF NOT EXISTS dpr_batch_closed (
           order_id TEXT PRIMARY KEY,
@@ -603,29 +603,32 @@ app.post('/api/dpr/settings', asyncRoute(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ─── DPR Batch-Close Routes (NEW) ────────────────────────────────────────────
-// POST — mark an order as DPR-closed (called from dpr.html when supervisor closes a batch)
+// ─── DPR Batch-Close Routes ───────────────────────────────────────────────────
+// POST — DPR marks an order as closed (incharge/admin only, called from dpr.html)
 app.post('/api/dpr/batch-close', asyncRoute(async (req, res) => {
   const { orderId, batchNumber, closedBy, notes } = req.body;
   if (!orderId) return res.status(400).json({ ok: false, error: 'orderId required' });
   await query(
     `INSERT INTO dpr_batch_closed (order_id, batch_number, closed_at, closed_by, notes)
      VALUES ($1,$2,NOW(),$3,$4)
-     ON CONFLICT(order_id) DO UPDATE SET closed_at=NOW(), closed_by=EXCLUDED.closed_by, notes=EXCLUDED.notes`,
+     ON CONFLICT(order_id) DO UPDATE SET
+       closed_at=NOW(), closed_by=EXCLUDED.closed_by, notes=EXCLUDED.notes`,
     [orderId, batchNumber || null, closedBy || null, notes || null]
   );
   res.json({ ok: true });
 }));
 
-// DELETE — reopen a DPR-closed batch (admin action)
+// DELETE — reopen a DPR-closed batch (admin only)
 app.delete('/api/dpr/batch-close/:orderId', asyncRoute(async (req, res) => {
   await query('DELETE FROM dpr_batch_closed WHERE order_id=$1', [req.params.orderId]);
   res.json({ ok: true });
 }));
 
-// GET — return all DPR-closed order IDs (Planning reads this to gate its close button)
+// GET — all DPR-closed orders (Planning reads this to gate its close button)
 app.get('/api/dpr/batch-closed', asyncRoute(async (req, res) => {
-  const rows = await queryAll('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed');
+  const rows = await queryAll(
+    'SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed'
+  );
   res.json({ ok: true, closed: rows });
 }));
 
@@ -864,7 +867,7 @@ app.get('/api/admin/export', asyncRoute(async (req, res) => {
   }
   const tables = ['planning_state','dpr_records','production_actuals','tracking_labels','tracking_scans',
     'tracking_stage_closure','tracking_wastage','tracking_dispatch_records','tracking_alerts',
-    'app_users','audit_log','schema_migrations'];
+    'app_users','audit_log','dpr_batch_closed','schema_migrations'];
   const exportData = { exported_at: new Date().toISOString(), db: 'PostgreSQL (Railway)', version: 'sunloc-v9', tables: {} };
   for (const table of tables) {
     try { exportData.tables[table] = await queryAll(`SELECT * FROM ${table}`); }
@@ -889,7 +892,7 @@ app.post('/api/admin/import', asyncRoute(async (req, res) => {
   if (!tables) return res.status(400).json({ ok: false, error: 'No tables data provided' });
   await runMigrations();
   const importableTables = ['planning_state','dpr_records','production_actuals','tracking_labels',
-    'tracking_scans','tracking_stage_closure','tracking_wastage','tracking_dispatch_records','tracking_alerts'];
+    'tracking_scans','tracking_stage_closure','tracking_wastage','tracking_dispatch_records','tracking_alerts','dpr_batch_closed'];
   const results = {};
   const client = await pool.connect();
   try {
@@ -926,7 +929,7 @@ app.get('/api/admin/db-status', asyncRoute(async (req, res) => {
   const migrations = await queryAll('SELECT * FROM schema_migrations ORDER BY version');
   const tables = ['planning_state','dpr_records','production_actuals','tracking_labels',
     'tracking_scans','tracking_stage_closure','tracking_wastage','tracking_dispatch_records',
-    'tracking_alerts','app_users','audit_log'];
+    'tracking_alerts','app_users','audit_log','dpr_batch_closed'];
   const tableRowCounts = {};
   for (const t of tables) {
     try { const r = await queryOne(`SELECT COUNT(*) as c FROM ${t}`); tableRowCounts[t] = parseInt(r.c); }

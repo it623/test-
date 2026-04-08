@@ -5,123 +5,119 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DPR.tracker v7 — Sunloc</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800&family=Barlow:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{
-  --bg:#0b0d12;--s1:#12151d;--s2:#181d28;--s3:#1e2535;
-  --b1:#1d2638;--b2:#263040;
-  --cyan:#00d4ff;--green:#00e676;--amber:#ffab00;--red:#ff4060;--purple:#b388ff;--teal:#1de9b6;
-  --t1:#e8edf5;--t2:#7a8ba8;--t3:#3d4d65;
+  --bg:#f0f4f8;--s1:#ffffff;--s2:#f7f9fc;--s3:#eef2f7;
+  --b1:#e2e8f0;--b2:#cbd5e1;
+  --cyan:#2563eb;--green:#059669;--amber:#d97706;--red:#dc2626;--purple:#7c3aed;--teal:#0891b2;
+  --t1:#0f172a;--t2:#334155;--t3:#64748b;
   --font:'Barlow',sans-serif;--fc:'Barlow Condensed',sans-serif;--mono:'DM Mono',monospace;
   --nav:52px;--r:6px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px;min-height:100vh}
 /* NAV */
-#nav{position:fixed;top:0;left:0;right:0;height:var(--nav);background:var(--s1);border-bottom:1px solid var(--b1);z-index:200;display:flex;align-items:center;padding:0 12px;gap:0;min-width:0}
+#nav{position:fixed;top:0;left:0;right:0;height:var(--nav);background:var(--s1);border-bottom:2px solid var(--b1);z-index:200;display:flex;align-items:center;padding:0 16px;gap:0;box-shadow:0 1px 4px rgba(0,0,0,0.08)}
 .nbrand{font-family:var(--fc);font-weight:800;font-size:18px;letter-spacing:1px;color:var(--t2);white-space:nowrap;margin-right:16px}
 .nbrand b{color:var(--cyan)}
 .nbrand small{font-size:11px;color:var(--t3);font-weight:400;margin-left:4px}
-.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none;min-width:0}
+.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none}
 .ntabs::-webkit-scrollbar{display:none}
 .ntab{display:flex;align-items:center;gap:5px;padding:0 13px;height:100%;font-family:var(--fc);font-weight:700;font-size:11.5px;letter-spacing:1px;text-transform:uppercase;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
 .ntab:hover{color:var(--t2)}
 .ntab.on{color:var(--cyan);border-bottom-color:var(--cyan)}
-.nright{display:flex;align-items:center;gap:4px;margin-left:6px;flex-shrink:0;flex-wrap:nowrap}
-#ndate{background:transparent;border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:12px;font-weight:600;cursor:pointer;outline:none}
-#ndate::-webkit-calendar-picker-indicator{filter:invert(0.5)}
-.nbtn{padding:5px 11px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1px solid var(--b2);background:transparent;color:var(--t2);transition:.15s;white-space:nowrap}
-.nbtn:hover{background:var(--s2);color:var(--t1)}
-.nbtn.primary{background:var(--cyan);color:#000;border-color:var(--cyan)}
-.nbtn.primary:hover{background:#00bce0}
+.nright{display:flex;align-items:center;gap:6px;margin-left:8px;flex-shrink:0}
+#ndate{background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:12px;font-weight:700;cursor:pointer;outline:none}
+#ndate::-webkit-calendar-picker-indicator{filter:none}
+.nbtn{padding:5px 11px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1px solid var(--b2);background:var(--s2);color:var(--t2);transition:.15s;white-space:nowrap}
+.nbtn:hover{background:var(--s3);color:var(--t1)}
+.nbtn.primary{background:var(--cyan);color:#fff;border-color:var(--cyan)}
+.nbtn.primary:hover{background:#1d4ed8}
 #syncBadge{font-size:10px;padding:3px 9px;border-radius:20px;font-family:var(--fc);font-weight:700;letter-spacing:.5px;white-space:nowrap}
-#syncBadge.synced{background:rgba(0,230,118,.12);color:var(--green);border:1px solid rgba(0,230,118,.25)}
-#syncBadge.offline{background:rgba(255,171,0,.12);color:var(--amber);border:1px solid rgba(255,171,0,.25);cursor:pointer}
-#syncBadge.syncing{background:rgba(0,212,255,.12);color:var(--cyan);border:1px solid rgba(0,212,255,.25)}
+#syncBadge.synced{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
+#syncBadge.offline{background:#fef3c7;color:#92400e;border:1px solid #fde68a;cursor:pointer}
+#syncBadge.syncing{background:#dbeafe;color:#1d4ed8;border:1px solid #bfdbfe}
 #unsavedDot{width:7px;height:7px;border-radius:50%;background:var(--amber);display:none;flex-shrink:0}
 /* PAGES */
 #wrap{margin-top:var(--nav);min-height:calc(100vh - var(--nav));padding:20px}
 .page{display:none}.page.on{display:block}
 /* CARDS */
-.card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:16px;margin-bottom:12px}
-.card-title{font-family:var(--fc);font-weight:700;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--t3);margin-bottom:12px}
+.card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:16px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.card-title{font-family:var(--fc);font-weight:800;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--t2);margin-bottom:12px}
 /* FLOOR TABS */
 .ftabs{display:flex;gap:6px;margin-bottom:14px}
-.ftab{padding:6px 14px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1px solid var(--b2);color:var(--t3);transition:.15s}
+.ftab{padding:6px 14px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1px solid var(--b2);color:var(--t3);background:var(--s2);transition:.15s}
 .ftab:hover{color:var(--t2);border-color:var(--b2)}
-.ftab.on{background:rgba(0,212,255,.1);color:var(--cyan);border-color:rgba(0,212,255,.3)}
+.ftab.on{background:#dbeafe;color:#1d4ed8;border-color:#bfdbfe}
 .ftab.add{border-style:dashed;font-size:10px}
 /* KPI GRID */
 .kgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px}
 .kpi{background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);padding:12px 14px}
-.kpi-label{font-family:var(--fc);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--t3);margin-bottom:6px}
+.kpi-label{font-family:var(--fc);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--t3);font-weight:700;margin-bottom:6px}
 .kpi-val{font-family:var(--fc);font-weight:800;font-size:22px;color:var(--t1)}
 .kpi-val.green{color:var(--green)}.kpi-val.amber{color:var(--amber)}.kpi-val.red{color:var(--red)}.kpi-val.cyan{color:var(--cyan)}
-.kpi-sub{font-size:10px;color:var(--t3);margin-top:3px}
+.kpi-sub{font-size:10px;color:var(--t3);margin-top:3px;font-weight:600}
 /* SHIFT BLOCK */
-.shift-block{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);margin-bottom:10px;overflow:hidden}
-.shift-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;background:var(--s2)}
+.shift-block{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);margin-bottom:10px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+.shift-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;background:var(--s2);border-bottom:1px solid var(--b1)}
 .shift-hdr:hover{background:var(--s3)}
 .shift-title{font-family:var(--fc);font-weight:800;font-size:13px;letter-spacing:1.5px;color:var(--cyan)}
 .shift-badge{font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.5px;padding:2px 8px;border-radius:10px}
-.shift-badge.pending{background:rgba(255,171,0,.12);color:var(--amber);border:1px solid rgba(255,171,0,.25)}
-.shift-badge.done{background:rgba(0,230,118,.12);color:var(--green);border:1px solid rgba(0,230,118,.25)}
+.shift-badge.pending{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.shift-badge.done{background:#d1fae5;color:#065f46;border:1px solid #a7f3d0}
 .shift-body{padding:12px 14px;display:none}
 .shift-body.open{display:block}
 /* STAFF ROW */
 .staff-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
-.field-grp label{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:4px;text-transform:uppercase}
-input[type=text],input[type=number],select{background:var(--s2);border:1px solid var(--b1);border-radius:4px;color:var(--t1);padding:5px 8px;font-family:var(--font);font-size:12px;outline:none;width:100%;transition:.15s}
-input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--cyan);background:var(--s3)}
+.field-grp label{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t2);display:block;margin-bottom:4px;text-transform:uppercase;font-weight:700}
+input[type=text],input[type=number],select{background:#fff;border:1px solid var(--b1);border-radius:4px;color:var(--t1);padding:5px 8px;font-family:var(--font);font-size:12px;font-weight:600;outline:none;width:100%;transition:.15s}
+input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(37,99,235,0.1)}
 input[type=number]{font-family:var(--mono);text-align:right}
-input[type=number]::-webkit-inner-spin-button,
-input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
-input[type=number]{-moz-appearance:textfield;appearance:textfield}
 /* MACHINE TABLE */
 .mtable{width:100%;border-collapse:collapse;font-size:12px}
-.mtable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--b1);text-align:left;white-space:nowrap}
+.mtable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--t2);font-weight:700;padding:6px 8px;border-bottom:2px solid var(--b1);text-align:left;white-space:nowrap;background:#f8fafc}
 .mtable th.r{text-align:right}
-.mtable td{padding:5px 8px;border-bottom:1px solid rgba(30,38,56,.5)}
+.mtable td{padding:5px 8px;border-bottom:1px solid var(--b1);color:var(--t1);font-weight:500}
 .mtable tr:last-child td{border-bottom:none}
-.mtable tr:hover td{background:rgba(255,255,255,.02)}
+.mtable tr:hover td{background:#f8fafc}
 .mc-num{font-family:var(--fc);font-weight:800;font-size:14px;color:var(--cyan)}
 .mc-sz{font-family:var(--mono);font-size:10px;color:var(--t3)}
-.vs-pos{color:var(--green);font-family:var(--mono);font-size:11px}
-.vs-neg{color:var(--red);font-family:var(--mono);font-size:11px}
+.vs-pos{color:var(--green);font-family:var(--mono);font-size:11px;font-weight:700}
+.vs-neg{color:var(--red);font-family:var(--mono);font-size:11px;font-weight:700}
 .vs-zero{color:var(--t3);font-family:var(--mono);font-size:11px}
-.tot-row td{font-family:var(--fc);font-weight:700;font-size:11px;color:var(--t2);padding-top:8px;border-top:1px solid var(--b2)}
+.tot-row td{font-family:var(--fc);font-weight:700;font-size:11px;color:var(--t2);padding-top:8px;border-top:2px solid var(--b2)}
 /* ORDER DROPDOWN + batch field */
 .ord-sel{font-size:11px;padding:4px 6px;min-width:130px}
 .batch-inp{font-size:11px;padding:4px 6px;width:100px;font-family:var(--mono)}
 /* DT TABLE */
 .dttable{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
-.dttable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--b1);text-align:center}
+.dttable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t2);font-weight:700;padding:6px 8px;border-bottom:2px solid var(--b1);text-align:center;background:#f8fafc}
 .dttable th:first-child{text-align:left}
-.dttable td{padding:5px 8px;text-align:center;border-bottom:1px solid rgba(30,38,56,.5)}
-.dttable td:first-child{font-family:var(--fc);font-weight:700;color:var(--cyan);text-align:left}
+.dttable td{padding:5px 8px;text-align:center;border-bottom:1px solid var(--b1);color:var(--t1);font-weight:500}
+.dttable td:first-child{font-family:var(--fc);font-weight:800;color:var(--cyan);text-align:left}
 .dttable td input{width:60px;text-align:center}
-.dttable .tot-row td{font-family:var(--mono);font-weight:600;color:var(--amber);border-top:1px solid var(--b2)}
-.dttable .dt-pct{color:var(--amber);font-family:var(--mono)}
+.dttable .tot-row td{font-family:var(--mono);font-weight:700;color:var(--amber);border-top:2px solid var(--b2)}
+.dttable .dt-pct{color:var(--amber);font-family:var(--mono);font-weight:700}
 /* COLLAPSE SECTION */
 .collapsible{background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);margin-bottom:10px;overflow:hidden}
 .col-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer}
-.col-hdr:hover{background:rgba(255,255,255,.03)}
-.col-title{font-family:var(--fc);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3);display:flex;align-items:center;gap:8px}
+.col-hdr:hover{background:var(--s3)}
+.col-title{font-family:var(--fc);font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t2);display:flex;align-items:center;gap:8px}
 .col-body{padding:14px;display:none}
 .col-body.open{display:block}
 /* REMARKS */
-.remark-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(30,38,56,.4)}
+.remark-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--b1)}
 .remark-row:last-child{border-bottom:none}
-.rem-shift{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--cyan);width:52px;flex-shrink:0}
-.rem-text{flex:1;font-size:12px;color:var(--t2)}
-.btn-sm{padding:4px 10px;border-radius:4px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.5px;cursor:pointer;border:1px solid var(--b2);background:transparent;color:var(--t3);transition:.15s}
-.btn-sm:hover{color:var(--t1);border-color:var(--t3)}
+.rem-shift{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--cyan);font-weight:700;width:52px;flex-shrink:0}
+.rem-text{flex:1;font-size:12px;color:var(--t2);font-weight:500}
+.btn-sm{padding:4px 10px;border-radius:4px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.5px;cursor:pointer;border:1px solid var(--b2);background:var(--s2);color:var(--t2);transition:.15s}
+.btn-sm:hover{color:var(--t1);border-color:var(--t2)}
 .btn-sm.danger:hover{color:var(--red);border-color:var(--red)}
 .btn-add{padding:5px 12px;border-radius:4px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;cursor:pointer;border:1px dashed var(--b2);background:transparent;color:var(--t3);transition:.15s}
 .btn-add:hover{color:var(--cyan);border-color:var(--cyan)}
 /* RESORT */
-.resort-entry{background:var(--s3);border:1px solid var(--b2);border-radius:4px;padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:auto auto 1fr auto auto;gap:8px;align-items:center}
+.resort-entry{background:var(--s2);border:1px solid var(--b2);border-radius:4px;padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:auto auto 1fr auto auto;gap:8px;align-items:center}
 /* CHART CONTAINERS */
 .chart-wrap{position:relative;height:220px;margin:10px 0}
 .chart-wrap-lg{position:relative;height:280px;margin:10px 0}
@@ -142,10 +138,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   .ntabs::-webkit-scrollbar { display: none; }
   .ntab { padding: 0 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
   .nbrand { font-size: 14px; white-space: nowrap; }
-  .nright { flex-shrink: 0; gap: 3px; }
-  .nright .nbtn:not(.primary):not(#saveBtn) { display: none; }
-  #ndate { max-width: 120px; font-size: 11px; }
-  #recentDatesSelect { max-width: 80px; font-size: 10px; }
+  .nright { flex-shrink: 0; gap: 4px; }
   .nright .btn { padding: 4px 7px; font-size: 11px; }
 
   /* ── Content padding ── */
@@ -271,15 +264,14 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
   <div class="nright">
     <div id="unsavedDot"></div>
-    <span id="syncBadge" class="offline" onclick="configureServer()">⚙ S</span>
-    <input type="date" id="ndate" onchange="onDateChange()" style="max-width:130px">
-    <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 6px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:110px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
+    <span id="syncBadge" class="offline" onclick="configureServer()">⚙ Server</span>
+    <input type="date" id="ndate" onchange="onDateChange()">
+    <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:140px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
       <option value="">📅 History</option>
     </select>
-    <button class="nbtn" onclick="showExportMenu()" title="Export Reports">↓ Export</button>
-    <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import">↑ Import</button>
+    <button class="nbtn" onclick="exportData()">↓ Export</button>
+    <button class="nbtn" onclick="document.getElementById('imp').click()">↑ Import</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
-    <button class="nbtn" onclick="forceSyncNow()" title="Force push all data to server" style="color:var(--cyan);border-color:var(--cyan)">⬆ Sync</button>
     <button class="nbtn primary" id="saveBtn" onclick="saveDay()">Save</button>
   </div>
 </div>
@@ -341,7 +333,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 <div id="page-analytics" class="page">
   <div class="agrid">
     <div class="card"><div class="card-title">Production vs Target</div><div class="chart-wrap"><canvas id="ch-pvt"></canvas></div></div>
-    <div class="card"><div class="card-title">Downtime by Category</div><div class="chart-wrap"><canvas id="ch-dt"></canvas></div></div>
+    <div class="card"><div class="card-title">Downtime by Category (minutes)</div><div class="chart-wrap"><canvas id="ch-dt"></canvas></div></div>
     <div class="card"><div class="card-title">Downtime % per Department <span style="font-size:10px;color:var(--t3);font-weight:400">(max 1,440 min/day each)</span></div><div class="chart-wrap"><canvas id="ch-dt-pct"></canvas></div></div>
     <div class="card"><div class="card-title">Machine Efficiency %</div><div class="chart-wrap"><canvas id="ch-eff"></canvas></div></div>
     <div class="card"><div class="card-title">Re-Sort by Root Cause</div><div class="chart-wrap"><canvas id="ch-rs"></canvas></div></div>
@@ -386,7 +378,26 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
 <!-- ═══ HISTORY ═══════════════════════════════════════════ -->
 <div id="page-history" class="page">
-  <div class="card"><div class="card-title">All Saved Records</div><div id="historyList"></div></div>
+  <div class="card">
+    <div class="card-title">All Saved Records</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div class="field-grp" style="margin:0">
+        <label style="font-size:10px;color:var(--t3);font-family:var(--fc);letter-spacing:.8px">DATE</label>
+        <input type="date" id="hist-filter-date" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px" oninput="renderHistory()">
+      </div>
+      <div class="field-grp" style="margin:0">
+        <label style="font-size:10px;color:var(--t3);font-family:var(--fc);letter-spacing:.8px">FLOOR</label>
+        <select id="hist-filter-floor" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px" onchange="renderHistory()">
+          <option value="">All Floors</option>
+          <option value="GF">Ground Floor</option>
+          <option value="1F">First Floor (FF)</option>
+          <option value="2F">Second Floor (SF)</option>
+        </select>
+      </div>
+      <button class="btn-sm" style="margin-top:14px" onclick="document.getElementById('hist-filter-date').value='';document.getElementById('hist-filter-floor').value='';renderHistory()">Clear</button>
+    </div>
+    <div id="historyList"></div>
+  </div>
 </div>
 
 <!-- ═══ SETTINGS ══════════════════════════════════════════ -->
@@ -430,16 +441,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="card-title">Machine Targets (per shift)</div>
     <div id="targetSettings"></div>
   </div>
-  <div class="card" id="machine-mgmt-card">
-    <div class="section-title" style="margin-bottom:12px">Machine Management</div>
-    <div class="section-sub" style="margin-bottom:12px">Enable or disable machines per floor. Disabled machines are hidden from entry and analytics. Admin only.</div>
-    <div id="machine-settings-area"></div>
-  </div>
-
   <div class="card">
     <div class="section-title" style="margin-bottom:8px">Manpower Master</div>
     <div class="section-sub" style="margin-bottom:12px">Add or remove team member names. Changes apply to all drop-down menus in data entry. Admin only.</div>
     <div id="manpower-settings-area"></div>
+  </div>
+
+  <div class="card" id="machine-mgmt-card">
+    <div class="section-title" style="margin-bottom:12px">Machine Management</div>
+    <div class="section-sub" style="margin-bottom:12px">Enable or disable machines per floor. Disabled machines are hidden from entry and analytics. Admin only.</div>
+    <div id="machine-settings-area"></div>
   </div>
 
   <div class="card">
@@ -469,9 +480,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 // ═══════════════════════════════════════════════════════
 // MASTER DATA
 // ═══════════════════════════════════════════════════════
-const FLOORS_DEFAULT = {
+const FLOORS = {
   GF: { label:'Ground Floor', machines:[
-    {id:'MC7', sz:'#4'},{id:'MC8', sz:'#4'},
     {id:'MC20',sz:'#2'},{id:'MC21',sz:'#0'},{id:'MC22',sz:'#0'},
     {id:'MC29',sz:'#0'},{id:'MC30',sz:'#2'},{id:'MC31',sz:'#2'},
     {id:'MC32',sz:'#3'},{id:'MC33',sz:'#1'},{id:'MC34',sz:'#00'}
@@ -485,84 +495,14 @@ const FLOORS_DEFAULT = {
   ]}
 };
 
-// Sort machines numerically by ID (MC7 < MC8 < MC14 < MC20...)
-function sortMachines(machines){
-  return [...machines].sort((a,b)=>{
-    const na = parseInt(a.id.replace(/\D/g,''))||0;
-    const nb = parseInt(b.id.replace(/\D/g,''))||0;
-    return na - nb;
-  });
-}
-
-// Load custom machine edits (size changes + new machines) from localStorage
-function loadFloors() {
-  try {
-    const custom = JSON.parse(localStorage.getItem('dpr_custom_machines') || '{}');
-    // Deep clone defaults
-    const floors = JSON.parse(JSON.stringify(FLOORS_DEFAULT));
-    // Apply size overrides and add new machines
-    Object.entries(custom).forEach(([flKey, machines]) => {
-      if (!floors[flKey]) floors[flKey] = { label: flKey, machines: [] };
-      machines.forEach(cm => {
-        const existing = floors[flKey].machines.find(m => m.id === cm.id);
-        if (existing) {
-          existing.sz = cm.sz; // update size
-        } else {
-          floors[flKey].machines.push({ id: cm.id, sz: cm.sz }); // add new
-        }
-      });
-    });
-    // Sort all floors numerically
-    Object.values(floors).forEach(f=>{ f.machines = sortMachines(f.machines); });
-    return floors;
-  } catch(e) { return JSON.parse(JSON.stringify(FLOORS_DEFAULT)); }
-}
-
-function saveCustomMachines() {
-  // Save only differences from default (size changes + new machines)
-  const custom = {};
-  Object.entries(FLOORS).forEach(([fl, flData]) => {
-    const defaultMachines = FLOORS_DEFAULT[fl]?.machines || [];
-    const changed = [];
-    flData.machines.forEach(m => {
-      const def = defaultMachines.find(d => d.id === m.id);
-      if (!def || def.sz !== m.sz) changed.push({ id: m.id, sz: m.sz });
-    });
-    if (changed.length) custom[fl] = changed;
-  });
-  localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
-  // Push to server so machine config is not lost on browser clear
-  pushDprSettings({ dpr_custom_machines: custom });
-}
-
-let FLOORS = loadFloors();
-
-// Clean up custom entries for machines now in FLOORS_DEFAULT
-// (MC7, MC8 moved from custom to default — remove from custom storage)
-(function cleanupCustomMachines(){
-  try{
-    const custom = JSON.parse(localStorage.getItem('dpr_custom_machines')||'{}');
-    let changed = false;
-    Object.entries(FLOORS_DEFAULT).forEach(([fl, flData])=>{
-      if(!custom[fl]) return;
-      const defaultIds = flData.machines.map(m=>m.id);
-      const filtered = custom[fl].filter(m=>!defaultIds.includes(m.id));
-      if(filtered.length !== custom[fl].length){ custom[fl]=filtered; changed=true; }
-      if(custom[fl].length===0) delete custom[fl];
-    });
-    if(changed) localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
-  }catch(e){}
-})();
-
 // Machine operator groups — one operator entry covers all machines in a group
 // Multiple operators allowed per group
 const MC_GROUPS = {
   GF: [
-    { label:'MC 7 & 8',       machines:['MC7','MC8'] },
-    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
     { label:'MC 29 & 30',     machines:['MC29','MC30'] },
     { label:'MC 31, 32 & 33', machines:['MC31','MC32','MC33'] },
     { label:'MC 34',          machines:['MC34'] },
+    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
   ],
   '1F': [
     { label:'MC 14, 15 & 16', machines:['MC14','MC15','MC16'] },
@@ -573,88 +513,9 @@ const MC_GROUPS = {
   ],
 };
 
-const SHIFTS = ['A','B','C'];
-const DT_CATS = ['proc','mech','elec','gpr','hvac','dw'];
-const DT_LABELS = {proc:'Process',mech:'Mech',elec:'Elect',gpr:'GPR',hvac:'HVAC',dw:'Dish Wash'};
-const RESORT_REASONS = [
-  'Colour Mismatch','Size Variation','Cap Body Separation','Dents/Deformity',
-  'Printing Defect','Fill Weight Deviation','Leakage','Contamination','Sealing Defect',
-  'Telescoping','Holes/Cracks','Moisture',
-  'Stripper','Pin Hole','Oil Hole','Loose Cap','Loose Body','Double Cap',
-  'Fibre Cut','Rough Cut','Uncut','Thin Body','Dent','Dot on Dome',
-  'Bubble','Oil Spot','Black Particle','Bad Dip',
-  'Other'];
-const CHART_COLORS = ['#00d4ff','#00e676','#ffab00','#ff4060','#b388ff','#1de9b6','#ff6d00','#80deea'];
-
-// ═══════════════════════════════════════════════════════
-// STATE
-// ═══════════════════════════════════════════════════════
-let curFloor = 'GF';
-let targets = JSON.parse(localStorage.getItem('dpr_targets')||'{}');
-let activeOrders = {}; // {machineId: [{id, batchNumber, customer, poNumber}]}
-// Sanitize server URL — strip any file path and trailing slashes
-function sanitizeServerUrl(url) {
-  if (!url) return '';
-  url = url.trim();
-  try {
-    const u = new URL(url);
-    return u.origin;
-  } catch {
-    return url.replace(/\/(planning|dpr|tracking|index)\.html.*$/, '').replace(/\/+$/, '');
-  }
-}
-
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
-let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
-let unsaved = false;
-
-function today(){ const d=new Date(); return d.toISOString().split('T')[0]; }
-function getDate(){ return document.getElementById('ndate').value || today(); }
-function skey(fl,d){ return `dpr3_${fl}_${d}`; }
-function tgt(fl,mcId){ return parseFloat(targets[`${fl}_${mcId}`]||8); }
-
-// Each machine entry now has:
-//   runs: [{orderId, batchNumber, qty, note}]  — one per batch run in the shift
-//   aim: number — AIM target for this machine this shift
-//   operator: string — operator name
-//   DT fields: proc, mech, elec, gpr, hvac, dw — stay at machine level
-function blankRun(){ return {orderId:'', batchNumber:'', qty:'', note:''}; }
-// Machine availability — admin managed per floor
-function getActiveMachines(fl){
-  try{
-    const saved=localStorage.getItem('dpr_active_machines');
-    const cfg=saved?JSON.parse(saved):{};
-    const all=FLOORS[fl]?FLOORS[fl].machines:[];
-    if(!cfg[fl]||cfg[fl].length===0) return all; // default: all active
-    return all.filter(m=>cfg[fl].includes(m.id));
-  }catch{ return FLOORS[fl]?FLOORS[fl].machines:[]; }
-}
-
-function setMachineActive(fl, mcId, active){
-  try{
-    const saved=localStorage.getItem('dpr_active_machines');
-    const cfg=saved?JSON.parse(saved):{};
-    if(!cfg[fl]) cfg[fl]=getActiveMachines(fl).map(m=>m.id);
-    if(active){ if(!cfg[fl].includes(mcId)) cfg[fl].push(mcId); }
-    else { cfg[fl]=cfg[fl].filter(id=>id!==mcId); }
-    localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
-    pushDprSettings({ dpr_active_machines: cfg });
-  }catch{}
-}
-
-function resetAllMachinesActive(fl){
-  try{
-    const saved=localStorage.getItem('dpr_active_machines');
-    const cfg=saved?JSON.parse(saved):{};
-    cfg[fl]=getActiveMachines(fl).map(m=>m.id);
-    localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
-    pushDprSettings({ dpr_active_machines: cfg });
-  }catch{}
-}
-
-// ─── Manpower Master ──────────────────────────────────────────────────────────
-// Staff name lists per floor/role — used to populate operator/incharge dropdowns.
-// Admins can add/remove names; stored in localStorage so they persist across sessions.
+// ─── Manpower Master ───────────────────────────────────────────
+// Common teams: same names shown on all floors
+// Floor-specific teams: GF vs FF/SF separate lists
 const MANPOWER_MASTER = {
   common: {
     hvac:       ['Pawan','Monu Kumar','Sunil Saini','Pradeep Kumar'],
@@ -694,15 +555,19 @@ const MANPOWER_MASTER = {
                'Siya Ram Yadav','Bijendra Pratap Singh'],
   },
 };
-MANPOWER_MASTER['2F'] = MANPOWER_MASTER['1F']; // SF shares FF lists
+// SF uses same master as FF
+MANPOWER_MASTER['2F'] = MANPOWER_MASTER['1F'];
 
-// Returns names for a role on a given floor (includes any admin additions)
+// Get names for a role on a given floor (merges common + floor-specific)
 function getMasterNames(fl, role){
+  // Common roles: same across all floors
   if(MANPOWER_MASTER.common[role]) return getCustomNames(role, MANPOWER_MASTER.common[role]);
+  // Floor-specific: fall back to 1F list for 2F
   const flData = MANPOWER_MASTER[fl] || MANPOWER_MASTER['1F'];
   return getCustomNames(`${fl}_${role}`, flData[role] || []);
 }
 
+// Get names including any admin-added custom names
 function getCustomNames(key, defaults){
   try{
     const saved = localStorage.getItem('dpr_manpower_'+key);
@@ -711,40 +576,155 @@ function getCustomNames(key, defaults){
   return [...defaults];
 }
 
-function getDefaultsForKey(storeKey){
-  if(MANPOWER_MASTER.common[storeKey]) return MANPOWER_MASTER.common[storeKey];
-  const parts = storeKey.split('_');
-  const fl = parts[0];
-  const role = parts.slice(1).join('_');
-  return (MANPOWER_MASTER[fl]||{})[role] || [];
+function saveCustomNames(fl, role, names){
+  const key = MANPOWER_MASTER.common[role] ? role : `${fl}_${role}`;
+  localStorage.setItem('dpr_manpower_'+key, JSON.stringify(names));
+}
+
+const SHIFTS = ['A','B','C'];
+const DT_CATS = ['proc','mech','elec','gpr','hvac','dw'];
+const DT_LABELS = {proc:'Process',mech:'Mech',elec:'Elect',gpr:'GPR',hvac:'HVAC',dw:'Dish Wash'};
+const RESORT_REASONS = [
+  'Colour Mismatch','Size Variation','Cap Body Separation','Dents/Deformity',
+  'Printing Defect','Fill Weight Deviation','Leakage','Contamination','Sealing Defect',
+  'Telescoping','Holes/Cracks','Moisture',
+  'Stripper','Pin Hole','Oil Hole','Loose Cap','Loose Body','Double Cap',
+  'Fibre Cut','Rough Cut','Uncut','Thin Body','Dent','Dot on Dome',
+  'Bubble','Oil Spot','Black Particle','Bad Dip',
+  'Other'];
+const CHART_COLORS = ['#00d4ff','#00e676','#ffab00','#ff4060','#b388ff','#1de9b6','#ff6d00','#80deea'];
+
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+let curFloor = 'GF';
+let targets = JSON.parse(localStorage.getItem('dpr_targets')||'{}');
+let activeOrders = {}; // {machineId: [{id, batchNumber, customer, poNumber}]}
+let dprClosedBatches = {}; // {orderId: {closedAt, closedBy}} — batches closed in DPR
+// Sanitize server URL — strip any file path and trailing slashes
+function sanitizeServerUrl(url) {
+  if (!url) return '';
+  url = url.trim();
+  try {
+    const u = new URL(url);
+    return u.origin;
+  } catch {
+    return url.replace(/\/(planning|dpr|tracking|index)\.html.*$/, '').replace(/\/+$/, '');
+  }
+}
+
+let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
+let unsaved = false;
+
+function today(){ const d=new Date(); return d.toISOString().split('T')[0]; }
+function getDate(){ return document.getElementById('ndate').value || today(); }
+function skey(fl,d){ return `dpr3_${fl}_${d}`; }
+function tgt(fl,mcId){ return parseFloat(targets[`${fl}_${mcId}`]||8); }
+
+// Each machine entry now has:
+//   runs: [{orderId, batchNumber, qty, note}]  — one per batch run in the shift
+//   aim: number — AIM target for this machine this shift
+//   operator: string — operator name
+//   DT fields: proc, mech, elec, gpr, hvac, dw — stay at machine level
+function blankRun(){ return {orderId:'', batchNumber:'', qty:'', note:''}; }
+// Machine availability — admin managed per floor
+function getActiveMachines(fl){
+  try{
+    const saved=localStorage.getItem('dpr_active_machines');
+    const cfg=saved?JSON.parse(saved):{};
+    const all=FLOORS[fl]?FLOORS[fl].machines:[];
+    if(!cfg[fl]||cfg[fl].length===0) return all; // default: all active
+    return all.filter(m=>cfg[fl].includes(m.id));
+  }catch{ return FLOORS[fl]?FLOORS[fl].machines:[]; }
+}
+
+function setMachineActive(fl, mcId, active){
+  try{
+    const saved=localStorage.getItem('dpr_active_machines');
+    const cfg=saved?JSON.parse(saved):{};
+    if(!cfg[fl]) cfg[fl]=getActiveMachines(fl).map(m=>m.id);
+    if(active){ if(!cfg[fl].includes(mcId)) cfg[fl].push(mcId); }
+    else { cfg[fl]=cfg[fl].filter(id=>id!==mcId); }
+    localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
+    pushDprSettings({dpr_active_machines:cfg});
+  }catch{}
+}
+
+function setMachineSize(fl, mcId, newSz){
+  const mc = FLOORS[fl]?.machines.find(m=>m.id===mcId);
+  if(!mc) return;
+  mc.sz = newSz;
+  try{
+    const saved = localStorage.getItem('dpr_machine_sizes')||'{}';
+    const cfg = JSON.parse(saved);
+    if(!cfg[fl]) cfg[fl]={};
+    cfg[fl][mcId] = newSz;
+    localStorage.setItem('dpr_machine_sizes', JSON.stringify(cfg));
+    pushDprSettings({dpr_machine_sizes:cfg});
+  }catch{}
+}
+
+function loadMachineSizes(){
+  try{
+    const saved = localStorage.getItem('dpr_machine_sizes');
+    if(!saved) return;
+    const cfg = JSON.parse(saved);
+    Object.entries(cfg).forEach(([fl, mcs])=>{
+      Object.entries(mcs).forEach(([mcId, sz])=>{
+        const mc = FLOORS[fl]?.machines.find(m=>m.id===mcId);
+        if(mc) mc.sz = sz;
+      });
+    });
+  }catch{}
+}
+
+function resetAllMachinesActive(fl){
+  try{
+    const saved=localStorage.getItem('dpr_active_machines');
+    const cfg=saved?JSON.parse(saved):{};
+    cfg[fl]=getActiveMachines(fl).map(m=>m.id);
+    localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
+    pushDprSettings({dpr_active_machines:cfg});
+  }catch{}
 }
 
 function renderManpowerSettings(){
   const container = document.getElementById('manpower-settings-area');
   if(!container) return;
+
+  // Define all roles and their labels + scope
   const ROLES = [
-    { key:'hvac',       label:'HVAC / Utility Team',     scope:'common' },
-    { key:'electrical', label:'Electrical Team',          scope:'common' },
-    { key:'chemist',    label:'QA / Shift Chemist Team',  scope:'common' },
-    { key:'incharge',   label:'GF — Shift Incharge',     scope:'GF' },
-    { key:'operator',   label:'GF — Machine Operators',   scope:'GF' },
-    { key:'fitter',     label:'GF — Shift Fitters',       scope:'GF' },
-    { key:'aim_staff',  label:'GF — AIM Team',            scope:'GF' },
-    { key:'gpr_staff',  label:'GF — GPR Team',            scope:'GF' },
-    { key:'incharge',   label:'FF/SF — Shift Incharge',   scope:'1F' },
-    { key:'operator',   label:'FF/SF — Machine Operators', scope:'1F' },
-    { key:'fitter',     label:'FF/SF — Shift Fitters',    scope:'1F' },
-    { key:'aim_staff',  label:'FF/SF — AIM Team',         scope:'1F' },
-    { key:'gpr_staff',  label:'FF/SF — GPR Team',         scope:'1F' },
+    // Common across all floors
+    { key:'hvac',       label:'HVAC / Utility Team',    scope:'common' },
+    { key:'electrical', label:'Electrical Team',         scope:'common' },
+    { key:'chemist',    label:'QA / Shift Chemist Team', scope:'common' },
+    // GF specific
+    { key:'incharge',   label:'GF — Shift Incharge',    scope:'GF' },
+    { key:'operator',   label:'GF — Machine Operators',  scope:'GF' },
+    { key:'fitter',     label:'GF — Shift Fitters',      scope:'GF' },
+    { key:'aim_staff',  label:'GF — AIM Team',           scope:'GF' },
+    { key:'gpr_staff',  label:'GF — GPR Team',           scope:'GF' },
+    // FF/SF specific
+    { key:'incharge',   label:'FF/SF — Shift Incharge',  scope:'1F' },
+    { key:'operator',   label:'FF/SF — Machine Operators',scope:'1F' },
+    { key:'fitter',     label:'FF/SF — Shift Fitters',   scope:'1F' },
+    { key:'aim_staff',  label:'FF/SF — AIM Team',        scope:'1F' },
+    { key:'gpr_staff',  label:'FF/SF — GPR Team',        scope:'1F' },
   ];
+
   let html = '';
   ROLES.forEach(({key, label, scope})=>{
+    const fl = scope === 'common' ? null : scope;
     const storeKey = scope === 'common' ? key : `${scope}_${key}`;
-    const defaults = scope === 'common' ? MANPOWER_MASTER.common[key] : (MANPOWER_MASTER[scope]||{})[key] || [];
+    const defaults = scope === 'common'
+      ? MANPOWER_MASTER.common[key]
+      : (MANPOWER_MASTER[scope]||{})[key] || [];
     const names = getCustomNames(storeKey, defaults);
+
     html += `<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--b1)">
       <div style="font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">${label}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
+      <div id="mp-list-${storeKey}" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
         ${names.map((n,i)=>`<span style="display:flex;align-items:center;gap:3px;padding:3px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;font-size:11px">
           ${esc(n)}
           <button onclick="removeManpowerName('${storeKey}',${i})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 1px;line-height:1">✕</button>
@@ -754,7 +734,7 @@ function renderManpowerSettings(){
         <input type="text" id="mp-new-${storeKey}" placeholder="Add name..." style="flex:1;font-size:11px;padding:4px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;color:var(--t1)"
           onkeydown="if(event.key==='Enter')addManpowerName('${storeKey}')">
         <button onclick="addManpowerName('${storeKey}')" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);cursor:pointer">+ Add</button>
-        <button onclick="resetManpowerNames('${storeKey}')" style="padding:4px 8px;font-size:10px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer" title="Reset to defaults">Reset</button>
+        <button onclick="resetManpowerNames('${storeKey}')" style="padding:4px 8px;font-size:10px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer" title="Reset to default list">Reset</button>
       </div>
     </div>`;
   });
@@ -765,117 +745,75 @@ function addManpowerName(storeKey){
   const inp = document.getElementById('mp-new-'+storeKey);
   const name = inp?.value.trim();
   if(!name) return;
-  const names = getCustomNames(storeKey, getDefaultsForKey(storeKey));
+  const defaults = getDefaultsForKey(storeKey);
+  const names = getCustomNames(storeKey, defaults);
   if(!names.includes(name)){
     names.push(name);
     localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
+    pushDprSettings({['dpr_manpower_'+storeKey]: names});
   }
   inp.value = '';
   renderManpowerSettings();
 }
 
 function removeManpowerName(storeKey, idx){
-  const names = getCustomNames(storeKey, getDefaultsForKey(storeKey));
+  const defaults = getDefaultsForKey(storeKey);
+  const names = getCustomNames(storeKey, defaults);
   names.splice(idx, 1);
   localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
+  pushDprSettings({['dpr_manpower_'+storeKey]: names});
   renderManpowerSettings();
 }
 
 function resetManpowerNames(storeKey){
+  const defaults = getDefaultsForKey(storeKey);
   localStorage.removeItem('dpr_manpower_'+storeKey);
+  pushDprSettings({['dpr_manpower_'+storeKey]: defaults});
   renderManpowerSettings();
+}
+
+function getDefaultsForKey(storeKey){
+  // common roles: key is just the role name
+  if(MANPOWER_MASTER.common[storeKey]) return MANPOWER_MASTER.common[storeKey];
+  // floor-specific: key is fl_role
+  const parts = storeKey.split('_');
+  const fl = parts[0];
+  const role = parts.slice(1).join('_');
+  return (MANPOWER_MASTER[fl]||{})[role] || [];
 }
 
 function renderMachineSettings(){
   const container=document.getElementById('machine-settings-area');
   if(!container) return;
-  const SIZES = ['#00','#0','#0EL','#1','#2','#3','#4','#5'];
   let html='';
   Object.entries(FLOORS).forEach(([fl,flData])=>{
     const active=getActiveMachines(fl).map(m=>m.id);
-    html+=`<div style="margin-bottom:20px">
-      <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:var(--t3);margin-bottom:8px;display:flex;align-items:center;gap:8px">
+    html+=`<div style="margin-bottom:16px">
+      <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">
         ${flData.label}
         <button onclick="resetAllMachinesActive('${fl}');renderMachineSettings();renderEntry()"
-          style="font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
+          style="margin-left:8px;font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
         ${flData.machines.map(m=>{
           const on=active.includes(m.id);
-          const isCustom=!FLOORS_DEFAULT[fl]?.machines.find(d=>d.id===m.id);
-          return `<div style="display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 8px;border:1px solid ${on?'var(--accent)':'var(--b2)'};border-radius:6px;background:${on?'rgba(0,212,255,0.06)':'transparent'}">
-            <div style="display:flex;align-items:center;gap:4px">
+          return `<div style="display:flex;align-items:center;gap:5px;padding:4px 10px;border:1px solid ${on?'var(--accent)':'var(--b2)'};border-radius:4px;background:${on?'rgba(0,212,255,0.08)':'transparent'}">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
               <input type="checkbox" ${on?'checked':''} onchange="setMachineActive('${fl}','${m.id}',this.checked);renderMachineSettings();renderEntry()" style="accent-color:var(--accent)">
-              <span style="font-family:var(--mono);font-size:12px;color:${on?'var(--accent)':'var(--t2)'}">${m.id}${isCustom?'<span style="color:var(--yellow);font-size:9px;margin-left:2px">NEW</span>':''}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:3px">
-              <select onchange="updateMachineSize('${fl}','${m.id}',this.value)"
-                style="font-size:10px;background:var(--bg2);border:1px solid var(--b2);border-radius:3px;color:var(--t2);padding:1px 2px;cursor:pointer">
-                ${SIZES.map(s=>`<option value="${s}" ${m.sz===s?'selected':''}>${s}</option>`).join('')}
-              </select>
-              ${isCustom?`<button onclick="removeMachine('${fl}','${m.id}')" title="Remove machine"
-                style="font-size:9px;padding:1px 4px;background:transparent;border:1px solid var(--red);border-radius:3px;color:var(--red);cursor:pointer">✕</button>`:''}
-            </div>
+              <span style="font-family:var(--mono);font-size:12px;color:${on?'var(--accent)':'var(--t2)'}">${m.id}</span>
+            </label>
+            <select onchange="setMachineSize('${fl}','${m.id}',this.value);renderMachineSettings();renderEntry()"
+              style="font-size:11px;padding:1px 4px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;color:var(--t2)">
+              ${['#00','#0','#1','#2','#3','#4'].map(sz=>
+                `<option value="${sz}" ${m.sz===sz?'selected':''}>${sz}</option>`
+              ).join('')}
+            </select>
           </div>`;
         }).join('')}
-      </div>
-      <!-- Add new machine row -->
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-        <span style="font-size:11px;color:var(--t3)">+ Add:</span>
-        <input id="new-mc-id-${fl}" placeholder="e.g. MC35" maxlength="6"
-          style="width:72px;font-size:12px;font-family:var(--mono);background:var(--bg2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:3px 6px">
-        <select id="new-mc-sz-${fl}"
-          style="font-size:12px;background:var(--bg2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:3px 6px">
-          ${SIZES.map(s=>`<option value="${s}">${s}</option>`).join('')}
-        </select>
-        <button onclick="addNewMachine('${fl}')"
-          style="font-size:11px;padding:3px 10px;background:var(--accent);color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600">Add</button>
       </div>
     </div>`;
   });
   container.innerHTML=html;
-}
-
-function updateMachineSize(fl, mcId, newSz) {
-  const mc = FLOORS[fl]?.machines.find(m=>m.id===mcId);
-  if (mc) {
-    mc.sz = newSz;
-    saveCustomMachines();
-    renderEntry();
-    toast(`${mcId} size updated to ${newSz}`,'var(--accent)');
-  }
-}
-
-function addNewMachine(fl) {
-  const idInput = document.getElementById(`new-mc-id-${fl}`);
-  const szInput = document.getElementById(`new-mc-sz-${fl}`);
-  const id = idInput?.value?.trim().toUpperCase();
-  const sz = szInput?.value || '#0';
-  if (!id) { toast('Enter machine ID','var(--red)'); return; }
-  // Check not already exists
-  const allIds = Object.values(FLOORS).flatMap(f=>f.machines.map(m=>m.id));
-  if (allIds.includes(id)) { toast(`${id} already exists`,'var(--red)'); return; }
-  FLOORS[fl].machines.push({id, sz});
-  FLOORS[fl].machines = sortMachines(FLOORS[fl].machines);
-  saveCustomMachines();
-  renderMachineSettings();
-  renderEntry();
-  toast(`${id} (${sz}) added to ${FLOORS[fl].label}`,'var(--accent)');
-}
-
-function removeMachine(fl, mcId) {
-  if (!confirm(`Remove ${mcId} from ${FLOORS[fl].label}? This only removes it from the machine list.`)) return;
-  FLOORS[fl].machines = FLOORS[fl].machines.filter(m=>m.id!==mcId);
-  // Also remove from custom storage
-  try {
-    const custom = JSON.parse(localStorage.getItem('dpr_custom_machines')||'{}');
-    if (custom[fl]) custom[fl] = custom[fl].filter(m=>m.id!==mcId);
-    localStorage.setItem('dpr_custom_machines', JSON.stringify(custom));
-  } catch(e){}
-  saveCustomMachines();
-  renderMachineSettings();
-  renderEntry();
-  toast(`${mcId} removed`,'var(--yellow)');
 }
 
 function blankMachine(){ return {runs:[blankRun()], aim:'', operator:'', proc:'', mech:'', elec:'', gpr:'', hvac:'', dw:''}; }
@@ -918,190 +856,26 @@ function loadDay(fl,d){
     return p;
   }catch{return blankDay(fl);}
 }
-async function saveDay(){
+function saveDay(){
   const fl=curFloor, d=getDate();
-
-  // ── GUARD: Do not save if user has not changed anything ──────────
-  // Check if there is ANY real data in the form right now
-  function formHasData(){
-    // Check staff fields
-    for(const sh of SHIFTS){
-      if(v('si-'+sh+'-incharge') || v('si-'+sh+'-fitter')) return true;
-      if(getMultiStaff(sh,'chemist').length)    return true;
-      if(getMultiStaff(sh,'electrical').length) return true;
-      if(getMultiStaff(sh,'utility').length)    return true;
-      if(getMultiStaff(sh,'aim_staff').length)  return true;
-      if(getMultiStaff(sh,'gpr_staff').length)  return true;
-    }
-    // Check any production qty entered
-    const anyQty = document.querySelectorAll('input[id^="run-qty-"]');
-    for(const el of anyQty){ if(el.value && parseFloat(el.value)>0) return true; }
-    // Check any batch number entered
-    const anyBatch = document.querySelectorAll('input[id^="run-batch-"]');
-    for(const el of anyBatch){ if(el.value && el.value.trim()) return true; }
-    // Check any order selected
-    const anyOrder = document.querySelectorAll('select[id^="run-ord-"]');
-    for(const el of anyOrder){ if(el.value && el.value.trim()) return true; }
-    // Check operator names
-    const anyOp = document.querySelectorAll('input[id^="op-"]');
-    for(const el of anyOp){ if(el.value && el.value.trim()) return true; }
-    return false;
-  }
-
-  if(!formHasData() && !unsaved){
-    toast('⚠️ Nothing to save — fill data first','var(--amber)');
-    return;
-  }
-
-  // ── DATE PERMISSION CHECK ──────────────────────────────────────
-  if(!canSaveForDate(d)){
-    const isAdmin = dprUser?.role === 'admin';
-    if(isAdmin){
-      // Admin should always pass — something wrong
-      toast('⚠️ Unexpected date error','var(--red)');
-    } else {
-      const today = new Date(); today.setHours(0,0,0,0);
-      const sel   = new Date(d+'T00:00:00');
-      if(sel > today){
-        toast('⚠️ Cannot save future dates','var(--red)');
-      } else {
-        toast('⚠️ Only today and previous 2 days allowed. Admin can edit any date.','var(--amber)');
-      }
-    }
-    return;
-  }
-
-  toast('💾 Saving...','var(--cyan)');
-
-  // Step 1 — snapshot live form values IMMEDIATELY before anything async
-  // This MUST happen first so user input is not lost during server fetch
-  const liveFormSnapshot = collectLiveFormValues();
-
-  // Step 2 — fetch latest server data to use as base
-  // This prevents blank fields from wiping data entered on other devices
-  if(serverUrl){
-    try{
-      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(5000)});
-      if(r.ok){
-        const j = await r.json();
-        if(j.ok && j.data){
-          // Write server data to localStorage — live snapshot will merge on top
-          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-        }
-      }
-    }catch(e){ /* offline — use what we have in localStorage */ }
-  }
-
-  // Step 3 — merge: live form values override server data
-  // Server data is the base; whatever user typed right now wins on top
-  const serverData = loadDay(fl, d); // fresh server data from Step 2
-  const data = mergeFormIntoData(serverData, liveFormSnapshot);
-
-  // Step 4 — save merged data locally and push to server
-  localStorage.setItem(skey(fl,d), JSON.stringify(data));
+  const data=collectForm();
+  localStorage.setItem(skey(fl,d),JSON.stringify(data));
   setUnsaved(false);
-  renderDayKpis();
   pushToServer(fl,d,data);
+  renderDayKpis();
+  toast('✓ Saved — '+fl+' '+d,'var(--green)');
 }
-// ── Collect ONLY what is currently visible/typed in the DOM ─────
-// Returns a snapshot of all live input values — does NOT read localStorage
-function collectLiveFormValues(){
-  const fl=curFloor;
-  const live = { staff:{}, machines:{} };
-  SHIFTS.forEach(sh=>{
-    live.staff[sh] = {
-      incharge:   v(`si-${sh}-incharge`) || null,
-      fitter:     v(`si-${sh}-fitter`)   || null,
-      chemist:    getMultiStaff(sh,'chemist'),
-      electrical: getMultiStaff(sh,'electrical'),
-      utility:    getMultiStaff(sh,'utility'),
-      aim_staff:  getMultiStaff(sh,'aim_staff'),
-      gpr_staff:  getMultiStaff(sh,'gpr_staff'),
-    };
-    if(!live.machines[sh]) live.machines[sh] = {};
-    getActiveMachines(fl).forEach(mc=>{
-      const mcLive = { aim: v(`aim-${sh}-${mc.id}`) || null, operator: v(`op-${sh}-${mc.id}`) || null };
-      // DT values — read directly from DOM inputs
-      DT_CATS.forEach(c=>{
-        const el = document.getElementById(`dt-${sh}-${mc.id}-${c}`);
-        mcLive[c] = el ? (el.value || null) : null;
-      });
-      // Runs — from run-row elements
-      const runEls = document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
-      if(runEls.length > 0){
-        mcLive.runs = Array.from(runEls).map(el=>{
-          const ri = el.dataset.ri;
-          const ordId = v(`run-ord-${sh}-${mc.id}-${ri}`) || '';
-          let batchNo = v(`run-batch-${sh}-${mc.id}-${ri}`) || '';
-          if(ordId && !batchNo){
-            const ord = Object.values(activeOrders).flat().find(o=>o.id===ordId);
-            if(ord) batchNo = ord.batchNumber || ord.poNumber || '';
-          }
-          return { orderId:ordId, batchNumber:batchNo, qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'', note:v(`run-note-${sh}-${mc.id}-${ri}`)||'' };
-        }).filter(r=>r.qty||r.batchNumber||r.orderId);
-      }
-      // Group operators
-      const grpOps = collectGroupOperators(sh, fl, mc.id);
-      if(grpOps !== null) mcLive.operators = grpOps;
-      live.machines[sh][mc.id] = mcLive;
-    });
-  });
-  return live;
-}
-
-// ── Merge live DOM values ON TOP of base data (from server/localStorage) ──
-// Live value wins if not null; base value wins if live is null (input not rendered)
-function mergeFormIntoData(base, live){
-  const fl = curFloor;
-  const result = JSON.parse(JSON.stringify(base)); // deep copy
-  SHIFTS.forEach(sh=>{
-    const s = live.staff[sh] || {};
-    if(s.incharge   !== null) result.shifts[sh].incharge   = s.incharge;
-    if(s.fitter     !== null) result.shifts[sh].fitter     = s.fitter;
-    if(s.chemist    && s.chemist.length)    result.shifts[sh].chemist    = s.chemist;
-    if(s.electrical && s.electrical.length) result.shifts[sh].electrical = s.electrical;
-    if(s.utility    && s.utility.length)    result.shifts[sh].utility    = s.utility;
-    if(s.aim_staff  && s.aim_staff.length)  result.shifts[sh].aim_staff  = s.aim_staff;
-    if(s.gpr_staff  && s.gpr_staff.length)  result.shifts[sh].gpr_staff  = s.gpr_staff;
-
-    getActiveMachines(fl).forEach(mc=>{
-      const mcLive = (live.machines[sh] || {})[mc.id] || {};
-      const m = migrateMachineData(result.shifts[sh].machines[mc.id] || blankMachine());
-      if(mcLive.aim      !== null && mcLive.aim      !== undefined) m.aim      = mcLive.aim;
-      if(mcLive.operator !== null && mcLive.operator !== undefined) m.operator = mcLive.operator;
-      if(mcLive.operators) m.operators = mcLive.operators;
-      // DT values — only overwrite if input existed in DOM
-      DT_CATS.forEach(c=>{
-        if(mcLive[c] !== null && mcLive[c] !== undefined) m[c] = mcLive[c];
-      });
-      // Runs — only overwrite if run rows existed in DOM
-      if(mcLive.runs && mcLive.runs.length > 0) m.runs = mcLive.runs;
-      result.shifts[sh].machines[mc.id] = m;
-    });
-  });
-  return result;
-}
-
 function collectForm(){
   const d=getDate(), fl=curFloor;
   const day=loadDay(fl,d);
   SHIFTS.forEach(sh=>{
-    // For staff fields: use form value if filled, otherwise keep existing saved value
-    // This prevents blank form (not yet rendered) from wiping real saved data
-    const formIncharge = v(`si-${sh}-incharge`);
-    const formFitter   = v(`si-${sh}-fitter`);
-    day.shifts[sh].incharge   = formIncharge   || day.shifts[sh].incharge   || '';
-    day.shifts[sh].fitter     = formFitter     || day.shifts[sh].fitter     || '';
-    const formChemist   = getMultiStaff(sh,'chemist');
-    const formElec      = getMultiStaff(sh,'electrical');
-    const formUtility   = getMultiStaff(sh,'utility');
-    const formAim       = getMultiStaff(sh,'aim_staff');
-    const formGpr       = getMultiStaff(sh,'gpr_staff');
-    day.shifts[sh].chemist    = formChemist.length   ? formChemist   : (day.shifts[sh].chemist    || []);
-    day.shifts[sh].electrical = formElec.length      ? formElec      : (day.shifts[sh].electrical || []);
-    day.shifts[sh].utility    = formUtility.length   ? formUtility   : (day.shifts[sh].utility    || []);
-    day.shifts[sh].aim_staff  = formAim.length       ? formAim       : (day.shifts[sh].aim_staff  || []);
-    day.shifts[sh].gpr_staff  = formGpr.length       ? formGpr       : (day.shifts[sh].gpr_staff  || []);
+    day.shifts[sh].incharge=v(`si-${sh}-incharge`)||'';
+    day.shifts[sh].fitter=v(`si-${sh}-fitter`)||'';
+    day.shifts[sh].chemist=v(`si-${sh}-chemist`)||'';
+    day.shifts[sh].electrical=getMultiStaff(sh,'electrical');
+    day.shifts[sh].utility=getMultiStaff(sh,'utility');
+    day.shifts[sh].aim_staff=getMultiStaff(sh,'aim_staff');
+    day.shifts[sh].gpr_staff=getMultiStaff(sh,'gpr_staff');
     getActiveMachines(fl).forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       m.aim=v(`aim-${sh}-${mc.id}`)||'';
@@ -1109,31 +883,15 @@ function collectForm(){
       // Collect group operators (stored on each machine in the group)
       const grpOps=collectGroupOperators(sh,fl,mc.id);
       if(grpOps!==null) m.operators=grpOps;
-      DT_CATS.forEach(c=>{
-        const liveVal = v(`dt-${sh}-${mc.id}-${c}`);
-        // Only overwrite if DOM input exists and has a value
-        // If input doesn't exist (section not rendered yet), keep existing saved value
-        const inputExists = !!document.getElementById(`dt-${sh}-${mc.id}-${c}`);
-        if(inputExists){
-          m[c] = liveVal || '';
-        }
-        // else: keep m[c] from loadDay() — don't overwrite with blank
-      });
+      DT_CATS.forEach(c=>{ m[c]=v(`dt-${sh}-${mc.id}-${c}`)||''; });
       // Collect all runs from DOM
       const runEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
       if(runEls.length>0){
         m.runs=Array.from(runEls).map(el=>{
           const ri=el.dataset.ri;
-          const ordId=v(`run-ord-${sh}-${mc.id}-${ri}`)||'';
-          let batchNo=v(`run-batch-${sh}-${mc.id}-${ri}`)||'';
-          // If order is selected but batch field is empty, auto-fill from activeOrders
-          if(ordId && !batchNo){
-            const ord=Object.values(activeOrders).flat().find(o=>o.id===ordId);
-            if(ord) batchNo=ord.batchNumber||ord.poNumber||'';
-          }
           return{
-            orderId:ordId,
-            batchNumber:batchNo,
+            orderId:v(`run-ord-${sh}-${mc.id}-${ri}`)||'',
+            batchNumber:v(`run-batch-${sh}-${mc.id}-${ri}`)||'',
             qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'',
             note:v(`run-note-${sh}-${mc.id}-${ri}`)||''
           };
@@ -1154,7 +912,6 @@ function calcDayStats(fl,d){
   const day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
   let totTgt=0,totProd=0,totAim=0,totResort=0,totDT=0;
-  function r2(n){ return Math.round(n*100)/100; } // round to 2 decimal places
   SHIFTS.forEach(sh=>{
     mcs.forEach(mc=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
@@ -1167,10 +924,7 @@ function calcDayStats(fl,d){
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
-  // BACKLOG: positive = excess, negative = behind
-  totProd = Math.round(totProd*100)/100;
-  totAim  = Math.round(totAim*100)/100;
-  const backlog = Math.round((totProd - totAim)*100)/100;
+  const backlog = Math.max(0, totAim - totProd);
   return {totTgt,totProd,totAim,totResort,totDT,dtPct,eff,backlog};
 }
 
@@ -1205,55 +959,54 @@ async function checkServer(){
   }catch{ setSyncBadge('offline'); return false; }
 }
 
-// ── BROADCAST CHANNEL — notify all tabs on DPR save ─────────────
-const sunlocChannel = (() => {
-  try {
-    const ch = new BroadcastChannel('sunloc_sync');
-    ch.onmessage = (e) => {
-      const msg = e.data;
-      if (msg.type === 'PLANNING_SAVED' && dprUser) {
-        try{ fetchActiveOrders(); }catch(ex){}
-      }
-    };
-    return ch;
-  } catch(e) { return { postMessage: ()=>{} }; }
-})();
-
-// ── DPR OFFLINE RETRY QUEUE ──────────────────────────────────────
-const DPR_QUEUE_KEY = 'sunloc_dpr_push_queue';
-function dprQueuePush(fl, d, data, actuals) {
-  try {
-    const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
-    const idx = q.findIndex(e=>e.fl===fl&&e.d===d);
-    const entry = { ts: Date.now(), fl, d, data, actuals };
-    if (idx>=0) q[idx]=entry; else q.push(entry);
-    localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(q));
-  } catch(e) {}
+// ── DPR Settings: push all config to server so any device sees same settings ──
+async function pushDprSettings(settingsObj){
+  if(!serverUrl) return;
+  try{
+    await fetch(serverUrl+'/api/dpr/settings',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({settings:settingsObj}),
+      signal:AbortSignal.timeout(5000)
+    });
+  }catch(e){}
 }
-async function dprQueueFlush() {
-  const url = localStorage.getItem('sunloc_server_url')||'';
-  if (!url) return;
-  try {
-    const raw = localStorage.getItem(DPR_QUEUE_KEY);
-    if (!raw) return;
-    const q = JSON.parse(raw);
-    if (!q.length) return;
-    const hR = await fetch(url+'/api/health',{signal:AbortSignal.timeout(3000)});
-    if (!hR.ok) return;
-    const remaining = [];
-    for (const entry of q) {
-      try {
-        const r = await fetch(url+'/api/dpr/save',{
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({floor:entry.fl, date:entry.d, data:entry.data, actuals:entry.actuals}),
-          signal: AbortSignal.timeout(8000)
-        });
-        if (!r.ok) remaining.push(entry);
-      } catch(e) { remaining.push(entry); }
+
+// ── DPR Settings: load all config from server on startup ─────────────────────
+async function loadDprSettings(){
+  if(!serverUrl) return;
+  try{
+    const r=await fetch(serverUrl+'/api/dpr/settings',{signal:AbortSignal.timeout(5000)});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(!j.ok || !j.settings) return;
+    const s=j.settings;
+    // Machine targets
+    if(s.dpr_targets && typeof s.dpr_targets==='object'){
+      targets=s.dpr_targets;
+      localStorage.setItem('dpr_targets',JSON.stringify(targets));
     }
-    if (remaining.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
-    else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(remaining));
-  } catch(e) {}
+    // Active machines per floor
+    if(s.dpr_active_machines && typeof s.dpr_active_machines==='object'){
+      localStorage.setItem('dpr_active_machines',JSON.stringify(s.dpr_active_machines));
+    }
+    // Machine size overrides
+    if(s.dpr_machine_sizes && typeof s.dpr_machine_sizes==='object'){
+      localStorage.setItem('dpr_machine_sizes',JSON.stringify(s.dpr_machine_sizes));
+      loadMachineSizes();
+    }
+    // Custom machines (added by admin)
+    if(s.dpr_custom_machines && typeof s.dpr_custom_machines==='object'){
+      localStorage.setItem('dpr_custom_machines',JSON.stringify(s.dpr_custom_machines));
+    }
+    // Manpower name lists
+    Object.keys(s).forEach(k=>{
+      if(k.startsWith('dpr_manpower_')){
+        localStorage.setItem(k,JSON.stringify(s[k]));
+      }
+    });
+    console.log('[DPR] Settings loaded from server');
+    renderEntry();
+  }catch(e){ console.warn('[DPR] Could not load settings from server:',e.message); }
 }
 
 async function pushToServer(fl,d,data){
@@ -1274,91 +1027,16 @@ async function pushToServer(fl,d,data){
       });
     });
   });
-  // Always queue first so data is never lost if push fails
-  dprQueuePush(fl, d, data, actuals);
   try{
-    const r = await fetch(serverUrl+'/api/dpr/save',{
+    await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({floor:fl,date:d,data,actuals}),
-      signal:AbortSignal.timeout(10000)
+      signal:AbortSignal.timeout(6000)
     });
-    const j = await r.json();
-    if(r.ok && j.ok){
-      setSyncBadge('synced');
-      toast('✅ Saved to server — '+fl+' '+d,'var(--green)');
-      console.log('[DPR] Saved to server OK — floor:'+fl+' date:'+d);
-      try{ sunlocChannel.postMessage({type:'DPR_SAVED',ts:Date.now()}); }catch(e){}
-      // Push succeeded — remove this entry from the queue
-      try{
-        const q = JSON.parse(localStorage.getItem(DPR_QUEUE_KEY)||'[]');
-        const filtered = q.filter(e=>!(e.fl===fl&&e.d===d));
-        if(filtered.length===0) localStorage.removeItem(DPR_QUEUE_KEY);
-        else localStorage.setItem(DPR_QUEUE_KEY, JSON.stringify(filtered));
-      }catch(e){}
-    } else {
-      // Server returned error — show it clearly
-      setSyncBadge('offline');
-      const errMsg = j?.error || ('HTTP '+r.status);
-      console.error('[DPR] Save failed:', errMsg);
-      toast('❌ Save failed: '+errMsg,'var(--red)');
-    }
-  }catch(e){
-    setSyncBadge('offline');
-    console.error('[DPR] Save network error:', e.message);
-    toast('❌ Server unreachable — data queued locally','var(--amber)');
-  }
+    setSyncBadge('synced');
+  }catch{ setSyncBadge('offline'); }
 }
-// ── DPR SETTINGS SYNC — push/pull machine config, targets, active machines ──
-async function pushDprSettings(settingsObj) {
-  if (!serverUrl) return;
-  try {
-    await fetch(serverUrl + '/api/dpr/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ settings: settingsObj }),
-      signal: AbortSignal.timeout(5000)
-    });
-  } catch(e) {} // silent — settings are secondary
-}
-
-async function loadDprSettings() {
-  if (!serverUrl) return;
-  try {
-    const r = await fetch(serverUrl + '/api/dpr/settings', { signal: AbortSignal.timeout(5000) });
-    if (!r.ok) return;
-    const j = await r.json();
-    if (!j.ok || !j.settings) return;
-
-    // Restore custom machines
-    if (j.settings.dpr_custom_machines) {
-      localStorage.setItem('dpr_custom_machines', JSON.stringify(j.settings.dpr_custom_machines));
-      // Re-apply to FLOORS
-      Object.entries(j.settings.dpr_custom_machines).forEach(([flKey, machines]) => {
-        if (!FLOORS[flKey]) return;
-        machines.forEach(cm => {
-          const existing = FLOORS[flKey].machines.find(m => m.id === cm.id);
-          if (existing) existing.sz = cm.sz;
-          else FLOORS[flKey].machines.push({ id: cm.id, sz: cm.sz });
-        });
-        FLOORS[flKey].machines = sortMachines(FLOORS[flKey].machines);
-      });
-    }
-
-    // Restore active machines per floor
-    if (j.settings.dpr_active_machines) {
-      localStorage.setItem('dpr_active_machines', JSON.stringify(j.settings.dpr_active_machines));
-    }
-
-    // Restore targets
-    if (j.settings.dpr_targets) {
-      localStorage.setItem('dpr_targets', JSON.stringify(j.settings.dpr_targets));
-      Object.assign(targets, j.settings.dpr_targets);
-    }
-
-  } catch(e) {}
-}
-
 async function fetchActiveOrders(){
   if(!serverUrl){
     const cached=localStorage.getItem('dpr_active_orders');
@@ -1368,53 +1046,62 @@ async function fetchActiveOrders(){
   try{
     const r=await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
     if(!r.ok) return;
-    const j=await r.json();    if(j.ok && j.orders){
+    const j=await r.json();
+    if(j.ok && j.orders){
       // Build map by machineId — only include orders that have a specific machineId assigned
       activeOrders={};
       j.orders.filter(o => o.machineId).forEach(o=>{
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
       });
-
-      // ── AUTO-SELECT: if a machine has exactly 1 active order and current run
-      //    has no orderId yet, pre-fill orderId + batchNumber automatically ──
-      const fl=curFloor, d=getDate();
-      const dayData=loadDay(fl,d);
-      let autoFilled=false;
-      SHIFTS.forEach(sh=>{
-        getActiveMachines(fl).forEach(mc=>{
-          const orders=activeOrders[mc.id]||[];
-          if(orders.length===1){
-            const m=migrateMachineData(dayData.shifts[sh].machines[mc.id]||blankMachine());
-            m.runs.forEach(run=>{
-              if(!run.orderId){
-                run.orderId=orders[0].id;
-                run.batchNumber=orders[0].batchNumber||orders[0].poNumber||'';
-                autoFilled=true;
-              }
-            });
-            dayData.shifts[sh].machines[mc.id]=m;
-          }
-        });
-      });
-      if(autoFilled){
-        localStorage.setItem(skey(fl,d),JSON.stringify(dayData));
-        pushToServer(fl,d,dayData);
-      }
-
       // Cache locally
       localStorage.setItem('dpr_active_orders',JSON.stringify(activeOrders));
+      toast('✓ Orders synced from Planning App','var(--green)');
 
       // Check each machine on current floor — if no active order, ensure TEMP batch exists
       await checkAndCreateTempBatches();
 
-      safeRenderShifts(); // Re-render dropdowns — preserves any typed-but-unsaved data
+      renderShifts(); // Re-render so dropdowns populate
     }
   }catch{
     const cached=localStorage.getItem('dpr_active_orders');
     if(cached) try{activeOrders=JSON.parse(cached);}catch{}
   }
   await fetchTrackingAGrade();
+}
+
+async function fetchClosedBatches(){
+  if(!serverUrl) return;
+  try{
+    const r=await fetch(serverUrl+'/api/dpr/batch-closed',{signal:AbortSignal.timeout(5000)});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j.ok && j.closed){
+      dprClosedBatches={};
+      j.closed.forEach(c=>{ dprClosedBatches[c.order_id]={closedAt:c.closed_at,closedBy:c.closed_by,batchNumber:c.batch_number}; });
+    }
+  }catch{}
+}
+
+async function closeBatchInDPR(orderId, batchNumber){
+  const canClose = dprUser?.role==='admin' || dprUser?.role==='incharge';
+  if(!canClose){ alert('Only Admin or Shift Incharge can close a batch.'); return; }
+  if(dprClosedBatches[orderId]){ alert(`Batch ${batchNumber} is already closed in DPR.`); return; }
+  if(!confirm(`Close batch ${batchNumber} in DPR?\n\nThis marks production as complete. Planning will then be able to close this order.\n\nThis action can only be undone by Admin.`)) return;
+  if(serverUrl){
+    try{
+      const r=await fetch(serverUrl+'/api/dpr/batch-close',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({orderId,batchNumber,closedBy:dprUser.username||dprUser.role}),
+        signal:AbortSignal.timeout(6000)
+      });
+      const j=await r.json();
+      if(!j.ok){ alert('Server error: '+j.error); return; }
+    }catch{ alert('Could not reach server. Please check connection.'); return; }
+  }
+  dprClosedBatches[orderId]={closedAt:new Date().toISOString(),closedBy:dprUser?.username||dprUser?.role,batchNumber};
+  toast(`✅ Batch ${batchNumber} closed in DPR`,'var(--green)');
+  renderShifts();
 }
 
 // Check all machines on current floor — create TEMP batch if no active order
@@ -1464,6 +1151,33 @@ async function checkAndCreateTempBatches(){
       }catch(e){ /* non-blocking */ }
     }
   }
+  // Update TEMP alert banner
+  updateTempAlertBanner();
+}
+
+// Show/hide TEMP batch alert banner
+async function updateTempAlertBanner(){
+  if(!serverUrl) return;
+  try{
+    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
+    const j = await r.json();
+    let banner = document.getElementById('temp-alert-banner');
+    if(!banner){
+      banner = document.createElement('div');
+      banner.id = 'temp-alert-banner';
+      banner.style.cssText = 'position:fixed;top:var(--nav);left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-bottom:2px solid var(--amber);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px';
+      document.body.appendChild(banner);
+    }
+    if(j.ok && j.count > 0){
+      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
+      banner.style.display = 'flex';
+      banner.innerHTML = `⚠️ <strong style="color:var(--amber)">${j.count} TEMP batch${j.count>1?'es':''} active</strong>
+        — Machines: ${machines.join(', ')} — No planned orders assigned.
+        <span style="color:var(--amber);margin-left:4px">Planning entry + Admin reconciliation required.</span>`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }catch(e){}
 }
 
 let trackingAGrade = {}; // { machineId: { batchNumber, aGradePct, inspected } }
@@ -1518,19 +1232,8 @@ function openPlanningApp(){
   if(url) window.open(url+'/planning.html','_blank');
   else alert('Please configure Server URL in Settings tab first.');
 }
-// ── FORCE SYNC — push current data to server immediately ─────────
-async function forceSyncNow() {
-  if(!serverUrl){ toast('No server configured','var(--red)'); return; }
-  toast('⬆ Pushing data to server...','var(--cyan)');
-  const fl=curFloor, d=getDate();
-  const data=collectForm();
-  localStorage.setItem(skey(fl,d),JSON.stringify(data));
-  await pushToServer(fl,d,data);
-  await dprQueueFlush();
-}
-
 function configureServer(){
-  const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'https://sunloc.up.railway.app');
+  const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'');
   if(url===null) return;
   serverUrl=sanitizeServerUrl(url);
   localStorage.setItem('sunloc_server_url',serverUrl);
@@ -1623,12 +1326,14 @@ function addGroupOperator(sh, mcId){
   if(!container) return;
   const div = document.createElement('div');
   div.style.cssText='display:flex;gap:3px;margin-bottom:2px';
-  div.innerHTML=`<input class="grp-op-input" type="text" placeholder="Operator name"
-    style="flex:1;font-size:11px" oninput="markUnsaved()">
+  div.innerHTML=`<select class="grp-op-input" oninput="markUnsaved()" style="flex:1;font-size:11px">
+    <option value="">— Select Operator —</option>
+    ${getMasterNames(curFloor,'operator').map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+  </select>
     <button onclick="this.parentElement.remove();markUnsaved()"
       style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:12px">✕</button>`;
   container.appendChild(div);
-  div.querySelector('input').focus();
+  div.querySelector('select').focus();
 }
 
 function getMultiStaff(sh, role){
@@ -1639,16 +1344,32 @@ function getMultiStaff(sh, role){
 }
 
 function renderMultiStaff(sh, role, label, values){
+  const fl = curFloor;
+  const masterNames = getMasterNames(fl, role);
   const vals = (values&&values.length) ? values : [''];
+  const opts = masterNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   return `<div class="field-grp" id="ms-${sh}-${role}">
     <label>${label}</label>
     ${vals.map((v,i)=>`<div style="display:flex;gap:4px;margin-bottom:3px">
-      <input class="ms-input" type="text" value="${esc(v)}" placeholder="Name"
-        style="flex:1" oninput="markUnsaved()">
-      ${i===0?`<button onclick="addStaffName('${sh}','${role}')" style="background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);font-size:11px;padding:2px 6px;cursor:pointer" title="Add another">+</button>`
+      <select class="ms-input" oninput="markUnsaved()" style="flex:1;font-size:11px">
+        <option value="">— Select —</option>
+        ${opts}
+        ${v && !masterNames.includes(v)?`<option value="${esc(v)}" selected>${esc(v)}</option>`:''}
+      </select>
+      ${i===0?`<button onclick="addStaffName('${sh}','${role}')" style="background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);font-size:11px;padding:2px 6px;cursor:pointer" title="Add another person">+</button>`
              :`<button onclick="removeStaffName(this)" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 4px">✕</button>`}
     </div>`).join('')}
   </div>`;
+}
+
+// Set selected value after render (since options may not match v at render time)
+function syncStaffSelects(sh, role, values){
+  const container = document.getElementById(`ms-${sh}-${role}`);
+  if(!container) return;
+  const selects = container.querySelectorAll('select.ms-input');
+  selects.forEach((sel, i)=>{
+    if(values && values[i]) sel.value = values[i];
+  });
 }
 
 function addStaffName(sh, role){
@@ -1667,92 +1388,13 @@ function removeStaffName(btn){
   markUnsaved();
 }
 
-// ── SERVER-FIRST renderEntry ─────────────────────────────────────
-// Shows loading spinner immediately (sync), then fetches server data, then renders.
-// Safe to call without await — spinner shows instantly regardless.
-async function renderEntry(){
-  const fl=curFloor, d=getDate();
-
-  // Step 1 — show loading spinner IMMEDIATELY (sync, no await needed)
-  // But only if user is NOT currently typing — never interrupt active input
-  const activeTagRE = document.activeElement?.tagName?.toLowerCase();
-  const userTypingRE = activeTagRE === 'input' || activeTagRE === 'select' || activeTagRE === 'textarea';
-  const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && serverUrl && !userTypingRE){
-    shiftsArea.innerHTML = '<div style="padding:24px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px;text-align:center">⟳ Loading from server...</div>';
-  }
-
-  // Step 2 — fetch latest data from server (async)
-  if(serverUrl){
-    try{
-      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(8000)});
-      if(r.ok){
-        const j = await r.json();
-        if(j.ok && j.data){
-          // Server data always wins — write to localStorage as cache
-          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-        }
-        // If j.data is null = no record on server yet — localStorage stays as-is (may be blank)
-      }
-    }catch(e){ /* offline — fall through to render from localStorage cache */ }
-  }
-
-  // Step 3 — render from localStorage (has fresh server data if fetch succeeded)
+function renderEntry(){
   renderDayKpis();
   renderShifts();
   renderDTTable();
   renderDTSummary();
   renderRemarks();
   renderResort();
-}
-
-// ── Sync-only render: fetch server data then re-render (used by auto-refresh) ──
-// Skips re-render if user has unsaved changes to avoid disrupting typing
-async function safeRenderShifts(){
-  const fl=curFloor, d=getDate();
-
-  // Never re-render if user is actively typing in a form field
-  const activeTag = document.activeElement?.tagName?.toLowerCase();
-  const activeId = document.activeElement?.id || '';
-  const userTyping = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
-
-  // Snapshot any unsaved DOM input first (before any server fetch overwrites localStorage)
-  if(unsaved && userTyping){
-    const shiftsArea = document.getElementById('shiftsArea');
-    if(shiftsArea && shiftsArea.querySelector('.run-row')){
-      try{
-        const snapshot = collectForm();
-        localStorage.setItem(skey(fl,d), JSON.stringify(snapshot));
-      }catch(e){}
-    }
-    // User is actively typing — skip re-render completely to avoid disruption
-    // The data is already snapshotted — it will be picked up on next save
-    return;
-  }
-
-  // Fetch from server if no unsaved changes
-  if(serverUrl && !unsaved){
-    try{
-      const r = await fetch(serverUrl+'/api/dpr/'+fl+'/'+d, {signal:AbortSignal.timeout(6000)});
-      if(r.ok){
-        const j = await r.json();
-        if(j.ok && j.data){
-          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-        }
-      }
-    }catch(e){}
-  }
-
-  // Only re-render if not interacting
-  if(!userTyping){
-    renderShifts();
-    renderDTTable();
-    renderDTSummary();
-    renderDayKpis();
-  } else {
-    // User started typing since we began — just update KPIs silently
-    renderDayKpis();
-  }
 }
 
 function renderDayKpis(){
@@ -1763,9 +1405,9 @@ function renderDayKpis(){
   document.getElementById('dayKpis').innerHTML=`
     <div class="kpi"><div class="kpi-label">Target</div><div class="kpi-val cyan">${s.totTgt||'—'}</div><div class="kpi-sub">units/day</div></div>
     <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
-    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+Math.round((s.totProd-s.totTgt)*100)/100:'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
-    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim?parseFloat(s.totAim.toFixed(2))||'—':'—'}</div><div class="kpi-sub">planned today</div></div>
-    <div class="kpi"><div class="kpi-label">BACKLOG</div><div class="kpi-val ${s.totAim===0?'t2':s.backlog>0?'green':s.backlog<0?'red':'green'}">${s.totAim===0?'—':s.backlog>0?'+'+parseFloat(s.backlog.toFixed(2)):parseFloat(s.backlog.toFixed(2))}</div><div class="kpi-sub">${s.totAim===0?'no aim set':s.backlog>0?'excess':s.backlog<0?'behind':'on track'}</div></div>
+    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
+    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim||'—'}</div><div class="kpi-sub">planned today</div></div>
+    <div class="kpi"><div class="kpi-label">Net Backlog</div><div class="kpi-val ${s.backlog>0?'amber':'green'}">${s.backlog||'—'}</div><div class="kpi-sub">units behind</div></div>
     <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
     <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
@@ -1790,8 +1432,8 @@ function renderShifts(){
       <div class="shift-body open" id="sb-${sh}">
         <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px">
           <div class="field-grp"><label>Process Incharge</label><input type="text" id="si-${sh}-incharge" value="${esc(sd.incharge||'')}" placeholder="Name" oninput="markUnsaved()"></div>
-          ${renderMultiStaff(sh,'chemist','Shift Chemist', Array.isArray(sd.chemist)?sd.chemist:(sd.chemist?[sd.chemist]:[]))}
-          ${fl==='GF'?`<div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>`:`<div class="field-grp"></div>`}
+          <div class="field-grp"><label>Shift Chemist</label><input type="text" id="si-${sh}-chemist" value="${esc(sd.chemist||'')}" placeholder="Name" oninput="markUnsaved()"></div>
+          <div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>
           <div class="field-grp"></div>
         </div>
         <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px">
@@ -1820,10 +1462,10 @@ function renderShifts(){
       const mRaw=sd.machines[mc.id]||blankMachine();
       const m=migrateMachineData(mRaw);
       const t=tgt(fl,mc.id);
-      const p=Math.round(mcTotalProd(m)*100)/100;
-      const a=Math.round(parseFloat(m.aim||0)*100)/100;
-      const vs=p>0?Math.round((p-t)*100)/100:null;
-      const bl=p>0?Math.round((p-a)*100)/100:null;
+      const p=mcTotalProd(m);
+      const a=parseFloat(m.aim||0);
+      const vs=p>0?p-t:null;
+      const bl=p>0?Math.max(0,p-a):null;
       shTgt+=t; shProd+=p; shAim+=a;
       const mcResort=(day.resort||[]).filter(r=>r.mc===mc.id&&r.shift===sh).reduce((s,r)=>s+parseFloat(r.qty||0),0);
       shResort+=mcResort;
@@ -1833,29 +1475,20 @@ function renderShifts(){
       let runsHtml='';
       runs.forEach((run,ri)=>{
         const orders=activeOrders[mc.id]||[];
-        // Match by id first, then by batchNumber as fallback
-        const matchedOrder = orders.find(o=>o.id===run.orderId) || orders.find(o=>o.batchNumber===run.batchNumber);
-        const effectiveOrderId = matchedOrder ? matchedOrder.id : run.orderId;
-        let ordOpts=`<option value="">— Order —</option>`+orders.map(o=>{
-          const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
-          return `<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(custShort)}</option>`;
-        }).join('');
-        // If run has a saved batch but no matching order in dropdown, add synthetic option so it's always visible
-        if(run.batchNumber && !matchedOrder){
-          ordOpts+=`<option value="${esc(run.orderId||run.batchNumber)}" selected>${esc(run.batchNumber)}</option>`;
-        }
+        const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${run.orderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
+        const runColour = run.colour || (run.orderId && activeOrders[mc.id]?.find(o=>o.id===run.orderId)?.colour) || '';
         const isMult=runs.length>1;
         runsHtml+=`
-          <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}">
+          <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed var(--b2)':''}">
             ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
             <select id="run-ord-${sh}-${mc.id}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mc.id}',${ri})" title="Select active order">
               ${ordOpts}
             </select>
-            <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" title="Type batch number if not in dropdown" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
+            <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" readonly style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0;background:var(--s2);cursor:default;opacity:0.8" title="Auto-filled from order selection">
             <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" step="0.01" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprQtyNav(event,'${sh}','${mc.id}')" title="Production in Lakhs">
-            <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t1);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
+            <span id="run-colour-${sh}-${mc.id}-${ri}" style="font-size:10px;font-weight:700;color:var(--cyan);font-family:var(--mono);flex-shrink:0;min-width:60px">${esc(runColour)}</span>
+            <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
-            ${(()=>{ const mo=(activeOrders[mc.id]||[]).find(o=>o.id===(run.orderId||'')||o.batchNumber===(run.batchNumber||'')); if(!mo) return ''; const pl=Math.round((mo.qty||0)*100)/100; const ac=Math.round((mo.actualQty||0)*100)/100; const rm=Math.max(0,Math.round((pl-ac)*100)/100); const col=rm<=0?'var(--green)':rm<pl*0.2?'var(--amber)':'var(--cyan)'; return `<span class="run-ord-info" style="font-size:9px;color:${col};font-family:var(--mono);white-space:nowrap;flex-shrink:0" title="${mo.customer||''}">Ord:${pl}L Prod:${ac}L Rem:${rm}L</span>`; })()}
           </div>`;
       });
 
@@ -1872,8 +1505,11 @@ function renderShifts(){
             </div>
             <div id="grp-ops-${sh}-${mc.id}">
               ${grpOps.map((op,oi)=>`<div style="display:flex;gap:3px;margin-bottom:2px">
-                <input class="grp-op-input" type="text" value="${esc(op)}" placeholder="Operator name"
-                  style="flex:1;font-size:11px" oninput="markUnsaved()">
+                <select class="grp-op-input" oninput="markUnsaved()" style="flex:1;font-size:11px">
+                  <option value="">— Select Operator —</option>
+                  ${getMasterNames(fl,'operator').map(n=>`<option value="${esc(n)}" ${op===n?'selected':''}>${esc(n)}</option>`).join('')}
+                  ${op && !getMasterNames(fl,'operator').includes(op)?`<option value="${esc(op)}" selected>${esc(op)}</option>`:''}
+                </select>
                 ${oi===0?`<button onclick="addGroupOperator('${sh}','${mc.id}')"
                   style="background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);font-size:11px;padding:2px 6px;cursor:pointer">+</button>`
                  :`<button onclick="this.parentElement.remove();markUnsaved()"
@@ -1890,38 +1526,38 @@ function renderShifts(){
         <td style="color:var(--t3);font-size:10px">${isInGrp?'↑ group':''}</td>
         <td>
           <div id="runs-${sh}-${mc.id}">${runsHtml}</div>
-          <button onclick="addRun('${sh}','${mc.id}')" style="margin-top:5px;padding:2px 8px;background:transparent;border:1px dashed var(--b2);border-radius:3px;color:var(--t3);font-size:10px;font-family:var(--fc);letter-spacing:.5px;cursor:pointer" title="Add another batch/colour change run">+ Add Run</button>
+          <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap">
+            <button onclick="addRun('${sh}','${mc.id}')" style="padding:2px 8px;background:transparent;border:1px dashed var(--b2);border-radius:3px;color:var(--t3);font-size:10px;font-family:var(--fc);letter-spacing:.5px;cursor:pointer" title="Add another batch/colour change run">+ Add Run</button>
+            ${runs.filter(r=>r.orderId).map(r=>{
+              const isClosed=dprClosedBatches[r.orderId];
+              const canClose=dprUser?.role==='admin'||dprUser?.role==='incharge';
+              if(isClosed) return `<span style="padding:2px 8px;background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.3);border-radius:3px;color:var(--green);font-size:10px;font-family:var(--fc)">✅ ${r.batchNumber||'Batch'} Closed in DPR</span>`;
+              if(canClose) return `<button onclick="closeBatchInDPR('${r.orderId}','${r.batchNumber||''}')" style="padding:2px 8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:3px;color:var(--red);font-size:10px;font-family:var(--fc);cursor:pointer" title="Mark production complete for this batch">🔒 Close ${r.batchNumber||'Batch'}</button>`;
+              return '';
+            }).join('')}
+          </div>
         </td>
         <td class="r" style="font-family:var(--mono);color:var(--t2)">${t}</td>
         <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${p||'—'}</td>
         <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`}</td>
         <td><input type="number" id="aim-${sh}-${mc.id}" value="${m.aim||''}" placeholder="0" min="0" style="width:52px" step="0.01" oninput="markUnsaved();updateBacklog('${sh}','${mc.id}');updateShiftTotals('${sh}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprAimNav(event,'${sh}','${mc.id}')">  </td>
-        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);${bl===null?'color:var(--t3)':bl>0?'color:var(--green)':bl<0?'color:var(--red)':'color:var(--t2)'}">${bl===null?'—':bl>0?'+'+bl:bl}</td>
+        <td class="r" id="bl-${sh}-${mc.id}" style="font-family:var(--mono);color:var(--amber)">${bl===null?'—':bl}</td>
         <td class="r" style="font-family:var(--mono);color:var(--red)">${mcResort||`<span style="color:var(--t3)">0</span>`}</td>
       </tr>`;
     });
 
-    shProd = Math.round(shProd*100)/100;
-    shAim  = Math.round(shAim*100)/100;
-    shTgt  = Math.round(shTgt*100)/100;
-    const shVs=shProd>0?Math.round((shProd-shTgt)*100)/100:null;
+    const shVs=shProd>0?shProd-shTgt:null;
     html+=`</tbody><tfoot><tr class="tot-row">
       <td colspan="4" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
       <td class="r" style="font-family:var(--mono)">${shTgt}</td>
       <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
-      <td class="r" id="shvs-${sh}">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
+      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
       <td class="r" id="shaim-${sh}" style="font-family:var(--mono)">${shAim||'—'}</td>
       <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
       <td></td>
     </tr></tfoot></table></div></div></div>`;
   });
   document.getElementById('shiftsArea').innerHTML=html;
-  // After render: trigger onRunOrderChange for any pre-selected orders to show Ord/Prod/Rem info
-  document.querySelectorAll('.run-row').forEach(row=>{
-    const sh=row.dataset.sh, mc=row.dataset.mc, ri=row.dataset.ri;
-    const sel=document.getElementById(`run-ord-${sh}-${mc}-${ri}`);
-    if(sel && sel.value) onRunOrderChange(sh, mc, parseInt(ri));
-  });
 }
 
 // ── Run management ─────────────────────────────────────────────
@@ -1934,7 +1570,6 @@ function addRun(sh, mcId){
   data.shifts[sh].machines[mcId]=m;
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   markUnsaved();
-  pushToServer(fl,d,data);
 
   // Inject new run row directly into DOM without full re-render (avoids shift collapse)
   const runsContainer=document.getElementById(`runs-${sh}-${mcId}`);
@@ -1944,17 +1579,15 @@ function addRun(sh, mcId){
     const div=document.createElement('div');
     div.className='run-row';
     div.dataset.sh=sh; div.dataset.mc=mcId; div.dataset.ri=ri;
-    div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}`;
+    div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed var(--b2)':''}`;
     const orders=activeOrders[mcId]||[];
-    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>{
-      const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
-      return `<option value="${esc(o.id)}">${o.isTemp?'⚠️ ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(custShort)}</option>`;
-    }).join('');
+    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}">${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp&&o.pcCode?' | PC:'+esc(o.pcCode):''}${o.isTemp&&!o.colourConfirmed?' ⚠️ PC not set':''}</option>`).join('');
     div.innerHTML=`
       ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
       <select id="run-ord-${sh}-${mcId}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mcId}',${ri})" title="Select active order">${ordOpts}</select>
-      <input type="text" id="run-batch-${sh}-${mcId}-${ri}" placeholder="Batch #" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
+      <input type="text" id="run-batch-${sh}-${mcId}-${ri}" placeholder="Batch #" readonly style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0;background:var(--s2);cursor:default;opacity:0.8" title="Auto-filled from order selection">
       <input type="number" id="run-qty-${sh}-${mcId}-${ri}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" oninput="markUnsaved();updateMcTotals('${sh}','${mcId}')" title="Production in Lakhs">
+      <span id="run-colour-${sh}-${mcId}-${ri}" style="font-size:10px;font-weight:700;color:var(--cyan);font-family:var(--mono);flex-shrink:0;min-width:60px">—</span>
       <input type="text" id="run-note-${sh}-${mcId}-${ri}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()">
       <button onclick="removeRun('${sh}','${mcId}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>
     `;
@@ -1977,7 +1610,6 @@ function removeRun(sh, mcId, ri){
   data.shifts[sh].machines[mcId]=m;
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   markUnsaved();
-  pushToServer(fl,d,data);
   renderShifts();
   document.getElementById(`sb-${sh}`)?.classList.add('open');
 }
@@ -1985,16 +1617,14 @@ function removeRun(sh, mcId, ri){
 function onRunOrderChange(sh, mcId, ri){
   const sel=document.getElementById(`run-ord-${sh}-${mcId}-${ri}`);
   const batchInp=document.getElementById(`run-batch-${sh}-${mcId}-${ri}`);
+  const colourEl=document.getElementById(`run-colour-${sh}-${mcId}-${ri}`);
   const ordId=sel?.value;
   if(ordId && activeOrders[mcId]){
     const ord=activeOrders[mcId].find(o=>o.id===ordId);
     if(ord){
       if(batchInp) batchInp.value=ord.batchNumber||ord.poNumber||'';
-      // Auto-fill note with colour if note is empty
-      const noteInp=document.getElementById(`run-note-${sh}-${mcId}-${ri}`);
-      if(noteInp && !noteInp.value && ord.colour){
-        noteInp.value=ord.colour;
-      }
+      // Auto-populate colour from order
+      if(colourEl) colourEl.textContent=ord.colour||'—';
       // Show order qty and remaining qty as a tooltip/note on the run row
       const rowEl=document.querySelector(`.run-row[data-sh="${sh}"][data-mc="${mcId}"][data-ri="${ri}"]`);
       if(rowEl){
@@ -2005,11 +1635,11 @@ function onRunOrderChange(sh, mcId, ri){
           infoEl.style.cssText='font-size:9px;color:var(--t3);font-family:var(--mono);white-space:nowrap;flex-shrink:0';
           rowEl.appendChild(infoEl);
         }
-        const planned=Math.round((ord.qty||0)*100)/100;
-        const actual=Math.round((ord.actualQty||0)*100)/100;
-        const remaining=Math.max(0,Math.round((planned-actual)*100)/100);
+        const planned=ord.qty||0;
+        const actual=ord.actualQty||0;
+        const remaining=Math.max(0,planned-actual);
         infoEl.textContent=`Ord:${planned}L Prod:${actual}L Rem:${remaining}L`;
-        infoEl.style.color='var(--green)';
+        infoEl.style.color=remaining<=0?'var(--green)':'var(--t3)';
       }
     }
   }
@@ -2022,9 +1652,8 @@ function updateMcTotals(sh, mcId){
   const runQtyEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mcId}"] input[id^="run-qty-"]`);
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
-  total=Math.round(total*100)/100;
   const t=tgt(fl,mcId);
-  const vs=total>0?Math.round((total-t)*100)/100:null;
+  const vs=total>0?total-t:null;
   const totEl=document.getElementById(`tot-${sh}-${mcId}`);
   const vsEl=document.getElementById(`vs-${sh}-${mcId}`);
   if(totEl){
@@ -2048,20 +1677,10 @@ function updateShiftTotals(sh){
     const aimEl=document.getElementById(`aim-${sh}-${mc.id}`);
     shAim+=parseFloat(aimEl?.value||0);
   });
-  shProd=Math.round(shProd*100)/100;
-  shAim=Math.round(shAim*100)/100;
-  const shTgtTotal = getActiveMachines(fl).reduce((s,mc)=>s+tgt(fl,mc.id),0);
-  const shVsLive = shProd>0?Math.round((shProd-shTgtTotal)*100)/100:null;
-
   const totEl=document.getElementById(`shtot-${sh}`);
   if(totEl) totEl.textContent=shProd||'—';
-
-  // Update VS TGT cell in shift total row
-  const vsEl=document.getElementById(`shvs-${sh}`);
-  if(vsEl) vsEl.innerHTML=shVsLive===null?'<span class="vs-zero">—</span>':shVsLive>=0?`<span class="vs-pos">+${shVsLive}</span>`:`<span class="vs-neg">${shVsLive}</span>`;
-
-  const aimEl2=document.getElementById(`shaim-${sh}`);
-  if(aimEl2) aimEl2.textContent=shAim||'—';
+  const aimEl=document.getElementById(`shaim-${sh}`);
+  if(aimEl) aimEl.textContent=shAim||'—';
 }
 
 function updateBacklog(sh,mcId){
@@ -2070,83 +1689,34 @@ function updateBacklog(sh,mcId){
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
   const a=parseFloat(document.getElementById(`aim-${sh}-${mcId}`)?.value||0);
-  // Backlog = BACKLOG: positive=excess, negative=behind
-  const bl = a>0 ? Math.round((total-a)*100)/100 : (total>0?total:null);
+  // Backlog = Production - AIM (positive = capsules still waiting for AIM)
+  const bl=total>0?Math.max(0,total-a):null;
   const el=document.getElementById(`bl-${sh}-${mcId}`);
   if(el){
-    if(bl===null){ el.textContent='—'; el.style.color='var(--t3)'; }
-    else if(bl>0){ el.textContent='+'+bl; el.style.color='var(--green)'; }
-    else if(bl<0){ el.textContent=bl; el.style.color='var(--red)'; }
-    else { el.textContent='0'; el.style.color='var(--t2)'; }
+    el.textContent=bl===null?'—':bl;
+    el.style.color=bl>0?'var(--amber)':'var(--t2)';
   }
 }
 
 function renderDTTable(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
-
-  const SHIFT_COLOR = { A:'#00d4ff', B:'#00e676', C:'#ffab00' };
-  const SHIFT_BG    = { A:'rgba(0,212,255,0.10)', B:'rgba(0,230,118,0.10)', C:'rgba(255,171,0,0.10)' };
-
-  // Header row — Machine + grouped shift columns
-  let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;min-width:700px;font-size:12px">
-    <thead>
-      <!-- Row 1: shift group labels -->
-      <tr>
-        <th rowspan="2" style="padding:6px 10px;text-align:left;font-family:var(--fc);font-size:11px;color:var(--t3);border:1px solid var(--b1);background:var(--s2);position:sticky;left:0;z-index:2;white-space:nowrap">Machine</th>
-        ${SHIFTS.map(sh=>`
-          <th colspan="${DT_CATS.length}" style="padding:5px 8px;text-align:center;font-family:var(--fc);font-size:11px;font-weight:700;letter-spacing:1px;color:${SHIFT_COLOR[sh]};background:${SHIFT_BG[sh]};border:1px solid ${SHIFT_COLOR[sh]}55;border-bottom:2px solid ${SHIFT_COLOR[sh]}">
-            SHIFT ${sh}
-          </th>`).join('')}
-      </tr>
-      <!-- Row 2: category labels per shift -->
-      <tr>
-        ${SHIFTS.map(sh=>DT_CATS.map(c=>`
-          <th style="padding:4px 5px;text-align:center;font-family:var(--fc);font-size:10px;color:${SHIFT_COLOR[sh]};background:${SHIFT_BG[sh]};border:1px solid ${SHIFT_COLOR[sh]}33;white-space:nowrap;letter-spacing:.3px">
-            ${DT_LABELS[c].substring(0,4)}
-          </th>`).join('')).join('')}
-      </tr>
-    </thead>
-    <tbody>`;
-
-  mcs.forEach((mc, ri)=>{
-    const rowBg = ri%2===0 ? 'transparent' : 'rgba(255,255,255,0.025)';
-    html += `<tr style="background:${rowBg}">
-      <td style="padding:4px 10px;font-family:var(--mono);font-size:12px;color:var(--cyan);font-weight:600;border:1px solid var(--b1);position:sticky;left:0;background:var(--bg1);z-index:1;white-space:nowrap">${mc.id}</td>
-      ${SHIFTS.map(sh=>{
-        const m = migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-        return DT_CATS.map(c=>{
-          const val = m[c]||'';
-          const v = parseFloat(val)||0;
-          const cellBg = v>=60?'rgba(255,64,96,0.15)':v>=30?'rgba(255,171,0,0.12)':v>0?SHIFT_BG[sh]:'transparent';
-          const cellClr = v>=60?'#ff4060':v>=30?'var(--amber)':v>0?SHIFT_COLOR[sh]:'var(--t2)';
-          return `<td style="padding:2px 3px;border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};text-align:center;background:${cellBg}">
-            <input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0"
-              style="width:38px;text-align:center;background:transparent;border:none;color:${cellClr};font-family:var(--mono);font-size:12px;padding:1px 0"
-              oninput="markUnsaved();updateDTSummary();updateDTTotalRow()">
-          </td>`;
-        }).join('');
-      }).join('')}
-    </tr>`;
+  let html=`<table class="dttable"><thead><tr><th>Machine</th>`;
+  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>html+=`<th>${sh}/${DT_LABELS[c].substring(0,4)}</th>`));
+  html+=`</tr></thead><tbody>`;
+  mcs.forEach(mc=>{
+    html+=`<tr><td>MC${mc.id.replace('MC','')}</td>`;
+    SHIFTS.forEach(sh=>DT_CATS.forEach(c=>{
+      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+      const val=m[c]||'';
+      html+=`<td><input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0" style="width:44px" oninput="markUnsaved();updateDTSummary()"></td>`;
+    }));
+    html+=`</tr>`;
   });
-
-  // Totals row
-  html += `<tr style="border-top:2px solid var(--b1)">
-    <td style="padding:4px 10px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px;border:1px solid var(--b1);position:sticky;left:0;background:var(--bg1);z-index:1">TOTAL</td>
-    ${SHIFTS.map(sh=>DT_CATS.map(c=>{
-      const total = mcs.reduce((s,mc)=>{
-        const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-        return s+parseFloat(m[c]||0);
-      },0);
-      return `<td id="dt-total-${sh}-${c}" style="padding:4px 3px;text-align:center;font-family:var(--mono);font-size:12px;font-weight:700;color:${total>0?SHIFT_COLOR[sh]:'var(--t3)'};border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};background:${SHIFT_BG[sh]}">${total||'—'}</td>`;
-    }).join('')).join('')}
-  </tr>`;
-
-  html += `</tbody></table></div>`;
+  html+=`</tbody></table>`;
   document.getElementById('dtTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
-  // Recalculate totals from live input values immediately after render
-  setTimeout(updateDTTotalRow, 0);
 }
+
 function renderDTSummary(){
   const fl=curFloor, d=getDate();
   const mcs=getActiveMachines(fl);
@@ -2189,93 +1759,23 @@ function renderDTSummary(){
 }
 function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
 
-// Update TOTAL row in DT table live from input values — no save/refresh needed
-function updateDTTotalRow(){
-  const mcs = getActiveMachines(curFloor);
-  SHIFTS.forEach(sh=>{
-    DT_CATS.forEach(c=>{
-      let total = 0;
-      mcs.forEach(mc=>{
-        const el = document.getElementById('dt-'+sh+'-'+mc.id+'-'+c);
-        if(el) total += parseFloat(el.value||0);
-      });
-      // Find the total cell for this shift+category
-      const totalCell = document.getElementById('dt-total-'+sh+'-'+c);
-      if(totalCell){
-        const SHIFT_COLOR = { A:'#00d4ff', B:'#00e676', C:'#ffab00' };
-        totalCell.textContent = total || '—';
-        totalCell.style.color = total > 0 ? SHIFT_COLOR[sh] : 'var(--t3)';
-      }
-    });
-  });
-}
-
 function renderRemarks(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const rem=day.remarks||[];
-
-  const SHIFT_CFG={
-    A:{color:'#00d4ff',bg:'rgba(0,212,255,0.07)',label:'SHIFT A'},
-    B:{color:'#00e676',bg:'rgba(0,230,118,0.07)',label:'SHIFT B'},
-    C:{color:'#ffab00',bg:'rgba(255,171,0,0.07)',label:'SHIFT C'},
-    General:{color:'#b388ff',bg:'rgba(179,136,255,0.07)',label:'GENERAL'}
-  };
-
-  let html='<div style="display:flex;flex-direction:column;gap:0">';
-
-  ['A','B','C','General'].forEach((sh,si)=>{
-    const cfg=SHIFT_CFG[sh];
-    const shRemarks=rem.map((r,i)=>({...r,_i:i})).filter(r=>(r.shift||'General')===sh);
-    const isLast=si===3;
-    html+=`<div style="border:1px solid ${cfg.color}33;${si===0?'border-radius:8px 8px 0 0':isLast?'border-radius:0 0 8px 8px;border-top:none':'border-top:none'}">
-      <div style="background:${cfg.bg};border-bottom:1px solid ${cfg.color}44;padding:7px 14px;display:flex;align-items:center;gap:10px">
-        <span style="font-family:var(--fc);font-size:12px;font-weight:700;color:${cfg.color};letter-spacing:1px">${cfg.label}</span>
-        <span style="font-size:11px;color:var(--t3)">${shRemarks.length} remark${shRemarks.length!==1?'s':''}</span>
-      </div>`;
-
-    if(shRemarks.length===0){
-      html+=`<div style="padding:8px 14px;color:var(--t3);font-size:11px;font-style:italic">No remarks for this shift.</div>`;
-    } else {
-      html+=`<table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:var(--s2)">
-          <th style="padding:5px 10px;text-align:left;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px;width:80px">MACHINE</th>
-          <th style="padding:5px 10px;text-align:left;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">REMARK / ISSUE</th>
-          <th style="padding:5px 8px;width:36px"></th>
-        </tr></thead>
-        <tbody>`;
-      shRemarks.forEach((r,ri)=>{
-        const rowBg=ri%2===0?'transparent':'rgba(255,255,255,0.02)';
-        html+=`<tr style="background:${rowBg};border-top:1px solid var(--b1)">
-          <td style="padding:5px 10px;vertical-align:top;font-family:var(--mono);font-size:12px;color:${cfg.color};font-weight:600;white-space:nowrap">
-            ${r.mc||'<span style="color:var(--t3);font-weight:400;font-style:italic;font-family:inherit">—</span>'}
-          </td>
-          <td style="padding:4px 6px;vertical-align:top">
-            <textarea id="rem-edit-${r._i}" rows="1"
-              style="width:100%;min-height:30px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:3px 5px;color:var(--t1);font-family:inherit;line-height:1.5"
-              oninput="saveRemarkEdit(${r._i});this.style.height='auto';this.style.height=this.scrollHeight+'px'"
-              onfocus="this.style.borderColor='${cfg.color}'"
-              onblur="this.style.borderColor='transparent'"
-            >${esc(r.text)}</textarea>
-          </td>
-          <td style="padding:5px 6px;vertical-align:top;text-align:center">
-            <button onclick="deleteRemark(${r._i})"
-              style="background:none;border:1px solid var(--red)55;border-radius:4px;color:var(--red);cursor:pointer;font-size:10px;padding:2px 6px">✕</button>
-          </td>
-        </tr>`;
-      });
-      html+=`</tbody></table>`;
-    }
-    html+=`</div>`;
+  if(rem.length===0){document.getElementById('remList').innerHTML=`<div style="color:var(--t3);font-size:12px;padding:8px">No remarks. Click "+ Add Remark" to log issues.</div>`;return;}
+  let html='';
+  rem.forEach((r,i)=>{
+    const mcLabel=r.mc?`<span style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:6px">${r.mc}</span>`:'';
+    html+=`<div class="remark-row" style="align-items:flex-start;gap:8px;padding:7px 10px;border-bottom:1px solid var(--b1)">
+      <span class="rem-shift" style="flex-shrink:0">Shift ${r.shift}</span>
+      ${mcLabel}
+      <div style="flex:1;min-width:0">
+        <textarea id="rem-edit-${i}" style="width:100%;min-height:48px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px 4px;color:var(--t1)" oninput="saveRemarkEdit(${i})" onfocus="this.style.borderColor='var(--cyan)'" onblur="this.style.borderColor='transparent'">${esc(r.text)}</textarea>
+      </div>
+      <button class="btn-sm danger" style="flex-shrink:0" onclick="deleteRemark(${i})">✕</button>
+    </div>`;
   });
-
-  html+='</div>';
   document.getElementById('remList').innerHTML=html;
-
-  // Auto-resize all textareas
-  rem.forEach((_,i)=>{
-    const ta=document.getElementById(`rem-edit-${i}`);
-    if(ta){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
-  });
 }
 
 function saveRemarkEdit(i){
@@ -2285,8 +1785,6 @@ function saveRemarkEdit(i){
   day.remarks[i].text=el.value;
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   markUnsaved();
-  // Push to server so remark edit is not lost on restart
-  pushToServer(fl,d,day);
 }
 function addRemark(){
   const fl=curFloor;
@@ -2303,8 +1801,6 @@ function addRemark(){
       day.remarks.push({shift:v('rem-shift'),mc,text:v('rem-text'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
       closeModal();renderRemarks();markUnsaved();
-      // Push to server immediately so remark is permanent
-      pushToServer(fl,d,day);
     }},
     {label:'Cancel',fn:closeModal}
   ]);
@@ -2315,8 +1811,6 @@ function deleteRemark(i){
   day.remarks.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   renderRemarks();
-  // Push to server so deletion is permanent
-  pushToServer(fl,d,day);
 }
 
 function renderResort(){
@@ -2352,8 +1846,6 @@ function addResort(){
       day.resort.push({mc:v('rs-mc'),shift:v('rs-shift'),reason:v('rs-reason'),qty:parseFloat(v('rs-qty')),note:v('rs-note'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
       closeModal();renderResort();renderDayKpis();renderShifts();markUnsaved();
-      // Push to server immediately so re-sort entry is permanent
-      pushToServer(fl,d,day);
     }},
     {label:'Cancel',fn:closeModal}
   ]);
@@ -2363,8 +1855,6 @@ function deleteResort(i){
   day.resort.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
   renderResort();renderDayKpis();renderShifts();
-  // Push to server so deletion is permanent
-  pushToServer(fl,d,day);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2394,21 +1884,21 @@ function renderAnalytics(){
     ]
   },options:{...chartOpts(),plugins:{...chartOpts().plugins,legend:{display:true,labels:{color:'#7a8ba8',font:{size:10}}}}}});
 
-  // DT by category
+  // DT by category — minutes + %
   const dtCats={proc:0,mech:0,elec:0,gpr:0,hvac:0,dw:0};
+  const DT_MAX_MINS = 1440; // 24h * 60min per dept per day
   mcs.forEach(mc=>SHIFTS.forEach(sh=>{
     const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
     DT_CATS.forEach(c=>dtCats[c]+=parseFloat(m[c]||0));
   }));
-  newChart('ch-dt',{type:'doughnut',data:{
-    labels:DT_CATS.map(c=>DT_LABELS[c]),
-    datasets:[{data:DT_CATS.map(c=>dtCats[c]),backgroundColor:CHART_COLORS,borderWidth:0}]
-  },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}}},responsive:true,maintainAspectRatio:false}});
-
-  // Downtime % per Department (NEW) — shows each DT category as % of max daily minutes
-  const DT_MAX_MINS = 1440; // 24h × 60min — theoretical max downtime per dept per day
   const dtPcts = {};
-  DT_CATS.forEach(c => dtPcts[c] = Math.min(100, (dtCats[c] / DT_MAX_MINS * 100)));
+  DT_CATS.forEach(c=>dtPcts[c]=Math.min(100,(dtCats[c]/DT_MAX_MINS*100)));
+  // Donut: minutes breakdown
+  newChart('ch-dt',{type:'doughnut',data:{
+    labels:DT_CATS.map(c=>DT_LABELS[c]+' ('+dtCats[c]+'min)'),
+    datasets:[{data:DT_CATS.map(c=>dtCats[c]||0.001),backgroundColor:CHART_COLORS,borderWidth:0}]
+  },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}}},responsive:true,maintainAspectRatio:false}});
+  // Bar: DT % per department
   newChart('ch-dt-pct',{type:'bar',data:{
     labels:DT_CATS.map(c=>DT_LABELS[c]),
     datasets:[{
@@ -2511,83 +2001,22 @@ function renderTrends(){
 function renderAIM(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
-  let html=`<table class="data-table"><thead><tr>
-    <th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th>
-    <th>Backlog / Excess</th><th>Status</th>
-  </tr></thead><tbody>`;
-  let totalAIM=0, totalProd=0;
-
+  let html=`<table class="data-table"><thead><tr><th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th><th>Backlog</th><th>Status</th></tr></thead><tbody>`;
   mcs.forEach(mc=>{
-    let prod=0, aim=0;
+    let prod=0,aim=0;
     SHIFTS.forEach(sh=>{
       const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
       prod+=mcTotalProd(m);
       aim+=parseFloat(m.aim||0);
     });
-    prod=Math.round(prod*100)/100;
-    aim=Math.round(aim*100)/100;
-    totalAIM+=aim;
-    totalProd+=prod;
-
-    // Formula: BACKLOG
-    const diff = aim>0 ? Math.round((prod - aim)*100)/100 : null;
-
-    let diffCell, statusCell;
-    if(diff===null){
-      diffCell  = `<span style="color:var(--t3)">—</span>`;
-      statusCell = `<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>`;
-    } else if(diff>0){
-      diffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:700">+${diff} Excess</span>`;
-      statusCell = `<span class="pill g">Excess +${diff}</span>`;
-    } else if(diff<0){
-      diffCell  = `<span style="color:var(--red);font-family:var(--mono);font-weight:700">${diff} Behind</span>`;
-      statusCell = `<span class="pill r">Behind ${diff}</span>`;
-    } else {
-      diffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:700">0</span>`;
-      statusCell = `<span class="pill g">On Track</span>`;
-    }
-
-    html+=`<tr>
-      <td class="mono">${mc.id}</td>
-      <td style="color:var(--t3)">${mc.sz}</td>
-      <td class="mono">${aim||'—'}</td>
-      <td class="mono">${prod||'—'}</td>
-      <td>${diffCell}</td>
-      <td>${statusCell}</td>
-    </tr>`;
+    const bl=aim>0?Math.max(0,aim-prod):null;
+    const st=aim===0?'<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>':
+      bl===0?'<span class="pill g">On Track</span>':
+      bl>0?`<span class="pill a">Behind by ${bl}</span>`:
+      '<span class="pill g">Ahead</span>';
+    html+=`<tr><td class="mono">${mc.id}</td><td style="color:var(--t3)">${mc.sz}</td><td class="mono">${aim||'—'}</td><td class="mono">${prod||'—'}</td><td class="mono">${bl===null?'—':bl}</td><td>${st}</td></tr>`;
   });
-
-  // ── TOTAL ROW ──────────────────────────────────────────
-  totalAIM  = Math.round(totalAIM*100)/100;
-  totalProd = Math.round(totalProd*100)/100;
-  const totalDiff = totalAIM>0 ? Math.round((totalProd - totalAIM)*100)/100 : null;
-
-  let totalDiffCell, totalStatusCell;
-  if(totalDiff===null){
-    totalDiffCell  = `<span style="color:var(--t3)">—</span>`;
-    totalStatusCell = `<span style="color:var(--t3);font-family:var(--fc);font-size:11px">No AIM</span>`;
-  } else if(totalDiff>0){
-    totalDiffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:800;font-size:14px">+${totalDiff} Excess</span>`;
-    totalStatusCell = `<span class="pill g">Excess +${totalDiff}</span>`;
-  } else if(totalDiff<0){
-    totalDiffCell  = `<span style="color:var(--red);font-family:var(--mono);font-weight:800;font-size:14px">${totalDiff} Behind</span>`;
-    totalStatusCell = `<span class="pill r">Behind ${totalDiff}</span>`;
-  } else {
-    totalDiffCell  = `<span style="color:var(--green);font-family:var(--mono);font-weight:800;font-size:14px">0</span>`;
-    totalStatusCell = `<span class="pill g">On Track</span>`;
-  }
-
-  html+=`</tbody>
-  <tfoot>
-    <tr style="border-top:2px solid var(--b2);background:rgba(0,212,255,0.06)">
-      <td colspan="2" style="padding:8px 10px;font-family:var(--fc);font-weight:800;font-size:12px;letter-spacing:1px;color:var(--cyan)">TOTAL</td>
-      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--cyan)">${totalAIM||'—'}</td>
-      <td style="padding:8px 10px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--green)">${totalProd||'—'}</td>
-      <td style="padding:8px 10px">${totalDiffCell}</td>
-      <td style="padding:8px 10px">${totalStatusCell}</td>
-    </tr>
-  </tfoot>
-  </table>`;
+  html+=`</tbody></table>`;
   document.getElementById('aimTable').innerHTML=html;
 
   // AIM chart
@@ -2621,8 +2050,6 @@ function renderShiftPersonnelPerf(){
     utility:    { label:'Shift Utility',    dtCats:['hvac'],        color:'#A8E6CF' },
     gpr_staff:  { label:'Shift GPR',        dtCats:['gpr','dw'],    color:'#FFD93D' },
     aim_staff:  { label:'Shift AIM',        dtCats:[],              color:'#FF6B6B', isAIM:true },
-    fitter:     { label:'Shift Fitter',     dtCats:['mech'],        color:'#FFA07A', isSingle:true },
-    chemist:    { label:'Shift Chemist',    dtCats:['proc'],        color:'#C3A6FF', isArray:true  },
   };
 
   // Aggregate stats per role per person across all saved days
@@ -2638,13 +2065,13 @@ function renderShiftPersonnelPerf(){
       const sd=dy.shifts[sh];
       const dt=calcShiftDT(fl,date,sh);
       Object.entries(ROLE_MAP).forEach(([roleKey, roleCfg])=>{
-        // Handle both array fields (chemist, electrical etc) and string fields (fitter)
-        const raw = sd[roleKey];
-        const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(n=>String(n).trim());
+        const names=(sd[roleKey]||[]).filter(n=>n.trim());
         names.forEach(name=>{
           if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
           personStats[name].shiftsWorked++;
           if(roleCfg.isAIM){
+            // AIM performance: count AIM boxes scanned — use tracking data if available
+            // Fall back to DPR AIM column sum for this shift
             let aimSum=0;
             getActiveMachines(fl).forEach(mc=>{
               const m=migrateMachineData((sd.machines||{})[mc.id]||blankMachine());
@@ -2652,6 +2079,7 @@ function renderShiftPersonnelPerf(){
             });
             personStats[name].aimBoxes+=aimSum;
           } else {
+            // DT performance: lower DT = better
             let roleDT=0;
             roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
             personStats[name].dtMins+=roleDT;
@@ -2668,12 +2096,11 @@ function renderShiftPersonnelPerf(){
     const sd=todayDay.shifts[sh];
     const dt=calcShiftDT(fl,today,sh);
     Object.entries(ROLE_MAP).forEach(([roleKey,roleCfg])=>{
-      const raw = sd[roleKey];
-      const names = (Array.isArray(raw) ? raw : (raw ? [raw] : [])).filter(n=>String(n).trim());
+      const names=(sd[roleKey]||[]).filter(n=>n.trim());
       names.forEach(name=>{
         if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
         const already=allKeys.some(k=>k.includes(`_${fl}_${today}`));
-        if(!already){
+        if(!already){ // avoid double-counting if already saved
           personStats[name].shiftsWorked++;
           if(roleCfg.isAIM){
             let aimSum=0;
@@ -2713,15 +2140,7 @@ function renderShiftPersonnelPerf(){
     html+=`<div style="margin-bottom:20px">
       <div style="font-family:var(--fc);font-size:11px;letter-spacing:.8px;color:${roleCfg.color};margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--b2)">
         ${roleCfg.label.toUpperCase()}
-        ${roleCfg.isAIM
-          ? '— scored on AIM lakhs inspected'
-          : roleCfg.dtCats.length===0
-            ? ''
-            : roleKey==='fitter'
-              ? '— scored on linked DT (MECH)'
-              : roleKey==='chemist'
-                ? '— scored on linked DT (PROCESS)'
-                : '— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
+        ${roleCfg.isAIM?'— scored on AIM lakhs inspected':'— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
       </div>
       <table class="data-table"><thead><tr>
         <th>Name</th>
@@ -2777,14 +2196,7 @@ function renderShiftPersonnelPerf(){
 
 function renderPerf(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  let html=`<table class="data-table"><thead><tr>
-    <th>Shift</th>
-    <th>Incharge</th>
-    <th>Production</th>
-    <th>Efficiency</th>
-    <th>DT%</th>
-    <th>Score</th>
-  </tr></thead><tbody>`;
+  let html=`<table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0;
@@ -2799,10 +2211,8 @@ function renderPerf(){
     const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
     const sc=parseInt(score);
     const scCls=sc>=80?'g':sc>=60?'a':'r';
-
-    html+=`<tr>
-      <td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
-      <td style="font-weight:600">${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
+    html+=`<tr><td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
+      <td>${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
       <td class="mono">${prod||'—'}</td>
       <td><span class="pill ${eff>=90?'g':eff>=75?'a':'r'}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
       <td><span class="pill ${dt.dtPct<=5?'g':dt.dtPct<=10?'a':'r'}">${dt.total>0?dt.dtPct.toFixed(1)+'%':'—'}</span></td>
@@ -2894,48 +2304,31 @@ function renderPerf(){
 // ═══════════════════════════════════════════════════════
 // HISTORY
 // ═══════════════════════════════════════════════════════
-async function renderHistory(){
-  const el = document.getElementById('historyList');
-  el.innerHTML = '<div style="padding:12px;color:var(--t3);font-family:var(--fc);font-size:12px">⟳ Loading records...</div>';
+function renderHistory(){
+  const allKeys=Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
+  const entries=allKeys.map(k=>{
+    const parts=k.split('_');
+    return{key:k,floor:parts[1],date:parts[2]};
+  }).sort((a,b)=>b.date.localeCompare(a.date));
 
-  // Collect local entries
-  const localKeys = Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
-  const localEntries = localKeys.map(k=>{ const p=k.split('_'); return{floor:p[1],date:p[2]}; });
-
-  // Also fetch server records list if online
-  let serverEntries = [];
-  if(serverUrl){
-    try{
-      const r = await fetch(serverUrl+'/api/dpr/history', {signal:AbortSignal.timeout(6000)});
-      if(r.ok){
-        const j = await r.json();
-        if(j.ok && j.records) serverEntries = j.records; // [{floor, date}]
-      }
-    }catch(e){}
-  }
-
-  // Merge local + server entries (deduplicate by floor+date)
-  const seen = new Set();
-  const allEntries = [];
-  [...serverEntries, ...localEntries].forEach(e=>{
-    const key = e.floor+'_'+e.date;
-    if(!seen.has(key) && e.floor && e.date){ seen.add(key); allEntries.push(e); }
+  // Date filter controls
+  const filterDate=document.getElementById('hist-filter-date')?.value||'';
+  const filterFloor=document.getElementById('hist-filter-floor')?.value||'';
+  const filtered=entries.filter(e=>{
+    if(filterDate && e.date!==filterDate) return false;
+    if(filterFloor && e.floor!==filterFloor) return false;
+    return true;
   });
-  allEntries.sort((a,b)=>b.date.localeCompare(a.date));
 
-  if(!allEntries.length){
-    el.innerHTML='<p style="color:var(--t3);padding:10px">No saved records yet.</p>';
-    return;
-  }
+  if(!entries.length){document.getElementById('historyList').innerHTML=`<p style="color:var(--t3);padding:10px">No saved records yet.</p>`;return;}
 
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  let html=`<div style="font-size:11px;color:var(--t3);margin-bottom:8px">${allEntries.length} records found — click Load to view any date</div>`;
-  html+=`<table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
-  allEntries.forEach(e=>{
-    const s = calcDayStats(e.floor, e.date);
-    const[y,m,d]=e.date.split('-');
+  let html=`<table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
+  (filtered.length?filtered:entries).forEach(e=>{
+    const s=calcDayStats(e.floor,e.date);
+    const[y,mo,dy]=e.date.split('-');
     html+=`<tr>
-      <td class="mono">${parseInt(d)} ${months[parseInt(m)-1]} ${y}</td>
+      <td class="mono">${parseInt(dy)} ${months[parseInt(mo)-1]} ${y}</td>
       <td style="color:var(--t2)">${FLOORS[e.floor]?.label||e.floor}</td>
       <td class="mono">${s.totProd||'—'}</td>
       <td><span class="pill ${s.eff>=90?'g':s.eff>=75?'a':'r'}">${s.totProd>0?s.eff.toFixed(1)+'%':'—'}</span></td>
@@ -2944,20 +2337,16 @@ async function renderHistory(){
       <td><button class="btn-sm" onclick="loadRecord('${e.floor}','${e.date}')">Load</button></td>
     </tr>`;
   });
+  if(filtered.length===0 && filterDate) html+=`<tr><td colspan="7" style="color:var(--t3);text-align:center;padding:12px">No records for selected date/floor.</td></tr>`;
   html+=`</tbody></table>`;
-  el.innerHTML = html;
+  document.getElementById('historyList').innerHTML=html;
 }
-
-function loadRecord(fl, d){
-  curFloor = fl;
-  document.getElementById('ndate').value = d;
+function loadRecord(fl,d){
+  curFloor=fl;
+  document.getElementById('ndate').value=d;
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
   document.getElementById(`ftab-${fl}`)?.classList.add('on');
   go('entry');
-  updateSaveBtnStyle(d);
-  const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
-  renderEntry();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2985,7 +2374,7 @@ function renderSettings(){
 
   // Machine settings
   renderMachineSettings();
-  // Manpower master names
+  // Manpower master
   renderManpowerSettings();
 }
 
@@ -3010,147 +2399,74 @@ function setFloor(fl){
   curFloor=fl;
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
   document.getElementById('ftab-'+fl)?.classList.add('on');
-  // Show loading then fetch from server
-  const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data from server...</div>';
   renderEntry();
-}
-
-// ── Fetch DPR data for a floor+date from server, merge into localStorage, re-render ──
-async function fetchDpr(fl, d){
-  if(!serverUrl || !fl || !d) return;
-  try{
-    const r = await fetch(serverUrl+`/api/dpr/${fl}/${d}`, {signal:AbortSignal.timeout(6000)});
-    if(!r.ok) return;
-    const j = await r.json();
-    if(j.ok && j.data){
-      // SERVER IS TRUTH — always use server data
-      // Only preserve currently-typed-but-unsaved data if user is actively on this floor+date
-      const isCurrentView = (curFloor===fl && getDate()===d);
-      if(isCurrentView){
-        const shiftsArea = document.getElementById('shiftsArea');
-        const hasUnsavedTyping = shiftsArea && shiftsArea.querySelector('.run-row') && unsaved;
-        if(hasUnsavedTyping){
-          // User has unsaved changes — merge keeping server as base, local as override
-          const local = loadDay(fl, d);
-          const merged = deepMergeDpr(j.data, local);
-          localStorage.setItem(skey(fl,d), JSON.stringify(merged));
-        } else {
-          // No unsaved changes — server data wins completely
-          localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-        }
-      } else {
-        // Background fetch for different floor/date — server always wins
-        localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-      }
-      if(isCurrentView && !document.activeElement?.tagName?.match(/^(input|select|textarea)$/i)) safeRenderShifts();
-    } else if(j.ok && !j.data){
-      // Server has no data for this floor+date
-      // NEVER delete localStorage — user may have just saved and server fetch ran before write completed
-      // Only re-render if we are currently viewing this floor+date and there is no local data either
-      if(curFloor===fl && getDate()===d && !unsaved){
-        safeRenderShifts();
-      }
-    }
-  }catch(e){}
-}
-
-// Merge server data (authoritative) with local data (may have unsaved edits)
-// Server wins for all saved fields; local wins only for unsaved qty > 0
-function deepMergeDpr(server, local){
-  const merged = JSON.parse(JSON.stringify(server)); // deep copy server as base
-  SHIFTS.forEach(sh=>{
-    if(!local?.shifts?.[sh]?.machines) return;
-    Object.keys(local.shifts[sh].machines).forEach(mcId=>{
-      if(!merged.shifts[sh]) return;
-      if(!merged.shifts[sh].machines) merged.shifts[sh].machines={};
-      const localMc = local.shifts[sh].machines[mcId];
-      const serverMc = merged.shifts[sh].machines[mcId];
-      // Only copy local runs if server has no production data (avoids overwriting saved data)
-      if(serverMc){
-        const serverHasProd = (serverMc.runs||[]).some(r=>parseFloat(r.qty||0)>0);
-        const localHasProd = (localMc?.runs||[]).some(r=>parseFloat(r.qty||0)>0);
-        if(!serverHasProd && localHasProd){
-          merged.shifts[sh].machines[mcId].runs = localMc.runs;
-        }
-      } else {
-        merged.shifts[sh].machines[mcId] = localMc;
-      }
-    });
-  });
-  return merged;
 }
 
 function onDateChange(){
   refreshRecentDates();
-  const fl=curFloor, d=getDate();
-  updateSaveBtnStyle(d);
-  const shiftsArea = document.getElementById('shiftsArea');
-  if(shiftsArea && serverUrl) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data for '+d+' from server...</div>';
   renderEntry();
-}
-
-// ── Update Save button style based on whether this date is editable ──
-function updateSaveBtnStyle(d){
-  const saveBtn = document.getElementById('saveBtn');
-  if(!saveBtn) return;
-  const canEdit = canSaveForDate(d || getDate());
-  if(canEdit){
-    // Normal — green Save button
-    saveBtn.className = 'nbtn primary';
-    saveBtn.style.background = '';
-    saveBtn.style.borderColor = '';
-    saveBtn.style.color = '';
-    saveBtn.title = 'Save';
+  // C-shift date handling: if current time is 00:00–08:00 and today is selected, auto-switch to previous day
+  const now=new Date(), h=now.getHours();
+  const selectedDate=getDate(), todayStr=now.toISOString().split('T')[0];
+  if(h>=0&&h<8&&selectedDate===todayStr){
+    const prev=new Date(now); prev.setDate(prev.getDate()-1);
+    const prevStr=prev.toISOString().split('T')[0];
+    // Auto-switch date to previous day
+    document.getElementById('ndate').value=prevStr;
+    // Show persistent banner explaining why
+    const warn=document.getElementById('cshift-date-warn');
+    if(!warn){
+      const bar=document.createElement('div');
+      bar.id='cshift-date-warn';
+      bar.style.cssText='background:rgba(255,171,0,0.15);border:1px solid #f0a500;border-radius:6px;padding:10px 14px;margin:0 24px 12px;font-size:13px;font-weight:600;color:#f0a500;display:flex;align-items:center;gap:8px;';
+      bar.innerHTML=`⚠️ C-Shift mode: It is ${now.toTimeString().slice(0,5)} — date auto-set to <strong>${prevStr}</strong> (previous production day). Data will be saved against ${prevStr}.`;
+      const content=document.getElementById('content');
+      if(content) content.insertBefore(bar,content.firstChild);
+    }
+    // Load data for the previous date
+    const fl=curFloor, d=prevStr;
+    if(serverUrl){
+      fetch(serverUrl+`/api/dpr/${fl}/${d}`,{signal:AbortSignal.timeout(4000)})
+        .then(r=>r.json()).then(j=>{
+          if(j.ok&&j.data){
+            localStorage.setItem(skey(fl,d),JSON.stringify(j.data));
+            renderEntry();toast('C-shift: Loaded '+prevStr+' data','var(--amber)');
+          } else { renderEntry(); }
+        }).catch(()=>renderEntry());
+    } else { renderEntry(); }
+    return; // skip the standard server load below
   } else {
-    // Restricted date — grey/dim Save button, not disabled, just visually deemphasised
-    saveBtn.className = 'nbtn';
-    saveBtn.style.background = 'transparent';
-    saveBtn.style.borderColor = 'var(--t3)';
-    saveBtn.style.color = 'var(--t3)';
-    saveBtn.title = dprUser?.role === 'admin'
-      ? 'Save (Admin — all dates allowed)'
-      : 'View only — only today and previous 2 days can be edited';
+    const warn=document.getElementById('cshift-date-warn');
+    if(warn) warn.remove();
+  }
+  // Try to load from server
+  const fl=curFloor, d=getDate();
+  if(serverUrl){
+    fetch(serverUrl+`/api/dpr/${fl}/${d}`,{signal:AbortSignal.timeout(4000)})
+      .then(r=>r.json()).then(j=>{
+        if(j.ok&&j.data){
+          localStorage.setItem(skey(fl,d),JSON.stringify(j.data));
+          renderEntry();toast('Loaded from server','var(--cyan)');
+        }
+      }).catch(()=>{});
   }
 }
 
-async function refreshRecentDates(){
+function refreshRecentDates(){
   const sel=document.getElementById('recentDatesSelect');
   if(!sel) return;
   const fl=curFloor;
-  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
   // Collect dates from localStorage
   const localDates=[...new Set(
     Object.keys(localStorage)
       .filter(k=>k.startsWith(`dpr3_${fl}_`))
       .map(k=>k.split('_')[2])
       .filter(Boolean)
-  )];
-
-  // Also fetch date list from server
-  let serverDates = [];
-  if(serverUrl){
-    try{
-      const r = await fetch(serverUrl+'/api/dpr/history', {signal:AbortSignal.timeout(4000)});
-      if(r.ok){
-        const j = await r.json();
-        if(j.ok && j.records){
-          serverDates = j.records.filter(e=>e.floor===fl).map(e=>e.date);
-        }
-      }
-    }catch(e){}
-  }
-
-  // Merge and sort — newest first
-  const allDates = [...new Set([...serverDates, ...localDates])]
-    .filter(Boolean)
-    .sort((a,b)=>b.localeCompare(a))
-    .slice(0,90);
-
+  )].sort((a,b)=>b.localeCompare(a)).slice(0,60);
   sel.innerHTML='<option value="">📅 History</option>'+
-    allDates.map(d=>{
+    localDates.map(d=>{
       const [y,m,day]=d.split('-');
+      const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       return `<option value="${d}">${parseInt(day)} ${months[parseInt(m)-1]} ${y}</option>`;
     }).join('');
 }
@@ -3182,8 +2498,7 @@ function openModal(title,body,actions){
   });
   document.getElementById('modal-actions').innerHTML=actHtml;
   (actions||[]).forEach(a=>{
-    const btn = document.getElementById('modal-btn-'+a.label);
-    if(btn) btn.addEventListener('click', typeof a.fn==='function' ? a.fn : new Function(a.fn));
+    document.getElementById('modal-btn-'+a.label)?.addEventListener('click',a.fn);
   });
   document.getElementById('modal-overlay').classList.add('open');
 }
@@ -3192,444 +2507,6 @@ function closeModal(){ document.getElementById('modal-overlay').classList.remove
 // ═══════════════════════════════════════════════════════
 // EXPORT / IMPORT
 // ═══════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════
-// EXPORT SYSTEM — Excel + PDF
-// ══════════════════════════════════════════════════════
-
-function showExportMenu(){
-  openModal('↓ Export Reports', `
-    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
-      <div style="font-family:var(--fc);font-size:10px;letter-spacing:1px;color:var(--t3);margin-bottom:4px">
-        Floor: <b style="color:var(--cyan)">${curFloor}</b> &nbsp;|&nbsp; Date: <b style="color:var(--cyan)">${getDate()}</b>
-      </div>
-
-      <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:4px;margin-bottom:2px">📊 EXCEL (.xlsx)</div>
-      <button class="nbtn" onclick="closeModal();runExport(exportDailyReportExcel)" style="text-align:left;padding:10px 14px">
-        📋 Daily Production Report — All Shifts
-      </button>
-      <button class="nbtn" onclick="closeModal();runExport(exportAimStatusExcel)" style="text-align:left;padding:10px 14px">
-        🎯 AIM Status Report
-      </button>
-      <button class="nbtn" onclick="closeModal();runExport(exportDowntimeExcel)" style="text-align:left;padding:10px 14px">
-        ⏱ Machine-wise Downtime Report
-      </button>
-      <button class="nbtn" onclick="closeModal();runExport(exportShiftPerformanceExcel)" style="text-align:left;padding:10px 14px">
-        👤 Shift Performance Report
-      </button>
-      <button class="nbtn" onclick="closeModal();runExport(exportAllShiftsExcel)" style="text-align:left;padding:10px 14px">
-        📦 Full DPR — All Data (All Sheets)
-      </button>
-
-      <div style="font-family:var(--fc);font-size:11px;color:var(--t2);margin-top:8px;margin-bottom:2px">🖨 PDF (Print)</div>
-      <button class="nbtn" onclick="closeModal();exportPDF()" style="text-align:left;padding:10px 14px">
-        🖨 Print / Save as PDF — Daily Report
-      </button>
-
-      <div style="border-top:1px solid var(--b2);margin-top:8px;padding-top:8px">
-        <button class="nbtn" onclick="closeModal();exportData()" style="text-align:left;padding:8px 14px;font-size:11px;color:var(--t3)">
-          💾 Backup — Full JSON Export
-        </button>
-      </div>
-    </div>
-  `, [{label:'Close', fn:'closeModal()'}]);
-}
-
-// ── Helper: get day data ─────────────────────────────────────────
-// ── Safe array join — handles string, array, null for export ────
-function safeJoin(val, sep=', '){
-  if(!val) return '';
-  if(Array.isArray(val)) return val.filter(Boolean).join(sep);
-  if(typeof val === 'string') return val;
-  return String(val);
-}
-
-// ── Safe cell value — XLSX only accepts string, number, boolean, null ──
-// Converts anything else (objects, arrays, undefined) to safe types
-function safeCell(val){
-  if(val === null || val === undefined || val === '') return '';
-  if(typeof val === 'number') return isFinite(val) ? val : '';
-  if(typeof val === 'boolean') return val ? 1 : 0;
-  if(typeof val === 'string') return val;
-  if(Array.isArray(val)) return val.filter(Boolean).join(', ');
-  if(typeof val === 'object') return JSON.stringify(val);
-  return String(val);
-}
-
-// ── Safe row — sanitizes every cell in a row array ──────────────
-function safeRow(arr){
-  return arr.map(safeCell);
-}
-
-function getExportData(){
-  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  const mcs=getActiveMachines(fl);
-  return {fl,d,day,mcs};
-}
-
-// ── Export wrapper — handles errors cleanly ─────────────────────
-function runExport(fn){
-  try{
-    const result = fn();
-    if(result && result.catch) result.catch(e=>{
-      console.error('[EXPORT ERROR]', e);
-      console.error('[EXPORT STACK]', e?.stack);
-      toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)');
-    });
-  }catch(e){
-    console.error('[EXPORT ERROR SYNC]', e);
-    console.error('[EXPORT STACK]', e?.stack);
-    toast('Export error: '+(e&&e.message?e.message:String(e)),'var(--red)');
-  }
-}
-
-// ── Check XLSX available ────────────────────────────────────────
-function checkXLSX(){
-  if(typeof XLSX === 'undefined'){
-    return new Promise((resolve, reject)=>{
-      const s = document.createElement('script');
-      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-      s.onload = ()=>resolve(true);
-      s.onerror = ()=>reject(new Error('XLSX library failed to load'));
-      document.head.appendChild(s);
-    });
-  }
-  return Promise.resolve(true);
-}
-
-// ── Safe XLSX file download — avoids XLSX.writeFile bug in 0.18.5 ──
-// Uses XLSX.write() to get binary data then creates Blob manually
-function xlsxSaveAs(wb, filename){
-  try {
-    // Try native writeFile first
-    XLSX.writeFile(wb, filename);
-  } catch(e1) {
-    // Fallback: manual Blob download (avoids indexOf bug in XLSX 0.18.5)
-    try {
-      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([wbout], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-    } catch(e2) {
-      throw new Error('Excel download failed: ' + (e2.message || String(e2)));
-    }
-  }
-}
-
-// ── EXCEL: Daily Production Report ──────────────────────────────
-async function exportDailyReportExcel(){
-  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=getExportData();
-  const wb=XLSX.utils.book_new();
-
-  SHIFTS.forEach(sh=>{
-    const sd=day.shifts[sh];
-    const rows=[];
-    // Header info
-    rows.push(safeRow(['SUNLOC DPR  '+fl+'  Shift '+sh+'  '+d]));
-    rows.push([]);
-    rows.push(safeRow(['Process Incharge', sd.incharge||'',
-               'Chemist', safeJoin(sd.chemist),
-               'Fitter', sd.fitter||'']));
-    rows.push(safeRow(['Electrical', safeJoin(sd.electrical),
-               'Utility', safeJoin(sd.utility),
-               'Shift AIM', safeJoin(sd.aim_staff),
-               'Shift GPR', safeJoin(sd.gpr_staff)]));
-    rows.push([]);
-    // Machine table header
-    rows.push(safeRow(['MC','Size','Operator','Order/Batch','Qty (L)','Note','Target','VS Target','AIM','Backlog','Proc DT','Mech DT','Elec DT','GPR DT','HVAC DT','DW DT']));
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      const prod=Math.round(mcTotalProd(m)*100)/100;
-      const t=tgt(fl,mc.id);
-      const vs=prod>0?Math.round((prod-t)*100)/100:null;
-      const aim=parseFloat(m.aim||0);
-      const bl=aim>0?Math.round((prod-aim)*100)/100:null;
-      const runs=m.runs||[blankRun()];
-      runs.forEach((run,ri)=>{
-        rows.push(safeRow([
-          ri===0?mc.id:'', ri===0?mc.sz:'', ri===0?(m.operator||''):'',
-          run.batchNumber||'', run.qty||'', run.note||'',
-          ri===0?t:'', ri===0?(vs!==null?vs:''):'',
-          ri===0?(aim||''):'', ri===0?(bl!==null?bl:''):'',
-          ri===0?(m.proc||0):'', ri===0?(m.mech||0):'', ri===0?(m.elec||0):'',
-          ri===0?(m.gpr||0):'', ri===0?(m.hvac||0):'', ri===0?(m.dw||0):''
-        ]));
-      });
-    });
-    // Totals
-    let shProd=0, shTgt=0, shAim=0;
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      shProd+=mcTotalProd(m); shTgt+=tgt(fl,mc.id); shAim+=parseFloat(m.aim||0);
-    });
-    shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100;
-    rows.push(safeRow(['TOTAL','','','','',shProd,'',shTgt,Math.round((shProd-shTgt)*100)/100,shAim,'','','','','','']));
-    const ws=XLSX.utils.aoa_to_sheet(rows);
-    ws['!cols']=[{wch:8},{wch:6},{wch:14},{wch:14},{wch:8},{wch:14},{wch:7},{wch:8},{wch:8},{wch:8},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7}];
-    XLSX.utils.book_append_sheet(wb,ws,'Shift_'+sh);
-  });
-  xlsxSaveAs(wb, 'DPR_'+fl+'_'+d+'_Production.xlsx');
-  toast('✅ Excel exported','var(--green)');
-}
-
-// ── EXCEL: AIM Status ────────────────────────────────────────────
-async function exportAimStatusExcel(){
-  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=getExportData();
-  const rows=[];
-  rows.push(safeRow(['SUNLOC  AIM Status Report  '+fl+'  '+d]));
-  rows.push([]);
-  rows.push(safeRow(['Machine','Size','AIM (L)','Produced (L)','Produced − AIM','Status']));
-  let totAim=0, totProd=0;
-  mcs.forEach(mc=>{
-    let prod=0,aim=0;
-    SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m); aim+=parseFloat(m.aim||0);
-    });
-    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
-    totAim+=aim; totProd+=prod;
-    const diff=aim>0?Math.round((prod-aim)*100)/100:null;
-    const status=aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track';
-    rows.push(safeRow([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',status]));
-  });
-  totAim=Math.round(totAim*100)/100; totProd=Math.round(totProd*100)/100;
-  const totDiff=totAim>0?Math.round((totProd-totAim)*100)/100:null;
-  rows.push([]);
-  rows.push(safeRow(['TOTAL','',totAim,totProd,totDiff!==null?(totDiff>0?'+'+totDiff:totDiff):'',totDiff>0?'Excess':totDiff<0?'Behind':'On Track']));
-  const wb=XLSX.utils.book_new();
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:8},{wch:6},{wch:10},{wch:12},{wch:14},{wch:12}];
-  XLSX.utils.book_append_sheet(wb,ws,'AIM Status');
-  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_AIM.xlsx');
-  toast('✅ AIM Excel exported','var(--green)');
-}
-
-// ── EXCEL: Downtime ──────────────────────────────────────────────
-async function exportDowntimeExcel(){
-  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=getExportData();
-  const rows=[];
-  rows.push(safeRow(['SUNLOC  Machine-wise Downtime  '+fl+'  '+d]));
-  rows.push([]);
-  const hdr=['Machine'];
-  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>hdr.push('Shift_'+sh+' '+DT_LABELS[c])));
-  hdr.push('Total DT (min)');
-  rows.push(hdr);
-  let grandTotal=0;
-  const colTotals={}; SHIFTS.forEach(sh=>DT_CATS.forEach(c=>{colTotals[sh+c]=0;}));
-  mcs.forEach(mc=>{
-    const row=[mc.id];
-    let mcTotal=0;
-    SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      DT_CATS.forEach(c=>{
-        const v=parseFloat(m[c]||0);
-        row.push(v||0); mcTotal+=v; colTotals[sh+c]+=v;
-      });
-    });
-    row.push(Math.round(mcTotal*10)/10);
-    grandTotal+=mcTotal;
-    rows.push(row);
-  });
-  // Totals row
-  const totRow=['TOTAL'];
-  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>totRow.push(Math.round(colTotals[sh+c]*10)/10)));
-  totRow.push(Math.round(grandTotal*10)/10);
-  rows.push(totRow);
-  const wb=XLSX.utils.book_new();
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb,ws,'Downtime');
-  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_Downtime.xlsx');
-  toast('✅ Downtime Excel exported','var(--green)');
-}
-
-// ── EXCEL: Shift Performance ─────────────────────────────────────
-async function exportShiftPerformanceExcel(){
-  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=getExportData();
-  const rows=[];
-  rows.push(safeRow(['SUNLOC  Shift Performance  '+fl+'  '+d]));
-  rows.push([]);
-  rows.push(safeRow(['Shift','Incharge','Electrical','Utility','AIM Staff','GPR Staff','Production (L)','Target (L)','Efficiency %','DT (min)','DT %','Score']));
-  SHIFTS.forEach(sh=>{
-    const sd=day.shifts[sh];
-    let prod=0,t=0;
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m); t+=tgt(fl,mc.id);
-    });
-    prod=Math.round(prod*100)/100;
-    const dt=calcShiftDT(fl,d,sh);
-    const eff=t>0?Math.round(prod/t*1000)/10:0;
-    const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
-    rows.push(safeRow([
-      'Shift_'+sh,
-      sd.incharge||'',
-      safeJoin(sd.electrical),
-      safeJoin(sd.utility),
-      safeJoin(sd.aim_staff),
-      safeJoin(sd.gpr_staff),
-      prod||'', t, eff+'%', dt.total, dt.dtPct.toFixed(1)+'%', prod>0?score:''
-    ]));
-  });
-  const wb=XLSX.utils.book_new();
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:8},{wch:14},{wch:14},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:10},{wch:10},{wch:10},{wch:8},{wch:7}];
-  XLSX.utils.book_append_sheet(wb,ws,'Shift Performance');
-  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_ShiftPerformance.xlsx');
-  toast('✅ Shift Performance exported','var(--green)');
-}
-
-// ── EXCEL: Full DPR  All sheets ────────────────────────────────
-async function exportAllShiftsExcel(){
-  try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const wb=XLSX.utils.book_new();
-  // Sheet 1: Production
-  const {fl,d,day,mcs}=getExportData();
-  const summaryRows=[['SUNLOC FULL DPR  '+fl+'  '+d],[]];
-  summaryRows.push(safeRow(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']));
-  SHIFTS.forEach(sh=>{
-    const sd=day.shifts[sh];
-    let prod=0,t=0,aim=0;
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m); t+=tgt(fl,mc.id); aim+=parseFloat(m.aim||0);
-    });
-    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
-    const dt=calcShiftDT(fl,d,sh);
-    summaryRows.push(safeRow(['Shift_'+sh, sd.incharge||'', prod, t, Math.round((prod-t)*100)/100, aim, aim>0?Math.round((prod-aim)*100)/100:'', dt.total]));
-  });
-  const summaryWs=XLSX.utils.aoa_to_sheet(summaryRows);
-  XLSX.utils.book_append_sheet(wb,summaryWs,'Summary');
-  // Add individual shift sheets
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([[]]),'_temp');
-  wb.SheetNames.pop(); // remove temp
-  // Re-use production export logic per shift
-  const wbTemp=XLSX.utils.book_new();
-  exportDailyReportExcel.__exportToWb=true;
-  // Just add all sheets manually
-  SHIFTS.forEach(sh=>{
-    const sd=day.shifts[sh];
-    const rows=[['Shift_'+sh+'  '+fl+'  '+d],[]];
-    rows.push(safeRow(['MC','Sz','Operator','Batch','Qty(L)','Note','Target','VS Tgt','AIM','Backlog','Proc','Mech','Elec','GPR','HVAC','DW']));
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      const prod=Math.round(mcTotalProd(m)*100)/100;
-      const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
-      (m.runs||[blankRun()]).forEach((run,ri)=>{
-        rows.push(safeRow([ri===0?mc.id:'',ri===0?mc.sz:'',ri===0?(m.operator||''):'',
-          run.batchNumber||'',run.qty||'',run.note||'',
-          ri===0?t:'',ri===0?Math.round((prod-t)*100)/100:'',
-          ri===0?(aim||0):'',ri===0?(aim>0?Math.round((prod-aim)*100)/100:''):'',
-          ri===0?(m.proc||0):'',ri===0?(m.mech||0):'',ri===0?(m.elec||0):'',
-          ri===0?(m.gpr||0):'',ri===0?(m.hvac||0):'',ri===0?(m.dw||0):''
-        ]));
-      });
-    });
-    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'Shift_'+sh);
-  });
-  // AIM sheet
-  const aimRows=[['AIM Status  '+fl+'  '+d],[]];
-  aimRows.push(safeRow(['MC','Sz','AIM','Produced','Diff','Status']));
-  mcs.forEach(mc=>{
-    let prod=0,aim=0;
-    SHIFTS.forEach(sh=>{const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());prod+=mcTotalProd(m);aim+=parseFloat(m.aim||0);});
-    prod=Math.round(prod*100)/100; aim=Math.round(aim*100)/100;
-    const diff=aim>0?Math.round((prod-aim)*100)/100:null;
-    aimRows.push(safeRow([mc.id,mc.sz,aim||'',prod||'',diff!==null?(diff>0?'+'+diff:diff):'',aim===0?'No AIM':diff>0?'Excess':diff<0?'Behind':'On Track']));
-  });
-  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aimRows),'AIM Status');
-  xlsxSaveAs(wb,'DPR_'+fl+'_'+d+'_FULL.xlsx');
-  toast('✅ Full DPR Excel exported','var(--green)');
-}
-
-// ── PDF: Print Daily Report ──────────────────────────────────────
-function exportPDF(){
-  const {fl,d,day,mcs}=getExportData();
-  let html=`
-    <html><head><title>DPR ${fl} ${d}</title>
-    <style>
-      body{font-family:Arial,sans-serif;font-size:11px;margin:20px;color:#111}
-      h1{font-size:16px;margin-bottom:4px;color:#0a6d91}
-      h2{font-size:13px;margin:16px 0 6px;color:#0a6d91;border-bottom:2px solid #0a6d91;padding-bottom:3px}
-      table{width:100%;border-collapse:collapse;margin-bottom:12px;font-size:10px}
-      th{background:#0a6d91;color:#fff;padding:5px 7px;text-align:left;white-space:nowrap}
-      td{padding:4px 7px;border-bottom:1px solid #ddd}
-      tr:nth-child(even) td{background:#f5f9fc}
-      .tot{font-weight:700;background:#e8f4f8!important;border-top:2px solid #0a6d91}
-      .info-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
-      .info-box{background:#f5f9fc;border:1px solid #cce;padding:6px 10px;border-radius:4px}
-      .info-label{font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px}
-      .info-val{font-size:12px;font-weight:700;color:#111;margin-top:2px}
-      .pos{color:#16a34a}.neg{color:#dc2626}
-      @media print{@page{margin:15mm}}
-    </style></head><body>
-    <h1>📋 SUNLOC DPR  ${fl}  ${d}</h1>
-    <p style="color:#666;font-size:10px;margin-bottom:12px">Generated: ${new Date().toLocaleString('en-IN')}</p>
-  `;
-  SHIFTS.forEach(sh=>{
-    const sd=day.shifts[sh];
-    let shProd=0,shTgt=0,shAim=0;
-    html+=`<h2>SHIFT ${sh}</h2>
-    <div class="info-grid">
-      <div class="info-box"><div class="info-label">Incharge</div><div class="info-val">${sd.incharge||''}</div></div>
-      <div class="info-box"><div class="info-label">Chemist</div><div class="info-val">${safeJoin(sd.chemist)}</div></div>
-      <div class="info-box"><div class="info-label">Fitter</div><div class="info-val">${sd.fitter||''}</div></div>
-      <div class="info-box"><div class="info-label">Electrical</div><div class="info-val">${safeJoin(sd.electrical)}</div></div>
-      <div class="info-box"><div class="info-label">Utility</div><div class="info-val">${safeJoin(sd.utility)}</div></div>
-      <div class="info-box"><div class="info-label">Shift AIM</div><div class="info-val">${safeJoin(sd.aim_staff)}</div></div>
-      <div class="info-box"><div class="info-label">Shift GPR</div><div class="info-val">${safeJoin(sd.gpr_staff)}</div></div>
-    </div>
-    <table><thead><tr>
-      <th>MC</th><th>Sz</th><th>Operator</th><th>Batch</th><th>Qty (L)</th><th>Note</th>
-      <th>Target</th><th>VS Tgt</th><th>AIM</th><th>Backlog/Excess</th>
-    </tr></thead><tbody>`;
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      const prod=Math.round(mcTotalProd(m)*100)/100;
-      const t=tgt(fl,mc.id), aim=parseFloat(m.aim||0);
-      const vs=Math.round((prod-t)*100)/100;
-      const bl=aim>0?Math.round((prod-aim)*100)/100:null;
-      shProd+=prod; shTgt+=t; shAim+=aim;
-      (m.runs||[blankRun()]).forEach((run,ri)=>{
-        html+=`<tr>
-          <td>${ri===0?`<b>${mc.id}</b>`:''}</td>
-          <td>${ri===0?mc.sz:''}</td>
-          <td>${ri===0?(m.operator||''):''}</td>
-          <td>${run.batchNumber||''}</td>
-          <td><b>${run.qty||''}</b></td>
-          <td>${run.note||''}</td>
-          <td>${ri===0?t:''}</td>
-          <td>${ri===0&&prod>0?`<span class="${vs>=0?'pos':'neg'}">${vs>=0?'+'+vs:vs}</span>`:''}</td>
-          <td>${ri===0&&aim>0?aim:''}</td>
-          <td>${ri===0&&bl!==null?`<span class="${bl>=0?'pos':'neg'}">${bl>=0?'+'+bl:bl}</span>`:''}</td>
-        </tr>`;
-      });
-    });
-    shProd=Math.round(shProd*100)/100; shAim=Math.round(shAim*100)/100; shTgt=Math.round(shTgt*100)/100;
-    const shVs=Math.round((shProd-shTgt)*100)/100;
-    html+=`<tr class="tot"><td colspan="4">SHIFT ${sh} TOTAL</td>
-      <td>${shProd||''}</td><td></td><td>${shTgt}</td>
-      <td><span class="${shVs>=0?'pos':'neg'}">${shVs>=0?'+'+shVs:shVs}</span></td>
-      <td>${shAim||''}</td>
-      <td><span class="${shProd-shAim>=0?'pos':'neg'}">${shAim>0?(shProd-shAim>=0?'+':'')+Math.round((shProd-shAim)*100)/100:''}</span></td>
-    </tr></tbody></table>`;
-  });
-  html+=`</body></html>`;
-  const w=window.open('','_blank','width=900,height=700');
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  setTimeout(()=>w.print(),600);
-  toast('🖨 Print dialog opened','var(--cyan)');
-}
-
 function exportData(){
   const data={};
   Object.keys(localStorage).filter(k=>k.startsWith('dpr3_')||k==='dpr_targets').forEach(k=>data[k]=localStorage.getItem(k));
@@ -3640,26 +2517,11 @@ function exportData(){
 function importData(input){
   const file=input.files[0];if(!file)return;
   const reader=new FileReader();
-  reader.onload=async e=>{
+  reader.onload=e=>{
     try{
       const data=JSON.parse(e.target.result);
-      // Write all keys to localStorage
       Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
-      toast('Import successful — pushing to server...','var(--cyan)');
-      // Push every DPR record to server so data is permanently saved
-      const dprKeys=Object.keys(data).filter(k=>k.startsWith('dpr3_'));
-      let pushed=0;
-      for(const k of dprKeys){
-        try{
-          const parts=k.split('_'); // dpr3_GF_2026-04-01
-          const fl=parts[1], d=parts[2];
-          if(!fl||!d) continue;
-          const dayData=JSON.parse(data[k]);
-          await pushToServer(fl,d,dayData);
-          pushed++;
-        }catch(e){}
-      }
-      toast(`✅ Imported & pushed ${pushed} records to server`,'var(--green)');
+      toast('Import successful!','var(--green)');
       renderEntry();
     }catch{toast('Invalid file','var(--red)');}
     input.value='';
@@ -3713,57 +2575,30 @@ function renderDprSearch(){
 // ═══════════════════════════════════════════════════════
 document.getElementById('ndate').value=today();
 refreshRecentDates();
-// Server init and renderEntry called after auth — see postAuthServerInit()
+// C-shift warning on load
+setTimeout(()=>onDateChange&&onDateChange(),200);
 function postAuthServerInit() {
-  checkServer().then(async ok=>{
+  checkServer().then(ok=>{
     if(ok){
-      // Show loading immediately
-      const shiftsArea = document.getElementById('shiftsArea');
-      if(shiftsArea) shiftsArea.innerHTML = '<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px">⟳ Loading data from server...</div>';
-
-      // Load settings from server first (machine config, targets, active machines)
-      await loadDprSettings();
-
-      // Load active orders first (for batch dropdowns)
-      try{
-        const r = await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
-        if(r.ok){
-          const j = await r.json();
-          if(j.ok && j.orders){
-            activeOrders={};
-            j.orders.filter(o=>o.machineId).forEach(o=>{
-              if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
-              activeOrders[o.machineId].push(o);
-            });
-            localStorage.setItem('dpr_active_orders', JSON.stringify(activeOrders));
-          }
-        }
-      }catch(e){
-        const cached=localStorage.getItem('dpr_active_orders');
-        if(cached) try{activeOrders=JSON.parse(cached);}catch{}
-      }
-
-      // renderEntry fetches DPR data from server then renders — server is always truth
-      await renderEntry();
-      setSyncBadge('synced');
-      setTimeout(()=>fetchActiveOrders().catch(()=>{}), 1000);
+      fetchActiveOrders();
+      fetchClosedBatches();
+      loadDprSettings(); // load machine config, targets, manpower from server
+      updateTempAlertBanner();
     } else {
-      // Offline — use localStorage cache
       const cached=localStorage.getItem('dpr_active_orders');
-      if(cached) try{activeOrders=JSON.parse(cached);}catch{}
-      await renderEntry();
-      toast('⚠️ Server offline — showing cached data','var(--amber)');
+      if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
     }
   });
 }
 
 window.addEventListener('beforeunload',e=>{ if(unsaved){e.preventDefault();e.returnValue='';} });
 
-// ── Re-sync when browser navigates back or tab refocused ──
-window.addEventListener('pageshow', (e) => {
-  if (e.persisted && dprUser) {
-    fetchActiveOrders();
-    fetchDpr(curFloor, getDate());
+// Re-sync settings from server every 60s + on tab focus — keeps all devices in sync
+setInterval(()=>{ if(serverUrl) loadDprSettings(); }, 60*1000);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible' && serverUrl){
+    loadDprSettings();
+    fetchClosedBatches();
   }
 });
 
@@ -3814,15 +2649,12 @@ async function doDprLogin() {
   }
 
   if (authOk) {
-    localStorage.setItem('dpr_session', JSON.stringify(dprUser));
+    sessionStorage.setItem('dpr_session', JSON.stringify(dprUser));
     applyDprRoleRestrictions();
     document.getElementById('auth-overlay').classList.add('hidden');
     addDprUserBadge();
-    // Load cached orders from localStorage BEFORE renderEntry so dropdowns show saved selection
-    const cachedOrders = localStorage.getItem('dpr_active_orders');
-    if(cachedOrders) try{ activeOrders = JSON.parse(cachedOrders); }catch{}
+    renderEntry();
     go('entry');
-    updateSaveBtnStyle(getDate());
     postAuthServerInit();
     dprAuditLog('LOGIN', 'Logged in to DPR');
   }
@@ -3830,14 +2662,6 @@ async function doDprLogin() {
 
 function applyDprRoleRestrictions() {
   if (!dprUser) return;
-
-  // ── Date picker — only block future dates for everyone ──────────
-  const datePicker = document.getElementById('ndate');
-  if (datePicker) {
-    datePicker.max = new Date().toISOString().split('T')[0];
-    datePicker.removeAttribute('min'); // user can browse any past date freely
-  }
-
   const allowedFloors = DPR_ROLE_FLOORS[dprUser.role];
   if (!allowedFloors) return; // admin — no restrictions
 
@@ -3854,8 +2678,6 @@ function applyDprRoleRestrictions() {
     curFloor = allowedFloors[0];
     document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
     document.getElementById('ftab-'+curFloor)?.classList.add('on');
-    const cachedOrders = localStorage.getItem('dpr_active_orders');
-    if(cachedOrders) try{ activeOrders = JSON.parse(cachedOrders); }catch{}
     renderEntry();
   }
 }
@@ -3872,17 +2694,10 @@ function addDprUserBadge() {
   if (document.getElementById('dpr-user-badge')) return;
   const wrap = document.createElement('div');
   wrap.id = 'dpr-user-badge';
-  wrap.style.cssText = 'display:flex;align-items:center;gap:5px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:3px 9px;font-size:11px;cursor:pointer;white-space:nowrap;flex-shrink:0';
+  wrap.style.cssText = 'position:fixed;top:8px;right:10px;z-index:500;display:flex;align-items:center;gap:6px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer';
   wrap.innerHTML = `👤 ${dprUser.username} <span style="color:var(--t3)">[${dprUser.role.toUpperCase()}]</span> <span style="color:var(--t3)">▾</span>`;
   wrap.onclick = showDprUserMenu;
-  // Insert into nright before Save button instead of floating over topbar
-  const nright = document.querySelector('.nright');
-  const saveBtn = document.getElementById('saveBtn');
-  if (nright && saveBtn) {
-    nright.insertBefore(wrap, saveBtn);
-  } else {
-    document.body.appendChild(wrap);
-  }
+  document.body.appendChild(wrap);
 
   // Show audit tab for admin
   if (dprUser.role === 'admin') {
@@ -3904,10 +2719,10 @@ function showDprUserMenu() {
   openModal(`👤 ${dprUser?.username}`, `
     <div style="padding:4px 0">
       <div style="font-size:13px;color:var(--t3);margin-bottom:14px">Role: <strong style="color:var(--cyan)">${dprUser?.role?.toUpperCase()}</strong></div>
-      ${isAdmin ? `<button class="nbtn" style="width:100%;margin-bottom:8px" onclick="closeModal();showDprAuditPage()">📋 Audit Log</button>` : ''}
-      <button class="nbtn" style="width:100%;color:var(--red);border-color:var(--red)" onclick="doDprLogout()">🚪 Log Out</button>
+      ${isAdmin ? `<button class="btn btn-sm" style="width:100%;margin-bottom:8px;background:var(--s3);color:var(--t1)" onclick="closeModal();showDprAuditPage()">📋 Audit Log</button>` : ''}
+      <button class="btn btn-sm btn-danger" style="width:100%" onclick="doDprLogout()">🚪 Log Out</button>
     </div>
-  `, [{label:'Close', fn: closeModal}]);
+  `, [{label:'Close', fn:'closeModal()'}]);
 }
 
 async function doDprLogout() {
@@ -3915,7 +2730,7 @@ async function doDprLogout() {
   if (serverUrl && dprUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:dprUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
-  localStorage.removeItem('dpr_session');
+  sessionStorage.removeItem('dpr_session');
   dprUser = null;
   document.getElementById('dpr-user-badge')?.remove();
   document.getElementById('auth-pin').value = '';
@@ -3965,25 +2780,38 @@ async function renderDprAuditLog() {
   }
 }
 
-// ── DATE PERMISSION CHECK ────────────────────────────────────────
-// Returns true if current user is allowed to save for the selected date
-function canSaveForDate(selectedDate) {
-  if (!dprUser) return false;
-
-  // Admin — can save any date, no restriction
-  if (dprUser.role === 'admin') return true;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const selected = new Date(selectedDate + 'T00:00:00');
-
-  // Block future dates for everyone
-  if (selected > today) return false;
-
-  // Regular users — only today and previous 2 days allowed
-  const diffDays = Math.round((today - selected) / 86400000);
-  return diffDays <= 2;
+// Patch saveToServer to include audit + back-date check
+const _origSaveToServer = saveToServer;
+async function saveToServer() {
+  // Back-date lock for non-admin — with 2-hour shift grace window
+  if (dprUser && dprUser.role !== 'admin') {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    const selected = document.getElementById('ndate')?.value;
+    if (selected && selected !== todayStr) {
+      // Check 2-hour grace window for shift changeover
+      // Shifts: A=06:00-14:00, B=14:00-22:00, C=22:00-06:00
+      const h = now.getHours();
+      const yesterdayStr = new Date(now - 86400000).toISOString().split('T')[0];
+      // Grace periods: A shift starts 06:00 — allow B shift (prev day C) edits until 08:00
+      //                B shift starts 14:00 — allow A shift edits until 16:00
+      //                C shift starts 22:00 — allow B shift edits until 00:00
+      // For previous calendar day: only allowed during 22:00-00:00 (C shift grace for yesterday)
+      const isPrevDay = selected === yesterdayStr;
+      const inCShiftGrace = isPrevDay && h >= 0 && h < 2; // midnight to 2am = C shift carrying over
+      if (!inCShiftGrace) {
+        alert('⚠️ Back-date editing is not allowed for your role.\nOnly Admin can edit past records.\nNote: Entries for the previous shift can be made within 2 hours of shift changeover.');
+        return;
+      }
+    }
+    // Also check: non-admin cannot edit future dates
+    if (selected && selected > todayStr) {
+      alert('⚠️ Cannot enter data for future dates.');
+      return;
+    }
+  }
+  await _origSaveToServer();
+  dprAuditLog('SAVE', `Saved DPR — Floor: ${curFloor}, Date: ${document.getElementById('ndate')?.value}`);
 }
 
 // Audit page handler — called directly, no go() monkey-patch needed
@@ -3999,7 +2827,7 @@ function showDprAuditPage() {
 
 // On init — check saved session
 (function initDprAuth() {
-  const saved = localStorage.getItem('dpr_session');
+  const saved = sessionStorage.getItem('dpr_session');
   if (saved) {
     try {
       dprUser = JSON.parse(saved);
@@ -4015,69 +2843,11 @@ function showDprAuditPage() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// Auto-refresh active orders from Planning every 60 seconds
-setInterval(async () => {
-  if (dprUser) {
-    try { await fetchActiveOrders(); } catch(e) {}
-    // safeRenderShifts fetches from server then re-renders (skips if unsaved changes)
-    if(!unsaved) try { await safeRenderShifts(); } catch(e) {}
-  }
-}, 30*1000);
-
-setInterval(dprQueueFlush, 5*1000); // flush queue every 5s
-document.addEventListener('visibilitychange', ()=>{
-  if(document.visibilityState==='visible'){
-    dprQueueFlush();
-    if(dprUser) fetchActiveOrders().catch(()=>{});
-    // Re-sync from server on tab focus if no unsaved changes
-    if(dprUser && !unsaved){
-      safeRenderShifts().catch(()=>{});
-    }
-  }
-});
-
-// ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
-window.addEventListener('beforeunload', () => {
-  const url = localStorage.getItem('sunloc_server_url')||'';
-  if (!url || !curFloor) return;
-  try {
-    const d = getDate();
-    const data = collectForm();
-    localStorage.setItem(skey(curFloor,d), JSON.stringify(data));
-    // Build actuals from current form so production qty is included
-    const actuals=[];
-    Object.keys(FLOORS).forEach(f=>{
-      if(!data.shifts) return;
-      SHIFTS.forEach(sh=>{
-        const sd=data.shifts[sh]; if(!sd) return;
-        FLOORS[f]?.machines.forEach(mc=>{
-          const m=migrateMachineData(sd.machines?.[mc.id]||blankMachine());
-          (m.runs||[]).forEach((run,ri)=>{
-            const qty=parseFloat(run.qty||0);
-            if(qty>0) actuals.push({floor:f,machineId:mc.id,shift:sh,orderId:run.orderId||null,batchNumber:run.batchNumber||null,qty,runIndex:ri});
-          });
-        });
-      });
-    });
-    dprQueuePush(curFloor, d, data, actuals);
-    const blob = new Blob([JSON.stringify({floor:curFloor,date:d,data,actuals})], {type:'application/json'});
-    navigator.sendBeacon && navigator.sendBeacon(url+'/api/dpr/save', blob);
-  } catch(e) {}
-});
-
-// ── TEMP Batch PC Code Prompt — show once, remind every 2 hours ─
+// ── TEMP Batch PC Code Prompt (one-time per TEMP batch) ────────
 const _tempPromptShown = new Set();
-const TEMP_PROMPT_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours
 
 async function promptTempBatchDetails(tempBatchId, machineId) {
-  // Already shown this session
   if (_tempPromptShown.has(tempBatchId)) return;
-
-  // Check if dismissed recently (within 2 hours) — persisted across page refresh
-  const dismissKey = 'dpr_temp_dismissed_' + tempBatchId;
-  const lastDismissed = parseInt(localStorage.getItem(dismissKey) || '0');
-  if (Date.now() - lastDismissed < TEMP_PROMPT_INTERVAL) return;
-
   _tempPromptShown.add(tempBatchId);
   openModal('⚠️ TEMP Batch — Enter PC Code', `
     <div style="padding:4px 0">
@@ -4100,7 +2870,7 @@ async function promptTempBatchDetails(tempBatchId, machineId) {
     </div>
   `, [
     { label: 'Save', fn: 'saveTempBatchDetails(\'' + tempBatchId + '\')' },
-    { label: 'Skip', fn: 'localStorage.setItem(\'dpr_temp_dismissed_' + tempBatchId + '\',Date.now());closeModal()' }
+    { label: 'Skip', fn: 'closeModal()' }
   ]);
 }
 
@@ -4133,8 +2903,6 @@ async function saveTempBatchDetails(tempBatchId) {
           if (o.id === tempBatchId) { o.colour = colour; o.pcCode = pcCode; o.colourConfirmed = true; }
         });
       });
-      // Mark as permanently confirmed — never prompt again for this TEMP batch
-      localStorage.setItem('dpr_temp_dismissed_' + tempBatchId, Date.now() + (365 * 24 * 60 * 60 * 1000));
       closeModal();
       renderEntry();
       dprAuditLog('TEMP_DETAILS_SET', 'TEMP ' + tempBatchId + ': PC Code=' + pcCode + ', Colour=' + (colour||'—'));

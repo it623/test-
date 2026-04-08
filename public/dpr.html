@@ -878,7 +878,7 @@ function removeMachine(fl, mcId) {
   toast(`${mcId} removed`,'var(--yellow)');
 }
 
-function blankMachine(){ return {runs:[blankRun()], aim:'', operator:'', proc:'', mech:'', elec:'', gpr:'', hvac:'', dw:''}; }
+function blankMachine(){ return {runs:[blankRun()], aim:'', operator:'', proc:'', mech:'', elec:'', gpr:'', hvac:'', dw:'', status:'running'}; }
 function blankShift(fl){
   const s={incharge:'',fitter:'',chemist:'',
     electrical:[],utility:[],aim_staff:[],gpr_staff:[],
@@ -1806,6 +1806,7 @@ function renderShifts(){
             <th>SZ</th>
             <th style="min-width:90px">Operator</th>
             <th style="min-width:340px">Batch Runs <span style="color:var(--t3);font-weight:400;font-size:9px;letter-spacing:0">(+ Add Run for colour/batch change)</span></th>
+            <th style="min-width:90px">Status</th>
             <th class="r" style="min-width:44px">Target</th>
             <th class="r" style="min-width:56px">Total Prod</th>
             <th class="r" style="min-width:52px">VS TGT</th>
@@ -1855,7 +1856,7 @@ function renderShifts(){
             <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" step="0.01" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprQtyNav(event,'${sh}','${mc.id}')" title="Production in Lakhs">
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t1);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
-            ${(()=>{ const mo=(activeOrders[mc.id]||[]).find(o=>o.id===(run.orderId||'')||o.batchNumber===(run.batchNumber||'')); if(!mo) return ''; const pl=Math.round((mo.qty||0)*100)/100; const ac=Math.round((mo.actualQty||0)*100)/100; const rm=Math.max(0,Math.round((pl-ac)*100)/100); const col=rm<=0?'var(--green)':rm<pl*0.2?'var(--amber)':'var(--cyan)'; return `<span class="run-ord-info" style="font-size:9px;color:${col};font-family:var(--mono);white-space:nowrap;flex-shrink:0" title="${mo.customer||''}">Ord:${pl}L Prod:${ac}L Rem:${rm}L</span>`; })()}
+            ${(()=>{ const mo=(activeOrders[mc.id]||[]).find(o=>o.id===(run.orderId||'')||o.batchNumber===(run.batchNumber||'')); if(!mo) return ''; const pl=Math.round((mo.qty||0)*100)/100; const gr=Math.round((mo.grossQty||0)*100)/100; const ac=Math.round((mo.actualQty||0)*100)/100; const rm=Math.max(0,Math.round((pl-ac)*100)/100); const col=rm<=0?'var(--green)':rm<pl*0.2?'var(--amber)':'var(--cyan)'; return `<span class="run-ord-info" style="font-size:9px;color:${col};font-family:var(--mono);white-space:nowrap;flex-shrink:0" title="${mo.customer||''}">Gross:${gr}L Prod:${ac}L Rem:${rm}L</span>`; })()}
           </div>`;
       });
 
@@ -1892,6 +1893,14 @@ function renderShifts(){
           <div id="runs-${sh}-${mc.id}">${runsHtml}</div>
           <button onclick="addRun('${sh}','${mc.id}')" style="margin-top:5px;padding:2px 8px;background:transparent;border:1px dashed var(--b2);border-radius:3px;color:var(--t3);font-size:10px;font-family:var(--fc);letter-spacing:.5px;cursor:pointer" title="Add another batch/colour change run">+ Add Run</button>
         </td>
+        <td style="vertical-align:top;padding-top:4px">
+          <select id="mcstatus-${sh}-${mc.id}"
+            style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--b2);background:var(--s2);color:var(--t1);cursor:pointer;width:90px"
+            onchange="updateMcStatus('${sh}','${mc.id}',this.value)">
+            <option value="running" ${(m.status||'running')==='running'?'selected':''}>🟢 Running</option>
+            <option value="closed"  ${m.status==='closed'?'selected':''}>🔴 Closed</option>
+          </select>
+        </td>
         <td class="r" style="font-family:var(--mono);color:var(--t2)">${t}</td>
         <td class="r" id="tot-${sh}-${mc.id}" style="font-family:var(--mono);font-weight:700;color:${p>0?(p>=t?'var(--green)':'var(--amber)'):'var(--t3)'}">${p||'—'}</td>
         <td class="r" id="vs-${sh}-${mc.id}">${vs===null?'<span class="vs-zero">—</span>':vs>=0?`<span class="vs-pos">+${vs}</span>`:`<span class="vs-neg">${vs}</span>`}</td>
@@ -1906,7 +1915,7 @@ function renderShifts(){
     shTgt  = Math.round(shTgt*100)/100;
     const shVs=shProd>0?Math.round((shProd-shTgt)*100)/100:null;
     html+=`</tbody><tfoot><tr class="tot-row">
-      <td colspan="4" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
+      <td colspan="5" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
       <td class="r" style="font-family:var(--mono)">${shTgt}</td>
       <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
       <td class="r" id="shvs-${sh}">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
@@ -2008,7 +2017,7 @@ function onRunOrderChange(sh, mcId, ri){
         const planned=Math.round((ord.qty||0)*100)/100;
         const actual=Math.round((ord.actualQty||0)*100)/100;
         const remaining=Math.max(0,Math.round((planned-actual)*100)/100);
-        infoEl.textContent=`Ord:${planned}L Prod:${actual}L Rem:${remaining}L`;
+        const grossQty=Math.round((mo.grossQty||0)*100)/100; infoEl.textContent=`Gross:${grossQty}L Prod:${actual}L Rem:${remaining}L`;
         infoEl.style.color='var(--green)';
       }
     }
@@ -2062,6 +2071,18 @@ function updateShiftTotals(sh){
 
   const aimEl2=document.getElementById(`shaim-${sh}`);
   if(aimEl2) aimEl2.textContent=shAim||'—';
+}
+
+
+function updateMcStatus(sh, mcId, val){
+  const fl=curFloor, dt=getDate(), day=loadDay(fl,dt);
+  if(!day.shifts[sh]) day.shifts[sh]=blankShift(fl);
+  if(!day.shifts[sh].machines[mcId]) day.shifts[sh].machines[mcId]=blankMachine();
+  day.shifts[sh].machines[mcId].status = val;
+  localStorage.setItem(skey(fl,dt), JSON.stringify(day));
+  markUnsaved();
+  pushToServer(fl,dt,day);
+  toast(val==='closed'?'🔴 Machine closed':'🟢 Machine running','var(--t2)');
 }
 
 function updateBacklog(sh,mcId){

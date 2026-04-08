@@ -576,7 +576,7 @@ const NAV_ITEMS = [
 ];
 
 const DEPT_PINS = {
-  admin:'000000', planning:'1111', labels:'2222',
+  admin:'9999', planning:'1111', labels:'2222',
   aim:'3333', printing:'4444', pi:'5555', packing:'6666', dispatch:'7777'
 };
 
@@ -1655,6 +1655,63 @@ function getMachineAvgWIPDays(machineId){
   if(!runningBatches.length) return 2; // default T+2
   const total = runningBatches.reduce((s,b)=>s+getBatchWIPDays(b.batchNumber),0);
   return total/runningBatches.length;
+}
+
+function getMachineAvgWIPDays(machineId){
+  const runningBatches = state.batches.filter(b=>b.machineId===machineId&&b.status==='running');
+  if(!runningBatches.length) return 2; // default T+2
+  const total = runningBatches.reduce((s,b)=>s+getBatchWIPDays(b.batchNumber),0);
+  return total/runningBatches.length;
+}
+
+// ── WIP Breakdown — stage-wise per batch ──────────────────────────────────
+// Pre-AIM : Gross (DPR) − AIM Scan In − AIM Salvage − AIM Remelt  → "Unsorted WIP"
+// AIM     : AIM Scan In − AIM Scan Out − AIM Salvage − AIM Remelt
+// Printing: AIM Out − Print Scan Out − Print Salvage − Print Remelt  (PTD only)
+// PI      : Print Out − PI Scan Out − PI Salvage − PI Remelt          (PTD only)
+// Packing : Pack Scan In − Pack Scan Out
+function getBatchWIPBreakdown(batchNo){
+  const batch = getBatch(batchNo);
+  if(!batch) return null;
+  const sz = batch.size;
+
+  // Raw scan counts per stage
+  const aimInBoxes   = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
+  const aimOutBoxes  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='out').length;
+  const printOutBoxes= state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='printing'&&s.type==='out').length;
+  const piOutBoxes   = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='pi'&&s.type==='out').length;
+  const packInBoxes  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='in').length;
+  const packOutBoxes = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out').length;
+
+  // Convert box counts to Lakhs
+  const aimIn    = boxToLakh(aimInBoxes,   sz);
+  const aimOut   = boxToLakh(aimOutBoxes,  sz);
+  const printOut = boxToLakh(printOutBoxes,sz);
+  const piOut    = boxToLakh(piOutBoxes,   sz);
+  const packIn   = boxToLakh(packInBoxes,  sz);
+  const packOut  = boxToLakh(packOutBoxes, sz);
+
+  // Wastage per stage (salvage + remelt)
+  const wAIM   = getTotalWastage(batchNo,'aim');
+  const wPrint = getTotalWastage(batchNo,'printing');
+  const wPI    = getTotalWastage(batchNo,'pi');
+
+  // Gross production from DPR
+  const grossProd = batch.actualProd || batch.actualQty || 0;
+
+  // Stage WIP calculations
+  const preAIM   = Math.max(0, grossProd - aimIn - wAIM.salvage - wAIM.remelt);
+  const aimWIP   = Math.max(0, aimIn - aimOut - wAIM.salvage - wAIM.remelt);
+  const printWIP = batch.isPrinted ? Math.max(0, aimOut - printOut - wPrint.salvage - wPrint.remelt) : 0;
+  const piWIP    = batch.isPrinted ? Math.max(0, printOut - piOut - wPI.salvage - wPI.remelt) : 0;
+  const packWIP  = Math.max(0, packIn - packOut);
+  const totalWIP = preAIM + aimWIP + printWIP + piWIP + packWIP;
+
+  return {
+    grossProd, aimIn, aimOut,
+    preAIM, aimWIP, printWIP, piWIP, packWIP, totalWIP,
+    wAIM, wPrint, wPI
+  };
 }
 
 function calcDispatchDate(batch){
@@ -3911,6 +3968,7 @@ function renderReportG(){
 function filterReportG(){
   const search=(document.getElementById('rg-search')?.value||'').toLowerCase().trim();
   const dept=document.getElementById('rg-dept')?.value||'';
+  // Filter rows by batch/customer search
   const rows=document.querySelectorAll('#rg-body tr[data-batch]');
   rows.forEach(row=>{
     const matchSearch=!search||
@@ -3918,6 +3976,7 @@ function filterReportG(){
        (row.dataset.customer||'').toLowerCase().includes(search));
     row.style.display=matchSearch?'':'none';
   });
+  // Show/hide department column groups
   const aimCols=document.querySelectorAll('.rg-col-aim');
   const piCols=document.querySelectorAll('.rg-col-pi');
   if(dept==='aim'){
@@ -3930,36 +3989,6 @@ function filterReportG(){
     aimCols.forEach(c=>c.style.display='');
     piCols.forEach(c=>c.style.display='');
   }
-}
-
-function exportReportG(){
-  const batches = state.batches.filter(b=>!b.deleted&&b.batchNumber);
-  const rows = batches.map(b=>{
-    const ag = getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
-    const row = {
-      'Batch': b.batchNumber,
-      'Customer': b.customer||'',
-      'Size': b.size,
-      'Type': b.isPrinted?'PTD':'UP',
-      'Gross Production (L)': fmt(b.actualProd||b.actualQty||0),
-      'Inspected (L)': fmt(ag.inspected),
-      'A-Grade (L)': fmt(ag.aGrade),
-      'Salvage (L)': fmt(ag.salvage),
-      'Remelt (L)': fmt(ag.remelt),
-      'WIP (L)': fmt(ag.wip||0),
-      'A-Grade %': ag.inspected>0?fmt(ag.pct,2)+'%':'—',
-    };
-    if(b.isPrinted && ag.stages){
-      row['AIM Stage %'] = ag.stages.aim.inspected>0?fmt(ag.stages.aim.pct,2)+'%':'—';
-      row['Printing Stage %'] = ag.stages.print.inspected>0?fmt(ag.stages.print.pct,2)+'%':'—';
-      row['PI Stage %'] = ag.stages.pi.inspected>0?fmt(ag.stages.pi.pct,2)+'%':'—';
-    }
-    return row;
-  });
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'A-Grade Report');
-  XLSX.writeFile(wb, 'AGrade_Report_'+today()+'.xlsx');
 }
 
 async function exportReportGExcel(){
@@ -3995,7 +4024,7 @@ async function exportReportGExcel(){
   });
   const ws=XLSX.utils.aoa_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb,ws,'A-Grade Report');
-  XLSX.writeFile(wb,'ReportG_AGrade_'+today()+'.xlsx');
+  xlsxSaveAs(wb,'ReportG_AGrade_'+today()+'.xlsx');
   toast('Excel downloaded','var(--green)');
 }
 
@@ -4226,11 +4255,16 @@ function renderReportD(){
     <tbody>
     ${stages.map(dept=>{
       const wip=stageWIP[dept];
-      const deptScansIn=state.scans.filter(s=>s.dept===dept&&s.type==='in');
-      const deptScansOut=state.scans.filter(s=>s.dept===dept&&s.type==='out');
-      const qtyIn=deptScansIn.reduce((sum,s)=>{const b=getBatch(s.batchNumber);return sum+(b?boxToLakh(1,b.size):1);},0);
-      const qtyOut=deptScansOut.reduce((sum,s)=>{const b=getBatch(s.batchNumber);return sum+(b?boxToLakh(1,b.size):1);},0);
-      const qty=Math.max(0,qtyIn-qtyOut);
+      // Calculate actual qty using real scan data weighted by batch size
+      const deptScans=state.scans.filter(s=>s.dept===dept&&s.type==='in');
+      const wipQty=deptScans.reduce((sum,s)=>{
+        const b=getBatch(s.batchNumber);
+        return sum+(b?boxToLakh(1,b.size):1);
+      },0) - state.scans.filter(s=>s.dept===dept&&s.type==='out').reduce((sum,s)=>{
+        const b=getBatch(s.batchNumber);
+        return sum+(b?boxToLakh(1,b.size):1);
+      },0);
+      const qty=Math.max(0,wipQty);
       return `<tr><td class="fw-bold">${DEPT_LABELS[dept]}</td><td class="td-mono">${wip}</td><td class="td-mono">${fmt(qty)}</td><td class="td-mono">${totalGross>0?fmt(qty/totalGross*100,1):0}%</td></tr>`;
     }).join('')}
     </tbody>
@@ -4343,34 +4377,39 @@ function renderReportE(){
   const allScanDates = [...new Set(state.scans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
 
   const rows=[];
+  // Group all batches by machine directly — avoids FLOORS.machines ID mismatch
   const allBatches = state.batches.filter(b=>!b.deleted);
   const machineIds = [...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort();
   machineIds.forEach(mc=>{
-    const floorKey = getMachineFloor(mc)||'';
+    const floorKey = getMachineFloor(mc) || '';
     const batches = allBatches.filter(b=>b.machineId===mc);
     batches.forEach(b=>{
-        // Filter scans by date if a filter is set
-        const scansForBatch = filterDate
-          ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
-          : getScansForBatch(b.batchNumber);
-        const grossProd=b.actualProd||0;
-        const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
-        const aimOutQty=boxToLakh(aimOut,b.size);
-        const aimW=getTotalWastage(b.batchNumber,'aim');
-        const aimIn=aimOutQty+aimW.total;
-        const manW=getTotalWastage(b.batchNumber,'manual');
-        const totalAG=aimOutQty+(manW.total>0?boxToLakh(scansForBatch.filter(s=>s.dept==='manual'&&s.type==='out').length,b.size):0);
-        const aGradePct=aimIn>0?(totalAG/aimIn*100):0;
-        const wip=Math.max(0,grossProd-aimIn);
-        const printingTD=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='printing'&&s.type==='out').length,b.size):0;
-        const piOut=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='pi'&&s.type==='out').length,b.size):0;
-        const printW=getTotalWastage(b.batchNumber,'printing');
-        const piW=getTotalWastage(b.batchNumber,'pi');
-        const packUnptd=!b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
-        const packPtd=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
-        const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
-        rows.push({machine:mc,floor:floorKey,batchNo:b.batchNumber,size:b.size,plannedQty:b.qty||0,grossProd:fmt(grossProd),aimRunTotal:fmt(aimIn),aimSalvage:fmt(aimW.salvage),aimRemelt:fmt(aimW.remelt),aimAGrade:fmt(aimOutQty),aimAGradePct:fmt(aGradePct,1),manInspect:fmt(manW.total),totalAGrade:fmt(totalAG),aGradePctUnptd:fmt(aGradePct,1),wip:fmt(wip),availUnptd:fmt(!b.isPrinted?totalAG:0),availPrint:fmt(b.isPrinted?totalAG:0),
-          printingTD:fmt(printingTD),printRej:fmt(printW.salvage),piInspect:fmt(piOut),piSalRem:fmt(piW.salvage),packingUP:fmt(packUnptd),packingPTD:fmt(packPtd),dispatch:fmt(disp)});
+      const scansForBatch = filterDate
+        ? getScansForBatch(b.batchNumber).filter(s=>s.ts?.slice(0,10)===filterDate)
+        : getScansForBatch(b.batchNumber);
+      const grossProd=b.actualProd||0;
+      const aimOut=scansForBatch.filter(s=>s.dept==='aim'&&s.type==='out').length;
+      const aimOutQty=boxToLakh(aimOut,b.size);
+      const aimW=getTotalWastage(b.batchNumber,'aim');
+      const aimIn=aimOutQty+aimW.total;
+      const manW=getTotalWastage(b.batchNumber,'manual');
+      const totalAG=aimOutQty+(manW.total>0?boxToLakh(scansForBatch.filter(s=>s.dept==='manual'&&s.type==='out').length,b.size):0);
+      const aGradePct=aimIn>0?(totalAG/aimIn*100):0;
+      const wip=Math.max(0,grossProd-aimIn);
+      const printingTD=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='printing'&&s.type==='out').length,b.size):0;
+      const piOut=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='pi'&&s.type==='out').length,b.size):0;
+      const printW=getTotalWastage(b.batchNumber,'printing');
+      const piW=getTotalWastage(b.batchNumber,'pi');
+      const packUnptd=!b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+      const packPtd=b.isPrinted?boxToLakh(scansForBatch.filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0;
+      const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
+      rows.push({machine:mc,floor:floorKey,batchNo:b.batchNumber,size:b.size,plannedQty:b.qty||0,
+        grossProd:fmt(grossProd),aimRunTotal:fmt(aimIn),aimSalvage:fmt(aimW.salvage),aimRemelt:fmt(aimW.remelt),
+        aimAGrade:fmt(aimOutQty),aimAGradePct:fmt(aGradePct,1),manInspect:fmt(manW.total),
+        totalAGrade:fmt(totalAG),aGradePctUnptd:fmt(aGradePct,1),wip:fmt(wip),
+        availUnptd:fmt(!b.isPrinted?totalAG:0),availPrint:fmt(b.isPrinted?totalAG:0),
+        printingTD:fmt(printingTD),printRej:fmt(printW.salvage),piInspect:fmt(piOut),
+        piSalRem:fmt(piW.salvage),packingUP:fmt(packUnptd),packingPTD:fmt(packPtd),dispatch:fmt(disp)});
     });
   });
   let html=`<div class="card"><div class="section-title mb-4">Report E — Machine-wise Production Tracking Sheet</div>
@@ -4404,22 +4443,25 @@ function renderReportE(){
 }
 
 // Export functions
-
-// ── Safe XLSX download — uses Blob fallback to avoid writeFile bug ─
+// ── Check XLSX library available ────────────────────────────────
 async function checkXLSX(){
-  if(typeof XLSX==='undefined'){
+  if(typeof XLSX === 'undefined'){
     return new Promise((resolve,reject)=>{
       const s=document.createElement('script');
       s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-      s.onload=()=>resolve(true); s.onerror=()=>reject(new Error('XLSX load failed'));
+      s.onload=()=>resolve(true);
+      s.onerror=()=>reject(new Error('XLSX library failed to load'));
       document.head.appendChild(s);
     });
   }
   return Promise.resolve(true);
 }
-function xlsxSaveAs(wb,filename){
-  try{ XLSX.writeFile(wb,filename); }
-  catch(e1){
+
+// ── Safe XLSX download — uses Blob fallback to avoid writeFile bug ─
+function xlsxSaveAs(wb, filename){
+  try{
+    XLSX.writeFile(wb, filename);
+  }catch(e1){
     try{
       const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
       const blob=new Blob([wbout],{type:'application/octet-stream'});
@@ -4428,7 +4470,7 @@ function xlsxSaveAs(wb,filename){
       a.href=url; a.download=filename;
       document.body.appendChild(a); a.click();
       setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
-    }catch(e2){ console.error('Export failed:',e2); }
+    }catch(e2){ toast('Export failed: '+e2.message,'var(--red)'); }
   }
 }
 
@@ -4436,7 +4478,7 @@ function exportToExcel(rows, filename, sheetName){
   const wb=XLSX.utils.book_new();
   const ws=XLSX.utils.json_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb,ws,sheetName||'Report');
-  XLSX.writeFile(wb,filename);
+  xlsxSaveAs(wb,filename);
 }
 
 function exportReportA(){
@@ -4485,38 +4527,73 @@ function exportReportD(){
 }
 
 function exportReportE(){
-  // Full Excel export matching existing format
   const wb=XLSX.utils.book_new();
-  // Summary sheet
   const summaryRows=[];
-  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
-    floor.machines.forEach(mc=>{
-      state.batches.filter(b=>b.machineId===mc&&!b.deleted).forEach(b=>{
-        const grossProd=b.actualProd||0;
-        const aimOut=boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size);
-        const aimW=getTotalWastage(b.batchNumber,'aim');
-        const aimIn=aimOut+aimW.total;
-        const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
-        const wip=Math.max(0,grossProd-aimIn);
-        summaryRows.push({'M/C NO':mc,'SIZE':b.size,'PLANNED QUANTITY (lac)':fmt(b.qty),'TOTAL PRODUCTION (lac)':fmt(grossProd),'AIM TOTAL RUN (lac)':fmt(aimIn),'SALVAGE':fmt(aimW.salvage),'REMELT':fmt(aimW.remelt),'A GRADE QTY (lac)':fmt(aimOut),'AIM A GRADE %':fmt(aGradePct,2),'TOTAL A GRADE QTY (lac)':fmt(aimOut),'A GRADE % (UNPTD)':fmt(aGradePct,2),'WIP (lac)':fmt(wip),'PACKING UNPTD (lac)':fmt(!b.isPrinted?boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0),'PACKING PTD (lac)':fmt(b.isPrinted?boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length,b.size):0),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),'FLOOR':floorKey});
-      });
+
+  // Use ALL active batches directly — no floor/machine matching needed
+  const activeBatches = state.batches.filter(b=>!b.deleted);
+  // Group by machineId
+  const byMachine={};
+  activeBatches.forEach(b=>{
+    const mc=b.machineId||'Unknown';
+    if(!byMachine[mc]) byMachine[mc]=[];
+    byMachine[mc].push(b);
+  });
+
+  // Summary sheet — one row per batch
+  activeBatches.forEach(b=>{
+    const mc=b.machineId||'';
+    const floorKey=getMachineFloor(mc)||'';
+    const grossProd=b.actualProd||0;
+    const aimOut=boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size);
+    const aimW=getTotalWastage(b.batchNumber,'aim');
+    const aimIn=aimOut+aimW.total;
+    const aGradePct=aimIn>0?(aimOut/aimIn*100):0;
+    const wip=Math.max(0,grossProd-aimIn);
+    const packScans=getScansForBatch(b.batchNumber).filter(s=>s.dept==='packing'&&s.type==='out').length;
+    const packQty=boxToLakh(packScans,b.size);
+    const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
+    summaryRows.push({
+      'FLOOR':floorKey,'M/C NO':mc,'BATCH NO':b.batchNumber,
+      'CUSTOMER':b.customer||'','SIZE':b.size,
+      'PLANNED QTY (lac)':fmt(b.qty),
+      'GROSS PROD (lac)':fmt(grossProd),
+      'AIM RUN (lac)':fmt(aimIn),
+      'SALVAGE (lac)':fmt(aimW.salvage),
+      'REMELT (lac)':fmt(aimW.remelt),
+      'A GRADE (lac)':fmt(aimOut),
+      'A GRADE %':fmt(aGradePct,2),
+      'WIP (lac)':fmt(wip),
+      'PACKING UNPTD (lac)':fmt(!b.isPrinted?packQty:0),
+      'PACKING PTD (lac)':fmt(b.isPrinted?packQty:0),
+      'DISPATCH (lac)':fmt(disp),
+      'STATUS':b.status||''
     });
   });
-  const wsSummary=XLSX.utils.json_to_sheet(summaryRows);
+
+  const wsSummary=XLSX.utils.json_to_sheet(summaryRows.length?summaryRows:[{'Note':'No active batches found'}]);
   XLSX.utils.book_append_sheet(wb,wsSummary,'Summary');
+
   // Per machine sheets
-  Object.entries(FLOORS).forEach(([floorKey,floor])=>{
-    floor.machines.forEach(mc=>{
-      const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
-      if(!batches.length) return;
-      const mcRows=batches.map(b=>({
-        'DATE':today(),'BATCH NO':b.batchNumber,'COLOR CODE':b.colour||'','CUSTOMER NAME':b.customer||'','PLANT QUANTITY (lac)':fmt(b.qty),'PRODUCT CODE':b.pcCode||'','PRODUCTION (lac)':fmt(b.actualProd||0),'AIM A GRADE (lac)':fmt(boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size)),'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))
-      }));
-      const wsName=mc.replace('.','');
-      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName.slice(0,31));
-    });
+  Object.entries(byMachine).forEach(([mc,batches])=>{
+    const mcRows=batches.map(b=>({
+      'DATE':today(),
+      'BATCH NO':b.batchNumber,
+      'CUSTOMER':b.customer||'',
+      'COLOR':b.colour||'',
+      'PC CODE':b.pcCode||'',
+      'SIZE':b.size,
+      'PLANNED QTY (lac)':fmt(b.qty),
+      'GROSS PROD (lac)':fmt(b.actualProd||0),
+      'AIM A GRADE (lac)':fmt(boxToLakh(getScansForBatch(b.batchNumber).filter(s=>s.dept==='aim'&&s.type==='out').length,b.size)),
+      'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0)),
+      'STATUS':b.status||''
+    }));
+    const wsName=(mc||'Unknown').replace(/[\.\/:*?[\]]/g,'').slice(0,31);
+    if(wsName) XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),wsName);
   });
-  XLSX.writeFile(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
+
+  xlsxSaveAs(wb,`Sunloc_WIP_Report_${today()}.xlsx`);
 }
 
 function exportTrackerReport(){
@@ -4885,28 +4962,6 @@ setInterval(()=>{
   checkAlerts();
   buildSidebar();
 },5*60*1000);
-
-async function checkTrackingTempAlerts(){
-  if(!serverUrl) return;
-  try{
-    const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
-    const j = await r.json();
-    let banner = document.getElementById('trk-temp-banner');
-    if(!banner){
-      banner = document.createElement('div');
-      banner.id = 'trk-temp-banner';
-      banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-top:2px solid var(--accent3);padding:8px 16px;font-size:12px;text-align:center';
-      document.body.appendChild(banner);
-    }
-    if(j.ok && j.count > 0){
-      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
-      banner.style.display = 'block';
-      banner.innerHTML = `⚠️ <strong style="color:var(--accent3)">${j.count} TEMP batch${j.count>1?'es':''} active</strong> on machines: ${machines.join(', ')} — Labels will show <span style="color:#ff4060;font-weight:600">⚠️ TEMP</span> badge (red border) until reconciled. &nbsp;|&nbsp; W/O orders show <span style="color:#C55A11;font-weight:600">🔶 W/O</span> badge (orange border) until customer assigned.`;
-    } else {
-      banner.style.display = 'none';
-    }
-  }catch(e){}
-}
 
 setInterval(trkQueueFlush, 5*1000); // flush every 5s for near-realtime cross-device sync
 document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible' && currentDept) { trkQueueFlush(); pullFromServer(); } });

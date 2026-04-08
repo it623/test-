@@ -7,7 +7,63 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>Sunloc Tracking Suite v1.1</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js">
+// ── Orange Label Recovery ────────────────────────────────────────────────────
+// Runs on startup to fix any PI scans that didn't get an orange label
+// (due to the server ON CONFLICT bug that reset is_orange to false)
+async function recoverMissingOrangeLabels(){
+  if(!state.scans.length || !state.labels.length) return;
+
+  // Find all PI scan-in events
+  const piScansIn = state.scans.filter(s=>s.dept==='pi'&&s.type==='in');
+  if(!piScansIn.length) return;
+
+  let recovered = 0;
+
+  piScansIn.forEach(scan=>{
+    const label = state.labels.find(l=>l.id===scan.labelId);
+    if(!label || label.voided) return;
+
+    // Check if orange label already exists for this label
+    const existingOrange = state.labels.find(l=>
+      (l.parentLabelId===label.id && l.isOrange && !l.voided) ||
+      (l.batchNumber===label.batchNumber && l.labelNumber===('OL-'+label.labelNumber) && l.isOrange && !l.voided)
+    );
+    if(existingOrange) return; // already exists
+
+    // Generate missing orange label
+    const batch = getBatch(label.batchNumber) || {
+      batchNumber: label.batchNumber,
+      isPrinted: true,
+      customer: label.customer||'',
+      colour: label.colour||'',
+      printingMatter: label.printingMatter||''
+    };
+    const orangeLabel = {
+      id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+label.labelNumber,
+      size:label.size, qty:label.qty, isOrange:true, parentLabelId:label.id,
+      printingMatter:batch.printingMatter||batch.pcCode||'',
+      customer:batch.customer||label.customer||'',
+      colour:batch.colour||label.colour||'',
+      generated:scan.ts||now(), printed:false, voided:false
+    };
+    state.labels.push(orangeLabel);
+    // Push to server
+    const lfs = {...orangeLabel, isOrange:1, isPartial:0, printed:0, voided:0, isExcess:0};
+    trkQueuePush('/api/tracking/state',{labels:[lfs],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+    pushToServer('/api/tracking/state',{labels:[lfs],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]});
+    recovered++;
+  });
+
+  if(recovered > 0){
+    saveLocal();
+    console.log('[Recovery] Generated', recovered, 'missing orange labels from existing PI scans');
+    toast('🟠 Recovered ' + recovered + ' orange label' + (recovered>1?'s':'') + ' from PI scan history', 'var(--orange)');
+    if(currentPage==='labels') renderPage('labels');
+  }
+}
+
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
@@ -1077,9 +1133,23 @@ async function pullFromServer(){
         }
 
         if(snap.tracking){
-          // Labels — server is truth
+          // Labels — server is truth, but preserve local orange labels not yet synced
           const normLabels = (snap.tracking.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
-          if(normLabels.length > 0) state.labels = normLabels;
+          if(normLabels.length > 0){
+            const serverLabelIds = new Set(normLabels.map(l=>l.id));
+            // Keep local orange labels that aren't on server yet
+            const localOrangeOnly = state.labels.filter(l=>l.isOrange&&!serverLabelIds.has(l.id));
+            state.labels = [...normLabels, ...localOrangeOnly];
+            // Re-push any local-only orange labels to server
+            if(localOrangeOnly.length > 0){
+              const toSync = localOrangeOnly.map(l=>({...l,isOrange:1,isPartial:0,printed:0,voided:0,isExcess:0}));
+              fetch(serverUrl+'/api/tracking/state',{
+                method:'POST',headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({labels:toSync,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+                signal:AbortSignal.timeout(8000)
+              }).catch(()=>{});
+            }
+          }
 
           // Scans — server + queued pending
           const serverScans = (snap.tracking.scans||[]).map(s=>({
@@ -1813,22 +1883,36 @@ function generateZPL(label, batch){
     : (shipTo && billTo && billTo !== shipTo ? shipTo+' ('+billTo+')' : shipTo);
 
   // ── ORANGE LABEL 100mm x 50mm ─────────────────────────────────
+  // Matches physical sample: orange background, white text, QR top-right
+  // Fields: Batch NO, Container NO, Printed, PrintingMatter, Q RELEASED, SIGNATURE
   if(label.isOrange){
-    const pm=label.printingMatter||batch?.printMatter||'', pmP=pm.split('/');
-    const pmCap=(pmP[0]||'').trim()||pm, pmBody=(pmP[1]||'').trim()||'';
-    return `^XA^CI28^PW800^LL400^MMT^PON^LH0,0
-^FO10,10^GB780,378,2^FS^FO560,10^GB2,378,2^FS
-^CF0,30^FO20,18^FB530,1,0,C^FDPRINTING DETAILS^FS
-^FO20,52^GB540,2,2^FS
-^CF0,26^FO25,60^FDCAP   :  ${pmCap}^FS
-^FO25,100^FDBODY :  ${pmBody}^FS
-^FO20,144^GB540,2,2^FS
-^CF0,22^FO25,154^FDBatch :  ${batchNo}^FS
-^FO25,186^FDContainer :  ${containerNo}^FS
-^FO25,218^FDSize :  ${label.size}^FS
-^FO20,260^GB540,2,2^FS
-^CF0,18^FO25,268^FDExpiry: 5 yrs from Mfg. RAJ-867, Dt 08.12.1981^FS
-^FO574,10^BQN,2,4^FDLA,${label.qrData}^FS
+    const pm = label.printingMatter || batch?.printingMatter || batch?.pcCode || '';
+    const containerNum = Math.abs(label.labelNumber||0);
+    const qrContent = label.qrData || (batchNo+'-OL-'+containerNum);
+    return `^XA
+^CI28
+^PW800
+^LL400
+^MMT
+^PON
+^LH0,0
+^FO0,0^GB800,400,400^FS
+^CF0,38
+^FR
+^FO20,18^FDBatch NO.^FS
+^FO260,18^FD:  ${batchNo}^FS
+^FO20,72^FDContainer NO.^FS
+^FO260,72^FD:  ${containerNum}^FS
+^FO20,126^FDPrinted^FS
+^FO260,126^FD:^FS
+^CF0,44
+^FO20,172^FD${pm}^FS
+^CF0,70
+^FO20,280^FDQ^FS
+^CF0,38
+^FO85,296^FDRELEASED^FS
+^FO500,370^FB260,1,0,R^FDSIGNATURE^FS
+^FO540,18^BQN,2,6^FDLA,${qrContent}^FS
 ^XZ`;
   }
 
@@ -2245,15 +2329,21 @@ function getBoxCurrentStageForBatch(batchNo){
 
 // ── Regenerate orange labels from existing PI scan-in records ──
 // Run this once to fix batches that were scanned at PI before the bug fix
-function regenerateOrangeLabelsFromScans(){
+async function regenerateOrangeLabelsFromScans(){
+  toast('🔄 Generating orange labels...','var(--orange)');
   let count = 0;
+  const newOrangeLabels = [];
   const piScans = state.scans.filter(s=>s.dept==='pi'&&s.type==='in');
   piScans.forEach(scan=>{
+    // Find the label for this scan
     const label = state.labels.find(l=>l.id===scan.labelId||
-      (l.batchNumber===scan.batchNumber && Math.abs(l.labelNumber)===Math.abs(scan.boxNumber)));
+      (l.batchNumber===scan.batchNumber && Math.abs(l.labelNumber)===Math.abs(scan.labelNumber||scan.boxNumber)));
     if(!label) return;
-    const batch = getBatch(scan.batchNumber);
-    if(!batch) return;
+    const batch = getBatch(scan.batchNumber) || {
+      batchNumber:scan.batchNumber, isPrinted:true, size:scan.size||label.size,
+      customer:label.customer||'', colour:label.colour||'',
+      printingMatter:label.printingMatter||label.pcCode||''
+    };
     // Mark as printed
     if(!batch.isPrinted){
       batch.isPrinted = true;
@@ -2263,19 +2353,45 @@ function regenerateOrangeLabelsFromScans(){
     // Check if orange label already exists
     const existing = state.labels.find(l=>
       (l.parentLabelId===label.id && l.isOrange) ||
-      (l.batchNumber===label.batchNumber && l.labelNumber===('OL-'+label.labelNumber) && l.isOrange)
+      (l.batchNumber===label.batchNumber && l.isOrange &&
+       (l.labelNumber===('OL-'+label.labelNumber)||l.labelNumber===('OL-'+Math.abs(label.labelNumber))))
     );
     if(existing) return;
-    // Generate
-    autoGenerateOrangeLabel(label, batch);
+    // Create orange label locally
+    const orangeLabel = {
+      id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+Math.abs(label.labelNumber),
+      size:label.size, qty:label.qty, isOrange:true, parentLabelId:label.id,
+      printingMatter:batch.printingMatter||batch.pcCode||label.printingMatter||'',
+      customer:batch.customer||label.customer||'',
+      colour:batch.colour||label.colour||'', generated:now(), printed:false, voided:false
+    };
+    state.labels.push(orangeLabel);
+    newOrangeLabels.push({...orangeLabel, isOrange:1, isPartial:0, printed:0, voided:0, isExcess:0});
     count++;
   });
+
   saveLocal();
+
   if(count > 0){
-    toast(`✅ Generated ${count} orange label${count>1?'s':''} from existing PI scans`,'var(--orange)');
+    // Push ALL new orange labels to server in ONE batch call and AWAIT it
+    if(serverUrl && newOrangeLabels.length > 0){
+      try{
+        await fetch(serverUrl+'/api/tracking/state',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({labels:newOrangeLabels,scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}),
+          signal:AbortSignal.timeout(10000)
+        });
+        toast(`✅ ${count} orange label${count>1?'s':''} saved to server`,'var(--orange)');
+      }catch(e){
+        toast(`✅ ${count} orange label${count>1?'s':''} generated (will sync when online)`,'var(--orange)');
+        // Queue for retry
+        newOrangeLabels.forEach(l=>trkQueuePush('/api/tracking/state',{labels:[l],scans:[],stageClosure:[],wastage:[],dispatchRecs:[],alerts:[]}));
+      }
+    }
     renderPage(currentPage);
   } else {
-    toast('No new orange labels to generate','var(--text3)');
+    toast('All orange labels already exist','var(--text3)');
   }
   return count;
 }

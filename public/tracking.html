@@ -1523,11 +1523,14 @@ function autoGenerateOrangeLabel(label, batch){
     (l.batchNumber===label.batchNumber && l.labelNumber===('OL-'+label.labelNumber) && l.isOrange)
   );
   if(existing) return;
+  // Fetch fresh batch to get latest printingMatter
+  const _fb = getBatch(batch.batchNumber) || batch;
+  const _pm = (_fb.printingMatter||batch.printingMatter||'').trim();
   const orangeLabel = {
     id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+label.labelNumber,
     size:label.size, qty:label.qty, isOrange:true, parentLabelId:label.id,
-    printingMatter:batch.printingMatter||batch.pcCode||'', customer:batch.customer,
-    colour:batch.colour, generated:now(), printed:false, voided:false
+    printingMatter:_pm, customer:_fb.customer||batch.customer||'',
+    colour:_fb.colour||batch.colour||'', generated:now(), printed:false, voided:false
   };
   state.labels.push(orangeLabel);
   saveLocal();
@@ -1886,7 +1889,11 @@ function generateZPL(label, batch){
   // Matches physical sample: orange background, white text, QR top-right
   // Fields: Batch NO, Container NO, Printed, PrintingMatter, Q RELEASED, SIGNATURE
   if(label.isOrange){
-    const pm = label.printingMatter || batch?.printingMatter || '';
+    // Get printingMatter from fresh batch data — never show pcCode as pm
+    const _b2 = getBatch(label.batchNumber) || batch || {};
+    const pm = label.printingMatter && isNaN(label.printingMatter)
+      ? label.printingMatter
+      : (_b2.printingMatter || batch?.printingMatter || '');
     // Container number: strip OL- prefix if present
     const rawNum = String(label.labelNumber||'0');
     const containerNum = rawNum.startsWith('OL-') ? rawNum.replace('OL-','') : String(Math.abs(parseFloat(rawNum)||0));
@@ -1912,7 +1919,7 @@ function generateZPL(label, batch){
 ^FO55,162^FDRELEASED^FS
 ^FO470,186^FB300,1,0,R^FDSIGNATURE^FS
 ^BQN,2,5
-^FO590,10^BQN,2,5^FDLA,${qrContent}^FS
+^FO570,5^BQN,2,7^FDLA,${qrContent}^FS
 ^XZ`;
   }
 
@@ -2361,7 +2368,7 @@ async function regenerateOrangeLabelsFromScans(){
     const orangeLabel = {
       id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+Math.abs(label.labelNumber),
       size:label.size, qty:label.qty, isOrange:true, parentLabelId:label.id,
-      printingMatter:batch.printingMatter||batch.pcCode||label.printingMatter||'',
+      printingMatter:(batch.printingMatter||label.printingMatter||'').replace(/^\d+$/,''),
       customer:batch.customer||label.customer||'',
       colour:batch.colour||label.colour||'', generated:now(), printed:false, voided:false
     };

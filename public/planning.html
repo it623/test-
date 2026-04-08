@@ -701,6 +701,7 @@ const SYNC = (() => {
     } catch {}
 
     await loadTrackingStatus();
+      await loadDprStatus();
     await loadLiveAGrade();
     await loadDispatchActuals();
 
@@ -744,6 +745,40 @@ const SYNC = (() => {
         if (ord.batchNumber && closureMap[ord.batchNumber]) {
           ord.stageStatus = closureMap[ord.batchNumber];
         }
+      });
+    } catch(e) {}
+  }
+
+
+  // ── Load DPR Status for each order (machine level) ───────────
+  async function loadDprStatus() {
+    if (!_url) return;
+    try {
+      const today = new Date().toISOString().slice(0,10);
+      const floors = ['GF','1F','2F'];
+      const dprData = {};
+      await Promise.all(floors.map(async fl => {
+        try {
+          const r = await fetch(_url+'/api/dpr/'+fl+'/'+today, {signal:AbortSignal.timeout(4000)});
+          const j = await r.json();
+          if(j.ok && j.data) dprData[fl] = j.data;
+        } catch(e) {}
+      }));
+      // For each order, check if its machine has production qty entered today
+      state.orders.forEach(ord => {
+        if(!ord.machineId) return;
+        let found = false;
+        Object.values(dprData).forEach(dayData => {
+          if(found) return;
+          ['A','B','C'].forEach(sh => {
+            if(found) return;
+            const mc = dayData.shifts?.[sh]?.machines?.[ord.machineId];
+            if(!mc) return;
+            const hasQty = (mc.runs||[]).some(r => parseFloat(r.qty||0) > 0);
+            if(hasQty) { ord.dprStatus = 'entered'; found = true; }
+          });
+        });
+        if(!found) ord.dprStatus = 'pending';
       });
     } catch(e) {}
   }
@@ -1331,7 +1366,7 @@ function renderProduction() {
                 <tr>
                   <th>#</th><th>PO / Batch</th><th>Customer</th><th>Size</th><th>PC Code</th><th>Colour</th>
                   <th>PTD/UP</th><th>Print Matter Cap</th><th>Print Matter Body</th><th>Ink Cap</th><th>Ink Body</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
-                  <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>Status</th><th>Remarks</th><th>Actions</th>
+                  <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>AIM Out (L)</th><th>Status</th><th>DPR Status</th><th>Remarks</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1403,7 +1438,19 @@ function renderOrderRow(ord, idx, mc) {
         style="width:70px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px;font-family:var(--mono)"
         onchange="updateActualProd('${ord.id}',this.value,'${mc.id}')">
     </td>
+    <td class="text-mono" style="color:var(--accent2);font-size:12px">${(()=>{
+      const ag = window._liveAGrade && window._liveAGrade[ord.batchNumber];
+      const aimOut = ag?.aim?.outQty || 0;
+      return aimOut > 0 ? fmt(aimOut) + 'L' : '<span style="color:var(--text3)">—</span>';
+    })()}</td>
     <td>${statusBadge}</td>
+    <td style="font-size:11px">${(()=>{
+      const dprSt = ord.dprStatus;
+      if(!dprSt) return '<span style="color:var(--text3)">—</span>';
+      if(dprSt==='entered') return '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">✅ Entered</span>';
+      if(dprSt==='pending') return '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)">⏳ Pending</span>';
+      return '<span style="color:var(--text3)">—</span>';
+    })()}</td>
     <td><input type="text" value="${ord.remarks||''}" placeholder="Add remark..."
       style="width:130px;background:var(--surface3);border:1px solid var(--border);border-radius:4px;color:var(--text);padding:3px 6px;font-size:12px"
       onchange="updateOrderRemark('${ord.id}',this.value)"></td>

@@ -1889,17 +1889,15 @@ function generateZPL(label, batch){
   // Matches physical sample: orange background, white text, QR top-right
   // Fields: Batch NO, Container NO, Printed, PrintingMatter, Q RELEASED, SIGNATURE
   if(label.isOrange){
-    // Get printingMatter from fresh batch data — never show pcCode as pm
+    // Get printingMatter from all sources — never use numeric pcCode
     const _b2 = getBatch(label.batchNumber) || batch || {};
-    const pm = label.printingMatter && isNaN(label.printingMatter)
-      ? label.printingMatter
-      : (_b2.printingMatter || batch?.printingMatter || '');
-    // Container number: strip OL- prefix if present
+    const _rawPm = label.printingMatter || _b2.printingMatter || batch?.printingMatter || '';
+    const pm = _rawPm && isNaN(_rawPm.trim()) ? _rawPm.trim() : '';
+    // Container number — strip OL- prefix if present
     const rawNum = String(label.labelNumber||'0');
     const containerNum = rawNum.startsWith('OL-') ? rawNum.replace('OL-','') : String(Math.abs(parseFloat(rawNum)||0));
     const qrContent = label.qrData || (batchNo+'-OL-'+containerNum);
-    // Orange label: 4" wide x 1" tall (landscape) at 203dpi = PW=812, LL=203
-    // Paper is physically orange — print black text directly
+    // Orange label: 4" wide x 1" tall at 203dpi = PW=812, LL=203
     return `^XA
 ^CI28
 ^PW812
@@ -1907,19 +1905,18 @@ function generateZPL(label, batch){
 ^MMT
 ^PON
 ^LH0,0
-^CF0,26
-^FO10,6^FDBatch NO.     :  ${batchNo}^FS
-^FO10,38^FDContainer NO. :  ${containerNum}^FS
-^FO10,70^FDPrinted       :^FS
-^CF0,30
-^FO10,100^FD${pm}^FS
-^CF0,48
-^FO10,150^FDQ^FS
-^CF0,26
-^FO55,162^FDRELEASED^FS
-^FO470,186^FB300,1,0,R^FDSIGNATURE^FS
-^BQN,2,5
-^FO570,5^BQN,2,7^FDLA,${qrContent}^FS
+^A0N,30,30
+^FO12,18^FDBatch NO.     :  ${batchNo}^FS
+^FO12,52^FDContainer NO. :  ${containerNum}^FS
+^FO12,86^FDPrinted       :^FS
+^A0N,34,34
+^FO12,120^FD${pm}^FS
+^A0N,52,52
+^FO12,158^FDQ^FS
+^A0N,28,28
+^FO65,168^FDRELEASED^FS
+^FO490,185^FB280,1,0,R^FDSIGNATURE^FS
+^FO555,8^BQN,2,8^FDLA,${qrContent}^FS
 ^XZ`;
   }
 
@@ -2346,11 +2343,14 @@ async function regenerateOrangeLabelsFromScans(){
     const label = state.labels.find(l=>l.id===scan.labelId||
       (l.batchNumber===scan.batchNumber && Math.abs(l.labelNumber)===Math.abs(scan.labelNumber||scan.boxNumber)));
     if(!label) return;
-    const batch = getBatch(scan.batchNumber) || {
+    const _rb = getBatch(scan.batchNumber);
+    const batch = _rb || {
       batchNumber:scan.batchNumber, isPrinted:true, size:scan.size||label.size,
       customer:label.customer||'', colour:label.colour||'',
-      printingMatter:label.printingMatter||label.pcCode||''
+      printingMatter:''
     };
+    // Always get fresh printingMatter from state.batches
+    if(_rb && _rb.printingMatter) batch.printingMatter = _rb.printingMatter;
     // Mark as printed
     if(!batch.isPrinted){
       batch.isPrinted = true;
@@ -2363,7 +2363,16 @@ async function regenerateOrangeLabelsFromScans(){
       (l.batchNumber===label.batchNumber && l.isOrange &&
        (l.labelNumber===('OL-'+label.labelNumber)||l.labelNumber===('OL-'+Math.abs(label.labelNumber))))
     );
-    if(existing) return;
+    if(existing){
+      // Update printingMatter if it was missing or was a number (pcCode)
+      const correctPm = (batch.printingMatter||'').trim();
+      if(correctPm && (isNaN(existing.printingMatter)||!existing.printingMatter)){
+        existing.printingMatter = correctPm;
+        const lfs={...existing,isOrange:1,isPartial:0,printed:existing.printed?1:0,voided:0,isExcess:0};
+        newOrangeLabels.push(lfs); // re-push to server with corrected PM
+      }
+      return;
+    }
     // Create orange label locally
     const orangeLabel = {
       id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+Math.abs(label.labelNumber),

@@ -764,21 +764,20 @@ const SYNC = (() => {
           if(j.ok && j.data) dprData[fl] = j.data;
         } catch(e) {}
       }));
-      // For each order, check if its machine has production qty entered today
+      // For each order, get the machine STATUS (Running/Closed) from DPR
       state.orders.forEach(ord => {
         if(!ord.machineId) return;
-        let found = false;
+        let statusFound = null;
         Object.values(dprData).forEach(dayData => {
-          if(found) return;
           ['A','B','C'].forEach(sh => {
-            if(found) return;
             const mc = dayData.shifts?.[sh]?.machines?.[ord.machineId];
             if(!mc) return;
-            const hasQty = (mc.runs||[]).some(r => parseFloat(r.qty||0) > 0);
-            if(hasQty) { ord.dprStatus = 'entered'; found = true; }
+            // If any shift has 'closed', mark closed; else running
+            if(mc.status === 'closed') statusFound = 'closed';
+            else if(!statusFound) statusFound = mc.status || 'running';
           });
         });
-        if(!found) ord.dprStatus = 'pending';
+        ord.dprStatus = statusFound || 'running';
       });
     } catch(e) {}
   }
@@ -1446,9 +1445,8 @@ function renderOrderRow(ord, idx, mc) {
     <td>${statusBadge}</td>
     <td style="font-size:11px">${(()=>{
       const dprSt = ord.dprStatus;
-      if(!dprSt) return '<span style="color:var(--text3)">—</span>';
-      if(dprSt==='entered') return '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">✅ Entered</span>';
-      if(dprSt==='pending') return '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.3)">⏳ Pending</span>';
+      if(!dprSt || dprSt==='running') return '<span class="badge" style="background:rgba(16,185,129,0.15);color:#10b981;border:1px solid rgba(16,185,129,0.3)">🟢 Running</span>';
+      if(dprSt==='closed') return '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.3)">🔴 Closed</span>';
       return '<span style="color:var(--text3)">—</span>';
     })()}</td>
     <td><input type="text" value="${ord.remarks||''}" placeholder="Add remark..."

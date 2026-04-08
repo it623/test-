@@ -2586,7 +2586,17 @@ function renderLabels(){
         </tr>`;
       }).join('')}
       </tbody>
-    </table></div>` : '<div class="text-center text-muted" style="padding:16px">No orange labels yet — generated automatically when printed batch boxes are scanned IN at PI.</div>'}
+    </table></div>` : (()=>{
+        // If no orange labels but server is available, try pulling from server
+        if(serverUrl && state.labels.length > 0){
+          return '<div class="text-center text-muted" style="padding:16px">No orange labels yet — generated automatically when printed batch boxes are scanned IN at PI.</div>';
+        } else if(serverUrl && state.labels.length === 0){
+          // Labels not loaded yet — trigger pull and show loading
+          setTimeout(()=>{ pullFromServer().then(()=>renderLabels()); }, 500);
+          return '<div class="text-center text-muted" style="padding:16px">⏳ Loading labels from server...</div>';
+        }
+        return '<div class="text-center text-muted" style="padding:16px">No orange labels yet — generated automatically when printed batch boxes are scanned IN at PI.</div>';
+      })()}
   </div>`;
   }
 }

@@ -462,14 +462,18 @@ app.get('/api/orders/machine/:machineId', asyncRoute(async (req, res) => {
 // GET all active orders
 app.get('/api/orders/active', asyncRoute(async (req, res) => {
   const state = await getPlanningState();
-  const orders = (state.orders || [])
-    .filter(o => o.status !== 'closed' && !o.deleted)
-    .map(o => ({
+  const rawOrders = (state.orders || []).filter(o => o.status !== 'closed' && !o.deleted);
+  // Use getOrderActuals for live production qty from DPR records
+  const orders = await Promise.all(rawOrders.map(async o => {
+    const actual = await getOrderActuals(o.id, o.batchNumber);
+    return {
       id: o.id, batchNumber: o.batchNumber || '', poNumber: o.poNumber || '',
       customer: o.customer || '', machineId: o.machineId || '',
       size: o.size || '', colour: o.colour || '',
-      qty: o.qty || 0, grossQty: o.grossQty || 0, actualQty: o.actualQty || 0, status: o.status || 'pending',
-    }));
+      qty: o.qty || 0, grossQty: o.grossQty || 0,
+      actualQty: actual || o.actualQty || 0, status: o.status || 'pending',
+    };
+  }));
   res.json({ ok: true, orders });
 }));
 

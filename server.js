@@ -1197,7 +1197,7 @@ app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
       isPrinted: !!o.isPrinted,
       startDate: o.startDate || null,
       endDate: o.endDate || null,
-      printingMatter: o.printingMatter || '',
+      printingMatter: o.printMatter || o.printingMatter || '',
       zone: o.zone || '',
       dispatchedQty: o.dispatchedQty || 0,
     });

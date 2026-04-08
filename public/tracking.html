@@ -1474,6 +1474,21 @@ async function recordScan(labelId, dept, type, operator, parsed){
       return {ok:false, msg:`⚠️ Box not scanned IN at ${dept.toUpperCase()} yet — scan IN first`};
     if(deptOut >= deptIn)
       return {ok:false, msg:`✋ Box already scanned OUT at ${dept.toUpperCase()}`};
+    // ORANGE LABEL CHECK: block PI scan-out if orange label not generated
+    if(dept === 'pi'){
+      const hasOrangeLabel = state.labels.some(l=>
+        l.isOrange && !l.voided &&
+        (l.parentLabelId === labelId ||
+         (l.batchNumber === label.batchNumber &&
+          (l.labelNumber === ('OL-'+Math.abs(label.labelNumber||0)) ||
+           l.labelNumber === ('OL-'+label.labelNumber))))
+      );
+      if(!hasOrangeLabel){
+        // Auto-generate now and warn
+        if(batch) autoGenerateOrangeLabel(label, batch);
+        return {ok:false, msg:`🟠 ORANGE LABEL MISSING — Orange label has been auto-generated. Please print the orange label first, then scan OUT.`};
+      }
+    }
   }
 
   const scan = { id:uid(), labelId, batchNumber:label.batchNumber, dept, type, ts:now(), operator:operator||currentDept, size:label.size, qty:label.qty };
@@ -1525,7 +1540,8 @@ function autoGenerateOrangeLabel(label, batch){
   if(existing) return;
   // Fetch fresh batch to get latest printingMatter
   const _fb = getBatch(batch.batchNumber) || batch;
-  const _pm = (_fb.printingMatter||batch.printingMatter||'').trim();
+  // Use printMatter (Planning field) or printingMatter (server normalized)
+  const _pm = (_fb.printMatter||_fb.printingMatter||batch.printMatter||batch.printingMatter||'').trim().replace(/^\d+$/,'');
   const orangeLabel = {
     id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+label.labelNumber,
     size:label.size, qty:label.qty, isOrange:true, parentLabelId:label.id,
@@ -1889,10 +1905,10 @@ function generateZPL(label, batch){
   // Matches physical sample: orange background, white text, QR top-right
   // Fields: Batch NO, Container NO, Printed, PrintingMatter, Q RELEASED, SIGNATURE
   if(label.isOrange){
-    // Get printingMatter — never use numeric pcCode
-    const _b2 = getBatch(label.batchNumber) || batch || {};
-    const _rawPm = label.printingMatter || _b2.printingMatter || batch?.printingMatter || '';
-    const pm = _rawPm && isNaN(_rawPm.trim()) ? _rawPm.trim() : (_b2.printingMatter||'').trim();
+    // ALWAYS get printingMatter fresh from state.batches — most reliable source
+    const _freshBatch = state.batches.find(b=>b.batchNumber===label.batchNumber) || batch || {};
+    // printMatter = Planning field, printingMatter = server-normalized field
+    const pm = (_freshBatch.printMatter||_freshBatch.printingMatter||batch?.printMatter||batch?.printingMatter||label.printingMatter||'').trim().replace(/^\d+$/,'');
     // Container number — strip OL- prefix if present
     const rawNum = String(label.labelNumber||'0');
     const containerNum = rawNum.startsWith('OL-') ? rawNum.replace('OL-','') : String(Math.abs(parseFloat(rawNum)||0));
@@ -1905,19 +1921,18 @@ function generateZPL(label, batch){
 ^MMT
 ^PON
 ^LH0,0
-^A0N,36,36
-^FO10,8^FDBatch NO.     :  ${batchNo}^FS
-^FO10,46^FDContainer NO. :  ${containerNum}^FS
-^FO10,84^FDPrinted       :^FS
 ^A0N,40,40
-^FO10,124^FD${pm}^FS
-^A0N,52,52
+^FO10,8^FDBatch NO.     :  ${batchNo}^FS
+^FO10,52^FDContainer NO. :  ${containerNum}^FS
+^FO10,96^FDPrinted       :^FS
+^A0N,44,44
+^FO10,136^FD${pm}^FS
+^A0N,56,56
 ^FO10,162^FDQ^FS
-^A0N,34,34
-^FO62,168^FDRELEASED^FS
-^A0N,28,28
-^FO530,174^FDSIGNATURE^FS
-^FO585,5^BQN,2,7^FDLA,${qrContent}^FS
+^A0N,36,36
+^FO68,170^FDRELEASED^FS
+^FO510,178^FB270,1,0,R^FDSIGNATURE^FS
+^FO582,4^BQN,2,7^FDLA,${qrContent}^FS
 ^XZ`;
   }
 

@@ -1886,11 +1886,13 @@ function generateZPL(label, batch){
   // Matches physical sample: orange background, white text, QR top-right
   // Fields: Batch NO, Container NO, Printed, PrintingMatter, Q RELEASED, SIGNATURE
   if(label.isOrange){
-    const pm = label.printingMatter || batch?.printingMatter || batch?.pcCode || '';
-    const containerNum = Math.abs(label.labelNumber||0);
+    const pm = label.printingMatter || batch?.printingMatter || '';
+    // Container number: strip OL- prefix if present
+    const rawNum = String(label.labelNumber||'0');
+    const containerNum = rawNum.startsWith('OL-') ? rawNum.replace('OL-','') : String(Math.abs(parseFloat(rawNum)||0));
     const qrContent = label.qrData || (batchNo+'-OL-'+containerNum);
-    // Orange label: 4" x 1" at 203dpi = 812 x 203 dots
-    // Physically orange paper — print black text directly, no fill needed
+    // Orange label: 4" wide x 1" tall (landscape) at 203dpi = PW=812, LL=203
+    // Paper is physically orange — print black text directly
     return `^XA
 ^CI28
 ^PW812
@@ -1898,18 +1900,19 @@ function generateZPL(label, batch){
 ^MMT
 ^PON
 ^LH0,0
-^CF0,28
-^FO8,8^FDBatch NO.    :  ${batchNo}^FS
-^FO8,44^FDContainer NO.:  ${containerNum}^FS
-^FO8,80^FDPrinted      :^FS
-^CF0,32
-^FO8,118^FD${pm}^FS
-^CF0,55
-^FO8,160^FDQ^FS
 ^CF0,26
-^FO58,172^FDRELEASED^FS
-^FO480,178^FB280,1,0,R^FDSIGNATURE^FS
-^FO600,8^BQN,2,4^FDLA,${qrContent}^FS
+^FO10,6^FDBatch NO.     :  ${batchNo}^FS
+^FO10,38^FDContainer NO. :  ${containerNum}^FS
+^FO10,70^FDPrinted       :^FS
+^CF0,30
+^FO10,100^FD${pm}^FS
+^CF0,48
+^FO10,150^FDQ^FS
+^CF0,26
+^FO55,162^FDRELEASED^FS
+^FO470,186^FB300,1,0,R^FDSIGNATURE^FS
+^BQN,2,5
+^FO590,10^BQN,2,5^FDLA,${qrContent}^FS
 ^XZ`;
   }
 

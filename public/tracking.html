@@ -445,16 +445,10 @@ input[type=number]{font-family:var(--mono)}
 .text-center{text-align:center}
 .overflow-hidden{overflow:hidden}
 /* ── Sticky columns in reports ── */
-.tbl-wrap { overflow-x:auto; max-width:100%; }
-.tbl-wrap table { border-collapse:collapse; min-width:100%; }
-.tbl-wrap th, .tbl-wrap td { white-space:nowrap; }
-.sticky-col { position:sticky; background:var(--surface,#1a1e28); z-index:2; }
-.sticky-col-1 { left:0;   min-width:70px;  box-shadow:1px 0 0 var(--border,#2a2f3f); }
-.sticky-col-2 { left:70px; min-width:55px; box-shadow:1px 0 0 var(--border,#2a2f3f); }
-.sticky-col-3 { left:125px; min-width:80px; box-shadow:1px 0 0 var(--border,#2a2f3f); }
-.sticky-col-4 { left:205px; min-width:50px; box-shadow:1px 0 0 var(--border,#2a2f3f); }
-.sticky-col-5 { left:255px; min-width:90px; box-shadow:2px 0 6px rgba(0,0,0,0.3); }
-thead .sticky-col { z-index:3; background:var(--surface2,#222736); }
+/* ── Sticky columns ── */
+.sticky-col { position:sticky; z-index:2; background:var(--surface,#13161d); }
+thead .sticky-col { z-index:3; background:var(--surface2,#1a1e28); }
+tbody tr:hover .sticky-col { background:var(--surface3,#222736); }
 
 
 </style>
@@ -4054,6 +4048,32 @@ function renderBatchDetail(batch){
   </table></div>`;
 }
 
+
+// ── Auto-fix sticky column left offsets after report renders ──
+function fixStickyColumns(container){
+  const table = container ? container.querySelector('table') : null;
+  if(!table) return;
+  const rows = table.querySelectorAll('tr');
+  rows.forEach(row=>{
+    let offset = 0;
+    row.querySelectorAll('th.sticky-col, td.sticky-col').forEach(cell=>{
+      cell.style.left = offset + 'px';
+      // Add shadow only to last sticky col in this row
+      cell.style.boxShadow = '';
+      offset += cell.offsetWidth;
+    });
+    // Add shadow to last sticky cell
+    const stickyCells = row.querySelectorAll('th.sticky-col, td.sticky-col');
+    if(stickyCells.length > 0){
+      stickyCells[stickyCells.length-1].style.boxShadow = '3px 0 6px rgba(0,0,0,0.35)';
+    }
+  });
+}
+
+function fixAllReportSticky(){
+  document.querySelectorAll('.tbl-wrap').forEach(wrap => fixStickyColumns(wrap));
+}
+
 function renderReports(){
   const el=document.getElementById('page-reports');
   el.innerHTML=`
@@ -4377,6 +4397,7 @@ function renderReportF(){
 
   document.getElementById('report-output').innerHTML = html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+  setTimeout(fixAllReportSticky, 150);
 }
 
 function exportReportF(){
@@ -4435,6 +4456,7 @@ function renderReportB(){
   html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportB()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+  setTimeout(fixAllReportSticky, 150);
 }
 
 function renderReportC(){
@@ -4470,6 +4492,7 @@ function renderReportC(){
   html+=`</tbody></table></div><button class="btn btn-secondary btn-sm mt-12" onclick="exportReportC()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+  setTimeout(fixAllReportSticky, 150);
 }
 
 function renderReportD(){
@@ -4516,6 +4539,7 @@ function renderReportD(){
   <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportD()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+  setTimeout(fixAllReportSticky, 150);
 }
 
 function renderReportA(){
@@ -4597,6 +4621,7 @@ function renderReportA(){
   html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportA()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+  setTimeout(fixAllReportSticky, 150);
 }
 
 function renderBatchFlowSummary(batch){
@@ -4695,6 +4720,7 @@ function renderReportE(){
   <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportE()">📥 Export Excel (matches current format)</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
+  setTimeout(fixAllReportSticky, 150);
 }
 
 // Export functions

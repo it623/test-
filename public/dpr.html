@@ -342,7 +342,6 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <div class="agrid">
     <div class="card"><div class="card-title">Production vs Target</div><div class="chart-wrap"><canvas id="ch-pvt"></canvas></div></div>
     <div class="card"><div class="card-title">Downtime by Category</div><div class="chart-wrap"><canvas id="ch-dt"></canvas></div></div>
-    <div class="card"><div class="card-title">Downtime % per Department <span style="font-size:10px;color:var(--t3);font-weight:400">(max 1,440 min/day each)</span></div><div class="chart-wrap"><canvas id="ch-dt-pct"></canvas></div></div>
     <div class="card"><div class="card-title">Machine Efficiency %</div><div class="chart-wrap"><canvas id="ch-eff"></canvas></div></div>
     <div class="card"><div class="card-title">Re-Sort by Root Cause</div><div class="chart-wrap"><canvas id="ch-rs"></canvas></div></div>
   </div>
@@ -434,12 +433,6 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="section-title" style="margin-bottom:12px">Machine Management</div>
     <div class="section-sub" style="margin-bottom:12px">Enable or disable machines per floor. Disabled machines are hidden from entry and analytics. Admin only.</div>
     <div id="machine-settings-area"></div>
-  </div>
-
-  <div class="card">
-    <div class="section-title" style="margin-bottom:8px">Manpower Master</div>
-    <div class="section-sub" style="margin-bottom:12px">Add or remove team member names. Changes apply to all drop-down menus in data entry. Admin only.</div>
-    <div id="manpower-settings-area"></div>
   </div>
 
   <div class="card">
@@ -650,140 +643,6 @@ function resetAllMachinesActive(fl){
     localStorage.setItem('dpr_active_machines',JSON.stringify(cfg));
     pushDprSettings({ dpr_active_machines: cfg });
   }catch{}
-}
-
-// ─── Manpower Master ──────────────────────────────────────────────────────────
-// Staff name lists per floor/role — used to populate operator/incharge dropdowns.
-// Admins can add/remove names; stored in localStorage so they persist across sessions.
-const MANPOWER_MASTER = {
-  common: {
-    hvac:       ['Pawan','Monu Kumar','Sunil Saini','Pradeep Kumar'],
-    electrical: ['Mr. Narendra Singh','Mr. Arun Solanki','Mr. Anil Singh Rajput',
-                 'Mr. Sachin Sharma','Manog Gaur','Jitendra Sharma','Gajendra Pal Singh'],
-    chemist:    ['Satyendra Singh','Manish Kumar Saini','Govind Singh','Satyendra Sharma',
-                 'Devendra Naruka','Anurag Saini','Mukesh Chand Jat','Rajendra Singh',
-                 'Mohit Saini','Ramsingh Yadav','Duli Chand Jatav','Dharam Chand Saini',
-                 'Kamal Kishore Tiwari','Hoti Lal Meena','Narayan Lal Saini'],
-  },
-  GF: {
-    incharge: ['Mr. Ashwani Saini','Mr. Bhupendra Sharma','Mr. OM Prakash Yadav','Mr. Lakhan Singh'],
-    operator: ['Mr. Jitin Kumar Saini','Mr. Anil Meena','Mr. Sube Singh Jaat',
-               'Mr. Shiv Shanker Saini','Mr. Ramesh Jatav','Mr. Satya Jeet Roy',
-               'Mr. Manish Gurjar','Mr. Girraj Kishore Saini','Mr. Atendra Singh',
-               'Mr. Anju Ram','Mr. Manish Mishra','Anil Tiwari','Shri Chand',
-               'Dilip Verma','Amit Kumar Meena','Rahul Saini'],
-    fitter:   ['Dharmendra Sain','Naresh Chand Jangid','Rakesh Kumar',
-               'Ghanshyam Saini','Babu Lal Pushpad'],
-    aim_staff:['Himanshu','Sachin','Mahesh Chand Saini','Manish Jain'],
-    gpr_staff:['Om Prakash Saini','Sanjay Sharma','Mangelal Sharma','Dinesh Kumar Saini'],
-  },
-  '1F': {
-    incharge: ['Mr. Sanjay Lodha','Mr. Sunil Sharma','Mr. Rajesh Jangid','Mr. Jeetu Saini'],
-    operator: ['Mr. Dharmveer Prajapat','Mr. Pramod Kumar','Mr. Sunil Saini',
-               'Mr. Devendra Kumar Saini','Mr. Somendra Singh Yadav','Mr. Puneet Nawariya',
-               'Mr. Hittesh Kumar','Mr. Tarun Sharma','Mr. Rakesh Yogi','Mr. Subhash Gupta',
-               'Mr. Devendra Kumar','Mr. Bhura Ram Meena','Mr. Jitendra Saini',
-               'Mr. Rajesh Malawliya','Mr. Vinod Kumar Sharma','Mr. Deepak Saini',
-               'Mr. Rinku Saini','Mr. Satyendra Kumar Sharma','Mr. Hoshyar Singh',
-               'Mr. Satish Kumar','Mr. Anil Prajapat','Mr. Jagdish Prasad Sharma',
-               'Mahesh Verma','Mr. Trilok Saini','Mr. Amit Kumar','Sandeep Choudhary','Sohan Lal'],
-    fitter:   ['Mr. Anil Yadav','Mr. Dharmendra Sain','Mr. Pankaj Sharma',
-               'Mr. Yogesh Singh','Mr. Rinku'],
-    aim_staff:['Dilip Biswas','Mahendra Singh','Amit Sharma','Sunil Bairwa','Jitin Sharma','Hukam Singh'],
-    gpr_staff:['Daleep Gurjar','Karan Tiwari','Bablu','Vikas','Kedar Singh',
-               'Siya Ram Yadav','Bijendra Pratap Singh'],
-  },
-};
-MANPOWER_MASTER['2F'] = MANPOWER_MASTER['1F']; // SF shares FF lists
-
-// Returns names for a role on a given floor (includes any admin additions)
-function getMasterNames(fl, role){
-  if(MANPOWER_MASTER.common[role]) return getCustomNames(role, MANPOWER_MASTER.common[role]);
-  const flData = MANPOWER_MASTER[fl] || MANPOWER_MASTER['1F'];
-  return getCustomNames(`${fl}_${role}`, flData[role] || []);
-}
-
-function getCustomNames(key, defaults){
-  try{
-    const saved = localStorage.getItem('dpr_manpower_'+key);
-    if(saved) return JSON.parse(saved);
-  }catch{}
-  return [...defaults];
-}
-
-function getDefaultsForKey(storeKey){
-  if(MANPOWER_MASTER.common[storeKey]) return MANPOWER_MASTER.common[storeKey];
-  const parts = storeKey.split('_');
-  const fl = parts[0];
-  const role = parts.slice(1).join('_');
-  return (MANPOWER_MASTER[fl]||{})[role] || [];
-}
-
-function renderManpowerSettings(){
-  const container = document.getElementById('manpower-settings-area');
-  if(!container) return;
-  const ROLES = [
-    { key:'hvac',       label:'HVAC / Utility Team',     scope:'common' },
-    { key:'electrical', label:'Electrical Team',          scope:'common' },
-    { key:'chemist',    label:'QA / Shift Chemist Team',  scope:'common' },
-    { key:'incharge',   label:'GF — Shift Incharge',     scope:'GF' },
-    { key:'operator',   label:'GF — Machine Operators',   scope:'GF' },
-    { key:'fitter',     label:'GF — Shift Fitters',       scope:'GF' },
-    { key:'aim_staff',  label:'GF — AIM Team',            scope:'GF' },
-    { key:'gpr_staff',  label:'GF — GPR Team',            scope:'GF' },
-    { key:'incharge',   label:'FF/SF — Shift Incharge',   scope:'1F' },
-    { key:'operator',   label:'FF/SF — Machine Operators', scope:'1F' },
-    { key:'fitter',     label:'FF/SF — Shift Fitters',    scope:'1F' },
-    { key:'aim_staff',  label:'FF/SF — AIM Team',         scope:'1F' },
-    { key:'gpr_staff',  label:'FF/SF — GPR Team',         scope:'1F' },
-  ];
-  let html = '';
-  ROLES.forEach(({key, label, scope})=>{
-    const storeKey = scope === 'common' ? key : `${scope}_${key}`;
-    const defaults = scope === 'common' ? MANPOWER_MASTER.common[key] : (MANPOWER_MASTER[scope]||{})[key] || [];
-    const names = getCustomNames(storeKey, defaults);
-    html += `<div style="margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--b1)">
-      <div style="font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);margin-bottom:6px">${label}</div>
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">
-        ${names.map((n,i)=>`<span style="display:flex;align-items:center;gap:3px;padding:3px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;font-size:11px">
-          ${esc(n)}
-          <button onclick="removeManpowerName('${storeKey}',${i})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:11px;padding:0 1px;line-height:1">✕</button>
-        </span>`).join('')}
-      </div>
-      <div style="display:flex;gap:6px">
-        <input type="text" id="mp-new-${storeKey}" placeholder="Add name..." style="flex:1;font-size:11px;padding:4px 8px;background:var(--s2);border:1px solid var(--b2);border-radius:3px;color:var(--t1)"
-          onkeydown="if(event.key==='Enter')addManpowerName('${storeKey}')">
-        <button onclick="addManpowerName('${storeKey}')" style="padding:4px 10px;font-size:11px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);cursor:pointer">+ Add</button>
-        <button onclick="resetManpowerNames('${storeKey}')" style="padding:4px 8px;font-size:10px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer" title="Reset to defaults">Reset</button>
-      </div>
-    </div>`;
-  });
-  container.innerHTML = html;
-}
-
-function addManpowerName(storeKey){
-  const inp = document.getElementById('mp-new-'+storeKey);
-  const name = inp?.value.trim();
-  if(!name) return;
-  const names = getCustomNames(storeKey, getDefaultsForKey(storeKey));
-  if(!names.includes(name)){
-    names.push(name);
-    localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
-  }
-  inp.value = '';
-  renderManpowerSettings();
-}
-
-function removeManpowerName(storeKey, idx){
-  const names = getCustomNames(storeKey, getDefaultsForKey(storeKey));
-  names.splice(idx, 1);
-  localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
-  renderManpowerSettings();
-}
-
-function resetManpowerNames(storeKey){
-  localStorage.removeItem('dpr_manpower_'+storeKey);
-  renderManpowerSettings();
 }
 
 function renderMachineSettings(){
@@ -2405,24 +2264,6 @@ function renderAnalytics(){
     datasets:[{data:DT_CATS.map(c=>dtCats[c]),backgroundColor:CHART_COLORS,borderWidth:0}]
   },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}}},responsive:true,maintainAspectRatio:false}});
 
-  // Downtime % per Department (NEW) — shows each DT category as % of max daily minutes
-  const DT_MAX_MINS = 1440; // 24h × 60min — theoretical max downtime per dept per day
-  const dtPcts = {};
-  DT_CATS.forEach(c => dtPcts[c] = Math.min(100, (dtCats[c] / DT_MAX_MINS * 100)));
-  newChart('ch-dt-pct',{type:'bar',data:{
-    labels:DT_CATS.map(c=>DT_LABELS[c]),
-    datasets:[{
-      label:'DT %',
-      data:DT_CATS.map(c=>parseFloat(dtPcts[c].toFixed(1))),
-      backgroundColor:DT_CATS.map(c=>dtPcts[c]>10?'rgba(255,76,76,0.7)':dtPcts[c]>5?'rgba(255,171,0,0.7)':'rgba(0,212,100,0.7)'),
-      borderRadius:4,
-    }]
-  },options:{...chartOpts(),plugins:{...chartOpts().plugins,
-    tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y}% (${dtCats[DT_CATS[ctx.dataIndex]]} min / ${DT_MAX_MINS} min)`}}},
-    scales:{y:{min:0,max:Math.max(20,Math.ceil(Math.max(...DT_CATS.map(c=>dtPcts[c]))/5)*5),
-      ticks:{color:'#7a8ba8',callback:v=>v+'%'},grid:{color:'rgba(255,255,255,0.04)'}},
-      x:{ticks:{color:'#7a8ba8'},grid:{display:false}}}}});
-
   // Efficiency
   const effData=mcs.map(mc=>{
     let prod=0;SHIFTS.forEach(sh=>{
@@ -2985,8 +2826,6 @@ function renderSettings(){
 
   // Machine settings
   renderMachineSettings();
-  // Manpower master names
-  renderManpowerSettings();
 }
 
 // ═══════════════════════════════════════════════════════

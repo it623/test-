@@ -254,17 +254,6 @@ async function runMigrations() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
       `},
-      // v9: DPR batch-close table — tracks which orders have been closed in DPR
-      //     Used by Planning to gate the Planning close button
-      { version: 9, name: 'dpr_batch_closed', sql: `
-        CREATE TABLE IF NOT EXISTS dpr_batch_closed (
-          order_id TEXT PRIMARY KEY,
-          batch_number TEXT,
-          closed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          closed_by TEXT,
-          notes TEXT
-        );
-      `},
     ];
 
     for (const m of migrations) {
@@ -601,32 +590,6 @@ app.post('/api/dpr/settings', asyncRoute(async (req, res) => {
     );
   }
   res.json({ ok: true });
-}));
-
-// ─── DPR Batch-Close Routes (NEW) ────────────────────────────────────────────
-// POST — mark an order as DPR-closed (called from dpr.html when supervisor closes a batch)
-app.post('/api/dpr/batch-close', asyncRoute(async (req, res) => {
-  const { orderId, batchNumber, closedBy, notes } = req.body;
-  if (!orderId) return res.status(400).json({ ok: false, error: 'orderId required' });
-  await query(
-    `INSERT INTO dpr_batch_closed (order_id, batch_number, closed_at, closed_by, notes)
-     VALUES ($1,$2,NOW(),$3,$4)
-     ON CONFLICT(order_id) DO UPDATE SET closed_at=NOW(), closed_by=EXCLUDED.closed_by, notes=EXCLUDED.notes`,
-    [orderId, batchNumber || null, closedBy || null, notes || null]
-  );
-  res.json({ ok: true });
-}));
-
-// DELETE — reopen a DPR-closed batch (admin action)
-app.delete('/api/dpr/batch-close/:orderId', asyncRoute(async (req, res) => {
-  await query('DELETE FROM dpr_batch_closed WHERE order_id=$1', [req.params.orderId]);
-  res.json({ ok: true });
-}));
-
-// GET — return all DPR-closed order IDs (Planning reads this to gate its close button)
-app.get('/api/dpr/batch-closed', asyncRoute(async (req, res) => {
-  const rows = await queryAll('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed');
-  res.json({ ok: true, closed: rows });
 }));
 
 // GET actuals for a machine

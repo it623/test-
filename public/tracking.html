@@ -2357,6 +2357,22 @@ function getBoxCurrentStageForBatch(batchNo){
 // ── Regenerate orange labels from existing PI scan-in records ──
 // Run this once to fix batches that were scanned at PI before the bug fix
 async function regenerateOrangeLabelsFromScans(){
+  toast('🔄 Syncing orange labels from server...','var(--orange)');
+  // First: fix any OL- labels on server that have is_orange=false
+  if(serverUrl){
+    try{
+      await fetch(serverUrl+'/api/admin/fix-orange-labels',{method:'POST',signal:AbortSignal.timeout(5000)});
+    }catch(e){}
+    // Pull fresh from server after fix
+    await pullFromServer();
+    // Check if orange labels now exist
+    const existing = state.labels.filter(l=>l.isOrange&&!l.voided);
+    if(existing.length > 0){
+      toast(`✅ ${existing.length} orange labels loaded from server`,'var(--orange)');
+      renderPage(currentPage);
+      return existing.length;
+    }
+  }
   toast('🔄 Generating orange labels...','var(--orange)');
   let count = 0;
   const newOrangeLabels = [];
@@ -2511,11 +2527,11 @@ function renderLabels(){
     <div class="tbl-wrap"><table id="label-status-table">
       <thead>
         <tr>
-          <th onclick="sortLabelTable('batch')" style="cursor:pointer">Batch ↕</th>
-          <th>MC No</th>
-          <th>Colour</th>
-          <th onclick="sortLabelTable('customer')" style="cursor:pointer">Customer ↕</th>
-          <th>Size</th>
+          <th onclick="sortLabelTable('batch')" style="cursor:pointer;position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:90px">Batch ↕</th>
+          <th style="position:sticky;left:90px;z-index:3;background:#f8f9fb;min-width:70px">MC No</th>
+          <th style="position:sticky;left:160px;z-index:3;background:#f8f9fb;min-width:120px">Colour</th>
+          <th onclick="sortLabelTable('customer')" style="cursor:pointer;position:sticky;left:280px;z-index:3;background:#f8f9fb;min-width:160px">Customer ↕</th>
+          <th style="position:sticky;left:440px;z-index:3;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">Size</th>
           <th>Gross Qty</th>
           <th>Max Labels</th>
           <th>Generated</th>
@@ -2525,11 +2541,11 @@ function renderLabels(){
           <th>Actions</th>
         </tr>
         <tr style="background:var(--surface2)">
-          <td><input type="text" id="lf-batch" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Batch..." oninput="filterLabelTable()"></td>
-          <td><select id="lf-mc" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort((a,b)=>{const na=parseInt(a.replace(/\D/g,''))||0,nb=parseInt(b.replace(/\D/g,''))||0;return na-nb;}).map(m=>`<option value="${m.toLowerCase()}">${m}</option>`).join('')}</select></td>
-          <td><select id="lf-colour" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.colour).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}</select></td>
-          <td><input type="text" id="lf-customer" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Customer..." oninput="filterLabelTable()"></td>
-          <td><select id="lf-size" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td>
+          <td style="position:sticky;left:0;z-index:2;background:#f8f9fb;min-width:90px"><input type="text" id="lf-batch" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Batch..." oninput="filterLabelTable()"></td>
+          <td style="position:sticky;left:90px;z-index:2;background:#f8f9fb;min-width:70px"><select id="lf-mc" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort((a,b)=>{const na=parseInt(a.replace(/\D/g,''))||0,nb=parseInt(b.replace(/\D/g,''))||0;return na-nb;}).map(m=>`<option value="${m.toLowerCase()}">${m}</option>`).join('')}</select></td>
+          <td style="position:sticky;left:160px;z-index:2;background:#f8f9fb;min-width:120px"><select id="lf-colour" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.colour).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}</select></td>
+          <td style="position:sticky;left:280px;z-index:2;background:#f8f9fb;min-width:160px"><input type="text" id="lf-customer" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Customer..." oninput="filterLabelTable()"></td>
+          <td style="position:sticky;left:440px;z-index:2;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)"><select id="lf-size" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td>
           <td></td>
           <td></td>
           <td><select id="lf-status" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option><option value="no-labels">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></td>
@@ -2654,11 +2670,11 @@ function buildLabelRows(batches){
       data-printed="${printed}"
       data-remaining="${remaining}"
       data-maxlabels="${maxLabels}">
-      <td class="td-bold td-mono">${b.batchNumber}</td>
-      <td class="td-mono" style="color:var(--accent);font-weight:600">${b.machineId||'-'}</td>
-      <td class="text-sm" style="white-space:nowrap">${b.colour||'-'}</td>
-      <td>${b.customer||'-'}</td>
-      <td class="td-mono">${b.size} (${ps}L/box)</td>
+      <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#fff;min-width:90px">${b.batchNumber}</td>
+      <td class="td-mono" style="position:sticky;left:90px;z-index:2;background:#fff;min-width:70px;color:var(--accent);font-weight:600">${b.machineId||'-'}</td>
+      <td class="text-sm" style="position:sticky;left:160px;z-index:2;background:#fff;min-width:120px;white-space:nowrap">${b.colour||'-'}</td>
+      <td style="position:sticky;left:280px;z-index:2;background:#fff;min-width:160px">${b.customer||'-'}</td>
+      <td class="td-mono" style="position:sticky;left:440px;z-index:2;background:#fff;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">${b.size} (${ps}L/box)</td>
       <td class="td-mono">${fmt(b.grossQty||b.qty)}L</td>
       <td class="td-mono">${maxLabels}</td>
       <td><div class="mono fw-bold">${generated}</div><div class="progress mt-4" style="width:80px"><div class="progress-bar ${pct>=100?'green':'blue'}" style="width:${Math.min(100,pct)}%"></div></div></td>

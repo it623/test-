@@ -247,6 +247,12 @@ async function runMigrations() {
         );
         CREATE INDEX IF NOT EXISTS idx_backups_ts ON planning_state_backups(backed_up_at DESC);
       `},
+      { version: 9, name: 'fix_orange_labels', sql: `
+        UPDATE tracking_labels 
+        SET is_orange = true, is_partial = false
+        WHERE label_number LIKE 'OL-%' 
+        AND (is_orange = false OR is_orange IS NULL);
+      `},
       { version: 8, name: 'dpr_settings', sql: `
         CREATE TABLE IF NOT EXISTS dpr_settings (
           key TEXT PRIMARY KEY,
@@ -1868,3 +1874,22 @@ async function startServer() {
 }
 
 startServer();
+
+// POST /api/admin/fix-orange-labels — one-time fix to set is_orange=true for OL- labels
+app.post('/api/admin/fix-orange-labels', asyncRoute(async (req, res) => {
+  const result = await query(`
+    UPDATE tracking_labels 
+    SET is_orange = true, parent_label_id = COALESCE(parent_label_id, 
+      (SELECT id FROM tracking_labels tl2 
+       WHERE tl2.batch_number = tracking_labels.batch_number 
+       AND tl2.is_orange = false
+       AND CONCAT('OL-', ABS(tl2.label_number::numeric)) = tracking_labels.label_number
+       LIMIT 1))
+    WHERE label_number LIKE 'OL-%' 
+    AND (is_orange = false OR is_orange IS NULL)
+  `);
+  const count = result.rowCount || 0;
+  console.log('[fix-orange-labels] Fixed', count, 'labels');
+  res.json({ ok: true, fixed: count });
+}));
+

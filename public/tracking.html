@@ -5174,12 +5174,17 @@ function loadDemoData(){
 // ═══════════════════════════════════════════════════════
 
 // Auto-focus scan input when dept page loads
-document.addEventListener('click',e=>{
+// Auto-focus scan input ONLY when user presses Enter/Tab or page first loads
+// Removed global click auto-focus — it was stealing cursor from all other elements
+document.addEventListener('keydown',e=>{
   const page=currentPage;
   if(['aim','printing','pi','packing','dispatch'].includes(page)){
-    const scanIn=document.getElementById(`scan-in-${page}`);
-    if(scanIn&&!e.target.closest('button')&&!e.target.closest('input')&&!e.target.closest('select')){
-      scanIn.focus();
+    // If user presses a printable key and no input is focused, redirect to scan input
+    const active=document.activeElement;
+    const isInputFocused=active&&(active.tagName==='INPUT'||active.tagName==='SELECT'||active.tagName==='TEXTAREA');
+    if(!isInputFocused && e.key.length===1 && !e.ctrlKey && !e.metaKey && !e.altKey){
+      const scanIn=document.getElementById(`scan-in-${page}`);
+      if(scanIn){ scanIn.focus(); }
     }
   }
 });

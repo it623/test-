@@ -1657,6 +1657,63 @@ function getMachineAvgWIPDays(machineId){
   return total/runningBatches.length;
 }
 
+function getMachineAvgWIPDays(machineId){
+  const runningBatches = state.batches.filter(b=>b.machineId===machineId&&b.status==='running');
+  if(!runningBatches.length) return 2; // default T+2
+  const total = runningBatches.reduce((s,b)=>s+getBatchWIPDays(b.batchNumber),0);
+  return total/runningBatches.length;
+}
+
+// ── WIP Breakdown — stage-wise per batch ──────────────────────────────────
+// Pre-AIM : Gross (DPR) − AIM Scan In − AIM Salvage − AIM Remelt  → "Unsorted WIP"
+// AIM     : AIM Scan In − AIM Scan Out − AIM Salvage − AIM Remelt
+// Printing: AIM Out − Print Scan Out − Print Salvage − Print Remelt  (PTD only)
+// PI      : Print Out − PI Scan Out − PI Salvage − PI Remelt          (PTD only)
+// Packing : Pack Scan In − Pack Scan Out
+function getBatchWIPBreakdown(batchNo){
+  const batch = getBatch(batchNo);
+  if(!batch) return null;
+  const sz = batch.size;
+
+  // Raw scan counts per stage
+  const aimInBoxes   = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
+  const aimOutBoxes  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='out').length;
+  const printOutBoxes= state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='printing'&&s.type==='out').length;
+  const piOutBoxes   = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='pi'&&s.type==='out').length;
+  const packInBoxes  = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='in').length;
+  const packOutBoxes = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='packing'&&s.type==='out').length;
+
+  // Convert box counts to Lakhs
+  const aimIn    = boxToLakh(aimInBoxes,   sz);
+  const aimOut   = boxToLakh(aimOutBoxes,  sz);
+  const printOut = boxToLakh(printOutBoxes,sz);
+  const piOut    = boxToLakh(piOutBoxes,   sz);
+  const packIn   = boxToLakh(packInBoxes,  sz);
+  const packOut  = boxToLakh(packOutBoxes, sz);
+
+  // Wastage per stage (salvage + remelt)
+  const wAIM   = getTotalWastage(batchNo,'aim');
+  const wPrint = getTotalWastage(batchNo,'printing');
+  const wPI    = getTotalWastage(batchNo,'pi');
+
+  // Gross production from DPR
+  const grossProd = batch.actualProd || batch.actualQty || 0;
+
+  // Stage WIP calculations
+  const preAIM   = Math.max(0, grossProd - aimIn - wAIM.salvage - wAIM.remelt);
+  const aimWIP   = Math.max(0, aimIn - aimOut - wAIM.salvage - wAIM.remelt);
+  const printWIP = batch.isPrinted ? Math.max(0, aimOut - printOut - wPrint.salvage - wPrint.remelt) : 0;
+  const piWIP    = batch.isPrinted ? Math.max(0, printOut - piOut - wPI.salvage - wPI.remelt) : 0;
+  const packWIP  = Math.max(0, packIn - packOut);
+  const totalWIP = preAIM + aimWIP + printWIP + piWIP + packWIP;
+
+  return {
+    grossProd, aimIn, aimOut,
+    preAIM, aimWIP, printWIP, piWIP, packWIP, totalWIP,
+    wAIM, wPrint, wPI
+  };
+}
+
 function calcDispatchDate(batch){
   const today_d = new Date();
   let wipDays;

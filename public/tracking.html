@@ -446,14 +446,7 @@ input[type=number]{font-family:var(--mono)}
 .overflow-hidden{overflow:hidden}
 /* ── Sticky columns ── */
 .tbl-wrap { position: relative; }
-.sticky-col {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-}
-tbody tr .sticky-col { background: var(--surface, #0a0f1e); }
-tbody tr:hover .sticky-col { background: var(--surface2, #141a2e); }
-thead tr .sticky-col { z-index: 3; background: var(--surface2, #0f1628); }
+/* sticky handled via inline styles */
 
 
 </style>
@@ -4197,9 +4190,9 @@ function renderReportG(){
     <div class="tbl-wrap"><table id="rg-table">
       <thead>
         <tr style="background:var(--surface2)">
-          <th rowspan="2" class="sticky-col sticky-col-1">Batch</th>
-          <th rowspan="2" class="sticky-col sticky-col-2" style="min-width:140px">Customer</th>
-          <th rowspan="2" class="sticky-col sticky-col-3">Size</th>
+          <th rowspan="2" style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:80px;white-space:nowrap">Batch</th>
+          <th rowspan="2" style="position:sticky;left:80px;z-index:3;background:#0f1628;min-width:160px;white-space:nowrap">Customer</th>
+          <th rowspan="2" style="position:sticky;left:240px;z-index:3;background:#0f1628;min-width:55px;white-space:nowrap">Size</th>
           ${DEPTS.map(d=>`<th colspan="5" class="rg-col-${d}" style="text-align:center;border-left:2px solid var(--border2)">${DEPT_LABELS[d]}</th>`).join('')}
           <th colspan="3" style="text-align:center;border-left:2px solid var(--border2)">Overall</th>
         </tr>
@@ -4219,9 +4212,9 @@ function renderReportG(){
       <tbody id="rg-body">
       ${rows.map(({b,deptData,batchTotalAGrade,batchTotalWastage,overallPct})=>`
         <tr data-batch="${(b.batchNumber||'').toLowerCase()}" data-customer="${(b.customer||'').toLowerCase()}">
-          <td class="td-bold td-mono sticky-col">${b.batchNumber}</td>
-          <td class="sticky-col" style="min-width:140px">${b.customer||'-'}</td>
-          <td class="td-mono sticky-col">${b.size}</td>
+          <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:80px;white-space:nowrap">${b.batchNumber}</td>
+          <td style="position:sticky;left:80px;z-index:2;background:#0a0f1e;min-width:160px">${b.customer||'-'}</td>
+          <td class="td-mono" style="position:sticky;left:240px;z-index:2;background:#0a0f1e;min-width:55px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${b.size}</td>
           ${deptData.map(d=>`
             <td class="td-mono rg-col-${d.dept}" style="border-left:2px solid var(--border2)">${d.inQty}</td>
             <td class="td-mono rg-col-${d.dept}">${d.outQty}</td>
@@ -4390,9 +4383,9 @@ function renderReportF(){
 
     <div class="tbl-wrap"><table>
       <thead><tr>
-        <th class="sticky-col sticky-col-1">Batch No.</th>
-        <th class="sticky-col sticky-col-2">Customer</th>
-        <th class="sticky-col sticky-col-3">Size</th>
+        <th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:90px">Batch No.</th>
+        <th style="position:sticky;left:90px;z-index:3;background:#0f1628;min-width:160px">Customer</th>
+        <th style="position:sticky;left:250px;z-index:3;background:#0f1628;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Size</th>
         <th>DPR Qty (L)</th><th>DPR Boxes</th>
         <th>AIM Scans Today</th><th>AIM Total</th><th>Packed Out Today</th>
         <th>Status</th>
@@ -4443,7 +4436,7 @@ function renderReportB(){
     const batchSet=[...new Set(inScans.map(s=>s.batchNumber))];
     html+=`<div class="mb-16"><div class="card-title" style="color:${DEPT_CONFIG[dept].color}">${DEPT_CONFIG[dept].label}</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th class="sticky-col sticky-col-1">Batch</th><th class="sticky-col sticky-col-2" style="min-width:140px">Customer</th><th>Boxes IN</th><th>Boxes OUT</th><th>WIP Boxes</th><th>WIP Qty (L)</th><th>Time in Dept</th><th>Status</th></tr></thead><tbody>`;
+      <thead><tr><th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:90px">Batch</th><th style="position:sticky;left:90px;z-index:3;background:#0f1628;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Customer</th><th>Boxes IN</th><th>Boxes OUT</th><th>WIP Boxes</th><th>WIP Qty (L)</th><th>Time in Dept</th><th>Status</th></tr></thead><tbody>`;
     batchSet.forEach(batchNo=>{
       const batch=getBatch(batchNo);
       const inn=inScans.filter(s=>s.batchNumber===batchNo).length;
@@ -4454,8 +4447,8 @@ function renderReportB(){
       const hrs=firstIn?hoursAgo(firstIn.ts):0;
       const alerts=state.alerts.filter(a=>a.batchNumber===batchNo&&a.dept===dept).length;
       html+=`<tr>
-        <td class="td-bold td-mono sticky-col sticky-col-1">${batchNo}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
-        <td class="text-sm sticky-col sticky-col-2" style="min-width:140px">${batch?.customer||'-'}</td>
+        <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:90px">${batchNo}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
+        <td class="text-sm" style="position:sticky;left:90px;z-index:2;background:#0a0f1e;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${batch?.customer||'-'}</td>
         <td class="td-mono">${inn}</td><td class="td-mono">${out}</td>
         <td class="td-mono fw-bold">${wip}</td>
         <td class="td-mono">${fmt(wipQty)}</td>
@@ -4473,7 +4466,7 @@ function renderReportB(){
 
 function renderReportC(){
   let html=`<div class="card"><div class="section-title mb-16">Report C — Machine-wise WIP Status</div><div class="tbl-wrap"><table>
-    <thead><tr><th class="sticky-col sticky-col-1">Machine</th><th class="sticky-col sticky-col-2">Floor</th><th class="sticky-col sticky-col-3">Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
+    <thead><tr><th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:70px">Machine</th><th style="position:sticky;left:70px;z-index:3;background:#0f1628;min-width:55px">Floor</th><th style="position:sticky;left:125px;z-index:3;background:#0f1628;min-width:80px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
   const machines=[...new Set(state.batches.map(b=>b.machineId).filter(Boolean))].sort();
   machines.forEach(mc=>{
     const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
@@ -4490,9 +4483,9 @@ function renderReportC(){
       else if(wipDays<=std) statusBadge='<span class="badge badge-blue">🔵 In Progress</span>';
       else statusBadge='<span class="badge badge-amber">⚠️ Pending</span>';
       html+=`<tr>
-        <td class="td-bold td-mono sticky-col sticky-col-1">${mc}</td>
-        <td class="td-mono sticky-col sticky-col-2">${getMachineFloor(mc)}</td>
-        <td class="td-mono sticky-col sticky-col-3">${b.batchNumber}</td>
+        <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:70px">${mc}</td>
+        <td class="td-mono" style="position:sticky;left:70px;z-index:2;background:#0a0f1e;min-width:55px">${getMachineFloor(mc)}</td>
+        <td class="td-mono" style="position:sticky;left:125px;z-index:2;background:#0a0f1e;min-width:80px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${b.batchNumber}</td>
         <td class="text-sm">${b.customer||'-'}</td>
         <td class="td-mono">${fmt(grossProd)}</td>
         <td class="td-mono">${fmt(packedQty)}</td>
@@ -4704,20 +4697,20 @@ function renderReportE(){
   </div>
   <div class="tbl-wrap"><div class="tbl-wrap"><table>
     <thead><tr>
-      <th class="sticky-col sticky-col-1">Machine</th>
-      <th class="sticky-col sticky-col-2">Floor</th>
-      <th class="sticky-col sticky-col-3">Batch</th>
-      <th class="sticky-col sticky-col-4">Size</th>
-      <th class="sticky-col sticky-col-5">Planned (L)</th>
+      <th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:70px">Machine</th>
+      <th style="position:sticky;left:70px;z-index:3;background:#0f1628;min-width:55px">Floor</th>
+      <th style="position:sticky;left:125px;z-index:3;background:#0f1628;min-width:80px">Batch</th>
+      <th style="position:sticky;left:205px;z-index:3;background:#0f1628;min-width:50px">Size</th>
+      <th style="position:sticky;left:255px;z-index:3;background:#0f1628;min-width:90px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Planned (L)</th>
       <th>Gross Prod</th><th>AIM Run</th><th>AIM Sal</th><th>AIM Remelt</th><th>AIM A-Grade</th><th>AIM %</th><th>Manual Insp</th><th>Total A-Grade</th><th>A-Grade %</th><th>WIP</th><th>Avail UNPTD</th><th>Avail PTD</th><th>Print TD</th><th>Print Rej</th><th>PI Inspect</th><th>PI Sal/Rem</th><th>Pack UNPTD</th><th>Pack PTD</th><th>Dispatch</th>
     </tr></thead>
     <tbody>
     ${rows.map(r=>`<tr>
-      <td class="td-bold td-mono sticky-col sticky-col-1">${r.machine}</td>
-      <td class="td-mono sticky-col sticky-col-2">${r.floor}</td>
-      <td class="td-mono sticky-col sticky-col-3">${r.batchNo}</td>
-      <td class="td-mono sticky-col sticky-col-4">${r.size}</td>
-      <td class="td-mono sticky-col sticky-col-5">${fmt(r.plannedQty)}</td>
+      <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:70px">${r.machine}</td>
+      <td class="td-mono" style="position:sticky;left:70px;z-index:2;background:#0a0f1e;min-width:55px">${r.floor}</td>
+      <td class="td-mono" style="position:sticky;left:125px;z-index:2;background:#0a0f1e;min-width:80px">${r.batchNo}</td>
+      <td class="td-mono" style="position:sticky;left:205px;z-index:2;background:#0a0f1e;min-width:50px">${r.size}</td>
+      <td class="td-mono" style="position:sticky;left:255px;z-index:2;background:#0a0f1e;min-width:90px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${fmt(r.plannedQty)}</td>
       <td class="td-mono">${r.grossProd}</td>
       <td class="td-mono">${r.aimRunTotal}</td><td class="td-mono">${r.aimSalvage}</td><td class="td-mono">${r.aimRemelt}</td>
       <td class="td-mono fw-bold">${r.aimAGrade}</td><td class="td-mono">${r.aimAGradePct}%</td><td class="td-mono">${r.manInspect}</td>

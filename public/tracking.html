@@ -1041,7 +1041,7 @@ async function pullFromServer(){
   // Before pulling — push any local labels not yet on server
   // This auto-saves labels generated offline or before server was available
   if(state.labels.length > 0){
-    const labelsToSync = state.labels.filter(l=>!l.isOrange).map(l=>({...l,
+    const labelsToSync = state.labels.map(l=>({...l,
       isPartial:l.isPartial?1:0, isOrange:l.isOrange?1:0,
       printed:l.printed?1:0, voided:l.voided?1:0, isExcess:l.isExcess?1:0
     }));
@@ -1359,13 +1359,15 @@ async function recordScan(labelId, dept, type, operator, parsed){
   }
   if(!batch){
     // Create a synthetic minimal batch from label data so scan can proceed
+    // Infer isPrinted from scan history: if ANY printing scans exist, batch is PTD
+    const hasPrintingScans = state.scans.some(s=>s.batchNumber===label.batchNumber&&s.dept==='printing');
     batch={
       batchNumber: label.batchNumber,
       id: label.batchNumber,
       machineId: label.machineId||'',
       size: label.size||'0',
       customer: label.customer||'',
-      isPrinted: false,
+      isPrinted: hasPrintingScans,
       status:'running'
     };
   }
@@ -1408,7 +1410,17 @@ async function recordScan(labelId, dept, type, operator, parsed){
   state.scans.push(scan);
 
   // Auto-generate orange label on PI scan-in
-  if(dept==='pi' && type==='in' && batch.isPrinted){
+  // A box reaching PI has gone through Printing = it IS a printed batch
+  // Do not depend on batch.isPrinted flag (may not be set in Planning)
+  if(dept==='pi' && type==='in'){
+    // Mark batch as printed if not already
+    if(!batch.isPrinted){
+      batch.isPrinted = true;
+      // Update in state
+      const batchInState = state.batches.find(b=>b.batchNumber===batch.batchNumber);
+      if(batchInState) batchInState.isPrinted = true;
+      saveLocal();
+    }
     autoGenerateOrangeLabel(label, batch);
   }
 
@@ -1435,7 +1447,11 @@ async function recordScan(labelId, dept, type, operator, parsed){
 }
 
 function autoGenerateOrangeLabel(label, batch){
-  const existing = state.labels.find(l=>l.parentLabelId===label.id&&l.isOrange);
+  // Check for existing orange label by parentLabelId OR by labelNumber (handles DB corruption)
+  const existing = state.labels.find(l=>
+    (l.parentLabelId===label.id && l.isOrange) ||
+    (l.batchNumber===label.batchNumber && l.labelNumber===('OL-'+label.labelNumber) && l.isOrange)
+  );
   if(existing) return;
   const orangeLabel = {
     id:uid(), batchNumber:batch.batchNumber, labelNumber:'OL-'+label.labelNumber,
@@ -2226,6 +2242,44 @@ function getBoxCurrentStageForBatch(batchNo){
 // PAGE: LABEL GENERATION
 // ═══════════════════════════════════════════════════════
 
+
+// ── Regenerate orange labels from existing PI scan-in records ──
+// Run this once to fix batches that were scanned at PI before the bug fix
+function regenerateOrangeLabelsFromScans(){
+  let count = 0;
+  const piScans = state.scans.filter(s=>s.dept==='pi'&&s.type==='in');
+  piScans.forEach(scan=>{
+    const label = state.labels.find(l=>l.id===scan.labelId||
+      (l.batchNumber===scan.batchNumber && Math.abs(l.labelNumber)===Math.abs(scan.boxNumber)));
+    if(!label) return;
+    const batch = getBatch(scan.batchNumber);
+    if(!batch) return;
+    // Mark as printed
+    if(!batch.isPrinted){
+      batch.isPrinted = true;
+      const bs = state.batches.find(b=>b.batchNumber===scan.batchNumber);
+      if(bs) bs.isPrinted = true;
+    }
+    // Check if orange label already exists
+    const existing = state.labels.find(l=>
+      (l.parentLabelId===label.id && l.isOrange) ||
+      (l.batchNumber===label.batchNumber && l.labelNumber===('OL-'+label.labelNumber) && l.isOrange)
+    );
+    if(existing) return;
+    // Generate
+    autoGenerateOrangeLabel(label, batch);
+    count++;
+  });
+  saveLocal();
+  if(count > 0){
+    toast(`✅ Generated ${count} orange label${count>1?'s':''} from existing PI scans`,'var(--orange)');
+    renderPage(currentPage);
+  } else {
+    toast('No new orange labels to generate','var(--text3)');
+  }
+  return count;
+}
+
 function renderLabels(){
   const el=document.getElementById('page-labels');
 
@@ -2333,8 +2387,11 @@ function renderLabels(){
     const unprintedOrange = orangeLabels.filter(l=>!l.printed);
     el.innerHTML += `
   <div class="card" style="border:2px solid var(--orange);background:rgba(234,88,12,0.04);margin-top:16px">
-    <div class="card-title" style="color:var(--orange)">🟠 Orange Labels — Printed Batches</div>
-    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Auto-generated at PI scan-in for each printed batch box. One orange label per box.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div class="card-title" style="color:var(--orange);margin:0">🟠 Orange Labels — Printed Batches</div>
+      <button class="btn btn-sm" style="background:var(--orange);color:#fff;font-size:11px" onclick="regenerateOrangeLabelsFromScans()">🔄 Regenerate from PI Scans</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Auto-generated at PI scan-in. Click Regenerate if labels are missing for already-scanned batches.</div>
     ${unprintedOrange.length>0?`<div style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.4);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--orange)">⚠️ ${unprintedOrange.length} orange label${unprintedOrange.length>1?'s':''} pending print</div>`:''}
     ${orangeLabels.length ? `<div class="tbl-wrap"><table>
       <thead><tr><th>Batch</th><th>Customer</th><th>Box #</th><th>Qty (L)</th><th>Generated</th><th>Status</th><th>Action</th></tr></thead>

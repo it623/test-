@@ -1149,8 +1149,8 @@ async function pullFromServer(){
             // Keep local orange labels that aren't on server yet
             const localOrangeOnly = state.labels.filter(l=>l.isOrange&&!serverLabelIds.has(l.id));
             state.labels = [...normLabels, ...localOrangeOnly];
-            // Always re-render labels page after server load so orange labels appear
-            if(currentPage==='labels') setTimeout(()=>renderLabels(),50);
+            // Force re-render labels page so orange labels appear immediately
+            if(currentPage==='labels') renderLabels();
             // Re-push any local-only orange labels to server
             if(localOrangeOnly.length > 0){
               const toSync = localOrangeOnly.map(l=>({...l,isOrange:1,isPartial:0,printed:0,voided:0,isExcess:0}));
@@ -2478,13 +2478,12 @@ function renderLabels(){
     fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)})
       .then(r=>r.json())
       .then(snap=>{
-        if(snap.ok && snap.tracking && snap.tracking.labels && snap.tracking.labels.length>0){
+        if(snap.ok && snap.tracking && snap.tracking.labels){
           const fresh=(snap.tracking.labels).map(l=>l.batchNumber?l:normLabel(l));
           // Always use server labels — server is single source of truth
-          if(fresh.length > 0){
-            state.labels=fresh;
-            if(currentPage==='labels') renderLabels();
-          }
+          // No localStorage cache and no >= condition blocking orange labels
+          state.labels = fresh;
+          if(currentPage==='labels') renderLabels();
         }
         renderLabels._fetching=false;
       })
@@ -2556,7 +2555,7 @@ function renderLabels(){
     updateLabelCount(allBatches.length);
   }
 
-  // Orange Labels section — always show (labels load from server after render)
+  // Orange Labels section — always visible (server loads labels async after render)
   const orangeLabels = state.labels.filter(l=>l.isOrange&&!l.voided);
   if(true){
     const unprintedOrange = orangeLabels.filter(l=>!l.printed);

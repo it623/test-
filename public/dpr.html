@@ -1999,9 +1999,9 @@ function onRunOrderChange(sh, mcId, ri){
     const ord=activeOrders[mcId].find(o=>o.id===ordId);
     if(ord){
       if(batchInp) batchInp.value=ord.batchNumber||ord.poNumber||'';
-      // Auto-fill note with colour if note is empty
+      // Auto-fill note with colour — always update when order changes
       const noteInp=document.getElementById(`run-note-${sh}-${mcId}-${ri}`);
-      if(noteInp && !noteInp.value && ord.colour){
+      if(noteInp && ord.colour){
         noteInp.value=ord.colour;
       }
       // Show order qty and remaining qty as a tooltip/note on the run row

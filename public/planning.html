@@ -790,13 +790,9 @@ const SYNC = (() => {
       const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
       if (!userInteracting || isInitialLoad) {
             const allMachineIds=[...new Set((state.orders||[]).filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
-    const needsBackfill = (state.orders||[]).some(o=>!o.deleted && o.status!=='closed' && o.qty>0 && (!o.grossQty || !o.endDate));
-    const ghostsRemoved = (serverState.orders||[]).length > state.orders.length;
+    // Recalc schedule quietly — never auto-save from a server pull
+    // Auto-saving here caused duplicate orders when multiple tabs/devices push simultaneously
     allMachineIds.forEach(mid=>recalcMachineScheduleQuiet(mid));
-    if (needsBackfill || ghostsRemoved) {
-      console.log('[cleanup] Saving clean state — backfill:', needsBackfill, 'ghosts removed:', ghostsRemoved, (serverState.orders||[]).length - state.orders.length);
-      saveState();
-    }
     render();
       } else {
         // Data changed but user is typing — update KPI numbers silently without full re-render

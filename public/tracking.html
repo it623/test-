@@ -2471,15 +2471,15 @@ function renderLabels(){
 
   // Always fetch fresh label data from server when this page opens
   // This ensures Generated/Printed/Remaining are always correct on any device
-  // Fetch labels from server — debounced, no lock, uses fast endpoint
+  // Fetch labels from server using existing endpoint — debounced
   clearTimeout(renderLabels._timer);
   renderLabels._timer = setTimeout(()=>{
     if(!serverUrl) return;
-    fetch(serverUrl+'/api/tracking/labels-only',{signal:AbortSignal.timeout(8000)})
+    fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)})
       .then(r=>r.ok?r.json():null)
       .then(j=>{
-        if(j?.ok && Array.isArray(j.labels) && j.labels.length>0){
-          state.labels = j.labels.map(l=>l.batchNumber?l:normLabel(l));
+        if(j?.ok && j.state?.labels && j.state.labels.length>0){
+          state.labels = j.state.labels.map(l=>l.batchNumber?l:normLabel(l));
           if(currentPage==='labels') renderLabels();
         }
       })

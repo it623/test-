@@ -1087,6 +1087,14 @@ function autoGenBatchNumber(machineId) {
 }
 
 function getMachineOrders(machineId) {
+  // Sort by startDate for correct schedule cursor chaining (endDate depends on sequence)
+  return state.orders
+    .filter(o=>o.machineId===machineId && !o.deleted)
+    .sort((a,b)=>new Date(a.startDate||0)-new Date(b.startDate||0));
+}
+
+function getMachineOrdersDisplay(machineId) {
+  // Sort A→Z by batchNumber for display only — does not affect schedule calc
   return state.orders
     .filter(o=>o.machineId===machineId && !o.deleted)
     .sort((a,b)=>String(a.batchNumber||a.poNumber||'').localeCompare(String(b.batchNumber||b.poNumber||'')));
@@ -1393,7 +1401,7 @@ function renderProduction() {
   `;
 
   for (const mc of machines) {
-    const orders = getMachineOrders(mc.id);
+    const orders = getMachineOrdersDisplay(mc.id);
     const activeOrders = orders.filter(o=>o.status!=='closed');
     html += `
       <div class="mc-panel mb-4" data-size="${mc.size}">

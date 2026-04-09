@@ -2465,7 +2465,7 @@ function renderLabels(){
     ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
-  const allBatches=state.batches.filter(b=>b.status!=='closed');
+  const allBatches=state.batches.filter(b=>b.status!=='closed').sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
 
   // Always fetch fresh label data from server when this page opens
   // This ensures Generated/Printed/Remaining are always correct on any device
@@ -2510,14 +2510,14 @@ function renderLabels(){
 
   <div class="card">
     <div class="card-title">Active Batches — Label Status</div>
-    <div class="tbl-wrap"><table id="label-status-table">
+    <div class="tbl-wrap" style="max-height:70vh;overflow-y:auto;overflow-x:auto"><table id="label-status-table">
       <thead>
-        <tr>
-          <th onclick="sortLabelTable('batch')" style="cursor:pointer;position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:90px">Batch ↕</th>
-          <th style="position:sticky;left:90px;z-index:3;background:#f8f9fb;min-width:70px">MC No</th>
-          <th style="position:sticky;left:160px;z-index:3;background:#f8f9fb;min-width:120px">Colour</th>
-          <th onclick="sortLabelTable('customer')" style="cursor:pointer;position:sticky;left:280px;z-index:3;background:#f8f9fb;min-width:160px">Customer ↕</th>
-          <th style="position:sticky;left:440px;z-index:3;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">Size</th>
+        <tr style="position:sticky;top:0;z-index:5;background:#f8f9fb">
+          <th onclick="sortLabelTable('batch')" style="cursor:pointer;position:sticky;left:0;top:0;z-index:6;background:#f8f9fb;min-width:90px">Batch ↕</th>
+          <th style="position:sticky;left:90px;top:0;z-index:6;background:#f8f9fb;min-width:70px">MC No</th>
+          <th style="position:sticky;left:160px;top:0;z-index:6;background:#f8f9fb;min-width:120px">Colour</th>
+          <th onclick="sortLabelTable('customer')" style="cursor:pointer;position:sticky;left:280px;top:0;z-index:6;background:#f8f9fb;min-width:160px">Customer ↕</th>
+          <th style="position:sticky;left:440px;top:0;z-index:6;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">Size</th>
           <th>Gross Qty</th>
           <th>Actual Prod</th>
           <th>Max Labels</th>

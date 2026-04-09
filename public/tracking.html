@@ -1149,12 +1149,8 @@ async function pullFromServer(){
             // Keep local orange labels that aren't on server yet
             const localOrangeOnly = state.labels.filter(l=>l.isOrange&&!serverLabelIds.has(l.id));
             state.labels = [...normLabels, ...localOrangeOnly];
-            // Re-render labels page so orange labels show after server load
-            // Multiple attempts to handle slow connections
-            if(currentPage==='labels'){
-              setTimeout(function(){ if(currentPage==='labels'&&document.getElementById('page-labels')) renderLabels(); }, 300);
-              setTimeout(function(){ if(currentPage==='labels'&&document.getElementById('page-labels')) renderLabels(); }, 1500);
-            }
+            // Re-render labels page so orange labels show immediately after server load
+            if(currentPage==='labels') setTimeout(function(){ var el=document.getElementById('page-labels'); if(el) renderLabels(); }, 100);
             // Re-push any local-only orange labels to server
             if(localOrangeOnly.length > 0){
               const toSync = localOrangeOnly.map(l=>({...l,isOrange:1,isPartial:0,printed:0,voided:0,isExcess:0}));
@@ -2462,6 +2458,33 @@ function reprintOrangeLabel(labelId){
   }
 }
 
+function updateOrangeCard(card){
+  const orangeLabels = state.labels.filter(l=>l.isOrange&&!l.voided);
+  const unprintedOrange = orangeLabels.filter(l=>!l.printed);
+  if(orangeLabels.length===0) return; // don't wipe the empty message if no labels
+  card.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div class="card-title" style="color:var(--orange);margin:0">🟠 Orange Labels — Printed Batches</div>
+      <button class="btn btn-sm" style="background:var(--orange);color:#fff;font-size:11px" onclick="regenerateOrangeLabelsFromScans()">🔄 Regenerate from PI Scans</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Auto-generated at PI scan-in. Click Regenerate if labels are missing for already-scanned batches.</div>
+    ${unprintedOrange.length>0?'<div style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.4);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--orange)">⚠️ '+unprintedOrange.length+' orange label'+(unprintedOrange.length>1?'s':'')+' pending print</div>':''}
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Batch</th><th>Customer</th><th>Box #</th><th>Qty (L)</th><th>Generated</th><th>Status</th><th>Action</th></tr></thead>
+      <tbody>${orangeLabels.sort((a,b)=>(b.generated||'').localeCompare(a.generated||'')).map(function(l){
+        return '<tr style="'+(l.printed?'':'background:rgba(234,88,12,0.06)')+'">'+
+          '<td class="td-mono fw-bold">'+l.batchNumber+'</td>'+
+          '<td class="text-sm">'+(l.customer||'-')+'</td>'+
+          '<td class="td-mono">'+l.labelNumber+'</td>'+
+          '<td class="td-mono">'+fmt(l.qty)+'</td>'+
+          '<td class="text-sm">'+fmtDateTime(l.generated)+'</td>'+
+          '<td>'+(l.printed?'<span class="badge badge-green">✅ Printed '+fmtDateTime(l.printedAt)+'</span>':'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>')+'</td>'+
+          '<td>'+(l.voided?'<span class="text-muted text-sm">Voided</span>':(!l.printed?'<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel(\''+l.id+'\');renderLabels()">🖨️ Print</button>':'<button class="btn btn-sm btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="reprintOrangeLabel(\''+l.id+'\')">🔄 Reprint</button>'))+'</td>'+
+        '</tr>';
+      }).join('')}</tbody>
+    </table></div>`;
+}
+
 function renderLabels(){
   const el=document.getElementById('page-labels');
 
@@ -2542,12 +2565,31 @@ function renderLabels(){
     updateLabelCount(allBatches.length);
   }
 
+  // Fetch orange labels directly from server and render — independent of pullFromServer timing
+  if(serverUrl){
+    fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(10000)})
+      .then(r=>r.ok?r.json():null)
+      .then(j=>{
+        if(!j?.ok) return;
+        const allServerLabels = (j.state?.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
+        if(allServerLabels.length===0) return;
+        // Merge: server labels + any local-only labels
+        const serverIds = new Set(allServerLabels.map(l=>l.id));
+        const localOnly = state.labels.filter(l=>!serverIds.has(l.id));
+        state.labels = [...allServerLabels, ...localOnly];
+        // Update orange section in place
+        const orangeEl = document.getElementById('orange-labels-card');
+        if(orangeEl) updateOrangeCard(orangeEl);
+      })
+      .catch(()=>{});
+  }
+
   // Orange Labels section — always visible
   const orangeLabels = state.labels.filter(l=>l.isOrange&&!l.voided);
   if(true){
     const unprintedOrange = orangeLabels.filter(l=>!l.printed);
     el.innerHTML += `
-  <div class="card" style="border:2px solid var(--orange);background:rgba(234,88,12,0.04);margin-top:16px">
+  <div id="orange-labels-card" class="card" style="border:2px solid var(--orange);background:rgba(234,88,12,0.04);margin-top:16px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
       <div class="card-title" style="color:var(--orange);margin:0">🟠 Orange Labels — Printed Batches</div>
       <button class="btn btn-sm" style="background:var(--orange);color:#fff;font-size:11px" onclick="regenerateOrangeLabelsFromScans()">🔄 Regenerate from PI Scans</button>

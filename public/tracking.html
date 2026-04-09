@@ -2471,20 +2471,51 @@ function renderLabels(){
 
   // Always fetch fresh label data from server when this page opens
   // This ensures Generated/Printed/Remaining are always correct on any device
-  // Fetch labels from server using existing endpoint — debounced
-  clearTimeout(renderLabels._timer);
-  renderLabels._timer = setTimeout(()=>{
-    if(!serverUrl) return;
+  // Fetch labels from server and update orange section directly — no recursive renderLabels call
+  if(serverUrl){
     fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)})
       .then(r=>r.ok?r.json():null)
       .then(j=>{
         if(j?.ok && j.state?.labels && j.state.labels.length>0){
           state.labels = j.state.labels.map(l=>l.batchNumber?l:normLabel(l));
-          if(currentPage==='labels') renderLabels();
+          // Update orange section directly — no full page re-render
+          const orangeLabels = state.labels.filter(l=>l.isOrange&&!l.voided);
+          if(orangeLabels.length > 0){
+            const unprintedOrange = orangeLabels.filter(l=>!l.printed);
+            const section = document.getElementById('page-labels');
+            if(!section) return;
+            // Find or create orange container
+            let orangeDiv = section.querySelector('.orange-section-card');
+            if(!orangeDiv){
+              orangeDiv = document.createElement('div');
+              orangeDiv.className = 'orange-section-card card';
+              orangeDiv.style.cssText = 'border:2px solid var(--orange);background:rgba(234,88,12,0.04);margin-top:16px';
+              section.appendChild(orangeDiv);
+            }
+            orangeDiv.innerHTML = `
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <div class="card-title" style="color:var(--orange);margin:0">🟠 Orange Labels — Printed Batches</div>
+                <button class="btn btn-sm" style="background:var(--orange);color:#fff;font-size:11px" onclick="regenerateOrangeLabelsFromScans()">🔄 Regenerate from PI Scans</button>
+              </div>
+              <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Auto-generated at PI scan-in. Click Regenerate if labels are missing for already-scanned batches.</div>
+              ${unprintedOrange.length>0?`<div style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.4);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--orange)">⚠️ ${unprintedOrange.length} orange label${unprintedOrange.length>1?'s':''} pending print</div>`:''}
+              <div class="tbl-wrap"><table>
+                <thead><tr><th>Batch</th><th>Customer</th><th>Box #</th><th>Qty (L)</th><th>Generated</th><th>Status</th><th>Action</th></tr></thead>
+                <tbody>${orangeLabels.sort((a,b)=>new Date(b.generated)-new Date(a.generated)).map(l=>`<tr>
+                  <td class="td-mono fw-bold">${l.batchNumber}</td>
+                  <td class="text-sm">${l.customer||'-'}</td>
+                  <td class="td-mono">${l.labelNumber}</td>
+                  <td class="td-mono">${fmt(l.qty)}</td>
+                  <td class="text-sm">${fmtDateTime(l.generated)}</td>
+                  <td>${l.printed?'<span class="badge badge-green">✅ Printed</span>':'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>'}</td>
+                  <td>${!l.voided?(!l.printed?'<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel(\''+l.id+'\');renderLabels()">🖨️ Print</button>':'<button class="btn btn-sm btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="reprintOrangeLabel(\''+l.id+'\')">🔄 Reprint</button>'):'—'}</td>
+                </tr>`).join('')}</tbody>
+              </table></div>`;
+          }
         }
       })
       .catch(()=>{});
-  }, 200);
+  }
 
   // Save search value before re-render
   const _savedSearch = document.getElementById('lf-batch')?.value || '';

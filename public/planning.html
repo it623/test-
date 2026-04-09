@@ -1878,6 +1878,8 @@ function updateGrossCalc() {
   }
 }
 
+
+
 function saveOrderModal(existingId, defaultMachine) {
   const machineId = document.getElementById('fo-machine')?.value || defaultMachine;
   const mc = getMachine(machineId);
@@ -1886,13 +1888,20 @@ function saveOrderModal(existingId, defaultMachine) {
   const qty = parseFloat(document.getElementById('fo-qty')?.value)||0;
   if (!qty) return alert('Please enter order quantity');
 
+  const customerVal = document.getElementById('fo-customer')?.value?.trim();
+  if (!customerVal) return alert('Please enter a customer name');
+
+  const poNumVal = document.getElementById('fo-ponum')?.value?.trim();
+  const batchVal = document.getElementById('fo-batch')?.value?.trim();
+  if (!poNumVal && !batchVal) return alert('Please enter a PO Number or Batch Number');
+
   const isPrinted = document.getElementById('fo-printed')?.value === '1';
   const ag = parseFloat(document.getElementById('fo-agrade')?.value)||mc.aGrade;
   let grossQty, daysNeeded;
   if (isPrinted) {
     grossQty = qty * 1.07 * 1.02;
   } else {
-    grossQty = qty / (ag/100);
+    grossQty = ag > 0 ? qty / (ag/100) : qty;
   }
   daysNeeded = grossQty / mc.cap;
 
@@ -2204,11 +2213,16 @@ function confirmSAPImport(rows) {
     const mc = getMachine(machineId);
     const qty = parseFloat(row.Qty_Lakhs || row['Qty (Lakhs)'] || row['Qty'] || row['QTY'] || 0);
     if (!qty) continue;
+    // Skip rows with no customer or no PO/Batch number
+    const rowCustomer = String(row.Customer || row['Customer Name'] || row['Ship To'] || row['CUSTOMER'] || '').trim();
+    const rowPO = String(row.PO_Number || row['PO Number'] || row['PO No'] || row['PO No.'] || row['PO#'] || row['Order No'] || '').trim();
+    const rowBatch = String(row.Batch_Number || row['Batch Number'] || '').trim();
+    if (!rowCustomer || (!rowPO && !rowBatch)) continue; // skip invalid rows
 
     const isPrinted = (row.Printed_YN || row['Printed (Y/N)'] || row['PTD'] || row['Printed'] || 'N').toString().toUpperCase().startsWith('Y');
     const size = String(row.Size || '');
     const ag = mc?.aGrade || 93;
-    const grossQty = isPrinted ? qty*1.07*1.02 : qty/(ag/100);
+    const grossQty = isPrinted ? qty*1.07*1.02 : (ag > 0 ? qty/(ag/100) : qty);
     const daysNeeded = grossQty / (mc?.cap||20);
 
     // Sequential start date: end of last order on this machine

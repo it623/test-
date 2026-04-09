@@ -4469,8 +4469,8 @@ function renderReportB(){
     const outScans=state.scans.filter(s=>s.dept===dept&&s.type==='out');
     const batchSet=[...new Set(inScans.map(s=>s.batchNumber))].sort((a,b)=>String(a).localeCompare(String(b)));
     html+=`<div class="mb-16"><div class="card-title" style="color:${DEPT_CONFIG[dept].color}">${DEPT_CONFIG[dept].label}</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th style="position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:90px">Batch</th><th style="position:sticky;left:90px;z-index:3;background:#f8f9fb;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Customer</th><th>Boxes IN</th><th>Boxes OUT</th><th>WIP Boxes</th><th>WIP Qty (L)</th><th>Time in Dept</th><th>Status</th></tr></thead><tbody>`;
+    <div class="tbl-wrap" style="max-height:60vh;overflow-y:auto;overflow-x:auto"><table>
+      <thead><tr style="position:sticky;top:0;z-index:5;background:#f8f9fb"><th style="position:sticky;left:0;top:0;z-index:6;background:#f8f9fb;min-width:90px">Batch</th><th style="position:sticky;left:90px;top:0;z-index:6;background:#f8f9fb;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.12)">Customer</th><th style="background:#f8f9fb">Boxes IN</th><th style="background:#f8f9fb">Boxes OUT</th><th style="background:#f8f9fb">WIP Boxes</th><th style="background:#f8f9fb">WIP Qty (L)</th><th style="background:#f8f9fb">Time in Dept</th><th style="background:#f8f9fb">Status</th></tr></thead><tbody>`;
     batchSet.forEach(batchNo=>{
       const batch=getBatch(batchNo);
       const inn=inScans.filter(s=>s.batchNumber===batchNo).length;

@@ -3136,8 +3136,8 @@ function renderDeptScan(dept){
     <div class="card-title" style="color:var(--orange)">🟠 Orange Labels — Print Inspection</div>
     <div style="font-size:12px;color:var(--text3);margin-bottom:12px">One orange label is auto-generated per box on PI scan-in for printed batches. Print immediately after each scan-in.</div>
     ${unprinted.length>0?`<div style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.4);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--orange)">⚠️ ${unprinted.length} orange label${unprinted.length>1?'s':''} pending print</div>`:''}
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Box #</th><th>Qty (L)</th><th>Generated</th><th>Status</th><th>Action</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:40vh;overflow-y:auto;overflow-x:auto"><table>
+      <thead><tr style="position:sticky;top:0;z-index:4;background:#f8f9fb"><th style="background:#f8f9fb">Batch</th><th style="background:#f8f9fb">Box #</th><th style="background:#f8f9fb">Qty (L)</th><th style="background:#f8f9fb">Generated</th><th style="background:#f8f9fb">Status</th><th style="background:#f8f9fb">Action</th></tr></thead>
       <tbody>
       ${orangeLabels.length ? orangeLabels.sort((a,b)=>b.generated.localeCompare(a.generated)).map(l=>`<tr style="${!l.printed?'background:rgba(234,88,12,0.06)':''}">
         <td class="td-mono fw-bold">${l.batchNumber}</td>
@@ -3181,8 +3181,8 @@ function renderDeptScan(dept){
   <div class="card mb-16">
     <div class="card-title">✅ Batch Stage Closure</div>
     <div class="text-sm text-muted mb-12">Close a batch at this stage once all boxes have been scanned OUT.</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Scan IN</th><th>Scan OUT</th><th>A-Grade</th><th>Wastage</th><th>Status</th><th>Action</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:55vh;overflow-y:auto;overflow-x:auto"><table>
+      <thead><tr style="position:sticky;top:0;z-index:4;background:#f8f9fb"><th style="background:#f8f9fb">Batch</th><th style="background:#f8f9fb">Customer</th><th style="background:#f8f9fb">Scan IN</th><th style="background:#f8f9fb">Scan OUT</th><th style="background:#f8f9fb">A-Grade</th><th style="background:#f8f9fb">Wastage</th><th style="background:#f8f9fb">Status</th><th style="background:#f8f9fb">Action</th></tr></thead>
       <tbody>
       ${activeBatches.map(b=>{
         const inCount=getScansForBatch(b.batchNumber).filter(s=>s.dept===dept&&s.type==='in').length;
@@ -3239,7 +3239,7 @@ function renderDeptScan(dept){
     ${(()=>{
       const deptScans = [...state.scans].filter(s=>s.dept===dept).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,50);
       if(!deptScans.length) return '<div style="padding:12px;text-align:center;color:var(--text3);font-size:13px">No scans recorded yet</div>';
-      return '<div class="tbl-wrap"><table><thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead><tbody>' +
+      return '<div class="tbl-wrap" style="max-height:35vh;overflow-y:auto"><table><thead><tr style="position:sticky;top:0;z-index:4;background:#f8f9fb"><th style="background:#f8f9fb">Time</th><th style="background:#f8f9fb">Batch / Box</th><th style="background:#f8f9fb">Qty</th><th style="background:#f8f9fb">Type</th></tr></thead><tbody>' +
       deptScans.map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
         const qty = s.qty ?? lbl?.qty ?? null;
@@ -3557,9 +3557,8 @@ function getActiveBatchesForDept(dept){
     if(b.status==='closed') return false;
     const flow=getBatchFlow(b);
     if(!flow.includes(dept)) return false;
-    // Show if previous stage is complete or it's the first stage
     return canScanDept(b.batchNumber,dept)||isStageComplete(b.batchNumber,dept)||currentDept==='admin';
-  });
+  }).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3641,8 +3640,8 @@ function renderDispatch(){
   <!-- RECENT SCANS - DISPATCH -->
   <div class="card mb-16">
     <div class="card-title">Recent Scans — Dispatch</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Time</th><th>Batch / Box</th><th>Qty</th><th>Type</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:35vh;overflow-y:auto"><table>
+      <thead><tr style="position:sticky;top:0;z-index:4;background:#f8f9fb"><th style="background:#f8f9fb">Time</th><th style="background:#f8f9fb">Batch / Box</th><th style="background:#f8f9fb">Qty</th><th style="background:#f8f9fb">Type</th></tr></thead>
       <tbody>
       ${state.scans.filter(s=>s.dept==='dispatch').slice(-50).reverse().map(s=>{
         const lbl = state.labels.find(l=>l.id===s.labelId);
@@ -3662,10 +3661,10 @@ function renderDispatch(){
   <!-- PACKED LEDGER -->
   <div class="card mb-16">
     <div class="card-title">📦 Packed Quantity Ledger — Ready for Dispatch</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Size</th><th>Packed Boxes</th><th>Packed Qty (L)</th><th>Received</th><th>Dispatched</th><th>Pending</th><th>Action</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:55vh;overflow-y:auto;overflow-x:auto"><table>
+      <thead><tr style="position:sticky;top:0;z-index:4;background:#f8f9fb"><th style="background:#f8f9fb">Batch</th><th style="background:#f8f9fb">Customer</th><th style="background:#f8f9fb">Size</th><th style="background:#f8f9fb">Packed Boxes</th><th style="background:#f8f9fb">Packed Qty (L)</th><th style="background:#f8f9fb">Received</th><th style="background:#f8f9fb">Dispatched</th><th style="background:#f8f9fb">Pending</th><th style="background:#f8f9fb">Action</th></tr></thead>
       <tbody>
-      ${Object.entries(batchSummary).map(([batchNo,s])=>{
+      ${Object.entries(batchSummary).sort(([a],[b])=>String(a).localeCompare(String(b))).map(([batchNo,s])=>{
         const batch=getBatch(batchNo);
         const packedQty=boxToLakh(s.packed,s.size);
         const dispQty=boxToLakh(s.dispOut,s.size);
@@ -3691,8 +3690,8 @@ function renderDispatch(){
   <!-- DISPATCH RECORDS -->
   <div class="card">
     <div class="card-title">📋 Dispatch Records</div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>Date</th><th>Batch</th><th>Customer</th><th>Qty (L)</th><th>Boxes</th><th>Vehicle</th><th>Invoice</th><th>Status</th></tr></thead>
+    <div class="tbl-wrap" style="max-height:55vh;overflow-y:auto;overflow-x:auto"><table>
+      <thead><tr style="position:sticky;top:0;z-index:4;background:#f8f9fb"><th style="background:#f8f9fb">Date</th><th style="background:#f8f9fb">Batch</th><th style="background:#f8f9fb">Customer</th><th style="background:#f8f9fb">Qty (L)</th><th style="background:#f8f9fb">Boxes</th><th style="background:#f8f9fb">Vehicle</th><th style="background:#f8f9fb">Invoice</th><th style="background:#f8f9fb">Status</th></tr></thead>
       <tbody>
       ${state.dispatchRecs.sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,20).map(r=>`<tr>
         <td class="td-mono text-sm">${fmtDate(r.ts)}</td>

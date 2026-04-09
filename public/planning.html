@@ -740,7 +740,19 @@ const SYNC = (() => {
     // Always take server orders — never merge with localStorage orders
     // This prevents old/deleted orders from coming back via localStorage push
     Object.assign(state, serverState);
-    state.orders = serverState.orders || [];
+    // Filter out invalid orders on load: wrong batch format, no packing, bad customer, zero qty
+    state.orders = (serverState.orders || []).filter(o => {
+      if (o.deleted) return false;
+      const cust = String(o.customer || o.shipTo || '').trim().toLowerCase();
+      const batch = String(o.batchNumber || '').trim();
+      const qty = parseFloat(o.qty) || 0;
+      const packing = String(o.packing || '').trim();
+      if (!cust || cust === 'none' || cust === 'test') return false;
+      if (!batch || !BATCH_REGEX.test(batch)) return false;
+      if (qty <= 0) return false;
+      if (!packing) return false;
+      return true;
+    });
     state.printOrders = serverState.printOrders || [];
     state.dispatchPlans = serverState.dispatchPlans || [];
     state.pcCodes = PC_CODES_RAW;
@@ -769,7 +781,13 @@ const SYNC = (() => {
       const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
       if (!userInteracting || isInitialLoad) {
             const allMachineIds=[...new Set((state.orders||[]).filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
+    const needsBackfill = (state.orders||[]).some(o=>!o.deleted && o.status!=='closed' && o.qty>0 && (!o.grossQty || !o.endDate));
+    const ghostsRemoved = (serverState.orders||[]).length > state.orders.length;
     allMachineIds.forEach(mid=>recalcMachineScheduleQuiet(mid));
+    if (needsBackfill || ghostsRemoved) {
+      console.log('[cleanup] Saving clean state — backfill:', needsBackfill, 'ghosts removed:', ghostsRemoved, (serverState.orders||[]).length - state.orders.length);
+      saveState();
+    }
     render();
       } else {
         // Data changed but user is typing — update KPI numbers silently without full re-render
@@ -1072,6 +1090,12 @@ function machineToAlpha(mcId) {
   return result;
 }
 
+// Batch number format: 2-digit year + machine alpha (1+ uppercase letters) + 3-digit serial
+// Example: 26ZG061, 26U082, 26ZD033
+const BATCH_REGEX = /^[0-9]{2}[A-Z]+[0-9]{3}$/;
+
+function isValidBatch(b) { return BATCH_REGEX.test(String(b||'').trim()); }
+
 function autoGenBatchNumber(machineId) {
   const yy = new Date().getFullYear().toString().slice(2);
   const alpha = machineToAlpha(machineId);
@@ -1083,7 +1107,8 @@ function autoGenBatchNumber(machineId) {
       return m ? parseInt(m[1]) : 0;
     });
   const nextSerial = existing.length > 0 ? Math.max(...existing) + 1 : 1;
-  return yy + alpha + nextSerial;
+  // Zero-pad serial to 3 digits to match BATCH_REGEX (e.g. 001, 023, 100)
+  return yy + alpha + String(nextSerial).padStart(3, '0');
 }
 
 function getMachineOrders(machineId) {
@@ -1908,8 +1933,15 @@ function saveOrderModal(existingId, defaultMachine) {
   if (!customerVal) return alert('Please enter a customer name');
 
   const poNumVal = document.getElementById('fo-ponum')?.value?.trim();
-  const batchVal = document.getElementById('fo-batch')?.value?.trim();
+  const batchVal = document.getElementById('fo-batch')?.value?.trim() || autoGenBatchNumber(machineId);
   if (!poNumVal && !batchVal) return alert('Please enter a PO Number or Batch Number');
+  // Validate batch number format: YY + ALPHA + 3-digit serial (e.g. 26ZG061)
+  if (batchVal && !isValidBatch(batchVal)) {
+    return alert(`Invalid batch number format: "${batchVal}"\n\nExpected format: YY + Machine Code + 3-digit serial\nExample: 26ZG061, 26U082, 26ZD033`);
+  }
+  // Packing is required
+  const packingVal = document.getElementById('fo-packing')?.value?.trim();
+  if (!packingVal) return alert('Please select a Packing type (e.g. 3 PLY, 5 PLY)');
 
   const isPrinted = document.getElementById('fo-printed')?.value === '1';
   const ag = parseFloat(document.getElementById('fo-agrade')?.value)||mc.aGrade;
@@ -2255,6 +2287,19 @@ function confirmSAPImport(rows) {
     // Auto batch number if not provided
     let batchNumber = String(row.Batch_Number || row['Batch Number'] || '').trim();
     if (!batchNumber) batchNumber = autoGenBatchNumber(machineId);
+    // Validate batch format
+    if (!isValidBatch(batchNumber)) {
+      console.warn(`[SAP import] Skipping row — invalid batch format: "${batchNumber}"`);
+      errorRows.push({...row, _error:`Invalid batch format: ${batchNumber}`});
+      continue;
+    }
+    // Packing is required
+    const rowPacking = String(row.Packing || '').trim();
+    if (!rowPacking) {
+      console.warn(`[SAP import] Skipping row — packing missing for batch ${batchNumber}`);
+      errorRows.push({...row, _error:`Packing missing for ${batchNumber}`});
+      continue;
+    }
 
     const ord = {
       id: uid(),

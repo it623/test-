@@ -303,7 +303,54 @@ async function getPlanningState() {
   try { return JSON.parse(row.state_json); } catch { return {}; }
 }
 
+// ─── Order validation ────────────────────────────────────────────────────────
+// Batch format: 2-digit year + machine alpha (1+ uppercase letters) + 3-digit serial
+// Examples: 26ZG061, 26U082, 26ZD033
+const BATCH_REGEX = /^[0-9]{2}[A-Z]+[0-9]{3}$/;
+
+const VALID_PACKING = ['1 PLY','2 PLY','3 PLY','4 PLY','5 PLY','6 PLY','7 PLY','3PLY','5PLY'];
+
+function isValidOrder(o) {
+  if (!o || o.deleted) return false;
+  // Must have qty > 0
+  if (!o.qty || parseFloat(o.qty) <= 0) return { valid: false, reason: `qty=0 or missing` };
+  // Customer must not be empty/none/test
+  const cust = String(o.customer || o.shipTo || '').trim().toLowerCase();
+  if (!cust || cust === 'none' || cust === 'test') return { valid: false, reason: `invalid customer="${cust}"` };
+  // Batch number must match format
+  const batch = String(o.batchNumber || '').trim();
+  if (!batch || !BATCH_REGEX.test(batch)) return { valid: false, reason: `invalid batchNumber="${batch}"` };
+  // Packing must be present
+  const packing = String(o.packing || '').trim();
+  if (!packing) return { valid: false, reason: `packing is empty` };
+  return { valid: true };
+}
+
+function cleanOrders(orders) {
+  if (!Array.isArray(orders)) return orders;
+  const cleaned = [];
+  const removed = [];
+  for (const o of orders) {
+    if (o.deleted) { removed.push(`${o.batchNumber}:deleted`); continue; }
+    const check = isValidOrder(o);
+    if (check.valid) {
+      cleaned.push(o);
+    } else {
+      removed.push(`${o.batchNumber||o.id}:${check.reason}`);
+    }
+  }
+  if (removed.length > 0) {
+    console.log(`[cleanOrders] Removed ${removed.length} invalid orders: ${removed.join(', ')}`);
+  }
+  return cleaned;
+}
+
 async function savePlanningState(state) {
+  // Strip invalid orders before any guard check — permanent enforcement
+  if (Array.isArray(state.orders)) {
+    state.orders = cleanOrders(state.orders);
+  }
+
   // Always fetch existing state once for all guards
   const existingRow = await queryOne('SELECT state_json, saved_at FROM planning_state WHERE id=1');
   let existingState = null;
@@ -315,7 +362,7 @@ async function savePlanningState(state) {
   if (state && Array.isArray(state.orders) && state.orders.length === 0) {
     if (existingState?.orders?.length > 0) {
       console.log('[savePlanningState] GUARD1: blocked empty orders overwrite');
-      const merged = { ...existingState, ...state, orders: existingState.orders };
+      const merged = { ...existingState, ...state, orders: cleanOrders(existingState.orders) };
       await query(
         `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
          ON CONFLICT (id) DO UPDATE SET state_json = EXCLUDED.state_json, saved_at = NOW()`,
@@ -349,7 +396,7 @@ async function savePlanningState(state) {
       console.log(`[savePlanningState] GUARD3: suspicious order count drop ${existingCount} → ${incomingCount} (drop=${drop}), merging to protect data`);
       // Merge: keep all existing orders not in incoming state, add all incoming
       const incomingIds = new Set((state.orders || []).map(o => o.id));
-      const missingOrders = existingState.orders.filter(o => !incomingIds.has(o.id) && !o.deleted);
+      const missingOrders = cleanOrders(existingState.orders.filter(o => !incomingIds.has(o.id) && !o.deleted));
       const merged = { ...state, orders: [...(state.orders || []), ...missingOrders] };
       await query(
         `INSERT INTO planning_state (id, state_json) VALUES (1, $1)

@@ -1102,10 +1102,11 @@ function normWastage(w){
 async function pullFromServer(){
   if(!serverUrl) return;
 
-  // Fix any OL- labels in DB that have is_orange=false (runs every pull until all fixed)
-  if(serverUrl){
+  // Fix any OL- labels in DB that have is_orange=false (one-time auto-repair)
+  if(serverUrl && !window._orangeFixDone){
+    window._orangeFixDone = true;
     try{
-      fetch(serverUrl+'/api/admin/fix-orange-labels',{
+      await fetch(serverUrl+'/api/admin/fix-orange-labels',{
         method:'POST', signal:AbortSignal.timeout(3000)
       });
     }catch(e){}

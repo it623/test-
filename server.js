@@ -1176,11 +1176,7 @@ app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
   const [planningState, savedAtRow, labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
     getPlanningState(),
     queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1'),
-    queryAll(`
-      SELECT *, 
-        CASE WHEN label_number LIKE 'OL-%' THEN true ELSE is_orange END as is_orange
-      FROM tracking_labels ORDER BY generated DESC
-    `),
+    queryAll('SELECT * FROM tracking_labels ORDER BY generated DESC'),
     queryAll('SELECT * FROM tracking_scans ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_stage_closure'),
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
@@ -1240,7 +1236,7 @@ app.get('/api/tracking/label', asyncRoute(async (req, res) => {
 
 app.get('/api/tracking/state', asyncRoute(async (req, res) => {
   const [labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
-    queryAll(`SELECT *, CASE WHEN label_number LIKE 'OL-%' THEN true ELSE is_orange END as is_orange FROM tracking_labels ORDER BY generated DESC`),
+    queryAll('SELECT * FROM tracking_labels ORDER BY generated DESC'),
     queryAll('SELECT * FROM tracking_scans ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_stage_closure'),
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
@@ -1883,7 +1879,12 @@ startServer();
 app.post('/api/admin/fix-orange-labels', asyncRoute(async (req, res) => {
   const result = await query(`
     UPDATE tracking_labels 
-    SET is_orange = true
+    SET is_orange = true, parent_label_id = COALESCE(parent_label_id, 
+      (SELECT id FROM tracking_labels tl2 
+       WHERE tl2.batch_number = tracking_labels.batch_number 
+       AND tl2.is_orange = false
+       AND CONCAT('OL-', ABS(tl2.label_number::numeric)) = tracking_labels.label_number
+       LIMIT 1))
     WHERE label_number LIKE 'OL-%' 
     AND (is_orange = false OR is_orange IS NULL)
   `);

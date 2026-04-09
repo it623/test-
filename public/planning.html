@@ -630,7 +630,7 @@ function planQueuePush(stateObj) {
 
 async function planQueueFlush() {
   if (!_planRetryState || _planRetrying) return;
-  const url = localStorage.getItem('sunloc_server_url') || '';
+  const url = getServerUrl();
   if (!url) return;
   _planRetrying = true;
   try {
@@ -653,6 +653,8 @@ async function planQueueFlush() {
 
 const SYNC = (() => {
   let _url = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app');
+  // Always ensure URL is set — never let it be empty
+  if (!_url) { _url = 'https://sunloc.up.railway.app'; localStorage.setItem('sunloc_server_url', _url); }
   let _online = false, _lastCheck = 0;
 
   async function online() {
@@ -901,8 +903,15 @@ const SYNC = (() => {
     } catch(e) {}
   }
 
-  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus, loadLiveAGrade, loadDispatchActuals };
+  function getUrl() { return _url || 'https://sunloc.up.railway.app'; }
+  return { online, push, pull, configure, updateBadge, loadFromServer, loadTrackingStatus, loadLiveAGrade, loadDispatchActuals, getUrl };
 })();
+
+// Global helper — always returns server URL, never empty
+// Falls back to hardcoded Railway URL if localStorage was cleared
+function getServerUrl() {
+  return SYNC.getUrl() || localStorage.getItem('sunloc_server_url') || 'https://sunloc.up.railway.app';
+}
 
 // Load from localStorage (with server enrichment on init)
 function loadState() {
@@ -944,12 +953,14 @@ function loadState() {
 }
 
 function openTrackingApp() {
-  const url = localStorage.getItem('sunloc_server_url') || '';
+  const url = getServerUrl();
   if (url) {
     // Open in same tab to prevent accidental new tab spawning
     window.location.href = url + '/tracking.html';
   } else {
-    alert('Please configure the Server URL in Settings first.');
+    // Auto-use default Railway URL instead of blocking with alert
+    localStorage.setItem('sunloc_server_url', 'https://sunloc.up.railway.app');
+    window.location.href = 'https://sunloc.up.railway.app/tracking.html';
   }
 }
 
@@ -3547,7 +3558,7 @@ function renderTruckCard(truck, cap) {
 }
 
 async function showBatchTrackingModal(batchNumber) {
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   openModal(`📦 Batch Tracker — ${batchNumber}`, `
     <div id="btm-loading" style="text-align:center;padding:24px;color:var(--text3)">
       <div style="font-size:24px;margin-bottom:8px">⏳</div>
@@ -5223,7 +5234,7 @@ async function proposeWOReconciliation(orderId) {
   const poNumber = document.getElementById('woc-ponum')?.value?.trim();
   const zone = document.getElementById('woc-zone')?.value;
   const qtyConfirmed = parseFloat(document.getElementById('woc-qty')?.value) || null;
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl) { alert('Server not connected'); return; }
   try {
     const r = await fetch(serverUrl + '/api/wo/propose-reconciliation', {
@@ -5249,7 +5260,7 @@ let _reconProposedOrder = null;
 
 async function renderReconciliation() {
   document.getElementById('topbar-actions').innerHTML = '';
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   const content = document.getElementById('content');
   content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Loading TEMP batches...</div>';
 
@@ -5502,7 +5513,7 @@ async function proposeReconciliation() {
     const tb = _reconTempBatches.find(t=>t.id===tbId);
     return { tempBatchId: tbId, tempDate: tb?.date, boxes: tb?.label_count||0, actualLakhs: tb?.daily_cap_lakhs||0 };
   });
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   if (!serverUrl) { alert('Server not connected'); return; }
   try {
     const r = await fetch(serverUrl+'/api/reconciliation/propose', {
@@ -5521,7 +5532,7 @@ async function proposeReconciliation() {
 
 async function approveReconciliation(reqId) {
   if (!confirm(`Approve and execute reconciliation ${reqId}?\n\nThis will:\n• Migrate all TEMP batch labels to the real order\n• Migrate all WIP scan records\n• Update Planning actuals\n• Generate replacement labels for printing\n\nThis cannot be undone.`)) return;
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   try {
     const r = await fetch(serverUrl+'/api/reconciliation/approve/'+reqId, {
       method:'POST', headers:{'Content-Type':'application/json', 'x-session-token':currentUser?.token||''},
@@ -5539,7 +5550,7 @@ async function approveReconciliation(reqId) {
 async function rejectReconciliation(reqId) {
   const reason = prompt('Reason for rejection (required):');
   if (!reason) return;
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   try {
     const r = await fetch(serverUrl+'/api/reconciliation/reject/'+reqId, {
       method:'POST', headers:{'Content-Type':'application/json', 'x-session-token':currentUser?.token||''},
@@ -5553,7 +5564,7 @@ async function rejectReconciliation(reqId) {
 
 async function approveWOReconciliation(reqId) {
   if (!confirm(`Approve W/O reconciliation ${reqId}?\n\nThis will:\n• Add customer name to the order\n• Update all batch labels with customer name\n• Generate replacement labels for printing\n\nThis cannot be undone.`)) return;
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   try {
     const r = await fetch(serverUrl+'/api/wo/approve/'+reqId, {
       method:'POST', headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
@@ -5571,7 +5582,7 @@ async function approveWOReconciliation(reqId) {
 async function rejectWOReconciliation(reqId) {
   const reason = prompt('Reason for rejection (required):');
   if (!reason) return;
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   try {
     const r = await fetch(serverUrl+'/api/wo/reject/'+reqId, {
       method:'POST', headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
@@ -5842,7 +5853,7 @@ function saveAllTruckCaps() {
 }
 
 async function doPurgeTemp() {
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl || !currentUser?.token) { alert('Not connected to server'); return; }
   if (!confirm('Clear all TEMP batches from the server? This will hide the unreconciled banner.')) return;
   const r = await fetch(serverUrl+'/api/admin/purge-temp', {
@@ -5856,7 +5867,7 @@ async function doPurgeTemp() {
 }
 
 async function doPurgeLabels() {
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl || !currentUser?.token) { alert('Not connected to server'); return; }
   if (!confirm('Clear all tracking labels and scans from the server? Labels Generated will reset to 0.')) return;
   const r = await fetch(serverUrl+'/api/admin/purge-labels', {
@@ -5878,7 +5889,7 @@ async function doFullReset() {
     resultEl.innerHTML = '<span style="color:#dc2626">❌ Type exactly: RESET-ALL-DATA</span>';
     return;
   }
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl) { resultEl.innerHTML = '<span style="color:#dc2626">❌ No server connected</span>'; return; }
   if (!window.confirm('⚠️ FINAL WARNING\n\nThis will permanently delete ALL orders, scans, labels, DPR records and batches from the server.\n\nThis CANNOT be undone.\n\nClick OK to proceed.')) return;
 
@@ -5995,7 +6006,7 @@ setInterval(planQueueFlush, 5*1000); // flush queue every 5s
 // ── SAVE BEFORE PAGE CLOSE ──────────────────────────────────────
 window.addEventListener('beforeunload', () => {
   if (!_serverDataLoaded) return;
-  const url = localStorage.getItem('sunloc_server_url')||'';
+  const url = getServerUrl();
   if (!url) return;
   try {
     const toSave = {...state};
@@ -6028,7 +6039,7 @@ const TEMP_ALERT_VISIBLE  = 60 * 1000;           // 1 minute visible
 let _tempAlertTimer = null; // auto-hide timer
 
 async function checkPlanningTempAlerts(){
-  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  const serverUrl = getServerUrl();
   if(!serverUrl) return;
   try{
     const r = await fetch(serverUrl+'/api/temp-batches/active',{signal:AbortSignal.timeout(4000)});
@@ -6226,7 +6237,7 @@ async function saveNewPin() {
   const username = document.getElementById('cp-user').value;
   const newPin = document.getElementById('cp-newpin').value;
   if (!newPin || newPin.length < 4) { alert('PIN must be at least 4 digits'); return; }
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl) { alert('Server not connected'); return; }
   try {
     const r = await fetch(serverUrl + '/api/auth/change-pin', {
@@ -6242,7 +6253,7 @@ async function saveNewPin() {
 
 async function doLogout() {
   closeModal();
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (serverUrl && currentUser?.token) {
     try { await fetch(serverUrl + '/api/auth/logout', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:currentUser.token}),signal:AbortSignal.timeout(3000)}); } catch(e){}
   }
@@ -6256,7 +6267,7 @@ async function doLogout() {
 
 async function auditLog(action, details) {
   if (!currentUser) return;
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl || !currentUser.token) return;
   try {
     await fetch(serverUrl + '/api/audit/log', {
@@ -6281,7 +6292,7 @@ function renderAuditLog() {
 }
 
 async function loadAuditLog() {
-  const serverUrl = localStorage.getItem('sunloc_server_url') || '';
+  const serverUrl = getServerUrl();
   if (!serverUrl) { document.getElementById('audit-log-content').innerHTML = '<div style="color:var(--accent4)">Server not connected</div>'; return; }
   try {
     const r = await fetch(`${serverUrl}/api/audit/view?app=planning&limit=300`, {headers:{'x-session-token': currentUser.token}, signal: AbortSignal.timeout(5000)});

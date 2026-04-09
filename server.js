@@ -1148,8 +1148,8 @@ app.post('/api/reconciliation/approve/:id', asyncRoute(async (req, res) => {
         actualQty:mappings.reduce((s,m)=>s+(m.actualLakhs||0),0), status:'running' };
       if (idx>=0) planState.orders[idx]={...planState.orders[idx],...orderToSave};
       else planState.orders.push(orderToSave);
-      await client.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json,saved_at=NOW()`,
-        [JSON.stringify(planState)]);
+      // Use savePlanningState so cleanOrders runs — prevents ghost orders from reconciliation
+      await savePlanningState(planState);
     }
     // 8. Mark request approved
     await client.query(`UPDATE reconciliation_requests SET status='approved',approved_by=$1,approved_at=$2 WHERE id=$3`,

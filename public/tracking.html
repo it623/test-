@@ -4089,6 +4089,25 @@ function fixStickyColumns(container){
 
 function fixAllReportSticky(){
   document.querySelectorAll('.tbl-wrap').forEach(wrap => fixStickyColumns(wrap));
+  // Make all report table headers sticky on vertical scroll
+  document.querySelectorAll('#report-output .tbl-wrap table thead tr').forEach((tr, i) => {
+    tr.style.position = 'sticky';
+    tr.style.zIndex = '4';
+    tr.style.background = 'var(--surface3, #f8f9fb)';
+    // Stack multiple header rows
+    const prevRows = tr.parentElement.querySelectorAll('tr');
+    let top = 0;
+    for (let j = 0; j < i; j++) top += (prevRows[j].offsetHeight || 36);
+    tr.style.top = top + 'px';
+  });
+  // Ensure tbl-wrap containers in report output allow vertical scroll
+  document.querySelectorAll('#report-output .tbl-wrap').forEach(wrap => {
+    if (!wrap.style.maxHeight && wrap.scrollHeight > 400) {
+      wrap.style.maxHeight = '70vh';
+      wrap.style.overflowY = 'auto';
+    }
+    wrap.style.overflowX = 'auto';
+  });
 }
 
 function renderReports(){
@@ -4421,7 +4440,7 @@ function exportReportF(){
   const rows = [['Batch No.','Customer','Size','DPR Qty (L)','DPR Boxes','AIM Scans Today','AIM Total','Packed Out Today','Status']];
   const todayStr = today();
   const todayScans = state.scans.filter(s=>s.ts?.slice(0,10)===todayStr);
-  const batchNos = [...new Set(todayScans.map(s=>s.batchNumber).concat(state.batches.filter(b=>b.actualQty>0).map(b=>b.batchNumber)))];
+  const batchNos = [...new Set(todayScans.map(s=>s.batchNumber).concat(state.batches.filter(b=>b.actualQty>0).map(b=>b.batchNumber)))].sort((a,b)=>String(a).localeCompare(String(b)));
   batchNos.forEach(batchNo=>{
     const b = getBatch(batchNo); if(!b) return;
     const dprL = b.actualQty||0, dprBox = dprL>0?lakhToBox(dprL,b.size):0;
@@ -4445,7 +4464,7 @@ function renderReportB(){
   depts.forEach(dept=>{
     const inScans=state.scans.filter(s=>s.dept===dept&&s.type==='in');
     const outScans=state.scans.filter(s=>s.dept===dept&&s.type==='out');
-    const batchSet=[...new Set(inScans.map(s=>s.batchNumber))];
+    const batchSet=[...new Set(inScans.map(s=>s.batchNumber))].sort((a,b)=>String(a).localeCompare(String(b)));
     html+=`<div class="mb-16"><div class="card-title" style="color:${DEPT_CONFIG[dept].color}">${DEPT_CONFIG[dept].label}</div>
     <div class="tbl-wrap"><table>
       <thead><tr><th style="position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:90px">Batch</th><th style="position:sticky;left:90px;z-index:3;background:#f8f9fb;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Customer</th><th>Boxes IN</th><th>Boxes OUT</th><th>WIP Boxes</th><th>WIP Qty (L)</th><th>Time in Dept</th><th>Status</th></tr></thead><tbody>`;
@@ -4481,7 +4500,7 @@ function renderReportC(){
     <thead><tr><th style="position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:70px">Machine</th><th style="position:sticky;left:70px;z-index:3;background:#f8f9fb;min-width:55px">Floor</th><th style="position:sticky;left:125px;z-index:3;background:#f8f9fb;min-width:80px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
   const machines=[...new Set(state.batches.map(b=>b.machineId).filter(Boolean))].sort();
   machines.forEach(mc=>{
-    const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted);
+    const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
     batches.forEach(b=>{
       const wipDays=getBatchWIPDays(b.batchNumber);
       const std=b.isPrinted?3:2;
@@ -4562,8 +4581,8 @@ function renderReportD(){
 function renderReportA(){
   // Date filter
   const filterBatch = window._rptABatch||'';
-  const batches = state.batches.filter(b=>!b.deleted && (!filterBatch||b.batchNumber===filterBatch));
-  const batchOptions = state.batches.filter(b=>!b.deleted)
+  const batches = state.batches.filter(b=>!b.deleted && (!filterBatch||b.batchNumber===filterBatch)).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
+  const batchOptions = state.batches.filter(b=>!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)))
     .map(b=>`<option value="${b.batchNumber}" ${filterBatch===b.batchNumber?'selected':''}>${b.batchNumber} — ${b.customer||''}</option>`).join('');
 
   let html=`<div class="card">
@@ -4664,7 +4683,7 @@ function renderReportE(){
 
   const rows=[];
   // Group all batches by machine directly — avoids FLOORS.machines ID mismatch
-  const allBatches = state.batches.filter(b=>!b.deleted);
+  const allBatches = state.batches.filter(b=>!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
   const machineIds = [...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort();
   machineIds.forEach(mc=>{
     const floorKey = getMachineFloor(mc) || '';
@@ -4827,7 +4846,7 @@ function exportReportD(){
 function exportReportE(){
   const wb = XLSX.utils.book_new();
   const filterDate = window._rptEDate || '';
-  const allBatches = state.batches.filter(b=>!b.deleted);
+  const allBatches = state.batches.filter(b=>!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
   const machineIds = [...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort();
   const rows = [];
 

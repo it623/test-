@@ -177,7 +177,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--f
 .kpi-val.purple{color:var(--accent5)}
 
 /* ── TABLES ── */
-.tbl-wrap{overflow-x:auto;border-radius:var(--r);border:1px solid var(--border)}
+.tbl-wrap{overflow-x:auto;overflow-y:visible;border-radius:var(--r);border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:12px}
 th{background:var(--surface2);font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--text3);padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;white-space:nowrap;font-family:var(--mono)}
 td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text2)}
@@ -4199,34 +4199,34 @@ function renderReportG(){
   </div>
 
   <div class="card">
-    <div class="tbl-wrap" style="max-height:70vh;overflow-y:auto"><table id="rg-table">
+    <div class="tbl-wrap" style="max-height:70vh;overflow-x:auto;overflow-y:auto"><table id="rg-table">
       <thead>
-        <tr style="background:#f8f9fb;position:sticky;top:0;z-index:4">
-          <th rowspan="2" style="position:sticky;left:0;top:0;z-index:5;background:#f8f9fb;min-width:80px;white-space:nowrap">Batch</th>
-          <th rowspan="2" style="position:sticky;left:80px;top:0;z-index:5;background:#f8f9fb;min-width:160px;white-space:nowrap">Customer</th>
-          <th rowspan="2" style="position:sticky;left:240px;top:0;z-index:5;background:#f8f9fb;min-width:55px;white-space:nowrap">Size</th>
-          ${DEPTS.map(d=>`<th colspan="5" class="rg-col-${d}" style="position:sticky;top:0;z-index:4;background:#f8f9fb;text-align:center;border-left:2px solid var(--border2)">${DEPT_LABELS[d]}</th>`).join('')}
-          <th colspan="3" style="position:sticky;top:0;z-index:4;background:#f8f9fb;text-align:center;border-left:2px solid var(--border2)">Overall</th>
+        <tr style="background:#f8f9fb;position:sticky;top:0;z-index:6">
+          <th rowspan="2" style="position:sticky;left:0;top:0;z-index:7;background:#f8f9fb;min-width:80px;white-space:nowrap;box-shadow:1px 0 0 var(--border)">Batch</th>
+          <th rowspan="2" style="position:sticky;left:80px;top:0;z-index:7;background:#f8f9fb;min-width:160px;white-space:nowrap">Customer</th>
+          <th rowspan="2" style="position:sticky;left:240px;top:0;z-index:7;background:#f8f9fb;min-width:55px;white-space:nowrap;box-shadow:3px 0 8px rgba(0,0,0,0.15)">Size</th>
+          ${DEPTS.map(d=>`<th colspan="5" class="rg-col-${d}" style="position:sticky;top:0;z-index:5;background:#f8f9fb;text-align:center;border-left:2px solid var(--border2)">${DEPT_LABELS[d]}</th>`).join('')}
+          <th colspan="3" style="position:sticky;top:0;z-index:5;background:#f8f9fb;text-align:center;border-left:2px solid var(--border2)">Overall</th>
         </tr>
-        <tr style="background:#f8f9fb;position:sticky;top:36px;z-index:4">
+        <tr style="background:#f8f9fb;position:sticky;top:36px;z-index:5">
           ${DEPTS.map(d=>`
-            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:4;background:#f8f9fb;border-left:2px solid var(--border2)">IN (L)</th>
-            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:4;background:#f8f9fb">OUT (L)</th>
-            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:4;background:#f8f9fb">Salvage</th>
-            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:4;background:#f8f9fb">Remelt</th>
-            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:4;background:#f8f9fb">A-Grade %</th>
+            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:5;background:#f8f9fb;border-left:2px solid var(--border2)">IN (L)</th>
+            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:5;background:#f8f9fb">OUT (L)</th>
+            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:5;background:#f8f9fb">Salvage</th>
+            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:5;background:#f8f9fb">Remelt</th>
+            <th class="rg-col-${d}" style="position:sticky;top:36px;z-index:5;background:#f8f9fb">A-Grade %</th>
           `).join('')}
-          <th class="rg-col-overall" style="position:sticky;top:36px;z-index:4;background:#f8f9fb;border-left:2px solid var(--border2)">Total A-Grade</th>
-          <th class="rg-col-overall" style="position:sticky;top:36px;z-index:4;background:#f8f9fb">Total Wastage</th>
-          <th class="rg-col-overall" style="position:sticky;top:36px;z-index:4;background:#f8f9fb">Overall %</th>
+          <th class="rg-col-overall" style="position:sticky;top:36px;z-index:5;background:#f8f9fb;border-left:2px solid var(--border2)">Total A-Grade</th>
+          <th class="rg-col-overall" style="position:sticky;top:36px;z-index:5;background:#f8f9fb">Total Wastage</th>
+          <th class="rg-col-overall" style="position:sticky;top:36px;z-index:5;background:#f8f9fb">Overall %</th>
         </tr>
       </thead>
       <tbody id="rg-body">
       ${rows.map(({b,deptData,batchTotalAGrade,batchTotalWastage,overallPct})=>`
         <tr data-batch="${(b.batchNumber||'').toLowerCase()}" data-customer="${(b.customer||'').toLowerCase()}">
-          <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#fff;min-width:80px;white-space:nowrap">${b.batchNumber}</td>
-          <td style="position:sticky;left:80px;z-index:2;background:#fff;min-width:160px">${b.customer||'-'}</td>
-          <td class="td-mono" style="position:sticky;left:240px;z-index:2;background:#fff;min-width:55px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${b.size}</td>
+          <td class="td-bold td-mono" style="position:sticky;left:0;z-index:3;background:#fff;min-width:80px;white-space:nowrap">${b.batchNumber}</td>
+          <td style="position:sticky;left:80px;z-index:3;background:#fff;min-width:160px">${b.customer||'-'}</td>
+          <td class="td-mono" style="position:sticky;left:240px;z-index:3;background:#fff;min-width:55px;box-shadow:3px 0 8px rgba(0,0,0,0.15)">${b.size}</td>
           ${deptData.map(d=>`
             <td class="td-mono rg-col-${d.dept}" style="border-left:2px solid var(--border2)">${d.inQty}</td>
             <td class="td-mono rg-col-${d.dept}">${d.outQty}</td>

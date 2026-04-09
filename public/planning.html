@@ -769,7 +769,14 @@ const SYNC = (() => {
       const userInteracting = activeTag === 'input' || activeTag === 'select' || activeTag === 'textarea';
       if (!userInteracting || isInitialLoad) {
             const allMachineIds=[...new Set((state.orders||[]).filter(o=>!o.deleted).map(o=>o.machineId).filter(Boolean))];
+    // Check if any orders are missing grossQty or endDate (old data without these fields)
+    const needsBackfill = (state.orders||[]).some(o=>!o.deleted && o.status!=='closed' && o.qty>0 && (!o.grossQty || !o.endDate));
     allMachineIds.forEach(mid=>recalcMachineScheduleQuiet(mid));
+    // If orders had missing grossQty/endDate, save the recalculated values back to server
+    if (needsBackfill) {
+      console.log('[backfill] Saving recalculated grossQty/endDate for orders with missing values');
+      saveState();
+    }
     render();
       } else {
         // Data changed but user is typing — update KPI numbers silently without full re-render
@@ -1115,8 +1122,17 @@ function recalcMachineScheduleQuiet(machineId) {
   let cursor = null;
   for (const ord of orders) {
     if (ord.status === 'closed') continue;
-    if (!cursor) cursor = new Date(ord.startDate || today());
-    else ord.startDate = new Date(cursor);
+    // Use order's existing startDate for first order; chain from previous endDate for rest
+    if (!cursor) {
+      cursor = new Date(ord.startDate || today());
+    } else {
+      ord.startDate = new Date(cursor);
+    }
+    // Skip orders with no qty — can't calculate schedule
+    if (!ord.qty || ord.qty <= 0) {
+      ord.grossQty = 0; ord.daysNeeded = 0; ord.endDate = null;
+      continue;
+    }
     const sc = calcOrderSchedule(ord, mc);
     ord.grossQty   = sc.grossQty;
     ord.aimOut     = sc.aimOut;
@@ -1124,7 +1140,8 @@ function recalcMachineScheduleQuiet(machineId) {
     ord.piOut      = sc.piOut;
     ord.daysNeeded = sc.daysNeeded;
     ord.endDate    = calcEndDate(ord.startDate, sc.daysNeeded);
-    cursor = new Date(ord.endDate);
+    const endD = new Date(ord.endDate);
+    if (!isNaN(endD)) cursor = endD; // only advance cursor if valid date
   }
 }
 
@@ -1913,13 +1930,11 @@ function saveOrderModal(existingId, defaultMachine) {
 
   const isPrinted = document.getElementById('fo-printed')?.value === '1';
   const ag = parseFloat(document.getElementById('fo-agrade')?.value)||mc.aGrade;
-  let grossQty, daysNeeded;
-  if (isPrinted) {
-    grossQty = qty * 1.07 * 1.02;
-  } else {
-    grossQty = ag > 0 ? qty / (ag/100) : qty;
-  }
-  daysNeeded = grossQty / mc.cap;
+  // Use calcOrderSchedule for consistency with recalc functions
+  const _tempOrd = { qty, isPrinted, aGrade: ag, batchNumber: document.getElementById('fo-batch')?.value };
+  const _sc = calcOrderSchedule(_tempOrd, mc);
+  const grossQty = _sc.grossQty;
+  const daysNeeded = _sc.daysNeeded;
 
   const startDate = new Date(document.getElementById('fo-startdate')?.value || today());
   const endDate = calcEndDate(startDate, daysNeeded);

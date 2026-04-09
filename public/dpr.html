@@ -320,9 +320,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <div class="collapsible">
     <div class="col-hdr" onclick="toggleCol('remBlock')">
       <span class="col-title" style="color:var(--t2)">💬 Shift Remarks / Issues</span>
-      <button class="btn-add" onclick="event.stopPropagation();addRemark()">+ Add Remark</button>
     </div>
-    <div class="col-body" id="remBlock"><div id="remList"><p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log issues.</p></div></div>
+    <div class="col-body" id="remBlock">
+      <div id="remList"><p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log issues.</p></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:10px">
+        <button class="btn-add" onclick="addRemark()">+ Add Remark</button>
+      </div>
+    </div>
   </div>
   <!-- Resort -->
   <div class="collapsible">

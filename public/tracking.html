@@ -1037,8 +1037,7 @@ function configureServer(){
 
 // Normalise DB snake_case → camelCase for labels loaded from server
 function normLabel(l){
-  // Never skip — always normalize to ensure is_orange, parent_label_id etc are correct
-  if(l.batchNumber && l.isOrange !== undefined) return l; // already fully normalized
+  if(l.batchNumber) return l; // already camelCase (local label)
   return {
     id:            l.id,
     batchNumber:   l.batch_number,
@@ -1102,15 +1101,7 @@ function normWastage(w){
 async function pullFromServer(){
   if(!serverUrl) return;
 
-  // Fix any OL- labels in DB that have is_orange=false (one-time auto-repair)
-  if(serverUrl && !window._orangeFixDone){
-    window._orangeFixDone = true;
-    try{
-      await fetch(serverUrl+'/api/admin/fix-orange-labels',{
-        method:'POST', signal:AbortSignal.timeout(3000)
-      });
-    }catch(e){}
-  }
+
 
   // Before pulling — push any local labels not yet on server
   // This auto-saves labels generated offline or before server was available
@@ -1152,8 +1143,7 @@ async function pullFromServer(){
 
         if(snap.tracking){
           // Labels — server is truth, but preserve local orange labels not yet synced
-          // Always normalize ALL server labels — never skip (stale camelCase cache causes isOrange=false bug)
-          const normLabels = (snap.tracking.labels||[]).map(l=>normLabel(l));
+          const normLabels = (snap.tracking.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
           if(normLabels.length > 0){
             const serverLabelIds = new Set(normLabels.map(l=>l.id));
             // Keep local orange labels that aren't on server yet
@@ -2369,22 +2359,6 @@ function getBoxCurrentStageForBatch(batchNo){
 // ── Regenerate orange labels from existing PI scan-in records ──
 // Run this once to fix batches that were scanned at PI before the bug fix
 async function regenerateOrangeLabelsFromScans(){
-  toast('🔄 Syncing orange labels from server...','var(--orange)');
-  // First: fix any OL- labels on server that have is_orange=false
-  if(serverUrl){
-    try{
-      await fetch(serverUrl+'/api/admin/fix-orange-labels',{method:'POST',signal:AbortSignal.timeout(5000)});
-    }catch(e){}
-    // Pull fresh from server after fix
-    await pullFromServer();
-    // Check if orange labels now exist
-    const existing = state.labels.filter(l=>l.isOrange&&!l.voided);
-    if(existing.length > 0){
-      toast(`✅ ${existing.length} orange labels loaded from server`,'var(--orange)');
-      renderPage(currentPage);
-      return existing.length;
-    }
-  }
   toast('🔄 Generating orange labels...','var(--orange)');
   let count = 0;
   const newOrangeLabels = [];

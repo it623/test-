@@ -1037,7 +1037,8 @@ function configureServer(){
 
 // Normalise DB snake_case → camelCase for labels loaded from server
 function normLabel(l){
-  if(l.batchNumber) return l; // already camelCase (local label)
+  // Never skip — always normalize to ensure is_orange, parent_label_id etc are correct
+  if(l.batchNumber && l.isOrange !== undefined) return l; // already fully normalized
   return {
     id:            l.id,
     batchNumber:   l.batch_number,
@@ -1151,7 +1152,8 @@ async function pullFromServer(){
 
         if(snap.tracking){
           // Labels — server is truth, but preserve local orange labels not yet synced
-          const normLabels = (snap.tracking.labels||[]).map(l=>l.batchNumber?l:normLabel(l));
+          // Always normalize ALL server labels — never skip (stale camelCase cache causes isOrange=false bug)
+          const normLabels = (snap.tracking.labels||[]).map(l=>normLabel(l));
           if(normLabels.length > 0){
             const serverLabelIds = new Set(normLabels.map(l=>l.id));
             // Keep local orange labels that aren't on server yet

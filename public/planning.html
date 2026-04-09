@@ -1089,7 +1089,7 @@ function autoGenBatchNumber(machineId) {
 function getMachineOrders(machineId) {
   return state.orders
     .filter(o=>o.machineId===machineId && !o.deleted)
-    .sort((a,b)=>new Date(a.startDate)-new Date(b.startDate));
+    .sort((a,b)=>String(a.batchNumber||a.poNumber||'').localeCompare(String(b.batchNumber||b.poNumber||'')));
 }
 
 // Recalculate all order dates on a machine after any change
@@ -1412,16 +1412,16 @@ function renderProduction() {
             <button class="btn btn-primary btn-sm" onclick="showAddOrderModal('${mc.id}')">+ Add Order</button>
           </div>
           ${orders.length === 0 ? '<div class="empty-state" style="padding:20px"><p>No orders planned</p></div>' : `
-          <div class="table-wrap">
+          <div class="table-wrap" style="max-height:65vh;overflow-y:auto;overflow-x:auto">
             <table>
               <thead>
-                <tr>
-                  <th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:30px">#</th>
-                  <th style="position:sticky;left:30px;z-index:3;background:#0f1628;min-width:150px">PO / Batch</th>
-                  <th style="position:sticky;left:180px;z-index:3;background:#0f1628;min-width:160px">Customer</th>
-                  <th style="position:sticky;left:340px;z-index:3;background:#0f1628;min-width:50px">Size</th>
-                  <th style="position:sticky;left:390px;z-index:3;background:#0f1628;min-width:70px">PC Code</th>
-                  <th style="position:sticky;left:460px;z-index:3;background:#0f1628;min-width:100px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Colour</th>
+                <tr style="position:sticky;top:0;z-index:5;background:#0f1628">
+                  <th style="position:sticky;left:0;top:0;z-index:6;background:#0f1628;min-width:30px">#</th>
+                  <th style="position:sticky;left:30px;top:0;z-index:6;background:#0f1628;min-width:150px">PO / Batch</th>
+                  <th style="position:sticky;left:180px;top:0;z-index:6;background:#0f1628;min-width:160px">Customer</th>
+                  <th style="position:sticky;left:340px;top:0;z-index:6;background:#0f1628;min-width:50px">Size</th>
+                  <th style="position:sticky;left:390px;top:0;z-index:6;background:#0f1628;min-width:70px">PC Code</th>
+                  <th style="position:sticky;left:460px;top:0;z-index:6;background:#0f1628;min-width:100px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Colour</th>
                   <th>PTD/UP</th><th>Print Matter Cap</th><th>Print Matter Body</th><th>Ink Cap</th><th>Ink Body</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
                   <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>AIM Out (L)</th><th>Status</th><th>DPR Status</th><th>Remarks</th><th>Actions</th>
                 </tr>
@@ -3264,7 +3264,7 @@ function renderDispatch() {
       <div class="dispatch-zone-panel ${z!=='all'?'dispatch-zone-panel-zone':''}" data-zone="${z}" ${z!=='all'?'style="display:none"':''}>
         <div class="card mb-4">
           <div class="card-title">${z==='all'?'All Orders':'Zone: '+z} <span class="text-dim text-sm">— ${zPlans.length} orders</span></div>
-          <div class="table-wrap">
+          <div class="table-wrap" style="max-height:65vh;overflow-y:auto;overflow-x:auto">
             <table>
               <thead><tr>
                 <th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:160px">Customer</th>
@@ -4272,7 +4272,7 @@ function renderDispatchCustomer() {
         </div>
         <div class="card">
           <div class="card-title">Order-wise Dispatch Plan — ${cust}</div>
-          <div class="table-wrap">
+          <div class="table-wrap" style="max-height:65vh;overflow-y:auto;overflow-x:auto">
             <table>
               <thead><tr>
                 <th>Batch No</th><th>PC Code</th><th>Size</th><th>Colour</th><th>PTD/UP</th>
@@ -4884,7 +4884,7 @@ function renderMachines() {
     <div class="card">
       <div class="card-title">Production Machines</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Machine</th><th>Default Size</th><th>Capacity (L/day)</th><th>A-Grade %</th><th>Actions</th></tr></thead>
+        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f8f9fb)"><th>Machine</th><th>Default Size</th><th>Capacity (L/day)</th><th>A-Grade %</th><th>Actions</th></tr></thead>
         <tbody>${state.machineMaster.map(mc=>`<tr>
           <td class="text-mono text-accent fw-bold">${mc.id}</td>
           <td class="text-mono">${mc.size}</td>
@@ -4903,7 +4903,7 @@ function renderMachines() {
     <div class="card">
       <div class="card-title">Printing Machines</div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Machine</th><th>Size</th><th>Cap (L/day)</th><th>Preference</th><th>Actions</th></tr></thead>
+        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f8f9fb)"><th>Machine</th><th>Size</th><th>Cap (L/day)</th><th>Preference</th><th>Actions</th></tr></thead>
         <tbody>${state.printMachineMaster.map(pm=>`<tr>
           <td class="text-mono text-accent fw-bold">${pm.id}</td>
           <td class="text-mono">${pm.size}</td>
@@ -5217,7 +5217,7 @@ async function renderReconciliation() {
       <div style="font-size:12px;color:var(--text3);margin-bottom:16px">These machines are running without planned orders. Select TEMP batches and map them to a real order below.</div>
       <div style="overflow-x:auto">
         <table class="summary-table">
-          <thead><tr><th>Select</th><th>TEMP Batch ID</th><th>Machine</th><th>Size</th><th>Date</th><th>Cap (L)</th><th>Labels</th><th>Days Active</th></tr></thead>
+          <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f8f9fb)"><th>Select</th><th>TEMP Batch ID</th><th>Machine</th><th>Size</th><th>Date</th><th>Cap (L)</th><th>Labels</th><th>Days Active</th></tr></thead>
           <tbody>
             ${tempBatches.map(tb=>`<tr>
               <td><input type="checkbox" id="chk-${tb.id}" value="${tb.id}" onchange="toggleTempSelection('${tb.id}')" style="width:16px;height:16px;cursor:pointer"></td>
@@ -5303,7 +5303,7 @@ async function renderReconciliation() {
       <div style="font-size:12px;color:var(--text3);margin-bottom:16px">These orders were planned without a customer. Once customer order is received, click "Assign Customer" to propose reconciliation.</div>
       <div style="overflow-x:auto">
         <table class="summary-table">
-          <thead><tr><th>Batch</th><th>Size</th><th>Colour</th><th>PC Code</th><th>Qty (L)</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead>
+          <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f8f9fb)"><th>Batch</th><th>Size</th><th>Colour</th><th>PC Code</th><th>Qty (L)</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>
             ${woOrders.map(o=>`<tr style="border-left:3px solid rgba(255,171,0,0.5)">
               <td class="text-mono text-accent">${o.batchNumber||o.id}</td>
@@ -5350,7 +5350,7 @@ async function renderReconciliation() {
       <div class="card-title">📋 Reconciliation History</div>
       <div style="overflow-x:auto">
         <table class="summary-table">
-          <thead><tr><th>Request ID</th><th>Status</th><th>Proposed By</th><th>Approved By</th><th>Order</th><th>Boxes</th><th>Date</th></tr></thead>
+          <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f8f9fb)"><th>Request ID</th><th>Status</th><th>Proposed By</th><th>Approved By</th><th>Order</th><th>Boxes</th><th>Date</th></tr></thead>
           <tbody>
             ${history.map(r=>`<tr>
               <td class="text-mono text-sm">${r.id}</td>
@@ -5543,8 +5543,8 @@ function renderSearch() {
     <div class="card">
       <div class="card-title">${results.length} result${results.length!==1?'s':''} for "${q}"</div>
       ${results.length===0?'<div class="empty-state"><p>No matches found</p></div>':`
-      <div class="table-wrap"><table class="summary-table">
-        <thead><tr><th>Type</th><th>Batch No</th><th>Customer</th><th>PC Code</th><th>Size</th><th>Qty (L)</th><th>Status</th><th>Machine</th><th>Zone</th></tr></thead>
+      <div class="table-wrap" style="max-height:65vh;overflow-y:auto;overflow-x:auto"><table class="summary-table">
+        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f8f9fb)"><th>Type</th><th>Batch No</th><th>Customer</th><th>PC Code</th><th>Size</th><th>Qty (L)</th><th>Status</th><th>Machine</th><th>Zone</th></tr></thead>
         <tbody>
           ${results.map(r=>`<tr>
             <td><span class="badge ${r._type==='Print Order'?'badge-ptd':'badge-running'}" style="font-size:10px">${r._type}</span></td>

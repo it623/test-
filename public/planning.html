@@ -2642,16 +2642,20 @@ function renderPrinting() {
     html += `<div class="card mb-4">
       <div class="card-title text-accent">⚠️ Unassigned Print Orders (${unassigned.length})</div>
       <div class="table-wrap"><table>
-        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#1a2035)"><th style="background:var(--surface2,#1a2035)">Batch</th><th style="background:var(--surface2,#1a2035)">Customer</th><th style="background:var(--surface2,#1a2035)">Colour</th><th style="background:var(--surface2,#1a2035)">Size</th><th style="background:var(--surface2,#1a2035)">Qty to Print (L)</th><th style="background:var(--surface2,#1a2035)">Status</th><th style="background:var(--surface2,#1a2035)">Actions</th></tr></thead>
-        <tbody>${unassigned.map(p=>`<tr>
+        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#1a2035)"><th style="background:var(--surface2,#1a2035)">Batch</th><th style="background:var(--surface2,#1a2035)">Customer</th><th style="background:var(--surface2,#1a2035)">Colour</th><th style="background:var(--surface2,#1a2035)">Size</th><th style="background:var(--surface2,#1a2035)">Qty to Print (L)</th><th style="background:var(--surface2,#1a2035)">AIM Out (L)</th><th style="background:var(--surface2,#1a2035)">Status</th><th style="background:var(--surface2,#1a2035)">Actions</th></tr></thead>
+        <tbody>${unassigned.map(p=>{
+          const _ag = window._liveAGrade && window._liveAGrade[p.batchNumber];
+          const _aimOut = _ag?.aim?.outQty != null ? fmt(_ag.aim.outQty) : (p.aimOut ? fmt(p.aimOut) : '—');
+          return `<tr>
           <td class="td-mono fw-bold" style="color:var(--accent3)">${p.batchNumber||'-'}</td>
           <td>${p.customer||'-'}</td>
           <td class="text-sm">${p.colour||'-'}</td>
           <td class="td-mono">${p.size||'-'}</td>
           <td class="td-mono">${fmt(p.qtyToPrint)}</td>
+          <td class="td-mono" style="color:var(--accent2)">${_aimOut}</td>
           <td><span class="badge badge-pending">Unassigned</span></td>
           <td><button class="btn btn-primary btn-sm" onclick="showAddPrintModal(null,'${p.id}')">Assign Machine</button></td>
-        </tr>`).join('')}</tbody>
+        </tr>`;}).join('')}</tbody>
       </table></div>
     </div>`;
   }

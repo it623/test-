@@ -2478,14 +2478,10 @@ function renderLabels(){
       .then(snap=>{
         if(snap.ok && snap.tracking && snap.tracking.labels && snap.tracking.labels.length>0){
           const fresh=(snap.tracking.labels).map(l=>l.batchNumber?l:normLabel(l));
-          // Only update if server has more labels than local
-          if(fresh.length >= state.labels.length){
+          // Always use server labels — server is single source of truth
+          // No localStorage cache — prevents data loss after browser history clear
+          if(fresh.length > 0){
             state.labels=fresh;
-            try{localStorage.setItem('sunloc_tracking',JSON.stringify({
-              labels:state.labels,scans:state.scans,
-              stageClosure:state.stageClosure,wastage:state.wastage,
-              dispatchRecs:state.dispatchRecs,alerts:state.alerts
-            }));}catch(e){}
             if(currentPage==='labels') renderLabels();
           }
         }

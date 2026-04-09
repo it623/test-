@@ -1101,6 +1101,16 @@ function normWastage(w){
 async function pullFromServer(){
   if(!serverUrl) return;
 
+  // Fix any OL- labels in DB that have is_orange=false (one-time auto-repair)
+  if(serverUrl && !window._orangeFixDone){
+    window._orangeFixDone = true;
+    try{
+      await fetch(serverUrl+'/api/admin/fix-orange-labels',{
+        method:'POST', signal:AbortSignal.timeout(3000)
+      });
+    }catch(e){}
+  }
+
   // Before pulling — push any local labels not yet on server
   // This auto-saves labels generated offline or before server was available
   if(state.labels.length > 0){

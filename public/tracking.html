@@ -1149,8 +1149,8 @@ async function pullFromServer(){
             // Keep local orange labels that aren't on server yet
             const localOrangeOnly = state.labels.filter(l=>l.isOrange&&!serverLabelIds.has(l.id));
             state.labels = [...normLabels, ...localOrangeOnly];
-            // Re-render labels page after server load
-            if(currentPage==='labels') setTimeout(function(){ if(document.getElementById('page-labels')) renderLabels(); }, 100);
+            // Re-render labels page so orange labels show immediately after server load
+            if(currentPage==='labels') setTimeout(function(){ var el=document.getElementById('page-labels'); if(el) renderLabels(); }, 100);
             // Re-push any local-only orange labels to server
             if(localOrangeOnly.length > 0){
               const toSync = localOrangeOnly.map(l=>({...l,isOrange:1,isPartial:0,printed:0,voided:0,isExcess:0}));
@@ -2471,9 +2471,7 @@ function renderLabels(){
 
   const allBatches=state.batches.filter(b=>b.status!=='closed').sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
 
-  // Always fetch fresh label data from server when this page opens
-  // This ensures Generated/Printed/Remaining are always correct on any device
-  // Labels load via pullFromServer on page init
+  // Labels loaded by pullFromServer on init — no extra fetch needed
 
   // Save search value before re-render
   const _savedSearch = document.getElementById('lf-batch')?.value || '';

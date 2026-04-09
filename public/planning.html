@@ -2599,17 +2599,34 @@ function renderPrinting() {
       <div class="card mb-4">
         <div class="card-title">
           <span>${pm.id}</span> — Size ${pm.size} — ${pm.cap}L/day
-          <span class="text-dim text-sm" style="margin-left:8px;font-weight:400">${pm.pref}</span>
+          ${pm.pref ? `<span class="text-dim text-sm" style="margin-left:8px;font-weight:400">${pm.pref}</span>` : ''}
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="showAddPrintModal('${pm.id}')">+ Add</button>
         </div>
         ${orders.length===0?'<div class="empty-state" style="padding:16px"><p>No orders assigned</p></div>':`
-        <div class="table-wrap">
+        <div class="table-wrap" style="max-height:60vh;overflow-y:auto;overflow-x:auto">
           <table>
-            <thead><tr>
-              <th>Customer</th><th>Batch No</th><th>PC Code</th><th>Size</th><th>Colour</th>
-              <th>Print Matter</th><th>Linear/Circ</th><th>Order Qty (L)</th><th>Qty to Print (L)</th>
-              <th>Daily Cap (L)</th><th>Printed to Date</th><th>Salvage (kg)</th><th>Salvage %</th><th>Balance</th>
-              <th>Start Date</th><th>End Date</th><th>Status</th><th>Zone</th><th>Remarks</th><th>Actions</th>
+            <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#1a2035)">
+              <th style="position:sticky;left:0;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:140px">Customer</th>
+              <th style="position:sticky;left:140px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:100px">Batch No</th>
+              <th style="position:sticky;left:240px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:80px">PC Code</th>
+              <th style="position:sticky;left:320px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:55px">Size</th>
+              <th style="position:sticky;left:375px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:120px;box-shadow:3px 0 8px rgba(0,0,0,0.3)">Colour</th>
+              <th style="background:var(--surface2,#1a2035)">Print Matter</th>
+              <th style="background:var(--surface2,#1a2035)">Linear/Circ</th>
+              <th style="background:var(--surface2,#1a2035)">Order Qty (L)</th>
+              <th style="background:var(--surface2,#1a2035)">Qty to Print (L)</th>
+              <th style="background:var(--surface2,#1a2035)">Daily Cap (L)</th>
+              <th style="background:var(--surface2,#1a2035)">Printed to Date</th>
+              <th style="background:var(--surface2,#1a2035)">AIM Out (L)</th>
+              <th style="background:var(--surface2,#1a2035)">Salvage (kg)</th>
+              <th style="background:var(--surface2,#1a2035)">Salvage %</th>
+              <th style="background:var(--surface2,#1a2035)">Balance</th>
+              <th style="background:var(--surface2,#1a2035)">Start Date</th>
+              <th style="background:var(--surface2,#1a2035)">End Date</th>
+              <th style="background:var(--surface2,#1a2035)">Status</th>
+              <th style="background:var(--surface2,#1a2035)">Zone</th>
+              <th style="background:var(--surface2,#1a2035)">Remarks</th>
+              <th style="background:var(--surface2,#1a2035)">Actions</th>
             </tr></thead>
             <tbody>
               ${orders.map(p=>renderPrintRow(p,pm)).join('')}
@@ -2647,12 +2664,15 @@ function renderPrintRow(p, pm) {
   const statusBadge = p.status==='completed'?'<span class="badge badge-completed">Completed</span>':
     p.status==='running'?'<span class="badge badge-running">Running</span>':
     '<span class="badge badge-pending">Pending</span>';
+  // AIM Out from tracking live data
+  const _aimLive = window._liveAGrade && window._liveAGrade[p.batchNumber];
+  const _aimOut = _aimLive?.aim?.outQty != null ? fmt(_aimLive.aim.outQty) : (p.aimOut ? fmt(p.aimOut) : '—');
   return `<tr>
-    <td style="font-weight:500">${p.customer||'-'}</td>
-    <td class="text-mono">${p.batchNumber||'-'}</td>
-    <td class="text-mono text-accent">${p.pcCode||'-'}</td>
-    <td class="text-mono">${p.size||'-'}</td>
-    <td style="font-size:12px">${p.colour||'-'}</td>
+    <td style="position:sticky;left:0;z-index:2;background:var(--surface,#0d1527);min-width:140px;font-weight:500">${p.customer||'-'}</td>
+    <td class="text-mono" style="position:sticky;left:140px;z-index:2;background:var(--surface,#0d1527);min-width:100px;color:var(--accent3)">${p.batchNumber||'-'}</td>
+    <td class="text-mono text-accent" style="position:sticky;left:240px;z-index:2;background:var(--surface,#0d1527);min-width:80px">${p.pcCode||'-'}</td>
+    <td class="text-mono" style="position:sticky;left:320px;z-index:2;background:var(--surface,#0d1527);min-width:55px">${p.size||'-'}</td>
+    <td style="position:sticky;left:375px;z-index:2;background:var(--surface,#0d1527);min-width:120px;font-size:12px;box-shadow:3px 0 8px rgba(0,0,0,0.3)">${p.colour||'-'}</td>
     <td style="font-size:12px">${p.printMatter||'-'}</td>
     <td><select class="form-control" style="width:90px;padding:3px 6px;font-size:12px" onchange="updatePrintField('${p.id}','printType',this.value)">
       <option value="C" ${p.printType==='C'?'selected':''}>Circular</option>
@@ -2665,6 +2685,7 @@ function renderPrintRow(p, pm) {
       <span style="font-family:var(--mono);font-size:13px;color:var(--text)">${fmt(p.printedToDate||0)}</span>
       <span style="font-size:9px;padding:1px 4px;border-radius:2px;margin-left:3px;background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.2)">Auto</span>
     </td>
+    <td class="text-mono" style="color:var(--accent2)">${_aimOut}</td>
     <td class="text-mono ${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);return kg>0?'text-accent':''})()}">${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);return kg>0?fmt(kg,2)+' kg':'—'})()}</td>
     <td class="text-mono ${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);const out=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.totalOutput||0),0);const pct=out>0?(kg/out*100):0;return pct>2?'text-red':'';})()}">${(()=>{const kg=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.salvage||0),0);const out=(state.dailyPrinting||[]).filter(l=>l.printOrderId===p.id).reduce((s,l)=>s+(l.totalOutput||0),0);const pct=out>0?(kg/out*100):0;return out>0?fmt(pct,2)+'%':'—'})()}</td>
     <td class="text-mono ${balance<0?'text-green':balance>0?'text-accent':''}">${fmt(balance)}</td>

@@ -328,11 +328,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <div class="collapsible">
     <div class="col-hdr" onclick="toggleCol('resortBlock')">
       <span class="col-title" style="color:var(--amber)">↩ Re-Sort Entry — Machine-wise Reasons</span>
-      <button class="btn-add" onclick="event.stopPropagation();addResort()">+ Add Re-Sort Entry</button>
     </div>
     <div class="col-body" id="resortBlock">
       <p style="color:var(--t3);font-size:11px;margin-bottom:10px">Log machine-wise re-sort quantity and root cause. Target is always ZERO. Each entry links to a machine, shift, and defect reason.</p>
       <div id="resortList"><p style="color:var(--t3);font-size:12px">No re-sort entries. Click "+ Add Re-Sort Entry" to log machine-wise re-sort reasons.</p></div>
+      <div style="display:flex;justify-content:flex-end;margin-top:10px">
+        <button class="btn-add" onclick="addResort()">+ Add Re-Sort Entry</button>
+      </div>
     </div>
   </div>
 </div>
@@ -2352,6 +2354,7 @@ function renderResort(){
       <span class="pill a">${r.shift}</span>
       <span style="font-size:11px;color:var(--t2)">${esc(r.reason)} — <b style="color:var(--red)">${r.qty} units</b></span>
       <span style="font-size:11px;color:var(--t3)">${esc(r.note||'')}</span>
+      <button class="btn-sm" style="background:var(--s4);color:var(--t2);border:1px solid var(--b2)" onclick="editResort(${i})">✏️</button>
       <button class="btn-sm danger" onclick="deleteResort(${i})">✕</button>
     </div>`;
   });
@@ -2375,6 +2378,34 @@ function addResort(){
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
       closeModal();renderResort();renderDayKpis();renderShifts();markUnsaved();
       // Push to server immediately so re-sort entry is permanent
+      pushToServer(fl,d,day);
+    }},
+    {label:'Cancel',fn:closeModal}
+  ]);
+}
+function editResort(i){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  const r=day.resort[i];
+  if(!r) return;
+  const mcOpts=getActiveMachines(fl).map(m=>`<option value="${m.id}"${m.id===r.mc?' selected':''}>${m.id} (${m.sz})</option>`).join('');
+  const rsOpts=RESORT_REASONS.map(rs=>`<option${rs===r.reason?' selected':''}>${rs}</option>`).join('');
+  openModal('Edit Re-Sort Entry',`
+    <div class="modal-fgrp"><label>Machine</label><select id="rs-mc" style="width:100%">${mcOpts}</select></div>
+    <div class="modal-fgrp"><label>Shift</label><select id="rs-shift" style="width:100%">
+      <option${r.shift==='A'?' selected':''}>A</option>
+      <option${r.shift==='B'?' selected':''}>B</option>
+      <option${r.shift==='C'?' selected':''}>C</option>
+    </select></div>
+    <div class="modal-fgrp"><label>Root Cause</label><select id="rs-reason" style="width:100%">${rsOpts}</select></div>
+    <div class="modal-fgrp"><label>Quantity (units)</label><input type="number" id="rs-qty" min="1" value="${r.qty}" style="width:100%"></div>
+    <div class="modal-fgrp"><label>Note (optional)</label><input type="text" id="rs-note" value="${esc(r.note||'')}" style="width:100%"></div>
+  `,[
+    {label:'Save',cls:'primary',fn:()=>{
+      const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+      if(!v('rs-qty')){toast('Enter quantity','var(--red)');return;}
+      day.resort[i]={mc:v('rs-mc'),shift:v('rs-shift'),reason:v('rs-reason'),qty:parseFloat(v('rs-qty')),note:v('rs-note'),ts:day.resort[i].ts,editedAt:new Date().toISOString()};
+      localStorage.setItem(skey(fl,d),JSON.stringify(day));
+      closeModal();renderResort();renderDayKpis();renderShifts();markUnsaved();
       pushToServer(fl,d,day);
     }},
     {label:'Cancel',fn:closeModal}

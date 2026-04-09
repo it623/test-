@@ -1920,28 +1920,30 @@ function generateZPL(label, batch){
     const containerNum = rawNum.startsWith('OL-') ? rawNum.replace('OL-','') : String(Math.abs(parseFloat(rawNum)||0));
     const qrContent = label.qrData || (batchNo+'-OL-'+containerNum);
     // 4" x 1.5" label = PW=812, LL=304
+    // Orange label 4" x 1.5" (PW=812, LL=304)
+    // LH=30,20 adds left+top margin so content is not cut at printer edges
     return `^XA
 ^CI28
 ^PW812
 ^LL304
 ^MMT
 ^PON
-^LH0,0
-^A0N,48,48
-^FO10,10^FDBatch NO.      :  ${batchNo}^FS
-^A0N,48,48
-^FO10,62^FDContainer NO. :  ${containerNum}^FS
-^A0N,48,48
-^FO10,114^FDPrinted         :^FS
-^A0N,48,48
-^FO10,166^FD${pm}^FS
-^A0N,56,56
-^FO10,258^FDQ^FS
+^LH30,20
 ^A0N,44,44
-^FO65,265^FDRELEASED^FS
+^FO10,8^FDBatch NO.      :  ${batchNo}^FS
+^A0N,44,44
+^FO10,56^FDContainer NO. :  ${containerNum}^FS
+^A0N,44,44
+^FO10,104^FDPrinted         :^FS
+^A0N,44,44
+^FO10,152^FD${pm}^FS
+^A0N,52,52
+^FO10,228^FDQ^FS
 ^A0N,40,40
-^FO500,272^FB280,1,0,R^FDSIGNATURE^FS
-^FO582,10^BQN,2,7^FDLA,${qrContent}^FS
+^FO60,236^FDRELEASED^FS
+^A0N,36,36
+^FO440,240^FB280,1,0,R^FDSIGNATURE^FS
+^FO548,4^BQN,2,6^FDLA,${qrContent}^FS
 ^XZ`;
   }
 

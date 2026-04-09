@@ -1485,20 +1485,40 @@ async function recordScan(labelId, dept, type, operator, parsed){
       return {ok:false, msg:`⚠️ Box not scanned IN at ${dept.toUpperCase()} yet — scan IN first`};
     if(deptOut >= deptIn)
       return {ok:false, msg:`✋ Box already scanned OUT at ${dept.toUpperCase()}`};
-    // ORANGE LABEL CHECK: block PI scan-out if orange label not generated
-    if(dept === 'pi'){
-      const hasOrangeLabel = state.labels.some(l=>
+    // ORANGE LABEL CHECK: block PI scan-out for PTD batches if orange label not generated OR not printed
+    if(dept === 'pi' && batch?.isPrinted){
+      const orangeLabel = state.labels.find(l=>
         l.isOrange && !l.voided &&
         (l.parentLabelId === labelId ||
          (l.batchNumber === label.batchNumber &&
           (l.labelNumber === ('OL-'+Math.abs(label.labelNumber||0)) ||
            l.labelNumber === ('OL-'+label.labelNumber))))
       );
-      if(!hasOrangeLabel){
-        // Auto-generate now and warn
+      if(!orangeLabel){
+        // Auto-generate now and block
         if(batch) autoGenerateOrangeLabel(label, batch);
-        return {ok:false, msg:`🟠 ORANGE LABEL MISSING — Orange label has been auto-generated. Please print the orange label first, then scan OUT.`};
+        return {ok:false, msg:`🟠 Orange label not generated — auto-generated now. Please PRINT the orange label first, then scan OUT.`};
       }
+      if(!orangeLabel.printed){
+        return {ok:false, msg:`🟠 Orange label generated but NOT printed — please PRINT the orange label before scanning OUT.`};
+      }
+    }
+  }
+
+  // ORANGE LABEL CHECK: Packing + Dispatch — PTD batches must have orange label generated AND printed
+  if((dept === 'packing' || dept === 'dispatch') && batch?.isPrinted){
+    const orangeLabel = state.labels.find(l=>
+      l.isOrange && !l.voided &&
+      (l.parentLabelId === labelId ||
+       (l.batchNumber === label.batchNumber &&
+        (l.labelNumber === ('OL-'+Math.abs(label.labelNumber||0)) ||
+         l.labelNumber === ('OL-'+label.labelNumber))))
+    );
+    if(!orangeLabel){
+      return {ok:false, msg:`🟠 Cannot scan ${dept.toUpperCase()} — Orange label not generated. Box must go through PI first.`};
+    }
+    if(!orangeLabel.printed){
+      return {ok:false, msg:`🟠 Cannot scan ${dept.toUpperCase()} — Orange label not printed. Please print the orange label at PI first.`};
     }
   }
 

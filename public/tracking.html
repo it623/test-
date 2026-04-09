@@ -2519,6 +2519,7 @@ function renderLabels(){
           <th onclick="sortLabelTable('customer')" style="cursor:pointer;position:sticky;left:280px;z-index:3;background:#f8f9fb;min-width:160px">Customer ↕</th>
           <th style="position:sticky;left:440px;z-index:3;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">Size</th>
           <th>Gross Qty</th>
+          <th>Actual Prod</th>
           <th>Max Labels</th>
           <th>Generated</th>
           <th>Printed</th>
@@ -2532,6 +2533,7 @@ function renderLabels(){
           <td style="position:sticky;left:160px;z-index:2;background:#f8f9fb;min-width:120px"><select id="lf-colour" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.colour).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}</select></td>
           <td style="position:sticky;left:280px;z-index:2;background:#f8f9fb;min-width:160px"><input type="text" id="lf-customer" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Customer..." oninput="filterLabelTable()"></td>
           <td style="position:sticky;left:440px;z-index:2;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)"><select id="lf-size" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td>
+          <td></td>
           <td></td>
           <td></td>
           <td><select id="lf-status" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option><option value="no-labels">None</option><option value="partial">Partial</option><option value="complete">Complete</option></select></td>
@@ -2662,6 +2664,7 @@ function buildLabelRows(batches){
       <td style="position:sticky;left:280px;z-index:2;background:#fff;min-width:160px">${b.customer||'-'}</td>
       <td class="td-mono" style="position:sticky;left:440px;z-index:2;background:#fff;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">${b.size} (${ps}L/box)</td>
       <td class="td-mono">${fmt(b.grossQty||b.qty)}L</td>
+      <td class="td-mono" style="color:${(b.actualProd||b.actualQty)>0?'var(--accent2)':'var(--text3)'}">${(b.actualProd||b.actualQty)>0?fmt(b.actualProd||b.actualQty)+'L':'—'}</td>
       <td class="td-mono">${maxLabels}</td>
       <td><div class="mono fw-bold">${generated}</div><div class="progress mt-4" style="width:80px"><div class="progress-bar ${pct>=100?'green':'blue'}" style="width:${Math.min(100,pct)}%"></div></div></td>
       <td class="td-mono">${printed}</td>
@@ -2675,7 +2678,7 @@ function buildLabelRows(batches){
         </div>
       </td>
     </tr>`;
-  }).join('')||'<tr><td colspan="12" class="text-center text-muted">No active batches from Planning App</td></tr>';
+  }).join('')||'<tr><td colspan="13" class="text-center text-muted">No active batches from Planning App</td></tr>';
 }
 
 let _labelSortCol='', _labelSortDir=1;

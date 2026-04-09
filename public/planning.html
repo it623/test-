@@ -977,7 +977,7 @@ const sunlocChannel = (() => {
 // =============================
 // HELPERS
 // =============================
-function fmt(n, dec=2) { return n==null?'-':(+n).toFixed(dec); }
+function fmt(n, dec=2) { if(n==null||n===''||!isFinite(+n)) return '-'; return (+n).toFixed(dec); }
 function fmtDate(d) {
   if (!d) return '-';
   const dt = d instanceof Date ? d : new Date(d);
@@ -1459,7 +1459,8 @@ function renderOrderRow(ord, idx, mc) {
     <option value="closed" ${ord.status==='closed'?'selected':''}>Closed</option>
   </select>`;
   const ptdBadge = ord.isPrinted ? '<span class="badge badge-ptd">PTD</span>' : '<span class="badge badge-up">UP</span>';
-  const grossQty = ord.grossQty ? fmt(ord.grossQty) : '-';
+  const grossQtyVal = ord.grossQty && isFinite(ord.grossQty) ? ord.grossQty : null;
+  const grossQty = grossQtyVal ? fmt(grossQtyVal) : '-';
   const canClose = !isClosed && ord.actualProd >= (ord.qty * 0.99);
   const woBadge = isWO ? '<span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span>' :
                   isWOReconciled ? '<span class="badge badge-completed" style="font-size:10px">✅ W/O Assigned</span>' : '';
@@ -1486,8 +1487,8 @@ function renderOrderRow(ord, idx, mc) {
     <td style="font-size:11px;color:var(--accent3)">${ord.inkBody||'-'}</td>
     <td class="text-mono fw-bold">${fmt(ord.qty)}</td>
     <td class="text-mono text-blue">${grossQty}</td>
-    <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.startDate)}</td>
-    <td class="text-mono" style="white-space:nowrap">${fmtDate(ord.endDate)}</td>
+    <td class="text-mono" style="white-space:nowrap">${ord.startDate && !isNaN(new Date(ord.startDate)) ? fmtDate(ord.startDate) : '—'}</td>
+    <td class="text-mono" style="white-space:nowrap">${ord.endDate && !isNaN(new Date(ord.endDate)) ? fmtDate(ord.endDate) : ord.endDate ? '<span style="color:var(--accent4);font-size:11px">—</span>' : '—'}</td>
     <td class="text-sm">${ord.packing||'-'}</td>
     <td class="text-sm">${isWO?'<span style="color:var(--accent3)">—</span>':ord.zone||'-'}</td>
     <td>

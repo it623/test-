@@ -619,37 +619,36 @@ function sanitizeServerUrl(url) {
   }
 }
 
-// ── OFFLINE RETRY QUEUE (defined before SYNC so SYNC.push can reference it) ──
-const PLAN_QUEUE_KEY = 'sunloc_plan_push_queue';
+// ── IN-MEMORY RETRY QUEUE (no localStorage — server is the only store) ──
+let _planRetryState = null;   // latest state pending push
+let _planRetrying   = false;  // retry loop running
+
 function planQueuePush(stateObj) {
-  try {
-    const q = JSON.parse(localStorage.getItem(PLAN_QUEUE_KEY)||'[]');
-    q.splice(0, q.length, { ts: Date.now(), state: stateObj });
-    localStorage.setItem(PLAN_QUEUE_KEY, JSON.stringify(q));
-  } catch(e) {}
+  // Keep only the latest state — older versions are obsolete
+  _planRetryState = stateObj;
 }
+
 async function planQueueFlush() {
+  if (!_planRetryState || _planRetrying) return;
+  const url = localStorage.getItem('sunloc_server_url') || '';
+  if (!url) return;
+  _planRetrying = true;
   try {
-    const raw = localStorage.getItem(PLAN_QUEUE_KEY);
-    if (!raw) return;
-    const q = JSON.parse(raw);
-    if (!q.length) return;
-    const url = localStorage.getItem('sunloc_server_url')||'';
-    if (!url) return;
-    const r = await fetch(url+'/api/health',{signal:AbortSignal.timeout(3000)});
-    if (!r.ok) return;
-    const latest = q[q.length-1];
-    const resp = await fetch(url+'/api/planning/state',{
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({state: latest.state}),
+    const r = await fetch(url + '/api/health', { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) { _planRetrying = false; return; }
+    const resp = await fetch(url + '/api/planning/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state: _planRetryState }),
       signal: AbortSignal.timeout(8000)
     });
     if (resp.ok) {
-      localStorage.removeItem(PLAN_QUEUE_KEY);
-      try{ sunlocChannel.postMessage({type:'PLANNING_SAVED',ts:Date.now()}); }catch(e){}
-      console.log('[Plan] Offline queue flushed');
+      _planRetryState = null; // cleared — server has the data
+      try { sunlocChannel.postMessage({ type: 'PLANNING_SAVED', ts: Date.now() }); } catch(e) {}
+      console.log('[Plan] Retry queue flushed to server');
     }
   } catch(e) {}
+  _planRetrying = false;
 }
 
 const SYNC = (() => {
@@ -686,16 +685,27 @@ const SYNC = (() => {
     _lastCheck = 0;
     if (!(await online())) return;
     try {
-      await fetch(_url + '/api/planning/state', {
+      const resp = await fetch(_url + '/api/planning/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ state: stateObj }),
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(8000)
       });
-      _online = true; updateBadge();
-      // Push succeeded — clear the queue
-      localStorage.removeItem(PLAN_QUEUE_KEY);
-    } catch { _online = false; updateBadge(); }
+      if (resp.ok) {
+        _online = true; updateBadge();
+        _planRetryState = null; // server confirmed — clear retry
+        console.log('[SYNC] Pushed to server successfully');
+      } else {
+        _online = false; updateBadge();
+        // Keep in retry queue — will flush on next planQueueFlush interval
+        planQueuePush(stateObj);
+        console.warn('[SYNC] Server returned error — queued for retry');
+      }
+    } catch {
+      _online = false; updateBadge();
+      planQueuePush(stateObj); // network failure — queue for retry
+      console.warn('[SYNC] Network error — queued for retry');
+    }
   }
 
   async function pull() {
@@ -759,11 +769,8 @@ const SYNC = (() => {
     state.zoneMap = ZONE_MAP_RAW;
     _serverDataLoaded = true;
 
-    try {
-      const s = {...serverState};
-      delete s.pcCodes; delete s.zoneMap;
-      localStorage.setItem('sunloc_state', JSON.stringify(s));
-    } catch {}
+    // No localStorage caching of operational data — server is single source of truth
+    // Only cache server URL (already done in configure())
 
     await loadTrackingStatus();
       await loadDprStatus();
@@ -899,13 +906,13 @@ const SYNC = (() => {
 
 // Load from localStorage (with server enrichment on init)
 function loadState() {
-  // Load ONLY master data from localStorage (machines, packSizes, customers)
-  // NEVER load orders from localStorage — orders must always come from server
+  // Load ONLY config (server URL, user prefs) from localStorage
+  // ALL operational data (orders, printOrders, dailyPrinting) comes from server ONLY
   try {
     const saved = localStorage.getItem('sunloc_state');
     if (saved) {
       const parsed = JSON.parse(saved);
-      // Only restore master/config data — NOT orders (they must come from server)
+      // Only restore non-operational config data
       if (parsed.machineMaster) state.machineMaster = parsed.machineMaster;
       if (parsed.printMachineMaster) state.printMachineMaster = parsed.printMachineMaster;
       if (parsed.packSizes) state.packSizes = parsed.packSizes;
@@ -914,8 +921,11 @@ function loadState() {
       if (parsed.zoneCapacities) state.zoneCapacities = parsed.zoneCapacities;
       state.pcCodes = PC_CODES_RAW;
       state.zoneMap = ZONE_MAP_RAW;
-      // Orders, printOrders, dispatchPlans come from server ONLY
+      // NEVER load operational data from localStorage — always from server
       state.orders = [];
+      state.printOrders = [];
+      state.dailyPrinting = [];
+      state.dispatchPlans = [];
       state.printOrders = [];
       state.dispatchPlans = [];
     }
@@ -945,35 +955,19 @@ function openTrackingApp() {
 
 function saveState() {
   try {
+    if (!_serverDataLoaded) {
+      console.log('[saveState] blocked — server not loaded yet');
+      return;
+    }
     const toSave = {...state};
     delete toSave.pcCodes;
     delete toSave.zoneMap;
-    localStorage.setItem('sunloc_state', JSON.stringify(toSave));
-
-    // CRITICAL GUARD: never push to server until confirmed server data is loaded.
-    // Prevents empty/stale state from overwriting DB after history clear or fresh login.
-    if (!_serverDataLoaded) {
-      console.log('[saveState] push blocked — waiting for server data to load first');
-      return;
-    }
-
-    // Stale-push guard: if not synced from server in >10 min, pull first then push
-    const lastSync = state._serverSavedAt || 0;
-    const staleThreshold = 2 * 60 * 1000; // 2 min — keep data fresh across all devices
-    if (Date.now() - lastSync > staleThreshold) {
-      SYNC.loadFromServer().then(() => {
-        const fresh = {...state};
-        delete fresh.pcCodes;
-        delete fresh.zoneMap;
-        SYNC.push(fresh);
-      });
-    } else {
-      SYNC.push(toSave);
-    }
-    auditLog('SAVE', `Saved planning state — page: ${state.currentPage}`);
-    // Notify other tabs (tracking, DPR) that planning data changed
-    try{ sunlocChannel.postMessage({type:'PLANNING_SAVED', ts:Date.now()}); }catch(e){}
-  } catch(e) {}
+    // Push directly to server — server is single source of truth
+    // If offline, planQueuePush holds in memory and retries every 5s
+    SYNC.push(toSave);
+    auditLog('SAVE', 'Saved to server — page: ' + state.currentPage);
+    try { sunlocChannel.postMessage({ type: 'PLANNING_SAVED', ts: Date.now() }); } catch(e) {}
+  } catch(e) { console.error('[saveState] error:', e); }
 }
 
 // ── BROADCAST CHANNEL — notify all tabs on save ─────────────────
@@ -5977,9 +5971,14 @@ window.addEventListener('beforeunload', () => {
   try {
     const toSave = {...state};
     delete toSave.pcCodes; delete toSave.zoneMap;
-    planQueuePush(toSave);
+    // Send beacon to server — most reliable last-chance save before page close
     const blob = new Blob([JSON.stringify({state:toSave})], {type:'application/json'});
     navigator.sendBeacon && navigator.sendBeacon(url+'/api/planning/state', blob);
+    // Also try if retry queue has unsent data
+    if (_planRetryState) {
+      const retryBlob = new Blob([JSON.stringify({state:_planRetryState})], {type:'application/json'});
+      navigator.sendBeacon && navigator.sendBeacon(url+'/api/planning/state', retryBlob);
+    }
   } catch(e) {}
 });
 

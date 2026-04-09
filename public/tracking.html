@@ -1149,6 +1149,8 @@ async function pullFromServer(){
             // Keep local orange labels that aren't on server yet
             const localOrangeOnly = state.labels.filter(l=>l.isOrange&&!serverLabelIds.has(l.id));
             state.labels = [...normLabels, ...localOrangeOnly];
+            // Re-render labels page after server load
+            if(currentPage==='labels') setTimeout(function(){ if(document.getElementById('page-labels')) renderLabels(); }, 100);
             // Re-push any local-only orange labels to server
             if(localOrangeOnly.length > 0){
               const toSync = localOrangeOnly.map(l=>({...l,isOrange:1,isPartial:0,printed:0,voided:0,isExcess:0}));
@@ -2471,23 +2473,7 @@ function renderLabels(){
 
   // Always fetch fresh label data from server when this page opens
   // This ensures Generated/Printed/Remaining are always correct on any device
-  // Fetch fresh labels from server when page opens
-  if(serverUrl && !renderLabels._fetching){
-    renderLabels._fetching = true;
-    fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(8000)})
-      .then(r=>r.ok?r.json():null)
-      .then(j=>{
-        if(j?.ok && j.state?.labels && j.state.labels.length>0){
-          state.labels = j.state.labels.map(l=>l.batchNumber?l:normLabel(l));
-          if(currentPage==='labels'){
-            const el=document.getElementById('page-labels');
-            if(el) renderLabels();
-          }
-        }
-        renderLabels._fetching=false;
-      })
-      .catch(()=>{ renderLabels._fetching=false; });
-  }
+  // Labels load via pullFromServer on page init
 
   // Save search value before re-render
   const _savedSearch = document.getElementById('lf-batch')?.value || '';
@@ -2590,13 +2576,13 @@ function renderLabels(){
     </table></div>` : (()=>{
         // If no orange labels but server is available, try pulling from server
         if(serverUrl && state.labels.length > 0){
-          return '<div class="text-center text-muted" style="padding:16px">No orange labels yet — if you expect orange labels here, click 🔄 Regenerate from PI Scans.</div>';
+          return '<div class="text-center text-muted" style="padding:16px">No orange labels yet — if you expect orange labels here, click Regenerate from PI Scans.</div>';
         } else if(serverUrl && state.labels.length === 0){
           // Labels not loaded yet — trigger pull and show loading
           setTimeout(()=>{ pullFromServer().then(()=>renderLabels()); }, 500);
           return '<div class="text-center text-muted" style="padding:16px">⏳ Loading labels from server...</div>';
         }
-        return '<div class="text-center text-muted" style="padding:16px">No orange labels yet — if you expect orange labels here, click 🔄 Regenerate from PI Scans.</div>';
+        return '<div class="text-center text-muted" style="padding:16px">No orange labels yet — if you expect orange labels here, click Regenerate from PI Scans.</div>';
       })()}
   </div>`;
   }

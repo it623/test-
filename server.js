@@ -1299,15 +1299,15 @@ app.post('/api/tracking/state', asyncRoute(async (req, res) => {
     await client.query('BEGIN');
     if (labels && labels.length) {
       for (const l of labels) {
+        // Convert OL- string label numbers to negative integers for DB storage
+        const _lNum = (typeof l.labelNumber==='string' && l.labelNumber.startsWith('OL-'))
+          ? -(parseInt(l.labelNumber.slice(3))||0)
+          : (parseInt(l.labelNumber)||0);
         await client.query(
           `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
            ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,printed_at=EXCLUDED.printed_at,voided=EXCLUDED.voided,void_reason=EXCLUDED.void_reason,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status,is_orange=EXCLUDED.is_orange,parent_label_id=EXCLUDED.parent_label_id,is_partial=EXCLUDED.is_partial,is_excess=EXCLUDED.is_excess,printing_matter=EXCLUDED.printing_matter`,
-          // label_number is INTEGER — strip "OL-" prefix for orange labels
-          const _labelNum = typeof l.labelNumber==='string' && l.labelNumber.startsWith('OL-')
-            ? (parseInt(l.labelNumber.replace('OL-',''))||0) * -1
-            : (parseInt(l.labelNumber)||0);
-          [l.id,l.batchNumber,_labelNum,l.size,l.qty,l.isPartial?1:0,l.isOrange?1:0,
+          [l.id,l.batchNumber,_lNum,l.size,l.qty,l.isPartial?1:0,l.isOrange?1:0,
            l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
            l.poNumber||null,l.machineId||null,l.printingMatter||null,
            l.generated||new Date().toISOString(),l.printed?1:0,l.printedAt||null,
@@ -1436,15 +1436,15 @@ app.post('/api/tracking/labels', asyncRoute(async (req, res) => {
   const { labels } = req.body;
   if (!labels || !labels.length) return res.json({ ok: true });
   for (const l of labels) {
+    // Convert OL- string label numbers to negative integers for DB storage
+    const _lNum2 = (typeof l.labelNumber==='string' && l.labelNumber.startsWith('OL-'))
+      ? -(parseInt(l.labelNumber.slice(3))||0)
+      : (parseInt(l.labelNumber)||0);
     await query(
       `INSERT INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
        ON CONFLICT(id) DO UPDATE SET batch_number=EXCLUDED.batch_number,qty=EXCLUDED.qty,printed=EXCLUDED.printed,printed_at=EXCLUDED.printed_at,voided=EXCLUDED.voided,void_reason=EXCLUDED.void_reason,customer=EXCLUDED.customer,colour=EXCLUDED.colour,qr_data=EXCLUDED.qr_data,wo_status=EXCLUDED.wo_status,is_orange=EXCLUDED.is_orange,parent_label_id=EXCLUDED.parent_label_id,is_partial=EXCLUDED.is_partial,is_excess=EXCLUDED.is_excess,printing_matter=EXCLUDED.printing_matter`,
-      // label_number is INTEGER — strip "OL-" prefix for orange labels
-      const _ln2 = typeof l.labelNumber==='string' && l.labelNumber.startsWith('OL-')
-        ? (parseInt(l.labelNumber.replace('OL-',''))||0) * -1
-        : (parseInt(l.labelNumber)||0);
-      [l.id,l.batchNumber,_ln2,l.size,l.qty,!!l.isPartial,!!l.isOrange,
+      [l.id,l.batchNumber,_lNum2,l.size,l.qty,!!l.isPartial,!!l.isOrange,
        l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,
        l.poNumber||null,l.machineId||null,l.printingMatter||null,
        l.generated||new Date().toISOString(),!!l.printed,l.printedAt||null,

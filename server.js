@@ -339,11 +339,14 @@ async function savePlanningState(state) {
 
   // SAFETY GUARD 3: never reduce order count by more than 5 in a single save
   // (catches stale browser state being pushed after redeployment or back navigation)
+  // Note: intentional deletes by admin/planning_manager go through saveState() which sends
+  // the full updated state — these are always <=5 orders at a time, so GUARD3 allows them.
   if (existingState?.orders?.length > 0 && state.orders?.length >= 0) {
     const existingCount = existingState.orders.filter(o => !o.deleted).length;
     const incomingCount = (state.orders || []).filter(o => !o.deleted).length;
-    if (existingCount - incomingCount > 5) {
-      console.log(`[savePlanningState] GUARD3: suspicious order count drop ${existingCount} → ${incomingCount}, merging`);
+    const drop = existingCount - incomingCount;
+    if (drop > 5) {
+      console.log(`[savePlanningState] GUARD3: suspicious order count drop ${existingCount} → ${incomingCount} (drop=${drop}), merging to protect data`);
       // Merge: keep all existing orders not in incoming state, add all incoming
       const incomingIds = new Set((state.orders || []).map(o => o.id));
       const missingOrders = existingState.orders.filter(o => !incomingIds.has(o.id) && !o.deleted);
@@ -355,6 +358,10 @@ async function savePlanningState(state) {
       );
       await query(`INSERT INTO planning_state_backups (state_json, trigger) VALUES ($1, 'guard3-merge')`, [JSON.stringify(merged)]);
       return;
+    }
+    // Intentional deletes (1-5 orders): log for audit trail but allow through
+    if (drop > 0) {
+      console.log(`[savePlanningState] ${drop} order(s) intentionally deleted by user — saving permanently`);
     }
   }
 

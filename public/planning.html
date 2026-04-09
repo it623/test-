@@ -1597,10 +1597,17 @@ function closeOrder(ordId, machineId) {
 }
 
 function deleteOrder(ordId, machineId) {
-  if (!confirm('Delete this order?')) return;
+  const isAdminOrPM = ['admin','planning_manager'].includes(currentUser?.role);
+  if (!isAdminOrPM) { alert('Only Admin or Planning Manager can delete orders.'); return; }
+  const ord = state.orders.find(o=>o.id===ordId);
+  const label = ord ? `${ord.batchNumber||ord.id} — ${ord.customer||''}` : ordId;
+  if (!confirm(`Permanently delete order:\n${label}\n\nThis cannot be undone.`)) return;
+  // Remove completely from state (not soft-delete) so server never restores it
   state.orders = state.orders.filter(o=>o.id!==ordId);
   state.printOrders = state.printOrders.filter(p=>p.productionOrderId!==ordId);
+  state.dispatchPlans = (state.dispatchPlans||[]).filter(d=>d.productionOrderId!==ordId);
   recalcMachineSchedule(machineId);
+  saveState(); // ← push deletion to server immediately
   render();
 }
 

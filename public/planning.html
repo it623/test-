@@ -6295,7 +6295,12 @@ async function loadAuditLog() {
   const serverUrl = getServerUrl();
   if (!serverUrl) { document.getElementById('audit-log-content').innerHTML = '<div style="color:var(--accent4)">Server not connected</div>'; return; }
   try {
-    const r = await fetch(`${serverUrl}/api/audit/view?app=planning&limit=300`, {headers:{'x-session-token': currentUser.token}, signal: AbortSignal.timeout(5000)});
+    if (!currentUser?.token) throw new Error('Not authenticated');
+    const r = await fetch(`${serverUrl}/api/audit/view?app=planning&limit=300`, {
+      headers: { 'x-session-token': currentUser.token },
+      signal: AbortSignal.timeout(5000)
+    });
+    if (r.status === 401) throw new Error('Not authenticated');
     const j = await r.json();
     if (!j.ok) throw new Error(j.error);
     const el = document.getElementById('audit-log-content');
@@ -6315,7 +6320,12 @@ async function loadAuditLog() {
       </div>`;
   } catch(e) {
     const el = document.getElementById('audit-log-content');
-    if (el) el.innerHTML = `<div style="color:var(--accent4)">Error loading audit log: ${e.message}</div>`;
+    if (!el) return;
+    if (e.message === 'Not authenticated') {
+      el.innerHTML = '<div style="color:var(--accent4)">Session expired — please <a href="#" onclick="logout();return false;" style="color:var(--accent)">log out</a> and log in again.</div>';
+    } else {
+      el.innerHTML = `<div style="color:var(--accent4)">Error loading audit log: ${e.message}</div>`;
+    }
   }
 }
 
@@ -6342,23 +6352,49 @@ function closePlanSidebar() {
   if (bd) bd.style.display = 'none';
 }
 
-// ── On page init — check for saved session ──
-(function initAuth() {
+// ── On page init — check for saved session and verify token with server ──
+(async function initAuth() {
   const saved = localStorage.getItem('plan_session');
   if (saved) {
     try {
-      currentUser = JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      if (parsed?.token) {
+        // Verify token is still valid on server before trusting it
+        const serverUrl = getServerUrl();
+        try {
+          const vr = await fetch(serverUrl + '/api/auth/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: parsed.token }),
+            signal: AbortSignal.timeout(4000)
+          });
+          const vj = await vr.json();
+          if (!vj.ok) {
+            // Token expired — clear session and show login
+            console.log('[initAuth] Session token expired — requiring re-login');
+            localStorage.removeItem('plan_session');
+            document.getElementById('auth-overlay').classList.remove('hidden');
+            return;
+          }
+          // Token valid — restore session with fresh data from server
+          currentUser = { username: vj.username, role: vj.role, token: parsed.token };
+          localStorage.setItem('plan_session', JSON.stringify(currentUser));
+        } catch(netErr) {
+          // Network error — allow offline mode with saved session
+          console.warn('[initAuth] Cannot verify token (offline?) — using saved session');
+          currentUser = parsed;
+        }
+      } else {
+        currentUser = parsed; // offline session (no token)
+      }
       document.getElementById('auth-overlay').classList.add('hidden');
       applyRoleRestrictions();
       updateUserBadge();
-      // Show loading state immediately — do NOT render stale localStorage data
-      // Always pull from server first, then render with fresh data
       const content = document.getElementById('content');
       if (content) content.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:200px;color:var(--text3);font-family:var(--mono);font-size:13px;">⟳ Loading orders from server...</div>';
-      // loadState already calls SYNC.loadFromServer() which calls render() when done
       loadState();
       return;
-    } catch(e) {}
+    } catch(e) { localStorage.removeItem('plan_session'); }
   }
   // Show login — don't render yet
   document.getElementById('auth-overlay').classList.remove('hidden');

@@ -711,7 +711,7 @@ app.post('/api/auth/login', asyncRoute(async (req, res) => {
   if (!user) return res.status(401).json({ ok: false, error: 'User not found' });
   if (user.pin_hash !== hashPin(pin)) return res.status(401).json({ ok: false, error: 'Invalid PIN' });
   const token = generateToken();
-  const expires = new Date(Date.now() + 8*60*60*1000).toISOString();
+  const expires = new Date(Date.now() + 30*24*60*60*1000).toISOString(); // 30 days
   await query(`INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
     [token, user.id, user.username, user.role, appName, expires]);
   await logAudit(user.username, user.role, appName, 'LOGIN', 'Successful login', req.ip);

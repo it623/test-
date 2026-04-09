@@ -1149,8 +1149,6 @@ async function pullFromServer(){
             // Keep local orange labels that aren't on server yet
             const localOrangeOnly = state.labels.filter(l=>l.isOrange&&!serverLabelIds.has(l.id));
             state.labels = [...normLabels, ...localOrangeOnly];
-            // Force re-render labels page so orange labels appear immediately
-            if(currentPage==='labels') renderLabels();
             // Re-push any local-only orange labels to server
             if(localOrangeOnly.length > 0){
               const toSync = localOrangeOnly.map(l=>({...l,isOrange:1,isPartial:0,printed:0,voided:0,isExcess:0}));
@@ -2473,21 +2471,14 @@ function renderLabels(){
 
   // Always fetch fresh label data from server when this page opens
   // This ensures Generated/Printed/Remaining are always correct on any device
+  // Always pull fresh from server — this guarantees orange labels show on any device
+  // Use pullFromServer() which loads ALL labels then re-renders
   if(serverUrl && !renderLabels._fetching){
     renderLabels._fetching = true;
-    fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)})
-      .then(r=>r.json())
-      .then(snap=>{
-        if(snap.ok && snap.tracking && snap.tracking.labels){
-          const fresh=(snap.tracking.labels).map(l=>l.batchNumber?l:normLabel(l));
-          // Always use server labels — server is single source of truth
-          // No localStorage cache and no >= condition blocking orange labels
-          state.labels = fresh;
-          if(currentPage==='labels') renderLabels();
-        }
-        renderLabels._fetching=false;
-      })
-      .catch(()=>{ renderLabels._fetching=false; });
+    pullFromServer().finally(()=>{
+      renderLabels._fetching = false;
+      if(currentPage==='labels') renderLabels();
+    });
   }
 
   // Save search value before re-render
@@ -2555,7 +2546,7 @@ function renderLabels(){
     updateLabelCount(allBatches.length);
   }
 
-  // Orange Labels section — always visible (server loads labels async after render)
+  // Orange Labels section — always visible
   const orangeLabels = state.labels.filter(l=>l.isOrange&&!l.voided);
   if(true){
     const unprintedOrange = orangeLabels.filter(l=>!l.printed);

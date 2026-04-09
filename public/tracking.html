@@ -2471,21 +2471,20 @@ function renderLabels(){
 
   // Always fetch fresh label data from server when this page opens
   // This ensures Generated/Printed/Remaining are always correct on any device
-  if(serverUrl && !renderLabels._fetching){
-    renderLabels._fetching = true;
-    fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)})
-      .then(r=>r.json())
-      .then(snap=>{
-        if(snap.ok && snap.tracking && snap.tracking.labels && snap.tracking.labels.length>0){
-          const fresh=(snap.tracking.labels).map(l=>l.batchNumber?l:normLabel(l));
-          // Server always wins — replace local labels with server labels
-          state.labels = fresh;
+  // Fetch labels from server — debounced, no lock, uses fast endpoint
+  clearTimeout(renderLabels._timer);
+  renderLabels._timer = setTimeout(()=>{
+    if(!serverUrl) return;
+    fetch(serverUrl+'/api/tracking/labels-only',{signal:AbortSignal.timeout(8000)})
+      .then(r=>r.ok?r.json():null)
+      .then(j=>{
+        if(j?.ok && Array.isArray(j.labels) && j.labels.length>0){
+          state.labels = j.labels.map(l=>l.batchNumber?l:normLabel(l));
           if(currentPage==='labels') renderLabels();
         }
-        renderLabels._fetching=false;
       })
-      .catch(()=>{ renderLabels._fetching=false; });
-  }
+      .catch(()=>{});
+  }, 200);
 
   // Save search value before re-render
   const _savedSearch = document.getElementById('lf-batch')?.value || '';

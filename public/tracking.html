@@ -2469,16 +2469,31 @@ function renderLabels(){
 
   const allBatches=state.batches.filter(b=>b.status!=='closed').sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
 
-  // Always fetch fresh label data from server when this page opens
-  // This ensures Generated/Printed/Remaining are always correct on any device
-  // Always pull fresh from server — this guarantees orange labels show on any device
-  // Use pullFromServer() which loads ALL labels then re-renders
+  // Pull fresh data from server — guarantees orange labels show on any device/browser
+  // Only trigger once per page open (not on recursive re-renders)
   if(serverUrl && !renderLabels._fetching){
     renderLabels._fetching = true;
-    pullFromServer().finally(()=>{
-      renderLabels._fetching = false;
-      if(currentPage==='labels') renderLabels();
-    });
+    fetch(serverUrl+'/api/tracking/labels-only', {signal:AbortSignal.timeout(8000)})
+      .then(r=>r.ok?r.json():null)
+      .then(j=>{
+        if(j?.ok && Array.isArray(j.labels) && j.labels.length > 0){
+          const fresh = j.labels.map(l=>l.batchNumber?l:normLabel(l));
+          state.labels = fresh; // server is always truth — replace local
+          if(currentPage==='labels') renderLabels();
+        } else if(!j) {
+          // Fallback to full snapshot
+          return fetch(serverUrl+'/api/sync/snapshot',{signal:AbortSignal.timeout(8000)})
+            .then(r=>r.json())
+            .then(snap=>{
+              if(snap.ok && snap.tracking?.labels){
+                state.labels = snap.tracking.labels.map(l=>l.batchNumber?l:normLabel(l));
+                if(currentPage==='labels') renderLabels();
+              }
+            });
+        }
+      })
+      .catch(()=>{})
+      .finally(()=>{ renderLabels._fetching=false; });
   }
 
   // Save search value before re-render

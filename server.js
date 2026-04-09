@@ -1210,6 +1210,13 @@ app.get('/api/health', asyncRoute(async (req, res) => {
 
 // ─── CROSS-APP SYNC SNAPSHOT ──────────────────────────────────
 // Single endpoint that returns everything all 3 apps need in one call.
+// GET /api/tracking/labels-only — fast endpoint returns only labels (including orange)
+// Used by Label Generation page to load orange labels without waiting for full snapshot
+app.get('/api/tracking/labels-only', asyncRoute(async (req, res) => {
+  const labels = await queryAll('SELECT * FROM tracking_labels WHERE voided=0 ORDER BY generated DESC');
+  res.json({ ok: true, labels });
+}));
+
 // GET /api/sync/snapshot
 app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
   const [planningState, savedAtRow, labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([

@@ -1893,7 +1893,7 @@ function generateZPL(label, batch){
   const colourCap  = (cp[0]||'').trim() || (label.colour||'');
   const colourBody = (cp[1]||'').trim() || '';
   const packSizeL  = PACK_SIZES[String(label.size)] || 1;
-  const pieces     = label.isPartial ? Math.round(label.qty*100000) : Math.round(packSizeL*100000);
+  const pieces     = label.qty ? Math.round(label.qty*100000) : Math.round(packSizeL*100000);
   const mfgRaw     = batch?.startDate ? new Date(batch.startDate) : new Date();
   const mfgDate    = mfgRaw.toLocaleDateString('en-IN',{month:'short',year:'numeric'}).toUpperCase();
   const batchNo    = label.batchNumber || '';

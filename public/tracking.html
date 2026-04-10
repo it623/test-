@@ -2270,6 +2270,8 @@ function renderDashboard(){
     stageBoxes[dept]=Math.max(0,inn-out);
   });
 
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Active Batches</div><div class="kpi-val blue">${totalBatches}</div><div class="kpi-sub">In production/WIP</div></div>
@@ -2502,6 +2504,8 @@ function renderLabels(){
 
   // Save search value before re-render
   const _savedSearch = document.getElementById('lf-batch')?.value || '';
+
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
 
   el.innerHTML=`
   <div class="section-header">
@@ -3107,6 +3111,8 @@ function renderDeptScan(dept){
       .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
     ">🔄 Sync</button>`;
 
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid ${cfg.color}">
     <div class="dept-strip ${cfg.strip}"></div>
@@ -3620,6 +3626,8 @@ function renderDispatch(){
   dispatchedIn.forEach(s=>{ if(batchSummary[s.batchNumber]) batchSummary[s.batchNumber].dispIn++; });
   dispatchedOut.forEach(s=>{ if(batchSummary[s.batchNumber]) batchSummary[s.batchNumber].dispOut++; });
 
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid var(--accent3)">
     <div class="dept-strip dispatch"></div>
@@ -3817,6 +3825,8 @@ function renderScanHistory(){
   if(filterType!=='all') scans=scans.filter(s=>s.type===filterType);
   if(filterDate) scans=scans.filter(s=>s.ts&&s.ts.slice(0,10)===filterDate);
 
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
   <div class="section-header mb-16">
     <div>
@@ -3920,6 +3930,8 @@ function renderBatchTracker(){
       .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
     ">🔄 Sync</button>
     <button class="btn btn-secondary btn-sm" onclick="exportTrackerReport()">📥 Export</button>`;
+
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
 
   el.innerHTML=`
   <div class="section-header">
@@ -4141,6 +4153,8 @@ function fixAllReportSticky(){
 
 function renderReports(){
   const el=document.getElementById('page-reports');
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Reports</div><div class="section-sub">Generate and export operational reports</div></div>
@@ -4202,6 +4216,9 @@ function renderReportG(){
   // Collect data per batch per dept
   const batches = state.batches;
   const rows = [];
+  const grandTotals = {};
+  DEPTS.forEach(d=>{ grandTotals[d]={inQty:0,outQty:0,salvage:0,remelt:0}; });
+  let grandTotalAGrade=0, grandTotalWastage=0, grandGrossIn=0;
 
   batches.forEach(b=>{
     const batchNo = b.batchNumber;
@@ -4218,16 +4235,20 @@ function renderReportG(){
       const remelt   = wastage.reduce((s,w)=>s+(w.type==='remelt'?parseFloat(w.qty||0):0),0);
       const totalW   = salvage + remelt;
       const aGrade   = Math.max(0, outQty);
-      const pct      = inQty>0?(aGrade/inQty*100):0;
+      const pctBase  = inQty + salvage + remelt;
+      const pct      = pctBase>0?(aGrade/pctBase*100):0;
       if(dept==='aim'){ batchGrossIn += inQty; }
       batchTotalAGrade += aGrade;
       batchTotalWastage += totalW;
       return {dept, scansIn, scansOut, inQty:fmt(inQty), outQty:fmt(outQty), aGrade:fmt(aGrade), salvage:fmt(salvage), remelt:fmt(remelt), pct:fmt(pct,1)};
     });
 
-    const overallPct = batchGrossIn>0?(batchTotalAGrade/batchGrossIn*100):0;
+    const overallPct = (batchGrossIn+batchTotalWastage)>0?(batchTotalAGrade/(batchGrossIn+batchTotalWastage)*100):0;
+    grandTotalAGrade+=batchTotalAGrade; grandTotalWastage+=batchTotalWastage; grandGrossIn+=batchGrossIn;
     rows.push({b, deptData, batchTotalAGrade:fmt(batchTotalAGrade), batchTotalWastage:fmt(batchTotalWastage), overallPct:fmt(overallPct,1)});
   });
+
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
 
   el.innerHTML=`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
@@ -4288,6 +4309,21 @@ function renderReportG(){
         </tr>
       `).join('')||'<tr><td colspan="14" class="text-center text-muted">No batch data available</td></tr>'}
       </tbody>
+      <tfoot>
+        <tr style="background:#e8f0fe;border-top:2px solid var(--border2)">
+          <td colspan="3" style="position:sticky;left:0;z-index:3;background:#e8f0fe;padding:8px 10px;font-weight:700;white-space:nowrap;font-size:13px">GRAND TOTAL</td>
+          ${DEPTS.map(d=>`
+            <td class="td-mono rg-col-${d}" style="border-left:2px solid var(--border2);font-weight:700">${fmt(grandTotals[d].inQty)}</td>
+            <td class="td-mono rg-col-${d}" style="font-weight:700">${fmt(grandTotals[d].outQty)}</td>
+            <td class="td-mono rg-col-${d}" style="color:var(--amber);font-weight:700">${fmt(grandTotals[d].salvage)}</td>
+            <td class="td-mono rg-col-${d}" style="color:var(--red);font-weight:700">${fmt(grandTotals[d].remelt)}</td>
+            <td class="td-mono">—</td>
+          `).join("")}
+          <td class="td-mono fw-bold green rg-col-overall" style="border-left:2px solid var(--border2);font-weight:700">${fmt(grandTotalAGrade)}</td>
+          <td class="td-mono" style="color:var(--amber);font-weight:700">${fmt(grandTotalWastage)}</td>
+          <td class="td-mono fw-bold ${grandOverallPct>=95?'green':grandOverallPct>=90?'amber':grandOverallPct>0?'red':''}">${grandOverallPct>0?fmt(grandOverallPct,1)+'%':'—'}</td>
+        </tr>
+      </tfoot>
     </table></div>
   </div>`;
 }
@@ -4340,12 +4376,12 @@ async function exportReportGExcel(){
       const wastage=state.wastage.filter(w=>w.batchNumber===batchNo&&w.dept===dept);
       const salvage=wastage.reduce((s,w)=>s+(w.type==='salvage'?parseFloat(w.qty||0):0),0);
       const remelt=wastage.reduce((s,w)=>s+(w.type==='remelt'?parseFloat(w.qty||0):0),0);
-      const pct=inQty>0?(outQty/inQty*100):0;
+      const pct=(inQty+salvage+remelt)>0?(outQty/(inQty+salvage+remelt)*100):0;
       if(dept==='aim') grossIn+=inQty;
       totalAG+=outQty; totalW+=salvage+remelt;
       row.push(fmt(inQty),fmt(outQty),fmt(salvage),fmt(remelt),inQty>0?fmt(pct,1)+'%':'');
     });
-    const overallPct=grossIn>0?(totalAG/grossIn*100):0;
+    const overallPct=(grossIn+totalW)>0?(totalAG/(grossIn+totalW)*100):0;
     row.push(fmt(totalAG),fmt(totalW),grossIn>0?fmt(overallPct,1)+'%':'');
     rows.push(row);
   });
@@ -4967,6 +5003,8 @@ function renderTrackingSearch(){
     });
   }
 
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
     <div class="card">
       <div class="section-title mb-16">🔍 Search</div>
@@ -5019,6 +5057,8 @@ function renderSettings(){
   const isAdmin=currentDept==='admin';
   // After rendering, append audit log for admin
   setTimeout(()=>{ if(isAdmin) renderTrackingAuditLog(); }, 100);
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Settings</div></div>

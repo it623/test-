@@ -2482,15 +2482,28 @@ function updateOrangeCard(card){
     <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Auto-generated at PI scan-in. Click Regenerate if labels are missing for already-scanned batches.</div>
     ${unprintedOrange.length>0?'<div style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.4);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--orange)">⚠️ '+unprintedOrange.length+' orange label'+(unprintedOrange.length>1?'s':'')+' pending print</div>':''}
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Box #</th><th>Qty (L)</th><th>Generated</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody>${orangeLabels.sort((a,b)=>(b.generated||'').localeCompare(a.generated||'')).map(function(l){
+      <thead><tr>
+        <th style="min-width:90px">Batch</th>
+        <th style="min-width:60px">Box #</th>
+        <th style="min-width:70px">Qty (L)</th>
+        <th style="min-width:90px">Status</th>
+        <th style="min-width:130px">Generated</th>
+        <th style="min-width:130px">Printed</th>
+        <th>Actions</th>
+      </tr></thead>
+      <tbody>${orangeLabels.sort((a,b)=>{
+        const ba=a.batchNumber||'', bb=b.batchNumber||'';
+        if(ba!==bb) return ba.localeCompare(bb);
+        return Math.abs(parseInt((String(a.labelNumber||'0').replace('OL-',''))||0)) - Math.abs(parseInt((String(b.labelNumber||'0').replace('OL-',''))||0));
+      }).map(function(l){
+        const boxNum = String(l.labelNumber||'').replace(/^OL--/,'OL-');
         return '<tr style="'+(l.printed?'':'background:rgba(234,88,12,0.06)')+'">'+
           '<td class="td-mono fw-bold">'+l.batchNumber+'</td>'+
-          '<td class="text-sm">'+(l.customer||'-')+'</td>'+
-          '<td class="td-mono">'+l.labelNumber+'</td>'+
+          '<td class="td-mono">'+boxNum+'</td>'+
           '<td class="td-mono">'+fmt(l.qty)+'</td>'+
+          '<td>'+(l.printed?'<span class="badge badge-green">✅ Printed</span>':'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>')+'</td>'+
           '<td class="text-sm">'+fmtDateTime(l.generated)+'</td>'+
-          '<td>'+(l.printed?'<span class="badge badge-green">✅ Printed '+fmtDateTime(l.printedAt)+'</span>':'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>')+'</td>'+
+          '<td class="text-sm">'+(l.printed?fmtDateTime(l.printedAt):'-')+'</td>'+
           '<td>'+(l.voided?'<span class="text-muted text-sm">Voided</span>':(!l.printed?'<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel(\''+l.id+'\');renderLabels()">🖨️ Print</button>':'<button class="btn btn-sm btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="reprintOrangeLabel(\''+l.id+'\')">🔄 Reprint</button>'))+'</td>'+
         '</tr>';
       }).join('')}</tbody>
@@ -2508,7 +2521,7 @@ function renderLabels(){
     ">🔄 Sync</button>
     <button class="btn btn-secondary" onclick="configurePrinter()">🖨️ Printer Setup</button>`;
 
-  const allBatches=state.batches.filter(b=>b.status!=='closed').sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
+  const allBatches=state.batches.filter(b=>b.status==='running').sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
 
   // Labels loaded by pullFromServer on init — no extra fetch needed
 
@@ -2612,23 +2625,35 @@ function renderLabels(){
     <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Auto-generated at PI scan-in. Click Regenerate if labels are missing for already-scanned batches.</div>
     ${unprintedOrange.length>0?`<div style="background:rgba(234,88,12,0.1);border:1px solid rgba(234,88,12,0.4);border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--orange)">⚠️ ${unprintedOrange.length} orange label${unprintedOrange.length>1?'s':''} pending print</div>`:''}
     ${orangeLabels.length ? `<div class="tbl-wrap"><table>
-      <thead><tr><th>Batch</th><th>Customer</th><th>Box #</th><th>Qty (L)</th><th>Generated</th><th>Status</th><th>Action</th></tr></thead>
+      <thead><tr>
+        <th style="min-width:90px">Batch</th>
+        <th style="min-width:60px">Box #</th>
+        <th style="min-width:70px">Qty (L)</th>
+        <th style="min-width:90px">Status</th>
+        <th style="min-width:130px">Generated</th>
+        <th style="min-width:130px">Printed</th>
+        <th>Actions</th>
+      </tr></thead>
       <tbody>
-      ${orangeLabels.sort((a,b)=>b.generated.localeCompare(a.generated)).map(l=>{
-        const batch=getBatch(l.batchNumber);
+      ${orangeLabels.sort((a,b)=>{
+        const ba=a.batchNumber||'',bb=b.batchNumber||'';
+        if(ba!==bb) return ba.localeCompare(bb);
+        return Math.abs(parseInt(String(a.labelNumber||'0').replace('OL-',''))||0) - Math.abs(parseInt(String(b.labelNumber||'0').replace('OL-',''))||0);
+      }).map(l=>{
+        const boxNum = String(l.labelNumber||'').replace(/^OL--/,'OL-');
         return `<tr style="${!l.printed?'background:rgba(234,88,12,0.06)':''}">
           <td class="td-mono fw-bold">${l.batchNumber}</td>
-          <td class="text-sm">${l.customer||batch?.customer||'-'}</td>
-          <td class="td-mono">${l.labelNumber}</td>
+          <td class="td-mono">${boxNum}</td>
           <td class="td-mono">${fmt(l.qty)}</td>
+          <td>${l.printed?`<span class="badge badge-green">✅ Printed</span>`:'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>'}</td>
           <td class="text-sm">${fmtDateTime(l.generated)}</td>
-          <td>${l.printed?`<span class="badge badge-green">✅ Printed ${fmtDateTime(l.printedAt)}</span>`:'<span class="badge" style="background:rgba(234,88,12,0.15);color:var(--orange);border:1px solid rgba(234,88,12,0.4)">🟠 Pending</span>'}</td>
+          <td class="text-sm">${l.printed?fmtDateTime(l.printedAt):'-'}</td>
           <td>
-              ${!l.printed
-                ? `<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel('${l.id}');renderLabels()">🖨️ Print</button>`
-                : `<button class="btn btn-sm btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="reprintOrangeLabel('${l.id}')">🔄 Reprint</button>`
-              }
-            </td>
+            ${!l.printed
+              ? `<button class="btn btn-sm" style="background:var(--orange);color:#fff" onclick="printLabel('${l.id}');renderLabels()">🖨️ Print</button>`
+              : `<button class="btn btn-sm btn-ghost" style="border:1px solid var(--orange);color:var(--orange)" onclick="reprintOrangeLabel('${l.id}')">🔄 Reprint</button>`
+            }
+          </td>
         </tr>`;
       }).join('')}
       </tbody>
@@ -2722,7 +2747,7 @@ function buildLabelRows(batches){
         </div>
       </td>
     </tr>`;
-  }).join('')||'<tr><td colspan="14" class="text-center text-muted">No active batches from Planning App</td></tr>';
+  }).join('')||'<tr><td colspan="14" class="text-center text-muted">No batches with "In Production" status found. Set order status to In Production in the Planning App first</td></tr>';
 }
 
 let _labelSortCol='', _labelSortDir=1;

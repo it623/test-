@@ -1585,24 +1585,6 @@ function updateOrderRemark(ordId, val) {
 function changeOrderStatus(ordId, machineId, newStatus) {
   const ord = state.orders.find(o=>o.id===ordId);
   if (!ord) return;
-
-  // ── CHECKPOINT: max 2 "In Production" orders per machine for non-admin ──
-  if (newStatus === 'running' && currentUser?.role !== 'admin') {
-    const alreadyRunning = state.orders.filter(o =>
-      o.id !== ordId &&
-      o.machineId === machineId &&
-      o.status === 'running' &&
-      !o.deleted
-    ).length;
-    if (alreadyRunning >= 2) {
-      // Revert the select back to previous value
-      const sel = document.querySelector(`select[onchange*="${ordId}"]`);
-      if (sel) sel.value = ord.status;
-      alert(`⚠️ Maximum 2 orders can be "In Production" on ${machineId} at a time.\n\nPlease close or move one of the current In Production orders before setting another.`);
-      return;
-    }
-  }
-
   ord.status = newStatus;
   if (newStatus === 'closed') {
     ord.closedDate = new Date();

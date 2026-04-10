@@ -266,6 +266,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ntab" onclick="go('aim')">🎯 AIM Status</div>
     <div class="ntab" onclick="go('perf')">👤 Shift Performance</div>
     <div class="ntab" onclick="go('history')">📅 History</div>
+    <div class="ntab" onclick="go('plant')">🏭 Plant Report</div>
     <div class="ntab" onclick="go('search')">🔍 Search</div>
     <div class="ntab" onclick="go('settings')">⚙ Settings</div>
   </div>
@@ -320,13 +321,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <div class="collapsible">
     <div class="col-hdr" onclick="toggleCol('remBlock')">
       <span class="col-title" style="color:var(--t2)">💬 Shift Remarks / Issues</span>
+      <button class="btn-add" onclick="event.stopPropagation();addRemark()">+ Add Remark</button>
     </div>
-    <div class="col-body" id="remBlock">
-      <div id="remList"><p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log issues.</p></div>
-      <div style="display:flex;justify-content:flex-end;margin-top:10px">
-        <button class="btn-add" onclick="addRemark()">+ Add Remark</button>
-      </div>
-    </div>
+    <div class="col-body" id="remBlock"><div id="remList"><p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log issues.</p></div></div>
   </div>
   <!-- Resort -->
   <div class="collapsible">
@@ -397,6 +394,20 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
 <!-- ═══ SETTINGS ══════════════════════════════════════════ -->
 <!-- ═══ SEARCH ══════════════════════════════════════════ -->
+<div id="page-plant" class="page">
+  <div class="card">
+    <div class="card-title">🏭 Plant-wide Machine Production Report</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+      <div class="field-grp" style="margin:0;min-width:160px">
+        <label style="font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:4px;text-transform:uppercase">Report Date</label>
+        <input type="date" id="plant-date" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px;font-weight:600" oninput="renderPlantReport()">
+      </div>
+      <button class="nbtn primary" onclick="exportPlantReport()">📥 Export Excel</button>
+      <button class="nbtn" onclick="document.getElementById('plant-date').value=today();renderPlantReport()">Today</button>
+    </div>
+    <div id="plant-report-output"><p style="color:var(--t3);padding:20px 0">Select a date to view the plant report.</p></div>
+  </div>
+</div>
 <div id="page-search" class="page">
   <div class="card">
     <div class="card-title">🔍 Search</div>
@@ -1839,11 +1850,14 @@ function renderShifts(){
       const runs=m.runs&&m.runs.length>0?m.runs:[blankRun()];
       let runsHtml='';
       runs.forEach((run,ri)=>{
-        const orders=activeOrders[mc.id]||[];
-        // Match by id first, then by batchNumber as fallback
-        const matchedOrder = orders.find(o=>o.id===run.orderId) || orders.find(o=>o.batchNumber===run.batchNumber);
+        const allOrders=activeOrders[mc.id]||[];
+        const isAdmin = dprUser && dprUser.role === 'admin';
+        const orders = isAdmin ? allOrders : allOrders.filter(o=>o.status==='running'||o.isTemp||o.status==='temp');
+        const matchedOrder = allOrders.find(o=>o.id===run.orderId) || allOrders.find(o=>o.batchNumber===run.batchNumber);
         const effectiveOrderId = matchedOrder ? matchedOrder.id : run.orderId;
-        let ordOpts=`<option value="">— Order —</option>`+orders.map(o=>{
+        const visibleOrders = orders.some(o=>o.id===effectiveOrderId) ? orders
+          : (matchedOrder ? [...orders, matchedOrder] : orders);
+        let ordOpts=`<option value="">— Order —</option>`+visibleOrders.map(o=>{
           const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
           return `<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(custShort)}</option>`;
         }).join('');
@@ -1937,6 +1951,25 @@ function renderShifts(){
     const sel=document.getElementById(`run-ord-${sh}-${mc}-${ri}`);
     if(sel && sel.value) onRunOrderChange(sh, mc, parseInt(ri));
   });
+  setTimeout(autoScrollToCurrentShift, 300);
+}
+
+function getCurrentShift(){
+  const now=new Date(), h=now.getHours(), m=now.getMinutes();
+  const totalMins=h*60+m;
+  if(totalMins>=60 && totalMins<9*60) return 'C';
+  if(totalMins>=9*60 && totalMins<17*60) return 'A';
+  if(totalMins>=17*60) return 'B';
+  return 'B';
+}
+function autoScrollToCurrentShift(){
+  const sh=getCurrentShift();
+  const shiftEl=document.getElementById('sb-'+sh);
+  if(shiftEl){
+    shiftEl.classList.add('open');
+    const hdr=shiftEl.closest('.shift-block');
+    if(hdr) hdr.scrollIntoView({behavior:'smooth',block:'start'});
+  }
 }
 
 // ── Run management ─────────────────────────────────────────────
@@ -2109,6 +2142,29 @@ function updateBacklog(sh,mcId){
   }
 }
 
+function dtTableNav(e,el){
+  var key=e.key;
+  if(key!=='ArrowUp'&&key!=='ArrowDown'&&key!=='ArrowLeft'&&key!=='ArrowRight'&&key!=='Enter') return;
+  e.preventDefault();
+  var parts=el.id.split('-'), sh=parts[1], mcId=parts[2], cat=parts[3];
+  var mcs=getActiveMachines(curFloor), mcIds=mcs.map(function(m){return m.id;});
+  var mcIdx=mcIds.indexOf(mcId), catIdx=DT_CATS.indexOf(cat);
+  var newSh=sh, newMcId=mcId, newCat=cat;
+  if(key==='ArrowDown'||key==='Enter'){
+    if(mcIdx<mcIds.length-1) newMcId=mcIds[mcIdx+1];
+  } else if(key==='ArrowUp'){
+    if(mcIdx>0) newMcId=mcIds[mcIdx-1];
+  } else if(key==='ArrowRight'){
+    if(catIdx<DT_CATS.length-1){ newCat=DT_CATS[catIdx+1]; }
+    else { var sh2=['A','B','C'],si=sh2.indexOf(sh); if(si<sh2.length-1){newSh=sh2[si+1];newCat=DT_CATS[0];} }
+  } else if(key==='ArrowLeft'){
+    if(catIdx>0){ newCat=DT_CATS[catIdx-1]; }
+    else { var sh2=['A','B','C'],si=sh2.indexOf(sh); if(si>0){newSh=sh2[si-1];newCat=DT_CATS[DT_CATS.length-1];} }
+  }
+  var nextEl=document.getElementById('dt-'+newSh+'-'+newMcId+'-'+newCat);
+  if(nextEl){nextEl.focus();nextEl.select();}
+}
+
 function renderDTTable(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
@@ -2151,7 +2207,8 @@ function renderDTTable(){
           return `<td style="padding:2px 3px;border:1px solid ${SHIFT_COLOR[sh]}22;border-left:${DT_CATS.indexOf(c)===0?'2px solid '+SHIFT_COLOR[sh]+'44':'1px solid '+SHIFT_COLOR[sh]+'22'};text-align:center;background:${cellBg}">
             <input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0"
               style="width:38px;text-align:center;background:transparent;border:none;color:${cellClr};font-family:var(--mono);font-size:12px;padding:1px 0"
-              oninput="markUnsaved();updateDTSummary();updateDTTotalRow()">
+              oninput="markUnsaved();updateDTSummary();updateDTTotalRow()"
+              onkeydown="dtTableNav(event,this)">
           </td>`;
         }).join('');
       }).join('')}
@@ -3053,13 +3110,14 @@ function go(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('on'));
   document.getElementById('page-'+page)?.classList.add('on');
-  const idx={entry:0,analytics:1,trends:2,aim:3,perf:4,history:5,search:6,settings:7};
+  const idx={entry:0,analytics:1,trends:2,aim:3,perf:4,history:5,plant:6,search:7,settings:8};
   document.querySelectorAll('.ntab')[idx[page]]?.classList.add('on');
   if(page==='analytics') renderAnalytics();
   else if(page==='trends') renderTrends();
   else if(page==='aim') renderAIM();
   else if(page==='perf') renderPerf();
   else if(page==='history') renderHistory();
+  else if(page==='plant'){ document.getElementById('plant-date').value=document.getElementById('plant-date').value||today(); renderPlantReport(); }
   else if(page==='settings') renderSettings();
 }
 
@@ -3768,7 +3826,16 @@ function renderDprSearch(){
 // ═══════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════
-document.getElementById('ndate').value=today();
+(function setSmartDate(){
+  const now=new Date(), h=now.getHours(), m=now.getMinutes();
+  const totalMins=h*60+m;
+  let useDate;
+  if(totalMins < 9*60){
+    const yesterday=new Date(now); yesterday.setDate(yesterday.getDate()-1);
+    useDate=yesterday.toISOString().split('T')[0];
+  } else { useDate=now.toISOString().split('T')[0]; }
+  document.getElementById('ndate').value=useDate;
+})();
 refreshRecentDates();
 // Server init and renderEntry called after auth — see postAuthServerInit()
 function postAuthServerInit() {
@@ -4199,6 +4266,153 @@ async function saveTempBatchDetails(tempBatchId) {
     } else alert('Error saving: ' + j.error);
   } catch(e) { alert('Server error: ' + e.message); }
 }
+
+// ═══════════════════════════════════════════════════════
+// PLANT REPORT — consolidated machine-wise, all floors
+// ═══════════════════════════════════════════════════════
+function getPlantReportData(selectedDate){
+  const allMachines=[];
+  Object.entries(FLOORS).forEach(([fl,flData])=>{
+    flData.machines.forEach(mc=>allMachines.push({id:mc.id,sz:mc.sz,floor:fl,flLabel:flData.label}));
+  });
+  const allKeys=Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
+  const allDates=[...new Set(allKeys.map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
+  const rows=allMachines.map(mc=>{
+    const fl=mc.floor;
+    const dailyTgt=parseFloat(targets[fl+'_'+mc.id]||8);
+    const dayData=loadDay(fl,selectedDate);
+    let dayA=0,dayB=0,dayC=0;
+    SHIFTS.forEach(sh=>{
+      const m=dayData.shifts[sh]?.machines[mc.id];
+      if(m){const p=mcTotalProd(migrateMachineData(m));if(sh==='A')dayA=p;else if(sh==='B')dayB=p;else dayC=p;}
+    });
+    const dayTotal=dayA+dayB+dayC;
+    const vsTarget=dayTotal-dailyTgt;
+    let cumTotal=0,cumDays=0;
+    allDates.forEach(d=>{
+      const dd=loadDay(fl,d);
+      let p=0;
+      SHIFTS.forEach(sh=>{const m=dd.shifts[sh]?.machines[mc.id];if(m)p+=mcTotalProd(migrateMachineData(m));});
+      if(p>0){cumTotal+=p;cumDays++;}
+    });
+    const cumAvg=cumDays>0?cumTotal/cumDays:0;
+    return{...mc,dailyTgt,dayA,dayB,dayC,dayTotal,vsTarget,cumTotal,cumDays,cumAvg};
+  });
+  const totals=rows.reduce((acc,r)=>{
+    acc.dailyTgt+=r.dailyTgt;acc.dayA+=r.dayA;acc.dayB+=r.dayB;
+    acc.dayC+=r.dayC;acc.dayTotal+=r.dayTotal;acc.cumTotal+=r.cumTotal;
+    acc.cumDays=Math.max(acc.cumDays,r.cumDays);return acc;
+  },{dailyTgt:0,dayA:0,dayB:0,dayC:0,dayTotal:0,cumTotal:0,cumDays:0});
+  totals.vsTarget=totals.dayTotal-totals.dailyTgt;
+  totals.cumAvg=totals.cumDays>0?totals.cumTotal/totals.cumDays:0;
+  return{rows,totals,allDates};
+}
+
+function renderPlantReport(){
+  const selectedDate=document.getElementById('plant-date')?.value||today();
+  const el=document.getElementById('plant-report-output');
+  if(!el) return;
+  const {rows,totals,allDates}=getPlantReportData(selectedDate);
+  const cumLabel=allDates.length>0
+    ?'Cumulative up to '+selectedDate+' ('+allDates.length+' day'+(allDates.length!==1?'s':'')+')'
+    :'No cumulative data yet';
+  const fmt2=n=>(+n).toFixed(2);
+  const fmtVS=n=>n===0?'<span style="color:var(--t3)">—</span>'
+    :n>0?'<span style="color:var(--green);font-family:var(--mono);font-weight:800">+'+fmt2(n)+'</span>'
+    :'<span style="color:var(--red);font-family:var(--mono);font-weight:800">'+fmt2(n)+'</span>';
+  const rowsHtml=rows.map(r=>`
+    <tr style="border-bottom:1px solid var(--b1)">
+      <td style="padding:5px 8px;font-family:var(--fc);font-weight:800;color:var(--cyan)">${r.id}</td>
+      <td style="padding:5px 8px;font-family:var(--mono);font-size:10px;color:var(--t3)">${r.sz}</td>
+      <td style="padding:5px 8px;font-size:10px;color:var(--t3)">${r.flLabel.split(' ')[0]}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--t2)">${fmt2(r.dailyTgt)}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--cyan)">${r.dayA>0?fmt2(r.dayA):'—'}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${r.dayB>0?fmt2(r.dayB):'—'}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--amber)">${r.dayC>0?fmt2(r.dayC):'—'}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--fc);font-weight:800;font-size:13px;color:${r.dayTotal>=r.dailyTgt?'var(--green)':r.dayTotal>0?'var(--amber)':'var(--t3)'}">${r.dayTotal>0?fmt2(r.dayTotal):'—'}</td>
+      <td style="padding:5px 8px;text-align:right">${fmtVS(r.dayTotal>0?r.vsTarget:0)}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--cyan);border-left:2px solid var(--b2)">${r.cumTotal>0?fmt2(r.cumTotal):'—'}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--t3)">${r.cumDays>0?r.cumDays:'—'}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--purple)">${r.cumAvg>0?fmt2(r.cumAvg):'—'}</td>
+    </tr>`).join('');
+  const totRow=`<tr style="background:var(--s3);border-top:2px solid var(--b2)">
+    <td colspan="3" style="padding:8px 10px;font-family:var(--fc);font-weight:800;font-size:11px;letter-spacing:.8px;color:var(--cyan)">PLANT TOTAL</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--cyan)">${fmt2(totals.dailyTgt)}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--cyan)">${totals.dayA>0?fmt2(totals.dayA):'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--green)">${totals.dayB>0?fmt2(totals.dayB):'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--amber)">${totals.dayC>0?fmt2(totals.dayC):'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--fc);font-weight:800;font-size:14px;color:var(--cyan)">${totals.dayTotal>0?fmt2(totals.dayTotal):'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:${totals.vsTarget>=0?'var(--green)':'var(--red)'}">${totals.dayTotal>0?(totals.vsTarget>=0?'+':'')+fmt2(totals.vsTarget):'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--cyan);border-left:2px solid var(--b2)">${totals.cumTotal>0?fmt2(totals.cumTotal):'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800">${totals.cumDays>0?totals.cumDays:'—'}</td>
+    <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--purple)">${totals.cumAvg>0?fmt2(totals.cumAvg):'—'}</td>
+  </tr>`;
+  el.innerHTML=`
+    <div style="font-size:11px;color:var(--t3);margin-bottom:8px;font-family:var(--fc);letter-spacing:.5px">
+      📅 Daily: <strong style="color:var(--t1)">${selectedDate}</strong>
+      &nbsp;|&nbsp; 📊 ${cumLabel}
+      &nbsp;|&nbsp; All quantities in Lakhs (L)
+    </div>
+    <div style="overflow-x:auto;border-radius:6px;border:1px solid var(--b2)">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:var(--s2);border-bottom:1px solid var(--b2)">
+            <th colspan="3" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--t3);text-align:left;text-transform:uppercase">Machine</th>
+            <th colspan="6" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--cyan);text-align:center;border-left:1px solid var(--b2);text-transform:uppercase">Daily — ${selectedDate}</th>
+            <th colspan="3" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--purple);text-align:center;border-left:2px solid var(--b2);text-transform:uppercase">Cumulative</th>
+          </tr>
+          <tr style="background:var(--s2);border-bottom:2px solid var(--b1)">
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:left;letter-spacing:.5px">M/C</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">SZ</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">FLOOR</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px;border-left:1px solid var(--b2)">TARGET</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--cyan);text-align:right;letter-spacing:.5px">A-SHIFT</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--green);text-align:right;letter-spacing:.5px">B-SHIFT</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--amber);text-align:right;letter-spacing:.5px">C-SHIFT</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px">DAY TOTAL</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px">VS TGT</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px;border-left:2px solid var(--b2)">CUM TOTAL</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px">DAYS</th>
+            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px">DAILY AVG</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+        <tfoot>${totRow}</tfoot>
+      </table>
+    </div>`;
+}
+
+function exportPlantReport(){
+  const selectedDate=document.getElementById('plant-date')?.value||today();
+  const {rows,totals}=getPlantReportData(selectedDate);
+  const fmt2=n=>parseFloat((+n).toFixed(2));
+  const data=rows.map(r=>({'Machine':r.id,'Size':r.sz,'Floor':r.flLabel,
+    'Daily Target':fmt2(r.dailyTgt),'A-Shift':fmt2(r.dayA),'B-Shift':fmt2(r.dayB),'C-Shift':fmt2(r.dayC),
+    'Day Total':fmt2(r.dayTotal),'Vs Target':fmt2(r.vsTarget),
+    'Cum Total':fmt2(r.cumTotal),'Days Counted':r.cumDays,'Daily Avg':fmt2(r.cumAvg)}));
+  data.push({'Machine':'PLANT TOTAL','Size':'','Floor':'',
+    'Daily Target':fmt2(totals.dailyTgt),'A-Shift':fmt2(totals.dayA),'B-Shift':fmt2(totals.dayB),'C-Shift':fmt2(totals.dayC),
+    'Day Total':fmt2(totals.dayTotal),'Vs Target':fmt2(totals.vsTarget),
+    'Cum Total':fmt2(totals.cumTotal),'Days Counted':totals.cumDays,'Daily Avg':fmt2(totals.cumAvg)});
+  if(typeof XLSX==='undefined'){toast('XLSX not available','var(--red)');return;}
+  try{
+    const ws=XLSX.utils.json_to_sheet(data);
+    ws['!cols']=[{wch:10},{wch:6},{wch:20},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10}];
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'Plant Report');
+    try{XLSX.writeFile(wb,'PlantReport_'+selectedDate+'.xlsx');}
+    catch(e1){
+      const wbout=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+      const blob=new Blob([wbout],{type:'application/octet-stream'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=url;a.download='PlantReport_'+selectedDate+'.xlsx';
+      document.body.appendChild(a);a.click();
+      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},1000);
+    }
+    toast('Plant Report exported','var(--green)');
+  }catch(e){toast('Export error: '+e.message,'var(--red)');}
+}
+
 </script>
 </body>
 </html>

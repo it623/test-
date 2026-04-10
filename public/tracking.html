@@ -2270,6 +2270,7 @@ function renderDashboard(){
     stageBoxes[dept]=Math.max(0,inn-out);
   });
 
+
   el.innerHTML=`
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Active Batches</div><div class="kpi-val blue">${totalBatches}</div><div class="kpi-sub">In production/WIP</div></div>
@@ -2503,6 +2504,7 @@ function renderLabels(){
   // Save search value before re-render
   const _savedSearch = document.getElementById('lf-batch')?.value || '';
 
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Label Generation</div><div class="section-sub">Generate and print box labels for active batches</div></div>
@@ -2524,8 +2526,9 @@ function renderLabels(){
           <th onclick="sortLabelTable('batch')" style="cursor:pointer;position:sticky;left:0;top:0;z-index:6;background:#f8f9fb;min-width:90px">Batch ↕</th>
           <th style="position:sticky;left:90px;top:0;z-index:6;background:#f8f9fb;min-width:70px">MC No</th>
           <th style="position:sticky;left:160px;top:0;z-index:6;background:#f8f9fb;min-width:120px">Colour</th>
-          <th onclick="sortLabelTable('customer')" style="cursor:pointer;position:sticky;left:280px;top:0;z-index:6;background:#f8f9fb;min-width:160px">Customer ↕</th>
-          <th style="position:sticky;left:440px;top:0;z-index:6;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">Size</th>
+          <th style="position:sticky;left:280px;top:0;z-index:6;background:#f8f9fb;min-width:80px">PC Code</th>
+          <th onclick="sortLabelTable('customer')" style="cursor:pointer;position:sticky;left:360px;top:0;z-index:6;background:#f8f9fb;min-width:160px">Customer ↕</th>
+          <th style="position:sticky;left:520px;top:0;z-index:6;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">Size</th>
           <th>Gross Qty</th>
           <th>Actual Prod</th>
           <th>Max Labels</th>
@@ -2539,8 +2542,9 @@ function renderLabels(){
           <td style="position:sticky;left:0;z-index:2;background:#f8f9fb;min-width:90px"><input type="text" id="lf-batch" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Batch..." oninput="filterLabelTable()"></td>
           <td style="position:sticky;left:90px;z-index:2;background:#f8f9fb;min-width:70px"><select id="lf-mc" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort((a,b)=>{const na=parseInt(a.replace(/\D/g,''))||0,nb=parseInt(b.replace(/\D/g,''))||0;return na-nb;}).map(m=>`<option value="${m.toLowerCase()}">${m}</option>`).join('')}</select></td>
           <td style="position:sticky;left:160px;z-index:2;background:#f8f9fb;min-width:120px"><select id="lf-colour" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.colour).filter(Boolean))].sort().map(c=>`<option value="${c.toLowerCase()}">${c}</option>`).join('')}</select></td>
-          <td style="position:sticky;left:280px;z-index:2;background:#f8f9fb;min-width:160px"><input type="text" id="lf-customer" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Customer..." oninput="filterLabelTable()"></td>
-          <td style="position:sticky;left:440px;z-index:2;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)"><select id="lf-size" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td>
+          <td style="position:sticky;left:280px;z-index:2;background:#f8f9fb;min-width:80px"><input type="text" id="lf-pccode" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="PC Code..." oninput="filterLabelTable()"></td>
+          <td style="position:sticky;left:360px;z-index:2;background:#f8f9fb;min-width:160px"><input type="text" id="lf-customer" style="width:100%;padding:3px 5px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;outline:none" placeholder="Customer..." oninput="filterLabelTable()"></td>
+          <td style="position:sticky;left:520px;z-index:2;background:#f8f9fb;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)"><select id="lf-size" style="width:100%;padding:3px 4px;border:1px solid var(--border2);border-radius:3px;background:var(--surface);color:var(--text);font-size:11px;cursor:pointer" onchange="filterLabelTable()"><option value="">All</option>${[...new Set(allBatches.map(b=>b.size).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join('')}</select></td>
           <td></td>
           <td></td>
           <td></td>
@@ -2680,6 +2684,7 @@ function buildLabelRows(batches){
       data-mc="${(b.machineId||'').toLowerCase()}"
       data-colour="${(b.colour||'').toLowerCase()}"
       data-customer="${(b.customer||'').toLowerCase()}"
+      data-pccode="${(b.pcCode||'').toLowerCase()}"
       data-size="${b.size||''}"
       data-generated="${generated}"
       data-printed="${printed}"
@@ -2688,8 +2693,9 @@ function buildLabelRows(batches){
       <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#fff;min-width:90px">${b.batchNumber}</td>
       <td class="td-mono" style="position:sticky;left:90px;z-index:2;background:#fff;min-width:70px;color:var(--accent);font-weight:600">${b.machineId||'-'}</td>
       <td class="text-sm" style="position:sticky;left:160px;z-index:2;background:#fff;min-width:120px;white-space:nowrap">${b.colour||'-'}</td>
-      <td style="position:sticky;left:280px;z-index:2;background:#fff;min-width:160px">${b.customer||'-'}</td>
-      <td class="td-mono" style="position:sticky;left:440px;z-index:2;background:#fff;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">${b.size} (${ps}L/box)</td>
+      <td class="td-mono" style="position:sticky;left:280px;z-index:2;background:#fff;min-width:80px;color:var(--text2)">${b.pcCode||'-'}</td>
+      <td style="position:sticky;left:360px;z-index:2;background:#fff;min-width:160px">${b.customer||'-'}</td>
+      <td class="td-mono" style="position:sticky;left:520px;z-index:2;background:#fff;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.1)">${b.size} (${ps}L/box)</td>
       <td class="td-mono">${fmt(b.grossQty||b.qty)}L</td>
       <td class="td-mono" style="color:${(b.actualProd||b.actualQty)>0?'var(--accent2)':'var(--text3)'}">${(b.actualProd||b.actualQty)>0?fmt(b.actualProd||b.actualQty)+'L':'—'}</td>
       <td class="td-mono">${maxLabels}</td>
@@ -2705,7 +2711,7 @@ function buildLabelRows(batches){
         </div>
       </td>
     </tr>`;
-  }).join('')||'<tr><td colspan="13" class="text-center text-muted">No active batches from Planning App</td></tr>';
+  }).join('')||'<tr><td colspan="14" class="text-center text-muted">No active batches from Planning App</td></tr>';
 }
 
 let _labelSortCol='', _labelSortDir=1;
@@ -2720,6 +2726,7 @@ function filterLabelTable(){
   const fBatch=(document.getElementById('lf-batch')?.value||'').toLowerCase().trim();
   const fMc=(document.getElementById('lf-mc')?.value||'').toLowerCase();
   const fColour=(document.getElementById('lf-colour')?.value||'').toLowerCase();
+  const fPcCode=(document.getElementById('lf-pccode')?.value||'').toLowerCase().trim();
   const fCustomer=(document.getElementById('lf-customer')?.value||'').toLowerCase().trim();
   const fSize=document.getElementById('lf-size')?.value||'';
   const fStatus=document.getElementById('lf-status')?.value||'';
@@ -2730,6 +2737,7 @@ function filterLabelTable(){
     const batch=row.dataset.batch||'';
     const mc=row.dataset.mc||'';
     const colour=row.dataset.colour||'';
+    const pccode=row.dataset.pccode||'';
     const customer=row.dataset.customer||'';
     const size=row.dataset.size||'';
     const generated=parseInt(row.dataset.generated||0);
@@ -2740,6 +2748,7 @@ function filterLabelTable(){
     const matchBatch=!fBatch||batch.includes(fBatch);
     const matchMc=!fMc||mc===fMc;
     const matchColour=!fColour||colour.includes(fColour);
+    const matchPcCode=!fPcCode||pccode.includes(fPcCode);
     const matchCustomer=!fCustomer||customer.includes(fCustomer);
     const matchSize=!fSize||size===fSize;
 
@@ -2750,7 +2759,7 @@ function filterLabelTable(){
     else if(fStatus==='has-remaining') matchStatus=remaining>0;
     else if(fStatus==='unprinted') matchStatus=printed<generated;
 
-    const show=matchBatch&&matchMc&&matchColour&&matchCustomer&&matchSize&&matchStatus;
+    const show=matchBatch&&matchMc&&matchColour&&matchPcCode&&matchCustomer&&matchSize&&matchStatus;
     row.style.display=show?'':'none';
     if(show) visible++;
   });
@@ -2771,7 +2780,7 @@ function updateLabelCount(visible, total){
 }
 
 function clearLabelFilters(){
-  ['lf-batch','lf-mc','lf-colour','lf-customer','lf-size','lf-status'].forEach(id=>{
+  ['lf-batch','lf-mc','lf-colour','lf-pccode','lf-customer','lf-size','lf-status'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.value='';
   });
@@ -3107,6 +3116,7 @@ function renderDeptScan(dept){
       .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
     ">🔄 Sync</button>`;
 
+
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid ${cfg.color}">
     <div class="dept-strip ${cfg.strip}"></div>
@@ -3188,7 +3198,7 @@ function renderDeptScan(dept){
         <label>Batch</label>
         <select id="wastage-batch-${dept}">
           <option value="">-- Select Batch --</option>
-          ${state.batches.filter(b=>b.status!=='closed').map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''} (Size ${b.size})</option>`).join('')}
+          ${state.batches.filter(b=>b.status!=='closed').sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber))).map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''} (Size ${b.size})</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -3620,6 +3630,7 @@ function renderDispatch(){
   dispatchedIn.forEach(s=>{ if(batchSummary[s.batchNumber]) batchSummary[s.batchNumber].dispIn++; });
   dispatchedOut.forEach(s=>{ if(batchSummary[s.batchNumber]) batchSummary[s.batchNumber].dispOut++; });
 
+
   el.innerHTML=`
   <div class="card mb-16" style="border-top:4px solid var(--accent3)">
     <div class="dept-strip dispatch"></div>
@@ -3817,6 +3828,7 @@ function renderScanHistory(){
   if(filterType!=='all') scans=scans.filter(s=>s.type===filterType);
   if(filterDate) scans=scans.filter(s=>s.ts&&s.ts.slice(0,10)===filterDate);
 
+
   el.innerHTML=`
   <div class="section-header mb-16">
     <div>
@@ -3920,6 +3932,7 @@ function renderBatchTracker(){
       .catch(()=>{ b.textContent='❌ Failed'; b.disabled=false; setTimeout(()=>b.textContent='🔄 Sync',2000); });
     ">🔄 Sync</button>
     <button class="btn btn-secondary btn-sm" onclick="exportTrackerReport()">📥 Export</button>`;
+
 
   el.innerHTML=`
   <div class="section-header">
@@ -4141,6 +4154,7 @@ function fixAllReportSticky(){
 
 function renderReports(){
   const el=document.getElementById('page-reports');
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Reports</div><div class="section-sub">Generate and export operational reports</div></div>
@@ -4202,6 +4216,9 @@ function renderReportG(){
   // Collect data per batch per dept
   const batches = state.batches;
   const rows = [];
+  const grandTotals = {};
+  DEPTS.forEach(d=>{ grandTotals[d]={inQty:0,outQty:0,salvage:0,remelt:0}; });
+  let grandTotalAGrade=0, grandTotalWastage=0, grandGrossIn=0;
 
   batches.forEach(b=>{
     const batchNo = b.batchNumber;
@@ -4218,16 +4235,25 @@ function renderReportG(){
       const remelt   = wastage.reduce((s,w)=>s+(w.type==='remelt'?parseFloat(w.qty||0):0),0);
       const totalW   = salvage + remelt;
       const aGrade   = Math.max(0, outQty);
-      const pct      = inQty>0?(aGrade/inQty*100):0;
+      const pctBase  = inQty + salvage + remelt;
+      const pct      = pctBase>0?(aGrade/pctBase*100):0;
       if(dept==='aim'){ batchGrossIn += inQty; }
       batchTotalAGrade += aGrade;
       batchTotalWastage += totalW;
+      // accumulate per-dept grand totals
+      grandTotals[dept].inQty  += inQty;
+      grandTotals[dept].outQty += outQty;
+      grandTotals[dept].salvage+= salvage;
+      grandTotals[dept].remelt += remelt;
       return {dept, scansIn, scansOut, inQty:fmt(inQty), outQty:fmt(outQty), aGrade:fmt(aGrade), salvage:fmt(salvage), remelt:fmt(remelt), pct:fmt(pct,1)};
     });
 
-    const overallPct = batchGrossIn>0?(batchTotalAGrade/batchGrossIn*100):0;
+    const overallPct = (batchGrossIn+batchTotalWastage)>0?(batchTotalAGrade/(batchGrossIn+batchTotalWastage)*100):0;
+    grandTotalAGrade+=batchTotalAGrade; grandTotalWastage+=batchTotalWastage; grandGrossIn+=batchGrossIn;
     rows.push({b, deptData, batchTotalAGrade:fmt(batchTotalAGrade), batchTotalWastage:fmt(batchTotalWastage), overallPct:fmt(overallPct,1)});
   });
+
+  const grandOverallPct = (grandGrossIn+grandTotalWastage)>0?(grandTotalAGrade/(grandGrossIn+grandTotalWastage)*100):0;
 
   el.innerHTML=`
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
@@ -4288,8 +4314,29 @@ function renderReportG(){
         </tr>
       `).join('')||'<tr><td colspan="14" class="text-center text-muted">No batch data available</td></tr>'}
       </tbody>
+      <tfoot id="rg-tfoot"></tfoot>
     </table></div>
   </div>`;
+
+  // Build grand total tfoot row safely (avoids nested backtick conflict)
+  const tfootEl = document.getElementById('rg-tfoot');
+  if(tfootEl){
+    const gc = grandOverallPct>=95?'green':grandOverallPct>=90?'amber':grandOverallPct>0?'red':'';
+    let tfootHTML = '<tr style="background:#e8f0fe;border-top:2px solid var(--border2)">';
+    tfootHTML += '<td colspan="3" style="position:sticky;left:0;z-index:3;background:#e8f0fe;padding:8px 10px;font-weight:700;white-space:nowrap;font-size:13px">GRAND TOTAL</td>';
+    DEPTS.forEach(d=>{
+      tfootHTML += '<td class="td-mono rg-col-'+d+'" style="border-left:2px solid var(--border2);font-weight:700;min-width:70px">'+fmt(grandTotals[d].inQty)+'</td>';
+      tfootHTML += '<td class="td-mono rg-col-'+d+'" style="font-weight:700;min-width:70px">'+fmt(grandTotals[d].outQty)+'</td>';
+      tfootHTML += '<td class="td-mono rg-col-'+d+'" style="color:var(--amber);font-weight:700;min-width:70px">'+fmt(grandTotals[d].salvage)+'</td>';
+      tfootHTML += '<td class="td-mono rg-col-'+d+'" style="color:var(--red);font-weight:700;min-width:70px">'+fmt(grandTotals[d].remelt)+'</td>';
+      tfootHTML += '<td class="td-mono rg-col-'+d+'" style="min-width:70px">—</td>';
+    });
+    tfootHTML += '<td class="td-mono fw-bold green rg-col-overall" style="border-left:2px solid var(--border2);font-weight:700;min-width:90px">'+fmt(grandTotalAGrade)+'</td>';
+    tfootHTML += '<td class="td-mono" style="color:var(--amber);font-weight:700;min-width:90px">'+fmt(grandTotalWastage)+'</td>';
+    tfootHTML += '<td class="td-mono fw-bold '+gc+'" style="min-width:80px">'+(grandOverallPct>0?fmt(grandOverallPct,1)+'%':'—')+'</td>';
+    tfootHTML += '</tr>';
+    tfootEl.innerHTML = tfootHTML;
+  }
 }
 
 function filterReportG(){
@@ -4340,12 +4387,12 @@ async function exportReportGExcel(){
       const wastage=state.wastage.filter(w=>w.batchNumber===batchNo&&w.dept===dept);
       const salvage=wastage.reduce((s,w)=>s+(w.type==='salvage'?parseFloat(w.qty||0):0),0);
       const remelt=wastage.reduce((s,w)=>s+(w.type==='remelt'?parseFloat(w.qty||0):0),0);
-      const pct=inQty>0?(outQty/inQty*100):0;
+      const pct=(inQty+salvage+remelt)>0?(outQty/(inQty+salvage+remelt)*100):0;
       if(dept==='aim') grossIn+=inQty;
       totalAG+=outQty; totalW+=salvage+remelt;
       row.push(fmt(inQty),fmt(outQty),fmt(salvage),fmt(remelt),inQty>0?fmt(pct,1)+'%':'');
     });
-    const overallPct=grossIn>0?(totalAG/grossIn*100):0;
+    const overallPct=(grossIn+totalW)>0?(totalAG/(grossIn+totalW)*100):0;
     row.push(fmt(totalAG),fmt(totalW),grossIn>0?fmt(overallPct,1)+'%':'');
     rows.push(row);
   });
@@ -4419,6 +4466,27 @@ function renderReportF(){
     </tr>`;
   });
 
+  // Grand total row for Report F
+  let gtFDprL=0,gtFDprBox=0,gtFAimToday=0,gtFAimTotal=0,gtFPackToday=0,gtFCount=0;
+  allRelevantBatches.forEach(batchNo=>{
+    const batch=getBatch(batchNo); if(!batch) return;
+    const dprQtyL=batch.actualQty||0;
+    const dprBoxes=dprQtyL>0?lakhToBox(dprQtyL,batch.size):0;
+    const aimInToday=getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in'&&s.ts?.slice(0,10)===todayStr).length;
+    const aimInTotal=getScansForBatch(batchNo).filter(s=>s.dept==='aim'&&s.type==='in').length;
+    const packOutToday=getScansForBatch(batchNo).filter(s=>s.dept==='packing'&&s.type==='out'&&s.ts?.slice(0,10)===todayStr).length;
+    gtFDprL+=dprQtyL; gtFDprBox+=dprBoxes; gtFAimToday+=aimInToday; gtFAimTotal+=aimInTotal; gtFPackToday+=packOutToday; gtFCount++;
+  });
+  const gtFRow = gtFCount>0?`<tr style="background:#e8f0fe;border-top:2px solid var(--border2);font-weight:700">
+    <td colspan="3" style="position:sticky;left:0;z-index:2;background:#e8f0fe;padding:8px 10px;font-size:13px;font-weight:700">GRAND TOTAL (${gtFCount} batches)</td>
+    <td class="td-mono" style="font-weight:700;min-width:80px">${fmt(gtFDprL)}L</td>
+    <td class="td-mono" style="font-weight:700;min-width:70px">${gtFDprBox}</td>
+    <td class="td-mono" style="font-weight:700;min-width:80px">${gtFAimToday}</td>
+    <td class="td-mono" style="font-weight:700;min-width:70px">${gtFAimTotal}</td>
+    <td class="td-mono" style="font-weight:700;min-width:80px">${gtFPackToday}</td>
+    <td style="min-width:80px">—</td>
+  </tr>`:'';
+
   if(!rows){
     rows = '<tr><td colspan="9" class="text-center text-muted" style="padding:32px">No batch activity found for today</td></tr>';
   }
@@ -4451,6 +4519,7 @@ function renderReportF(){
         <th>Status</th>
       </tr></thead>
       <tbody>${rows}</tbody>
+      <tfoot>${gtFRow}</tfoot>
     </table></div>
 
     <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
@@ -4497,6 +4566,7 @@ function renderReportB(){
     html+=`<div class="mb-16"><div class="card-title" style="color:${DEPT_CONFIG[dept].color}">${DEPT_CONFIG[dept].label}</div>
     <div class="tbl-wrap" style="max-height:60vh;overflow-y:auto;overflow-x:auto"><table>
       <thead><tr style="position:sticky;top:0;z-index:5;background:#f8f9fb"><th style="position:sticky;left:0;top:0;z-index:6;background:#f8f9fb;min-width:90px">Batch</th><th style="position:sticky;left:90px;top:0;z-index:6;background:#f8f9fb;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.12)">Customer</th><th style="background:#f8f9fb">Boxes IN</th><th style="background:#f8f9fb">Boxes OUT</th><th style="background:#f8f9fb">WIP Boxes</th><th style="background:#f8f9fb">WIP Qty (L)</th><th style="background:#f8f9fb">Time in Dept</th><th style="background:#f8f9fb">Status</th></tr></thead><tbody>`;
+    let gtInn=0,gtOut=0,gtWip=0,gtWipQty=0;
     batchSet.forEach(batchNo=>{
       const batch=getBatch(batchNo);
       const inn=inScans.filter(s=>s.batchNumber===batchNo).length;
@@ -4506,6 +4576,7 @@ function renderReportB(){
       const firstIn=inScans.filter(s=>s.batchNumber===batchNo).sort((a,b)=>new Date(a.ts)-new Date(b.ts))[0];
       const hrs=firstIn?hoursAgo(firstIn.ts):0;
       const alerts=state.alerts.filter(a=>a.batchNumber===batchNo&&a.dept===dept).length;
+      gtInn+=inn; gtOut+=out; gtWip+=wip; gtWipQty+=wipQty;
       html+=`<tr>
         <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#fff;min-width:90px">${batchNo}${alerts>0?` <span class="red-flag">🚩</span>`:''}</td>
         <td class="text-sm" style="position:sticky;left:90px;z-index:2;background:#fff;min-width:160px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${batch?.customer||'-'}</td>
@@ -4516,6 +4587,17 @@ function renderReportB(){
         <td>${isStageComplete(batchNo,dept)?'<span class="badge badge-green">✅ Closed</span>':wip>0?'<span class="badge badge-blue">In Dept</span>':'<span class="badge badge-gray">-</span>'}</td>
       </tr>`;
     });
+    if(batchSet.length>0){
+      html+=`<tr style="background:#e8f0fe;border-top:2px solid var(--border2);font-weight:700">
+        <td colspan="2" style="position:sticky;left:0;z-index:2;background:#e8f0fe;padding:7px 10px;font-size:13px">TOTAL (${batchSet.length} batches)</td>
+        <td class="td-mono" style="font-weight:700;min-width:70px">${gtInn}</td>
+        <td class="td-mono" style="font-weight:700;min-width:70px">${gtOut}</td>
+        <td class="td-mono fw-bold" style="min-width:70px">${gtWip}</td>
+        <td class="td-mono" style="font-weight:700;min-width:70px">${fmt(gtWipQty)}</td>
+        <td class="td-mono" style="min-width:70px">—</td>
+        <td style="min-width:80px">—</td>
+      </tr>`;
+    }
     html+=`</tbody></table></div></div>`;
   });
   html+=`<button class="btn btn-secondary btn-sm mt-12" onclick="exportReportB()">📥 Export Excel</button></div>`;
@@ -4528,6 +4610,7 @@ function renderReportC(){
   let html=`<div class="card"><div class="section-title mb-16">Report C — Machine-wise WIP Status</div><div class="tbl-wrap"><table>
     <thead><tr><th style="position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:70px">Machine</th><th style="position:sticky;left:70px;z-index:3;background:#f8f9fb;min-width:55px">Floor</th><th style="position:sticky;left:125px;z-index:3;background:#f8f9fb;min-width:80px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
   const machines=[...new Set(state.batches.map(b=>b.machineId).filter(Boolean))].sort();
+  let gtCProd=0, gtCPacked=0, gtCBatches=0;
   machines.forEach(mc=>{
     const batches=state.batches.filter(b=>b.machineId===mc&&!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
     batches.forEach(b=>{
@@ -4542,6 +4625,7 @@ function renderReportC(){
       else if(packedOut===0&&wipDays===0) statusBadge='<span class="badge badge-gray">⏳ Production</span>';
       else if(wipDays<=std) statusBadge='<span class="badge badge-blue">🔵 In Progress</span>';
       else statusBadge='<span class="badge badge-amber">⚠️ Pending</span>';
+      gtCProd+=grossProd; gtCPacked+=packedQty; gtCBatches++;
       html+=`<tr>
         <td class="td-bold td-mono" style="position:sticky;left:0;z-index:2;background:#fff;min-width:70px">${mc}</td>
         <td class="td-mono" style="position:sticky;left:70px;z-index:2;background:#fff;min-width:55px">${getMachineFloor(mc)}</td>
@@ -4554,7 +4638,15 @@ function renderReportC(){
       </tr>`;
     });
   });
-  html+=`</tbody></table></div><button class="btn btn-secondary btn-sm mt-12" onclick="exportReportC()">📥 Export Excel</button></div>`;
+  html+=`</tbody>
+  <tfoot><tr style="background:#e8f0fe;border-top:2px solid var(--border2);font-weight:700">
+    <td colspan="4" style="position:sticky;left:0;z-index:2;background:#e8f0fe;padding:8px 10px;font-size:13px;font-weight:700">GRAND TOTAL (${gtCBatches} batches)</td>
+    <td class="td-mono" style="font-weight:700;min-width:80px">${fmt(gtCProd)}</td>
+    <td class="td-mono" style="font-weight:700;min-width:80px">${fmt(gtCPacked)}</td>
+    <td class="td-mono" style="min-width:70px">—</td>
+    <td style="min-width:80px">—</td>
+  </tr></tfoot>
+  </table></div><button class="btn btn-secondary btn-sm mt-12" onclick="exportReportC()">📥 Export Excel</button></div>`;
   document.getElementById('report-output').innerHTML=html;
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
   setTimeout(fixAllReportSticky, 150);
@@ -4711,6 +4803,10 @@ function renderReportE(){
   const allScanDates = [...new Set(state.scans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();
 
   const rows=[];
+  // Grand total accumulators
+  let gt={plannedQty:0,grossProd:0,aimIn:0,aimSalvage:0,aimRemelt:0,aimAGrade:0,manInspect:0,
+    totalAGrade:0,wip:0,availUnptd:0,availPrint:0,printingTD:0,printRej:0,
+    piInspect:0,piSalRem:0,packingUP:0,packingPTD:0,dispatch:0};
   // Group all batches by machine directly — avoids FLOORS.machines ID mismatch
   const allBatches = state.batches.filter(b=>!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
   const machineIds = [...new Set(allBatches.map(b=>b.machineId).filter(Boolean))].sort();
@@ -4744,6 +4840,12 @@ function renderReportE(){
         availUnptd:fmt(!b.isPrinted?totalAG:0),availPrint:fmt(b.isPrinted?totalAG:0),
         printingTD:fmt(printingTD),printRej:fmt(printW.salvage),piInspect:fmt(piOut),
         piSalRem:fmt(piW.salvage),packingUP:fmt(packUnptd),packingPTD:fmt(packPtd),dispatch:fmt(disp)});
+      gt.plannedQty+=b.qty||0; gt.grossProd+=grossProd; gt.aimIn+=aimIn;
+      gt.aimSalvage+=aimW.salvage; gt.aimRemelt+=aimW.remelt; gt.aimAGrade+=aimOutQty;
+      gt.manInspect+=manW.total; gt.totalAGrade+=totalAG; gt.wip+=wip;
+      gt.availUnptd+=(!b.isPrinted?totalAG:0); gt.availPrint+=(b.isPrinted?totalAG:0);
+      gt.printingTD+=printingTD; gt.printRej+=printW.salvage; gt.piInspect+=piOut;
+      gt.piSalRem+=piW.salvage; gt.packingUP+=packUnptd; gt.packingPTD+=packPtd; gt.dispatch+=disp;
     });
   });
   let html=`<div class="card"><div class="section-title mb-4">Report E — Machine-wise Production Tracking Sheet</div>
@@ -4784,6 +4886,41 @@ function renderReportE(){
   </table></div></div>
   <button class="btn btn-secondary btn-sm mt-12" onclick="exportReportE()">📥 Export Excel (matches current format)</button></div>`;
   document.getElementById('report-output').innerHTML=html;
+
+  // Build Grand Total tfoot safely
+  const tbl = document.getElementById('report-output').querySelector('table');
+  if(tbl && rows.length){
+    const gtAimPct = gt.aimIn>0?(gt.aimAGrade/gt.aimIn*100):0;
+    const gtOverallPct = (gt.aimIn+gt.aimSalvage+gt.aimRemelt)>0?(gt.totalAGrade/(gt.aimIn+gt.aimSalvage+gt.aimRemelt)*100):0;
+    const pc = (v,c='')=>'<td class="td-mono" style="font-weight:700;min-width:70px;'+(c?'color:'+c+';':'')+'">'+(v?fmt(v):'0.00')+'</td>';
+    const pct = (v,label='')=>{
+      const cl=v>=95?'var(--green,#16a34a)':v>=90?'var(--amber,#d97706)':v>0?'var(--red,#dc2626)':'';
+      return '<td class="td-mono fw-bold" style="min-width:70px;font-weight:700;color:'+cl+'">'+fmt(v,1)+'%</td>';
+    };
+    let tf='<tfoot><tr style="background:#e8f0fe;border-top:2px solid var(--border2,#cbd5e1)">';
+    tf+='<td colspan="5" style="position:sticky;left:0;z-index:3;background:#e8f0fe;padding:8px 10px;font-weight:700;font-size:13px;white-space:nowrap">GRAND TOTAL ('+rows.length+' batches)</td>';
+    tf+=pc(gt.grossProd);
+    tf+=pc(gt.aimIn);
+    tf+=pc(gt.aimSalvage,'var(--amber,#d97706)');
+    tf+=pc(gt.aimRemelt,'var(--red,#dc2626)');
+    tf+=pc(gt.aimAGrade);
+    tf+=pct(gtAimPct);
+    tf+=pc(gt.manInspect);
+    tf+=pc(gt.totalAGrade);
+    tf+=pct(gtOverallPct);
+    tf+=pc(gt.wip);
+    tf+=pc(gt.availUnptd);
+    tf+=pc(gt.availPrint);
+    tf+=pc(gt.printingTD);
+    tf+=pc(gt.printRej,'var(--red,#dc2626)');
+    tf+=pc(gt.piInspect);
+    tf+=pc(gt.piSalRem,'var(--amber,#d97706)');
+    tf+=pc(gt.packingUP);
+    tf+=pc(gt.packingPTD);
+    tf+='<td class="td-mono fw-bold" style="font-weight:700;min-width:70px;color:var(--green,#16a34a)">'+fmt(gt.dispatch)+'</td>';
+    tf+='</tr></tfoot>';
+    tbl.insertAdjacentHTML('beforeend', tf);
+  }
   document.getElementById('report-output').scrollIntoView({behavior:'smooth'});
   setTimeout(fixAllReportSticky, 150);
 }
@@ -4967,6 +5104,7 @@ function renderTrackingSearch(){
     });
   }
 
+
   el.innerHTML=`
     <div class="card">
       <div class="section-title mb-16">🔍 Search</div>
@@ -5019,6 +5157,7 @@ function renderSettings(){
   const isAdmin=currentDept==='admin';
   // After rendering, append audit log for admin
   setTimeout(()=>{ if(isAdmin) renderTrackingAuditLog(); }, 100);
+
   el.innerHTML=`
   <div class="section-header">
     <div><div class="section-title">Settings</div></div>
@@ -5081,7 +5220,7 @@ function renderSettings(){
           <label>Batch Number</label>
           <select id="bf-batch">
             <option value="">-- Select Batch --</option>
-            ${state.batches.filter(b=>!b.deleted).map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''} | ${b.isPrinted?'PTD':'UP'}</option>`).join('')}
+            ${state.batches.filter(b=>!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber))).map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''} | ${b.isPrinted?'PTD':'UP'}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
@@ -5123,7 +5262,7 @@ function renderSettings(){
           <label>Batch</label>
           <select id="bfw-batch">
             <option value="">-- Select Batch --</option>
-            ${state.batches.filter(b=>!b.deleted).map(b=>`<option value="${b.batchNumber}">${b.batchNumber}</option>`).join('')}
+            ${state.batches.filter(b=>!b.deleted).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber))).map(b=>`<option value="${b.batchNumber}">${b.batchNumber}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">

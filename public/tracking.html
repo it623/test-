@@ -649,6 +649,7 @@ const ALERT_HOURS = 48;
 
 let currentDept = null;
 let currentPage = null;
+let currentReport = null; // tracks which sub-report is open
 // Sanitize server URL — strip any file path and trailing slashes
 function sanitizeServerUrl(url) {
   if (!url) return '';
@@ -963,6 +964,7 @@ function buildSidebar(){
 
 function navigate(page){
   currentPage=page;
+  if(page!=='reports') currentReport=null;
   mobileCloseSidebar();
   updateMobileNavActive(page);
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -2244,7 +2246,16 @@ function renderPage(page){
     case 'dispatch': renderDispatch(); break;
     case 'scan-history': renderScanHistory(); break;
     case 'batch-tracker': renderBatchTracker(); break;
-    case 'reports': renderReports(); break;
+    case 'reports':
+      if(currentReport==='A') renderReportA();
+      else if(currentReport==='B') renderReportB();
+      else if(currentReport==='C') renderReportC();
+      else if(currentReport==='D') renderReportD();
+      else if(currentReport==='E') renderReportE();
+      else if(currentReport==='F') renderReportF();
+      else if(currentReport==='G') renderReportG();
+      else renderReports();
+      break;
     case 'search': renderTrackingSearch(); break;
     case 'settings': renderSettings(); break;
   }
@@ -4207,6 +4218,7 @@ function renderReports(){
 }
 
 function renderReportG(){
+  currentReport='G';
   const el = document.getElementById('report-output');
   if(!el) return;
 
@@ -4403,6 +4415,7 @@ async function exportReportGExcel(){
 }
 
 function renderReportF(){
+  currentReport='F';
   // End-of-day production vs scan reconciliation
   // Compares DPR actualQty (gross production) vs AIM scan IN count per batch per day
   const todayStr = today();
@@ -4557,6 +4570,7 @@ function exportReportF(){
 
 
 function renderReportB(){
+  currentReport='B';
   const depts=['aim','printing','pi','packing'];
   let html=`<div class="card"><div class="section-title mb-16">Report B — Department-wise WIP</div>`;
   depts.forEach(dept=>{
@@ -4607,6 +4621,7 @@ function renderReportB(){
 }
 
 function renderReportC(){
+  currentReport='C';
   let html=`<div class="card"><div class="section-title mb-16">Report C — Machine-wise WIP Status</div><div class="tbl-wrap"><table>
     <thead><tr><th style="position:sticky;left:0;z-index:3;background:#f8f9fb;min-width:70px">Machine</th><th style="position:sticky;left:70px;z-index:3;background:#f8f9fb;min-width:55px">Floor</th><th style="position:sticky;left:125px;z-index:3;background:#f8f9fb;min-width:80px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Batch</th><th>Customer</th><th>Produced (L)</th><th>Packed (L)</th><th>WIP Days</th><th>Status</th></tr></thead><tbody>`;
   const machines=[...new Set(state.batches.map(b=>b.machineId).filter(Boolean))].sort();
@@ -4653,6 +4668,7 @@ function renderReportC(){
 }
 
 function renderReportD(){
+  currentReport='D';
   const totalGross=state.batches.reduce((s,b)=>s+(b.actualProd||0),0);
   const stages=['aim','printing','pi','packing','dispatch'];
   const stageWIP={};
@@ -4700,6 +4716,7 @@ function renderReportD(){
 }
 
 function renderReportA(){
+  currentReport='A';
   // Date filter
   const filterBatch = window._rptABatch||'';
   const batches = state.batches.filter(b=>!b.deleted && (!filterBatch||b.batchNumber===filterBatch)).sort((a,b)=>String(a.batchNumber).localeCompare(String(b.batchNumber)));
@@ -4798,6 +4815,7 @@ function renderBatchFlowSummary(batch){
 }
 
 function renderReportE(){
+  currentReport='E';
   // Machine-wise Production Tracking Sheet — cumulative up to date, with optional date filter
   const filterDate = window._rptEDate || '';
   const allScanDates = [...new Set(state.scans.map(s=>s.ts?.slice(0,10)).filter(Boolean))].sort();

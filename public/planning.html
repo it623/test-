@@ -33,10 +33,7 @@
 * { margin:0; padding:0; box-sizing:border-box; }
 html, body { height:100%; color:var(--text); font-family:var(--body); font-size:14px; }
 body {
-  background:
-    radial-gradient(ellipse at 15% 10%, rgba(79,142,247,0.12) 0%, transparent 45%),
-    radial-gradient(ellipse at 85% 90%, rgba(240,165,0,0.08) 0%, transparent 45%),
-    radial-gradient(ellipse at 50% 50%, #0a0f1e 0%, #060912 100%);
+  background: #f2ede3;
 }
 
 /* LAYOUT */
@@ -121,9 +118,9 @@ body {
 
 /* TABLES */
 .table-wrap { overflow-x:auto; border-radius:8px; border:1px solid var(--border); position:relative; }
-.table-wrap td[style*="position:sticky"] { background:#0a0f1e; }
-.table-wrap tr:hover td[style*="position:sticky"] { background:#0f1628; }
-.table-wrap thead th[style*="position:sticky"] { background:#0f1628; }
+.table-wrap td[style*="position:sticky"] { background:#f2ede3; }
+.table-wrap tr:hover td[style*="position:sticky"] { background:#f2ede3; }
+.table-wrap thead th[style*="position:sticky"] { background:#f2ede3; }
 table { width:100%; border-collapse:collapse; font-size:13px; }
 thead th {
   background:linear-gradient(180deg,rgba(10,16,32,0.99) 0%,rgba(8,12,24,0.99) 100%);
@@ -342,7 +339,7 @@ input[type="file"] { display:none; }
 /* ── AUTH OVERLAY ── */
 #auth-overlay{position:fixed;inset:0;background:var(--surface,#0f1522);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column}
 #auth-overlay.hidden{display:none}
-.auth-card{background:var(--surface2,#1a2035);border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:12px;padding:36px 40px;width:100%;max-width:380px;box-shadow:0 8px 40px rgba(0,0,0,0.6)}
+.auth-card{background:var(--surface2,#f7f3ea);border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:12px;padding:36px 40px;width:100%;max-width:380px;box-shadow:0 8px 40px rgba(0,0,0,0.6)}
 .auth-logo{text-align:center;margin-bottom:24px}
 .auth-logo h2{font-size:22px;font-weight:700;color:var(--accent,#00d4ff);letter-spacing:2px;margin-bottom:4px}
 .auth-logo p{font-size:12px;color:var(--text3,rgba(255,255,255,0.4));letter-spacing:1px}
@@ -350,14 +347,14 @@ input[type="file"] { display:none; }
 .auth-form-group label{display:block;font-size:11px;color:var(--text3,rgba(255,255,255,0.4));letter-spacing:1px;margin-bottom:6px;text-transform:uppercase}
 .auth-form-group select,.auth-form-group input{width:100%;background:var(--surface3,rgba(255,255,255,0.04));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:6px;color:var(--text,#e8eaf0);padding:10px 14px;font-size:14px;outline:none;box-sizing:border-box}
 .auth-form-group input:focus{border-color:var(--accent,#00d4ff)}
-.auth-btn{width:100%;background:var(--accent,#00d4ff);color:#0a0f1e;border:none;border-radius:6px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1px;margin-top:8px}
+.auth-btn{width:100%;background:var(--accent,#00d4ff);color:#f2ede3;border:none;border-radius:6px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:1px;margin-top:8px}
 .auth-btn:hover{opacity:0.9}
 .auth-error{color:#ff6b6b;font-size:12px;text-align:center;margin-top:8px;min-height:18px}
 .auth-user-badge{display:flex;align-items:center;gap:8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
 .auth-user-badge:hover{background:rgba(0,212,255,0.15)}
 /* ── AUDIT LOG TAB ── */
 .audit-row{display:grid;grid-template-columns:140px 80px 90px 1fr;gap:8px;padding:7px 12px;border-bottom:1px solid var(--surface3,rgba(255,255,255,0.04));font-size:12px}
-.audit-row:hover{background:var(--surface2,#1a2035)}
+.audit-row:hover{background:var(--surface2,#f7f3ea)}
 </style>
 </head>
 <body>
@@ -1469,13 +1466,13 @@ function renderProduction() {
           <div class="table-wrap" style="max-height:65vh;overflow-y:auto;overflow-x:auto">
             <table>
               <thead>
-                <tr style="position:sticky;top:0;z-index:5;background:#0f1628">
-                  <th style="position:sticky;left:0;top:0;z-index:6;background:#0f1628;min-width:30px">#</th>
-                  <th style="position:sticky;left:30px;top:0;z-index:6;background:#0f1628;min-width:150px">PO / Batch</th>
-                  <th style="position:sticky;left:180px;top:0;z-index:6;background:#0f1628;min-width:160px">Customer</th>
-                  <th style="position:sticky;left:340px;top:0;z-index:6;background:#0f1628;min-width:50px">Size</th>
-                  <th style="position:sticky;left:390px;top:0;z-index:6;background:#0f1628;min-width:70px">PC Code</th>
-                  <th style="position:sticky;left:460px;top:0;z-index:6;background:#0f1628;min-width:100px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Colour</th>
+                <tr style="position:sticky;top:0;z-index:5;background:#f2ede3">
+                  <th style="position:sticky;left:0;top:0;z-index:6;background:#f2ede3;min-width:30px">#</th>
+                  <th style="position:sticky;left:30px;top:0;z-index:6;background:#f2ede3;min-width:150px">PO / Batch</th>
+                  <th style="position:sticky;left:180px;top:0;z-index:6;background:#f2ede3;min-width:160px">Customer</th>
+                  <th style="position:sticky;left:340px;top:0;z-index:6;background:#f2ede3;min-width:50px">Size</th>
+                  <th style="position:sticky;left:390px;top:0;z-index:6;background:#f2ede3;min-width:70px">PC Code</th>
+                  <th style="position:sticky;left:460px;top:0;z-index:6;background:#f2ede3;min-width:100px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Colour</th>
                   <th>PTD/UP</th><th>Print Matter Cap</th><th>Print Matter Body</th><th>Ink Cap</th><th>Ink Body</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
                   <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>AIM Out (L)</th><th>Status</th><th>DPR Status</th><th>Remarks</th><th>Actions</th>
                 </tr>
@@ -1519,21 +1516,21 @@ function renderOrderRow(ord, idx, mc) {
   const woBadge = isWO ? '<span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span>' :
                   isWOReconciled ? '<span class="badge badge-completed" style="font-size:10px">✅ W/O Assigned</span>' : '';
   return `<tr class="${isClosed?'closed':''}" style="${isWO?'background:rgba(255,171,0,0.03);border-left:3px solid rgba(255,171,0,0.4)':''}">
-    <td class="text-mono text-dim" style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:30px">${idx}</td>
-    <td class="text-mono" style="position:sticky;left:30px;z-index:2;background:#0a0f1e;min-width:150px;white-space:nowrap;padding:10px 14px;line-height:1.8">
+    <td class="text-mono text-dim" style="position:sticky;left:0;z-index:2;background:#f2ede3;min-width:30px">${idx}</td>
+    <td class="text-mono" style="position:sticky;left:30px;z-index:2;background:#f2ede3;min-width:150px;white-space:nowrap;padding:10px 14px;line-height:1.8">
       ${woBadge}
       ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}<span style="color:#e2e8f8;font-weight:700;font-size:13px;letter-spacing:0.4px">${ord.poNumber||'-'}</span>
       ${ord.batchNumber?`<br><span style="color:#f0a500;font-weight:600;font-size:13px;font-family:var(--mono);letter-spacing:0.3px">${ord.batchNumber}</span>`:''}
     </td>
-    <td style="position:sticky;left:180px;z-index:2;background:#0a0f1e;min-width:160px;font-weight:500">${isWO
+    <td style="position:sticky;left:180px;z-index:2;background:#f2ede3;min-width:160px;font-weight:500">${isWO
       ? '<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>'
       : (ord.shipTo||ord.customer||'-') + (ord.billTo && ord.billTo !== (ord.shipTo||ord.customer)
           ? '<br><span style="font-size:11px;color:var(--text3);font-weight:400">Bill To: ' + ord.billTo + '</span>'
           : '')
     }</td>
-    <td class="text-mono" style="position:sticky;left:340px;z-index:2;background:#0a0f1e;min-width:50px">${ord.size||'-'}</td>
-    <td class="text-mono text-accent" style="position:sticky;left:390px;z-index:2;background:#0a0f1e;min-width:70px">${ord.pcCode||'-'}</td>
-    <td style="position:sticky;left:460px;z-index:2;background:#0a0f1e;min-width:100px;white-space:nowrap;font-size:12px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${ord.colour||'-'}</td>
+    <td class="text-mono" style="position:sticky;left:340px;z-index:2;background:#f2ede3;min-width:50px">${ord.size||'-'}</td>
+    <td class="text-mono text-accent" style="position:sticky;left:390px;z-index:2;background:#f2ede3;min-width:70px">${ord.pcCode||'-'}</td>
+    <td style="position:sticky;left:460px;z-index:2;background:#f2ede3;min-width:100px;white-space:nowrap;font-size:12px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${ord.colour||'-'}</td>
     <td>${ptdBadge}</td>
     <td style="font-size:11px">${(ord.printMatter||'').split('/')[0]?.trim()||'-'}</td>
     <td style="font-size:11px">${(ord.printMatter||'').split('/')[1]?.trim()||'-'}</td>
@@ -2662,28 +2659,28 @@ function renderPrinting() {
         ${orders.length===0?'<div class="empty-state" style="padding:16px"><p>No orders assigned</p></div>':`
         <div class="table-wrap" style="max-height:60vh;overflow-y:auto;overflow-x:auto">
           <table>
-            <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#1a2035)">
-              <th style="position:sticky;left:0;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:140px">Customer</th>
-              <th style="position:sticky;left:140px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:100px">Batch No</th>
-              <th style="position:sticky;left:240px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:80px">PC Code</th>
-              <th style="position:sticky;left:320px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:55px">Size</th>
-              <th style="position:sticky;left:375px;top:0;z-index:6;background:var(--surface2,#1a2035);min-width:120px;box-shadow:3px 0 8px rgba(0,0,0,0.3)">Colour</th>
-              <th style="background:var(--surface2,#1a2035)">Print Matter</th>
-              <th style="background:var(--surface2,#1a2035)">Linear/Circ</th>
-              <th style="background:var(--surface2,#1a2035)">Order Qty (L)</th>
-              <th style="background:var(--surface2,#1a2035)">Qty to Print (L)</th>
-              <th style="background:var(--surface2,#1a2035)">Daily Cap (L)</th>
-              <th style="background:var(--surface2,#1a2035)">Printed to Date</th>
-              <th style="background:var(--surface2,#1a2035)">AIM Out (L)</th>
-              <th style="background:var(--surface2,#1a2035)">Salvage (kg)</th>
-              <th style="background:var(--surface2,#1a2035)">Salvage %</th>
-              <th style="background:var(--surface2,#1a2035)">Balance</th>
-              <th style="background:var(--surface2,#1a2035)">Start Date</th>
-              <th style="background:var(--surface2,#1a2035)">End Date</th>
-              <th style="background:var(--surface2,#1a2035)">Status</th>
-              <th style="background:var(--surface2,#1a2035)">Zone</th>
-              <th style="background:var(--surface2,#1a2035)">Remarks</th>
-              <th style="background:var(--surface2,#1a2035)">Actions</th>
+            <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f7f3ea)">
+              <th style="position:sticky;left:0;top:0;z-index:6;background:var(--surface2,#f7f3ea);min-width:140px">Customer</th>
+              <th style="position:sticky;left:140px;top:0;z-index:6;background:var(--surface2,#f7f3ea);min-width:100px">Batch No</th>
+              <th style="position:sticky;left:240px;top:0;z-index:6;background:var(--surface2,#f7f3ea);min-width:80px">PC Code</th>
+              <th style="position:sticky;left:320px;top:0;z-index:6;background:var(--surface2,#f7f3ea);min-width:55px">Size</th>
+              <th style="position:sticky;left:375px;top:0;z-index:6;background:var(--surface2,#f7f3ea);min-width:120px;box-shadow:3px 0 8px rgba(0,0,0,0.3)">Colour</th>
+              <th style="background:var(--surface2,#f7f3ea)">Print Matter</th>
+              <th style="background:var(--surface2,#f7f3ea)">Linear/Circ</th>
+              <th style="background:var(--surface2,#f7f3ea)">Order Qty (L)</th>
+              <th style="background:var(--surface2,#f7f3ea)">Qty to Print (L)</th>
+              <th style="background:var(--surface2,#f7f3ea)">Daily Cap (L)</th>
+              <th style="background:var(--surface2,#f7f3ea)">Printed to Date</th>
+              <th style="background:var(--surface2,#f7f3ea)">AIM Out (L)</th>
+              <th style="background:var(--surface2,#f7f3ea)">Salvage (kg)</th>
+              <th style="background:var(--surface2,#f7f3ea)">Salvage %</th>
+              <th style="background:var(--surface2,#f7f3ea)">Balance</th>
+              <th style="background:var(--surface2,#f7f3ea)">Start Date</th>
+              <th style="background:var(--surface2,#f7f3ea)">End Date</th>
+              <th style="background:var(--surface2,#f7f3ea)">Status</th>
+              <th style="background:var(--surface2,#f7f3ea)">Zone</th>
+              <th style="background:var(--surface2,#f7f3ea)">Remarks</th>
+              <th style="background:var(--surface2,#f7f3ea)">Actions</th>
             </tr></thead>
             <tbody>
               ${orders.map(p=>renderPrintRow(p,pm)).join('')}
@@ -2699,7 +2696,7 @@ function renderPrinting() {
     html += `<div class="card mb-4">
       <div class="card-title text-accent">⚠️ Unassigned Print Orders (${unassigned.length})</div>
       <div class="table-wrap"><table>
-        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#1a2035)"><th style="background:var(--surface2,#1a2035)">Batch</th><th style="background:var(--surface2,#1a2035)">Customer</th><th style="background:var(--surface2,#1a2035)">Colour</th><th style="background:var(--surface2,#1a2035)">Size</th><th style="background:var(--surface2,#1a2035)">Qty to Print (L)</th><th style="background:var(--surface2,#1a2035)">AIM Out (L)</th><th style="background:var(--surface2,#1a2035)">Status</th><th style="background:var(--surface2,#1a2035)">Actions</th></tr></thead>
+        <thead><tr style="position:sticky;top:0;z-index:5;background:var(--surface2,#f7f3ea)"><th style="background:var(--surface2,#f7f3ea)">Batch</th><th style="background:var(--surface2,#f7f3ea)">Customer</th><th style="background:var(--surface2,#f7f3ea)">Colour</th><th style="background:var(--surface2,#f7f3ea)">Size</th><th style="background:var(--surface2,#f7f3ea)">Qty to Print (L)</th><th style="background:var(--surface2,#f7f3ea)">AIM Out (L)</th><th style="background:var(--surface2,#f7f3ea)">Status</th><th style="background:var(--surface2,#f7f3ea)">Actions</th></tr></thead>
         <tbody>${unassigned.map(p=>{
           const _ag = window._liveAGrade && window._liveAGrade[p.batchNumber];
           const _aimOut = _ag?.aim?.outQty != null ? fmt(_ag.aim.outQty) : (p.aimOut ? fmt(p.aimOut) : '—');
@@ -2729,11 +2726,11 @@ function renderPrintRow(p, pm) {
   const _aimLive = window._liveAGrade && window._liveAGrade[p.batchNumber];
   const _aimOut = _aimLive?.aim?.outQty != null ? fmt(_aimLive.aim.outQty) : (p.aimOut ? fmt(p.aimOut) : '—');
   return `<tr>
-    <td style="position:sticky;left:0;z-index:2;background:var(--surface,#0d1527);min-width:140px;font-weight:500">${p.customer||'-'}</td>
-    <td class="text-mono" style="position:sticky;left:140px;z-index:2;background:var(--surface,#0d1527);min-width:100px;color:var(--accent3)">${p.batchNumber||'-'}</td>
-    <td class="text-mono text-accent" style="position:sticky;left:240px;z-index:2;background:var(--surface,#0d1527);min-width:80px">${p.pcCode||'-'}</td>
-    <td class="text-mono" style="position:sticky;left:320px;z-index:2;background:var(--surface,#0d1527);min-width:55px">${p.size||'-'}</td>
-    <td style="position:sticky;left:375px;z-index:2;background:var(--surface,#0d1527);min-width:120px;font-size:12px;box-shadow:3px 0 8px rgba(0,0,0,0.3)">${p.colour||'-'}</td>
+    <td style="position:sticky;left:0;z-index:2;background:var(--surface,#f2ede3);min-width:140px;font-weight:500">${p.customer||'-'}</td>
+    <td class="text-mono" style="position:sticky;left:140px;z-index:2;background:var(--surface,#f2ede3);min-width:100px;color:var(--accent3)">${p.batchNumber||'-'}</td>
+    <td class="text-mono text-accent" style="position:sticky;left:240px;z-index:2;background:var(--surface,#f2ede3);min-width:80px">${p.pcCode||'-'}</td>
+    <td class="text-mono" style="position:sticky;left:320px;z-index:2;background:var(--surface,#f2ede3);min-width:55px">${p.size||'-'}</td>
+    <td style="position:sticky;left:375px;z-index:2;background:var(--surface,#f2ede3);min-width:120px;font-size:12px;box-shadow:3px 0 8px rgba(0,0,0,0.3)">${p.colour||'-'}</td>
     <td style="font-size:12px">${p.printMatter||'-'}</td>
     <td><select class="form-control" style="width:90px;padding:3px 6px;font-size:12px" onchange="updatePrintField('${p.id}','printType',this.value)">
       <option value="C" ${p.printType==='C'?'selected':''}>Circular</option>
@@ -3407,13 +3404,13 @@ function renderDispatch() {
           <div class="table-wrap" style="max-height:65vh;overflow-y:auto;overflow-x:auto">
             <table>
               <thead><tr>
-                <th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:160px">Customer</th>
-                <th style="position:sticky;left:160px;z-index:3;background:#0f1628;min-width:90px">Batch No</th>
-                <th style="position:sticky;left:250px;z-index:3;background:#0f1628;min-width:70px">PC Code</th>
-                <th style="position:sticky;left:320px;z-index:3;background:#0f1628;min-width:65px">Month</th>
-                <th style="position:sticky;left:385px;z-index:3;background:#0f1628;min-width:90px">Colour</th>
-                <th style="position:sticky;left:475px;z-index:3;background:#0f1628;min-width:50px">Size</th>
-                <th style="position:sticky;left:525px;z-index:3;background:#0f1628;min-width:65px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">PTD/UP</th><th>Zone</th><th>Qty (L)</th><th>Boxes</th>
+                <th style="position:sticky;left:0;z-index:3;background:#f2ede3;min-width:160px">Customer</th>
+                <th style="position:sticky;left:160px;z-index:3;background:#f2ede3;min-width:90px">Batch No</th>
+                <th style="position:sticky;left:250px;z-index:3;background:#f2ede3;min-width:70px">PC Code</th>
+                <th style="position:sticky;left:320px;z-index:3;background:#f2ede3;min-width:65px">Month</th>
+                <th style="position:sticky;left:385px;z-index:3;background:#f2ede3;min-width:90px">Colour</th>
+                <th style="position:sticky;left:475px;z-index:3;background:#f2ede3;min-width:50px">Size</th>
+                <th style="position:sticky;left:525px;z-index:3;background:#f2ede3;min-width:65px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">PTD/UP</th><th>Zone</th><th>Qty (L)</th><th>Boxes</th>
                 <th>Planned Date</th><th>Dispatched (L)</th><th>Pending (L)</th>
                 <th style="color:#00e676;background:rgba(0,230,118,0.06)">📦 Tracking Actual</th>
                 <th>Status</th><th>Remarks</th><th>Actions</th>
@@ -3458,13 +3455,13 @@ function renderDispatchRow(p) {
   const containerInfo = p.isConsolidatedExport
     ? `<div style="font-size:10px;color:var(--accent5);font-family:var(--mono);margin-top:2px">📦 Container: ${p.containerRef||'—'} (${(p.allProductionOrderIds||[]).length} orders)</div>` : '';
   return `<tr>
-    <td style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:160px;font-weight:500">${p.customer||'-'}${containerInfo}</td>
-    <td class="text-mono" style="position:sticky;left:160px;z-index:2;background:#0a0f1e;min-width:90px">${p.batchNumber||'-'}</td>
-    <td class="text-mono text-accent" style="position:sticky;left:250px;z-index:2;background:#0a0f1e;min-width:70px">${p.pcCode||'-'}</td>
-    <td class="text-mono text-dim" style="position:sticky;left:320px;z-index:2;background:#0a0f1e;min-width:65px">${month}</td>
-    <td style="position:sticky;left:385px;z-index:2;background:#0a0f1e;min-width:90px;font-size:12px">${p.colour||'-'}</td>
-    <td class="text-mono" style="position:sticky;left:475px;z-index:2;background:#0a0f1e;min-width:50px">${p.size||'-'}</td>
-    <td style="position:sticky;left:525px;z-index:2;background:#0a0f1e;min-width:65px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${p.packing==='PTD'?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
+    <td style="position:sticky;left:0;z-index:2;background:#f2ede3;min-width:160px;font-weight:500">${p.customer||'-'}${containerInfo}</td>
+    <td class="text-mono" style="position:sticky;left:160px;z-index:2;background:#f2ede3;min-width:90px">${p.batchNumber||'-'}</td>
+    <td class="text-mono text-accent" style="position:sticky;left:250px;z-index:2;background:#f2ede3;min-width:70px">${p.pcCode||'-'}</td>
+    <td class="text-mono text-dim" style="position:sticky;left:320px;z-index:2;background:#f2ede3;min-width:65px">${month}</td>
+    <td style="position:sticky;left:385px;z-index:2;background:#f2ede3;min-width:90px;font-size:12px">${p.colour||'-'}</td>
+    <td class="text-mono" style="position:sticky;left:475px;z-index:2;background:#f2ede3;min-width:50px">${p.size||'-'}</td>
+    <td style="position:sticky;left:525px;z-index:2;background:#f2ede3;min-width:65px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${p.packing==='PTD'?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
     <td class="text-sm">${p.zone||'-'}</td>
     <td class="text-mono fw-bold">${fmt(p.qty)}</td>
     <td class="text-mono">${p.boxes||'-'}</td>
@@ -4898,11 +4895,11 @@ function renderOrderTracker() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th style="position:sticky;left:0;z-index:3;background:#0f1628;min-width:70px">Machine</th>
-            <th style="position:sticky;left:70px;z-index:3;background:#0f1628;min-width:90px">Batch No</th>
-            <th style="position:sticky;left:160px;z-index:3;background:#0f1628;min-width:160px">Customer</th>
-            <th style="position:sticky;left:320px;z-index:3;background:#0f1628;min-width:70px">PC Code</th>
-            <th style="position:sticky;left:390px;z-index:3;background:#0f1628;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Size</th>
+            <th style="position:sticky;left:0;z-index:3;background:#f2ede3;min-width:70px">Machine</th>
+            <th style="position:sticky;left:70px;z-index:3;background:#f2ede3;min-width:90px">Batch No</th>
+            <th style="position:sticky;left:160px;z-index:3;background:#f2ede3;min-width:160px">Customer</th>
+            <th style="position:sticky;left:320px;z-index:3;background:#f2ede3;min-width:70px">PC Code</th>
+            <th style="position:sticky;left:390px;z-index:3;background:#f2ede3;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">Size</th>
             <th>PTD/UP</th>
             <th>Zone</th>
             <th>Order Qty (L)</th>
@@ -4963,11 +4960,11 @@ function renderOrderTracker() {
                     : '';
 
                   return `<tr style="${rowStyle}">
-                    <td class="text-mono text-accent" style="position:sticky;left:0;z-index:2;background:#0a0f1e;min-width:70px">${ord.machineId||'-'}</td>
-                    <td class="text-mono" style="position:sticky;left:70px;z-index:2;background:#0a0f1e;min-width:90px">${ord.batchNumber||'-'}</td>
-                    <td style="position:sticky;left:160px;z-index:2;background:#0a0f1e;min-width:160px;font-size:12px;font-weight:500">${fmtCustomer(ord)}</td>
-                    <td class="text-mono" style="position:sticky;left:320px;z-index:2;background:#0a0f1e;min-width:70px">${ord.pcCode||'-'}</td>
-                    <td class="text-mono" style="position:sticky;left:390px;z-index:2;background:#0a0f1e;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${ord.size||'-'}</td>
+                    <td class="text-mono text-accent" style="position:sticky;left:0;z-index:2;background:#f2ede3;min-width:70px">${ord.machineId||'-'}</td>
+                    <td class="text-mono" style="position:sticky;left:70px;z-index:2;background:#f2ede3;min-width:90px">${ord.batchNumber||'-'}</td>
+                    <td style="position:sticky;left:160px;z-index:2;background:#f2ede3;min-width:160px;font-size:12px;font-weight:500">${fmtCustomer(ord)}</td>
+                    <td class="text-mono" style="position:sticky;left:320px;z-index:2;background:#f2ede3;min-width:70px">${ord.pcCode||'-'}</td>
+                    <td class="text-mono" style="position:sticky;left:390px;z-index:2;background:#f2ede3;min-width:50px;box-shadow:3px 0 8px rgba(0,0,0,0.5)">${ord.size||'-'}</td>
                     <td>${ord.isPrinted?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
                     <td class="text-sm">${ord.zone||'-'}</td>
                     <td class="text-mono fw-bold">${fmt(ord.qty)}</td>

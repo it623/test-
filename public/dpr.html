@@ -44,7 +44,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px
 #wrap{margin-top:var(--nav);min-height:calc(100vh - var(--nav));padding:20px}
 .page{display:none}.page.on{display:block}
 /* CARDS */
-.card{background:#ffffff;border:1px solid var(--b1);border-radius:var(--r);padding:16px;margin-bottom:12px}
+.card{background:#ffffff;border:1px solid #d4c9a8;border-radius:var(--r);padding:16px;margin-bottom:12px}
 .card-title{font-family:var(--fc);font-weight:700;font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:var(--t3);margin-bottom:12px}
 /* FLOOR TABS */
 .ftabs{display:flex;gap:6px;margin-bottom:14px}
@@ -54,15 +54,15 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px
 .ftab.add{border-style:dashed;font-size:10px}
 /* KPI GRID */
 .kgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:14px}
-.kpi{background:#ffffff;border:1px solid var(--b1);border-radius:var(--r);padding:12px 14px}
+.kpi{background:#ffffff;border:1px solid #d4c9a8;border-radius:var(--r);padding:12px 14px}
 .kpi-label{font-family:var(--fc);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--t3);margin-bottom:6px}
 .kpi-val{font-family:var(--fc);font-weight:800;font-size:22px;color:var(--t1)}
 .kpi-val.green{color:var(--green)}.kpi-val.amber{color:var(--amber)}.kpi-val.red{color:var(--red)}.kpi-val.cyan{color:var(--cyan)}
 .kpi-sub{font-size:10px;color:var(--t3);margin-top:3px}
 /* SHIFT BLOCK */
-.shift-block{background:#ffffff;border:1px solid var(--b1);border-radius:var(--r);margin-bottom:10px;overflow:hidden}
+.shift-block{background:#ffffff;border:1px solid #d4c9a8;border-radius:var(--r);margin-bottom:10px;overflow:hidden}
 .shift-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;background:#1e4d2b;color:#f0ede4}
-.shift-hdr:hover{background:var(--s3)}
+.shift-hdr:hover{background:#163d22}
 .shift-title{font-family:var(--fc);font-weight:800;font-size:13px;letter-spacing:1.5px;color:var(--cyan)}
 .shift-badge{font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.5px;padding:2px 8px;border-radius:10px}
 .shift-badge.pending{background:rgba(255,171,0,.12);color:var(--amber);border:1px solid rgba(255,171,0,.25)}
@@ -72,7 +72,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px
 /* STAFF ROW */
 .staff-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
 .field-grp label{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);display:block;margin-bottom:4px;text-transform:uppercase}
-input[type=text],input[type=number],select{background:#ffffff;border:1px solid var(--b1);border-radius:4px;color:var(--t1);padding:5px 8px;font-family:var(--font);font-size:12px;outline:none;width:100%;transition:.15s}
+input[type=text],input[type=number],select{background:#ffffff;border:1px solid #d4c9a8;border-radius:4px;color:#1a3a20;padding:5px 8px;font-family:var(--font);font-size:12px;outline:none;width:100%;transition:.15s}
 input[type=text]:focus,input[type=number]:focus,select:focus{border-color:var(--cyan);background:var(--s3)}
 input[type=number]{font-family:var(--mono);text-align:right}
 input[type=number]::-webkit-inner-spin-button,
@@ -80,9 +80,9 @@ input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
 input[type=number]{-moz-appearance:textfield;appearance:textfield}
 /* MACHINE TABLE */
 .mtable{width:100%;border-collapse:collapse;font-size:12px}
-.mtable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--b1);text-align:left;white-space:nowrap}
+.mtable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:#7a9e82;padding:6px 8px;border-bottom:1px solid var(--b1);text-align:left;white-space:nowrap;background:#f7f3ea}
 .mtable th.r{text-align:right}
-.mtable td{padding:5px 8px;border-bottom:1px solid rgba(30,38,56,.5)}
+.mtable td{padding:5px 8px;border-bottom:1px solid #d4c9a8;background:#ffffff}
 .mtable tr:last-child td{border-bottom:none}
 .mtable tr:hover td{background:rgba(255,255,255,.02)}
 .mc-num{font-family:var(--fc);font-weight:800;font-size:14px;color:var(--cyan)}
@@ -98,7 +98,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 .dttable{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
 .dttable th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--b1);text-align:center}
 .dttable th:first-child{text-align:left}
-.dttable td{padding:5px 8px;text-align:center;border-bottom:1px solid rgba(30,38,56,.5)}
+.dttable td{padding:5px 8px;text-align:center;border-bottom:1px solid #d4c9a8}
 .dttable td:first-child{font-family:var(--fc);font-weight:700;color:var(--cyan);text-align:left}
 .dttable td input{width:60px;text-align:center}
 .dttable .tot-row td{font-family:var(--mono);font-weight:600;color:var(--amber);border-top:1px solid var(--b2)}
@@ -111,7 +111,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 .col-body{padding:14px;display:none}
 .col-body.open{display:block}
 /* REMARKS */
-.remark-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(30,38,56,.4)}
+.remark-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #d4c9a8}
 .remark-row:last-child{border-bottom:none}
 .rem-shift{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--cyan);width:52px;flex-shrink:0}
 .rem-text{flex:1;font-size:12px;color:var(--t2)}
@@ -195,7 +195,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 /* TABLE */
 .data-table{width:100%;border-collapse:collapse;font-size:12px}
 .data-table th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);padding:7px 10px;border-bottom:1px solid var(--b1);text-align:left}
-.data-table td{padding:7px 10px;border-bottom:1px solid rgba(30,38,56,.4);color:var(--t2)}
+.data-table td{padding:7px 10px;border-bottom:1px solid #d4c9a8;color:#3d6b4a;background:#ffffff}
 .data-table tr:hover td{background:rgba(255,255,255,.02)}
 .data-table .mono{font-family:var(--mono);color:var(--t1)}
 /* PILL BADGE */
@@ -219,18 +219,18 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 <style>
 #auth-overlay{position:fixed;inset:0;background:#0b0d12;z-index:9999;display:flex;align-items:center;justify-content:center}
 #auth-overlay.hidden{display:none}
-.auth-card{background:#181d28;border:1px solid #263040;border-radius:12px;padding:36px 40px;width:100%;max-width:360px}
+.auth-card{background:#ffffff;border:1px solid #d4c9a8;border-radius:12px;padding:36px 40px;width:100%;max-width:360px}
 .auth-logo{text-align:center;margin-bottom:24px}
 .auth-logo h2{font-size:22px;font-weight:700;color:#00d4ff;letter-spacing:2px;margin-bottom:4px}
 .auth-logo p{font-size:12px;color:#3d4d65;letter-spacing:1px}
 .auth-fgrp{margin-bottom:14px}
 .auth-fgrp label{display:block;font-size:11px;color:#3d4d65;letter-spacing:1px;margin-bottom:5px;text-transform:uppercase}
-.auth-fgrp select,.auth-fgrp input{width:100%;background:#1e2535;border:1px solid #263040;border-radius:6px;color:#e8edf5;padding:10px 14px;font-size:14px;outline:none;box-sizing:border-box}
+.auth-fgrp select,.auth-fgrp input{width:100%;background:#ffffff;border:1px solid #d4c9a8;border-radius:6px;color:#e8edf5;padding:10px 14px;font-size:14px;outline:none;box-sizing:border-box}
 .auth-fgrp input:focus{border-color:#00d4ff}
 .auth-btn{width:100%;background:#00d4ff;color:#0b0d12;border:none;border-radius:6px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;letter-spacing:1px}
 .auth-btn:hover{opacity:.9}
 .auth-err{color:#ff4060;font-size:12px;text-align:center;margin-top:8px;min-height:16px}
-.audit-row{display:grid;grid-template-columns:140px 70px 90px 1fr;gap:6px;padding:6px 10px;border-bottom:1px solid #1e2535;font-size:11px}
+.audit-row{display:grid;grid-template-columns:140px 70px 90px 1fr;gap:6px;padding:6px 10px;border-bottom:1px solid #d4c9a8;font-size:11px}
 </style>
 </head>
 <body>
@@ -1867,7 +1867,7 @@ function renderShifts(){
         }
         const isMult=runs.length>1;
         runsHtml+=`
-          <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}">
+          <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed #d4c9a8':''}">
             ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
             <select id="run-ord-${sh}-${mc.id}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mc.id}',${ri})" title="Select active order">
               ${ordOpts}
@@ -1905,7 +1905,7 @@ function renderShifts(){
           <td colspan="7"></td>
         </tr>`;
       }
-      html+=`<tr id="mcrow-${sh}-${mc.id}" ${isInGrp&&!isFirstInGrp?'style="border-top:1px dashed rgba(30,38,56,.6)"':''}>
+      html+=`<tr id="mcrow-${sh}-${mc.id}" ${isInGrp&&!isFirstInGrp?'style="border-top:1px dashed #d4c9a8"':''}>
         <td><span class="mc-num">${mc.id.replace('MC','')}</span></td>
         <td><span class="mc-sz">${mc.sz}</span></td>
         <td style="color:var(--t3);font-size:10px">${isInGrp?'↑ group':''}</td>
@@ -1915,7 +1915,7 @@ function renderShifts(){
         </td>
         <td style="vertical-align:top;padding-top:4px">
           <select id="mcstatus-${sh}-${mc.id}"
-            style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--b2);background:var(--s2);color:var(--t1);cursor:pointer;width:90px"
+            style="font-size:11px;padding:3px 6px;border-radius:4px;border:1px solid var(--b2);background:#ffffff;color:#1a3a20;cursor:pointer;width:90px"
             onchange="updateMcStatus('${sh}','${mc.id}',this.value)">
             <option value="running" ${(m.status||'running')==='running'?'selected':''}>🟢 Running</option>
             <option value="closed"  ${m.status==='closed'?'selected':''}>🔴 Closed</option>
@@ -1992,7 +1992,7 @@ function addRun(sh, mcId){
     const div=document.createElement('div');
     div.className='run-row';
     div.dataset.sh=sh; div.dataset.mc=mcId; div.dataset.ri=ri;
-    div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed rgba(30,38,56,.8)':''}`;
+    div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed #d4c9a8':''}`;
     const orders=activeOrders[mcId]||[];
     const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>{
       const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
@@ -2585,8 +2585,8 @@ function renderAnalytics(){
 }
 
 function chartOpts(){
-  return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'#1e2535',titleColor:'#e8edf5',bodyColor:'#7a8ba8',borderColor:'#263040',borderWidth:1}},
-    scales:{x:{ticks:{color:'#7a8ba8',font:{size:9}},grid:{color:'rgba(30,38,56,.8)'}},y:{ticks:{color:'#7a8ba8',font:{size:9}},grid:{color:'rgba(30,38,56,.8)'}}}};
+  return{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{backgroundColor:'#ffffff',titleColor:'#1a3a20',bodyColor:'#3d6b4a',borderColor:'#d4c9a8',borderWidth:1}},
+    scales:{x:{ticks:{color:'#7a8ba8',font:{size:9}},grid:{color:'#d4c9a8'}},y:{ticks:{color:'#7a8ba8',font:{size:9}},grid:{color:'#d4c9a8'}}}};
 }
 
 // ═══════════════════════════════════════════════════════

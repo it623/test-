@@ -1851,11 +1851,12 @@ function renderShifts(){
       let runsHtml='';
       runs.forEach((run,ri)=>{
         const allOrders=activeOrders[mc.id]||[];
-        const isAdmin=dprUser&&dprUser.role==='admin';
-        const orders=isAdmin?allOrders:allOrders.filter(o=>o.status==='running'||o.isTemp||o.status==='temp');
-        const matchedOrder=allOrders.find(o=>o.id===run.orderId)||allOrders.find(o=>o.batchNumber===run.batchNumber);
-        const effectiveOrderId=matchedOrder?matchedOrder.id:run.orderId;
-        const visibleOrders=orders.some(o=>o.id===effectiveOrderId)?orders:(matchedOrder?[...orders,matchedOrder]:orders);
+        const isAdmin = dprUser && dprUser.role === 'admin';
+        const orders = isAdmin ? allOrders : allOrders.filter(o=>o.status==='running'||o.isTemp||o.status==='temp');
+        const matchedOrder = allOrders.find(o=>o.id===run.orderId) || allOrders.find(o=>o.batchNumber===run.batchNumber);
+        const effectiveOrderId = matchedOrder ? matchedOrder.id : run.orderId;
+        const visibleOrders = orders.some(o=>o.id===effectiveOrderId) ? orders
+          : (matchedOrder ? [...orders, matchedOrder] : orders);
         let ordOpts=`<option value="">— Order —</option>`+visibleOrders.map(o=>{
           const custShort=(o.customer||'').length>20?(o.customer||'').substring(0,20)+'…':(o.customer||'');
           return `<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(custShort)}</option>`;
@@ -1873,7 +1874,6 @@ function renderShifts(){
             </select>
             <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" title="Type batch number if not in dropdown" style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0" oninput="markUnsaved()">
             <input type="number" id="run-qty-${sh}-${mc.id}-${ri}" value="${run.qty||''}" placeholder="Qty" min="0" style="width:60px;font-size:14px;font-family:var(--mono);flex-shrink:0;font-weight:600" step="0.01" oninput="markUnsaved();updateMcTotals('${sh}','${mc.id}');updateBacklog('${sh}','${mc.id}')" onblur="this.value=this.value?parseFloat(this.value).toFixed(2):''" onkeydown="dprQtyNav(event,'${sh}','${mc.id}')" title="Production in Lakhs">
-            ${(()=>{const _o=(activeOrders[mc.id]||[]).find(x=>x.id===run.orderId||x.batchNumber===run.batchNumber);const _col=_o?.colour||'';return _col?`<span id="run-colour-${sh}-${mc.id}-${ri}" style="font-size:10px;font-weight:800;color:var(--cyan);font-family:var(--mono);flex-shrink:0;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:3px;padding:2px 6px;white-space:nowrap">${esc(_col)}</span>`:`<span id="run-colour-${sh}-${mc.id}-${ri}"></span>`})()}
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t1);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
             ${(()=>{ const mo=(activeOrders[mc.id]||[]).find(o=>o.id===(run.orderId||'')||o.batchNumber===(run.batchNumber||'')); if(!mo) return ''; const pl=Math.round((mo.qty||0)*100)/100; const gr=Math.round((mo.grossQty||0)*100)/100; const ac=Math.round((mo.actualQty||0)*100)/100; const rm=Math.max(0,Math.round((gr-ac)*100)/100); const col=rm<=0?'var(--green)':rm<gr*0.2?'var(--amber)':'var(--cyan)'; return `<span class="run-ord-info" style="font-size:9px;color:${col};font-family:var(--mono);white-space:nowrap;flex-shrink:0" title="${mo.customer||''}">Gross:${gr}L Prod:${ac}L Rem:${rm}L</span>`; })()}
@@ -1945,23 +1945,31 @@ function renderShifts(){
     </tr></tfoot></table></div></div></div>`;
   });
   document.getElementById('shiftsArea').innerHTML=html;
+  // After render: trigger onRunOrderChange for any pre-selected orders to show Ord/Prod/Rem info
   document.querySelectorAll('.run-row').forEach(row=>{
     const sh=row.dataset.sh, mc=row.dataset.mc, ri=row.dataset.ri;
     const sel=document.getElementById(`run-ord-${sh}-${mc}-${ri}`);
     if(sel && sel.value) onRunOrderChange(sh, mc, parseInt(ri));
   });
-  setTimeout(autoScrollToCurrentShift,300);
+  setTimeout(autoScrollToCurrentShift, 300);
 }
+
 function getCurrentShift(){
-  const now=new Date(),h=now.getHours(),m=now.getMinutes(),t=h*60+m;
-  if(t>=60&&t<9*60) return 'C';
-  if(t>=9*60&&t<17*60) return 'A';
+  const now=new Date(), h=now.getHours(), m=now.getMinutes();
+  const totalMins=h*60+m;
+  if(totalMins>=60 && totalMins<9*60) return 'C';
+  if(totalMins>=9*60 && totalMins<17*60) return 'A';
+  if(totalMins>=17*60) return 'B';
   return 'B';
 }
 function autoScrollToCurrentShift(){
   const sh=getCurrentShift();
-  const el=document.getElementById('sb-'+sh);
-  if(el){el.classList.add('open');const hdr=el.closest('.shift-block');if(hdr)hdr.scrollIntoView({behavior:'smooth',block:'start'});}
+  const shiftEl=document.getElementById('sb-'+sh);
+  if(shiftEl){
+    shiftEl.classList.add('open');
+    const hdr=shiftEl.closest('.shift-block');
+    if(hdr) hdr.scrollIntoView({behavior:'smooth',block:'start'});
+  }
 }
 
 // ── Run management ─────────────────────────────────────────────
@@ -2030,11 +2038,7 @@ function onRunOrderChange(sh, mcId, ri){
     const ord=activeOrders[mcId].find(o=>o.id===ordId);
     if(ord){
       if(batchInp) batchInp.value=ord.batchNumber||ord.poNumber||'';
-      const colSpan=document.getElementById(`run-colour-${sh}-${mcId}-${ri}`);
-      if(colSpan){
-        if(ord.colour){colSpan.textContent=ord.colour;colSpan.style.cssText='font-size:10px;font-weight:800;color:var(--cyan);font-family:var(--mono);flex-shrink:0;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:3px;padding:2px 6px;white-space:nowrap';}
-        else{colSpan.textContent='';colSpan.style.cssText='';}
-      }
+      // Auto-fill note with colour — always update when order changes
       const noteInp=document.getElementById(`run-note-${sh}-${mcId}-${ri}`);
       if(noteInp && ord.colour){
         noteInp.value=ord.colour;
@@ -2142,22 +2146,25 @@ function dtTableNav(e,el){
   var key=e.key;
   if(key!=='ArrowUp'&&key!=='ArrowDown'&&key!=='ArrowLeft'&&key!=='ArrowRight'&&key!=='Enter') return;
   e.preventDefault();
-  var parts=el.id.split('-'),sh=parts[1],mcId=parts[2],cat=parts[3];
-  var mcs=getActiveMachines(curFloor),mcIds=mcs.map(function(m){return m.id;});
-  var mcIdx=mcIds.indexOf(mcId),catIdx=DT_CATS.indexOf(cat);
-  var newSh=sh,newMcId=mcId,newCat=cat;
-  if(key==='ArrowDown'||key==='Enter'){if(mcIdx<mcIds.length-1)newMcId=mcIds[mcIdx+1];}
-  else if(key==='ArrowUp'){if(mcIdx>0)newMcId=mcIds[mcIdx-1];}
-  else if(key==='ArrowRight'){
-    if(catIdx<DT_CATS.length-1){newCat=DT_CATS[catIdx+1];}
-    else{var s2=['A','B','C'],si=s2.indexOf(sh);if(si<s2.length-1){newSh=s2[si+1];newCat=DT_CATS[0];}}
-  }else if(key==='ArrowLeft'){
-    if(catIdx>0){newCat=DT_CATS[catIdx-1];}
-    else{var s2=['A','B','C'],si=s2.indexOf(sh);if(si>0){newSh=s2[si-1];newCat=DT_CATS[DT_CATS.length-1];}}
+  var parts=el.id.split('-'), sh=parts[1], mcId=parts[2], cat=parts[3];
+  var mcs=getActiveMachines(curFloor), mcIds=mcs.map(function(m){return m.id;});
+  var mcIdx=mcIds.indexOf(mcId), catIdx=DT_CATS.indexOf(cat);
+  var newSh=sh, newMcId=mcId, newCat=cat;
+  if(key==='ArrowDown'||key==='Enter'){
+    if(mcIdx<mcIds.length-1) newMcId=mcIds[mcIdx+1];
+  } else if(key==='ArrowUp'){
+    if(mcIdx>0) newMcId=mcIds[mcIdx-1];
+  } else if(key==='ArrowRight'){
+    if(catIdx<DT_CATS.length-1){ newCat=DT_CATS[catIdx+1]; }
+    else { var sh2=['A','B','C'],si=sh2.indexOf(sh); if(si<sh2.length-1){newSh=sh2[si+1];newCat=DT_CATS[0];} }
+  } else if(key==='ArrowLeft'){
+    if(catIdx>0){ newCat=DT_CATS[catIdx-1]; }
+    else { var sh2=['A','B','C'],si=sh2.indexOf(sh); if(si>0){newSh=sh2[si-1];newCat=DT_CATS[DT_CATS.length-1];} }
   }
   var nextEl=document.getElementById('dt-'+newSh+'-'+newMcId+'-'+newCat);
   if(nextEl){nextEl.focus();nextEl.select();}
 }
+
 function renderDTTable(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
@@ -2481,16 +2488,8 @@ let chartInstances={};
 function destroyChart(id){ if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];} }
 function newChart(id,cfg){ destroyChart(id); const c=document.getElementById(id); if(!c)return; chartInstances[id]=new Chart(c,cfg); }
 
-async function renderAnalytics(){
-  const fl=curFloor, d=getDate();
-  // Fetch from server so all devices show same data
-  if(serverUrl){
-    try{
-      const r=await fetch(serverUrl+'/api/dpr/'+fl+'/'+d,{signal:AbortSignal.timeout(6000)});
-      if(r.ok){const j=await r.json();if(j.ok&&j.data)localStorage.setItem(skey(fl,d),JSON.stringify(j.data));}
-    }catch(e){}
-  }
-  const day=loadDay(fl,d);
+function renderAnalytics(){
+  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
 
   // P vs T
@@ -2593,28 +2592,13 @@ function chartOpts(){
 // ═══════════════════════════════════════════════════════
 // TRENDS
 // ═══════════════════════════════════════════════════════
-async function renderTrends(){
+function renderTrends(){
   const days=parseInt(document.getElementById('trendRange').value||30);
   const fl=document.getElementById('trendFloor').value;
   const dates=[];
   for(let i=days-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);dates.push(d.toISOString().split('T')[0]);}
   const floors=fl==='ALL'?Object.keys(FLOORS):[fl];
   const prods=[],dtPcts=[],effs=[],resorts=[];
-  // Pre-fetch all dates for selected floors from server into localStorage cache
-  if(serverUrl){
-    const fetchPromises=[];
-    dates.forEach(d=>{
-      floors.forEach(f=>{
-        fetchPromises.push(
-          fetch(serverUrl+'/api/dpr/'+f+'/'+d,{signal:AbortSignal.timeout(4000)})
-            .then(r=>r.ok?r.json():null)
-            .then(j=>{if(j?.ok&&j?.data)localStorage.setItem(skey(f,d),JSON.stringify(j.data));})
-            .catch(()=>{})
-        );
-      });
-    });
-    try{ await Promise.allSettled(fetchPromises); }catch(e){}
-  }
   dates.forEach(d=>{
     let p=0,dt=0,tg=0,rs=0;
     floors.forEach(f=>{
@@ -2638,15 +2622,8 @@ async function renderTrends(){
 // ═══════════════════════════════════════════════════════
 // AIM STATUS
 // ═══════════════════════════════════════════════════════
-async function renderAIM(){
-  const fl=curFloor, d=getDate();
-  if(serverUrl){
-    try{
-      const r=await fetch(serverUrl+'/api/dpr/'+fl+'/'+d,{signal:AbortSignal.timeout(6000)});
-      if(r.ok){const j=await r.json();if(j.ok&&j.data)localStorage.setItem(skey(fl,d),JSON.stringify(j.data));}
-    }catch(e){}
-  }
-  const day=loadDay(fl,d);
+function renderAIM(){
+  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
   let html=`<table class="data-table"><thead><tr>
     <th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th>
@@ -2912,15 +2889,8 @@ function renderShiftPersonnelPerf(){
   section.innerHTML=html;
 }
 
-async function renderPerf(){
-  const fl=curFloor, d=getDate();
-  if(serverUrl){
-    try{
-      const r=await fetch(serverUrl+'/api/dpr/'+fl+'/'+d,{signal:AbortSignal.timeout(6000)});
-      if(r.ok){const j=await r.json();if(j.ok&&j.data)localStorage.setItem(skey(fl,d),JSON.stringify(j.data));}
-    }catch(e){}
-  }
-  const day=loadDay(fl,d);
+function renderPerf(){
+  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   let html=`<table class="data-table"><thead><tr>
     <th>Shift</th>
     <th>Incharge</th>
@@ -3142,12 +3112,12 @@ function go(page){
   document.getElementById('page-'+page)?.classList.add('on');
   const idx={entry:0,analytics:1,trends:2,aim:3,perf:4,history:5,plant:6,search:7,settings:8};
   document.querySelectorAll('.ntab')[idx[page]]?.classList.add('on');
-  if(page==='analytics') renderAnalytics().catch(e=>console.error(e));
-  else if(page==='trends') renderTrends().catch(e=>console.error(e));
-  else if(page==='aim') renderAIM().catch(e=>console.error(e));
-  else if(page==='perf') renderPerf().catch(e=>console.error(e));
+  if(page==='analytics') renderAnalytics();
+  else if(page==='trends') renderTrends();
+  else if(page==='aim') renderAIM();
+  else if(page==='perf') renderPerf();
   else if(page==='history') renderHistory();
-  else if(page==='plant'){ document.getElementById('plant-date').value=document.getElementById('plant-date').value||today(); renderPlantReport().catch(e=>console.error(e)); }
+  else if(page==='plant'){ document.getElementById('plant-date').value=document.getElementById('plant-date').value||today(); renderPlantReport(); }
   else if(page==='settings') renderSettings();
 }
 
@@ -3405,16 +3375,8 @@ function safeRow(arr){
   return arr.map(safeCell);
 }
 
-async function getExportData(){
-  const fl=curFloor, d=getDate();
-  // Always fetch latest from server before exporting
-  if(serverUrl){
-    try{
-      const r=await fetch(serverUrl+'/api/dpr/'+fl+'/'+d,{signal:AbortSignal.timeout(6000)});
-      if(r.ok){const j=await r.json();if(j.ok&&j.data)localStorage.setItem(skey(fl,d),JSON.stringify(j.data));}
-    }catch(e){}
-  }
-  const day=loadDay(fl,d);
+function getExportData(){
+  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
   return {fl,d,day,mcs};
 }
@@ -3476,7 +3438,7 @@ function xlsxSaveAs(wb, filename){
 // ── EXCEL: Daily Production Report ──────────────────────────────
 async function exportDailyReportExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=await getExportData();
+  const {fl,d,day,mcs}=getExportData();
   const wb=XLSX.utils.book_new();
 
   SHIFTS.forEach(sh=>{
@@ -3533,7 +3495,7 @@ async function exportDailyReportExcel(){
 // ── EXCEL: AIM Status ────────────────────────────────────────────
 async function exportAimStatusExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=await getExportData();
+  const {fl,d,day,mcs}=getExportData();
   const rows=[];
   rows.push(safeRow(['SUNLOC  AIM Status Report  '+fl+'  '+d]));
   rows.push([]);
@@ -3566,7 +3528,7 @@ async function exportAimStatusExcel(){
 // ── EXCEL: Downtime ──────────────────────────────────────────────
 async function exportDowntimeExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=await getExportData();
+  const {fl,d,day,mcs}=getExportData();
   const rows=[];
   rows.push(safeRow(['SUNLOC  Machine-wise Downtime  '+fl+'  '+d]));
   rows.push([]);
@@ -3605,7 +3567,7 @@ async function exportDowntimeExcel(){
 // ── EXCEL: Shift Performance ─────────────────────────────────────
 async function exportShiftPerformanceExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
-  const {fl,d,day,mcs}=await getExportData();
+  const {fl,d,day,mcs}=getExportData();
   const rows=[];
   rows.push(safeRow(['SUNLOC  Shift Performance  '+fl+'  '+d]));
   rows.push([]);
@@ -3644,7 +3606,7 @@ async function exportAllShiftsExcel(){
   try{ await checkXLSX(); }catch(e){ toast('❌ XLSX library not available','var(--red)'); return; }
   const wb=XLSX.utils.book_new();
   // Sheet 1: Production
-  const {fl,d,day,mcs}=await getExportData();
+  const {fl,d,day,mcs}=getExportData();
   const summaryRows=[['SUNLOC FULL DPR  '+fl+'  '+d],[]];
   summaryRows.push(safeRow(['Shift','Incharge','Production (L)','Target (L)','VS Target','AIM (L)','Produced−AIM','DT (min)']));
   SHIFTS.forEach(sh=>{
@@ -3704,7 +3666,7 @@ async function exportAllShiftsExcel(){
 
 // ── PDF: Print Daily Report ──────────────────────────────────────
 function exportPDF(){
-  const {fl,d,day,mcs}=await getExportData();
+  const {fl,d,day,mcs}=getExportData();
   let html=`
     <html><head><title>DPR ${fl} ${d}</title>
     <style>
@@ -3865,10 +3827,13 @@ function renderDprSearch(){
 // INIT
 // ═══════════════════════════════════════════════════════
 (function setSmartDate(){
-  const now=new Date(),h=now.getHours(),m=now.getMinutes(),totalMins=h*60+m;
+  const now=new Date(), h=now.getHours(), m=now.getMinutes();
+  const totalMins=h*60+m;
   let useDate;
-  if(totalMins<9*60){const y=new Date(now);y.setDate(y.getDate()-1);useDate=y.toISOString().split('T')[0];}
-  else useDate=now.toISOString().split('T')[0];
+  if(totalMins < 9*60){
+    const yesterday=new Date(now); yesterday.setDate(yesterday.getDate()-1);
+    useDate=yesterday.toISOString().split('T')[0];
+  } else { useDate=now.toISOString().split('T')[0]; }
   document.getElementById('ndate').value=useDate;
 })();
 refreshRecentDates();
@@ -4305,65 +4270,33 @@ async function saveTempBatchDetails(tempBatchId) {
 // ═══════════════════════════════════════════════════════
 // PLANT REPORT — consolidated machine-wise, all floors
 // ═══════════════════════════════════════════════════════
-async function fetchPlantDayData(fl,date){
-  if(!serverUrl) return loadDay(fl,date);
-  try{
-    const r=await fetch(serverUrl+'/api/dpr/'+fl+'/'+date,{signal:AbortSignal.timeout(6000)});
-    if(!r.ok) return loadDay(fl,date);
-    const j=await r.json();
-    if(j.ok&&j.data){localStorage.setItem(skey(fl,date),JSON.stringify(j.data));return j.data;}
-    return loadDay(fl,date);
-  }catch(e){return loadDay(fl,date);}
-}
-
-async function getPlantReportData(selectedDate){
+function getPlantReportData(selectedDate){
   const allMachines=[];
   Object.entries(FLOORS).forEach(([fl,flData])=>{
     flData.machines.forEach(mc=>allMachines.push({id:mc.id,sz:mc.sz,floor:fl,flLabel:flData.label}));
   });
-  // Fetch all floors from server simultaneously
-  const floorDays={};
-  await Promise.all(Object.keys(FLOORS).map(async fl=>{
-    floorDays[fl]=await fetchPlantDayData(fl,selectedDate);
-  }));
-  // Get history dates
-  let allDates=[];
-  if(serverUrl){
-    try{
-      const r=await fetch(serverUrl+'/api/dpr/history',{signal:AbortSignal.timeout(5000)});
-      if(r.ok){const j=await r.json();if(j.ok&&j.records)allDates=[...new Set(j.records.map(e=>e.date).filter(d=>d&&d<=selectedDate))].sort();}
-    }catch(e){}
-  }
-  if(!allDates.length){
-    allDates=[...new Set(Object.keys(localStorage).filter(k=>k.startsWith('dpr3_')).map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
-  }
+  const allKeys=Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
+  const allDates=[...new Set(allKeys.map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
   const rows=allMachines.map(mc=>{
     const fl=mc.floor;
     const dailyTgt=parseFloat(targets[fl+'_'+mc.id]||8);
-    const dayData=floorDays[fl]||loadDay(fl,selectedDate);
-    let dayA=0,dayB=0,dayC=0,batchA='',batchB='',batchC='';
+    const dayData=loadDay(fl,selectedDate);
+    let dayA=0,dayB=0,dayC=0;
     SHIFTS.forEach(sh=>{
-      const m=dayData.shifts?.[sh]?.machines?.[mc.id];
-      if(m){
-        const mm=migrateMachineData(m);
-        const p=mcTotalProd(mm);
-        const firstRun=(mm.runs||[]).find(r=>r.batchNumber||r.orderId);
-        const bn=firstRun?.batchNumber||'';
-        if(sh==='A'){dayA=p;batchA=bn;}else if(sh==='B'){dayB=p;batchB=bn;}else{dayC=p;batchC=bn;}
-      }
+      const m=dayData.shifts[sh]?.machines[mc.id];
+      if(m){const p=mcTotalProd(migrateMachineData(m));if(sh==='A')dayA=p;else if(sh==='B')dayB=p;else dayC=p;}
     });
     const dayTotal=dayA+dayB+dayC;
     const vsTarget=dayTotal-dailyTgt;
-    const allBatches=[...new Set([batchA,batchB,batchC].filter(Boolean))];
-    const batchDisplay=allBatches.join(' / ')||'—';
     let cumTotal=0,cumDays=0;
     allDates.forEach(d=>{
-      const dd=loadDay(fl,d);let p=0;
-      SHIFTS.forEach(sh=>{const m=dd.shifts?.[sh]?.machines?.[mc.id];if(m)p+=mcTotalProd(migrateMachineData(m));});
+      const dd=loadDay(fl,d);
+      let p=0;
+      SHIFTS.forEach(sh=>{const m=dd.shifts[sh]?.machines[mc.id];if(m)p+=mcTotalProd(migrateMachineData(m));});
       if(p>0){cumTotal+=p;cumDays++;}
     });
     const cumAvg=cumDays>0?cumTotal/cumDays:0;
-    return{...mc,dailyTgt,dayA,dayB,dayC,dayTotal,vsTarget,batchA,batchB,batchC,batchDisplay,cumTotal,cumDays,cumAvg};
+    return{...mc,dailyTgt,dayA,dayB,dayC,dayTotal,vsTarget,cumTotal,cumDays,cumAvg};
   });
   const totals=rows.reduce((acc,r)=>{
     acc.dailyTgt+=r.dailyTgt;acc.dayA+=r.dayA;acc.dayB+=r.dayB;
@@ -4375,13 +4308,13 @@ async function getPlantReportData(selectedDate){
   return{rows,totals,allDates};
 }
 
-async function renderPlantReport(){
+function renderPlantReport(){
   const selectedDate=document.getElementById('plant-date')?.value||today();
   const el=document.getElementById('plant-report-output');
   if(!el) return;
-  el.innerHTML='<div style="padding:20px;color:var(--t2);font-family:var(--fc);font-size:13px;letter-spacing:1px;text-align:center">⟳ Loading from server...</div>';
-  const {rows,totals,allDates}=await getPlantReportData(selectedDate);
-  const cumLabel=allDates.length>0?'Cumulative up to '+selectedDate+' ('+allDates.length+' day'+(allDates.length!==1?'s':'')+')'
+  const {rows,totals,allDates}=getPlantReportData(selectedDate);
+  const cumLabel=allDates.length>0
+    ?'Cumulative up to '+selectedDate+' ('+allDates.length+' day'+(allDates.length!==1?'s':'')+')'
     :'No cumulative data yet';
   const fmt2=n=>(+n).toFixed(2);
   const fmtVS=n=>n===0?'<span style="color:var(--t3)">—</span>'
@@ -4392,7 +4325,6 @@ async function renderPlantReport(){
       <td style="padding:5px 8px;font-family:var(--fc);font-weight:800;color:var(--cyan)">${r.id}</td>
       <td style="padding:5px 8px;font-family:var(--mono);font-size:10px;color:var(--t3)">${r.sz}</td>
       <td style="padding:5px 8px;font-size:10px;color:var(--t3)">${r.flLabel.split(' ')[0]}</td>
-      <td style="padding:5px 8px;font-family:var(--mono);font-size:10px;color:var(--t2);white-space:nowrap">${r.batchDisplay}</td>
       <td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--t2)">${fmt2(r.dailyTgt)}</td>
       <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--cyan)">${r.dayA>0?fmt2(r.dayA):'—'}</td>
       <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${r.dayB>0?fmt2(r.dayB):'—'}</td>
@@ -4404,7 +4336,7 @@ async function renderPlantReport(){
       <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--purple)">${r.cumAvg>0?fmt2(r.cumAvg):'—'}</td>
     </tr>`).join('');
   const totRow=`<tr style="background:var(--s3);border-top:2px solid var(--b2)">
-    <td colspan="4" style="padding:8px 10px;font-family:var(--fc);font-weight:800;font-size:11px;letter-spacing:.8px;color:var(--cyan)">PLANT TOTAL</td>
+    <td colspan="3" style="padding:8px 10px;font-family:var(--fc);font-weight:800;font-size:11px;letter-spacing:.8px;color:var(--cyan)">PLANT TOTAL</td>
     <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--cyan)">${fmt2(totals.dailyTgt)}</td>
     <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--cyan)">${totals.dayA>0?fmt2(totals.dayA):'—'}</td>
     <td style="padding:8px 8px;text-align:right;font-family:var(--mono);font-weight:800;color:var(--green)">${totals.dayB>0?fmt2(totals.dayB):'—'}</td>
@@ -4425,7 +4357,7 @@ async function renderPlantReport(){
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead>
           <tr style="background:var(--s2);border-bottom:1px solid var(--b2)">
-            <th colspan="4" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--t3);text-align:left;text-transform:uppercase">Machine</th>
+            <th colspan="3" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--t3);text-align:left;text-transform:uppercase">Machine</th>
             <th colspan="6" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--cyan);text-align:center;border-left:1px solid var(--b2);text-transform:uppercase">Daily — ${selectedDate}</th>
             <th colspan="3" style="padding:7px 10px;font-family:var(--fc);font-size:10px;font-weight:700;letter-spacing:.8px;color:var(--purple);text-align:center;border-left:2px solid var(--b2);text-transform:uppercase">Cumulative</th>
           </tr>
@@ -4433,7 +4365,6 @@ async function renderPlantReport(){
             <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:left;letter-spacing:.5px">M/C</th>
             <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">SZ</th>
             <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">FLOOR</th>
-            <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:.5px">BATCH NO</th>
             <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--t3);text-align:right;letter-spacing:.5px;border-left:1px solid var(--b2)">TARGET</th>
             <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--cyan);text-align:right;letter-spacing:.5px">A-SHIFT</th>
             <th style="padding:6px 8px;font-family:var(--fc);font-size:10px;color:var(--green);text-align:right;letter-spacing:.5px">B-SHIFT</th>
@@ -4451,23 +4382,22 @@ async function renderPlantReport(){
     </div>`;
 }
 
-async function exportPlantReport(){
+function exportPlantReport(){
   const selectedDate=document.getElementById('plant-date')?.value||today();
-  toast('⟳ Preparing export...','var(--cyan)');
-  const {rows,totals}=await getPlantReportData(selectedDate);
+  const {rows,totals}=getPlantReportData(selectedDate);
   const fmt2=n=>parseFloat((+n).toFixed(2));
-  const data=rows.map(r=>({'Machine':r.id,'Size':r.sz,'Floor':r.flLabel,'Batch No':r.batchDisplay,
+  const data=rows.map(r=>({'Machine':r.id,'Size':r.sz,'Floor':r.flLabel,
     'Daily Target':fmt2(r.dailyTgt),'A-Shift':fmt2(r.dayA),'B-Shift':fmt2(r.dayB),'C-Shift':fmt2(r.dayC),
     'Day Total':fmt2(r.dayTotal),'Vs Target':fmt2(r.vsTarget),
     'Cum Total':fmt2(r.cumTotal),'Days Counted':r.cumDays,'Daily Avg':fmt2(r.cumAvg)}));
-  data.push({'Machine':'PLANT TOTAL','Size':'','Floor':'','Batch No':'',
+  data.push({'Machine':'PLANT TOTAL','Size':'','Floor':'',
     'Daily Target':fmt2(totals.dailyTgt),'A-Shift':fmt2(totals.dayA),'B-Shift':fmt2(totals.dayB),'C-Shift':fmt2(totals.dayC),
     'Day Total':fmt2(totals.dayTotal),'Vs Target':fmt2(totals.vsTarget),
     'Cum Total':fmt2(totals.cumTotal),'Days Counted':totals.cumDays,'Daily Avg':fmt2(totals.cumAvg)});
   if(typeof XLSX==='undefined'){toast('XLSX not available','var(--red)');return;}
   try{
     const ws=XLSX.utils.json_to_sheet(data);
-    ws['!cols']=[{wch:10},{wch:6},{wch:20},{wch:16},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10}];
+    ws['!cols']=[{wch:10},{wch:6},{wch:20},{wch:12},{wch:10},{wch:10},{wch:10},{wch:10},{wch:10},{wch:12},{wch:10},{wch:10}];
     const wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,ws,'Plant Report');
     try{XLSX.writeFile(wb,'PlantReport_'+selectedDate+'.xlsx');}

@@ -486,6 +486,21 @@ app.get('/api/planning/state', asyncRoute(async (req, res) => {
       if (actual > 0 && ord.status === 'pending') ord.status = 'running';
     }
   }
+  // Inject active TEMP batches as synthetic running orders
+  const tempBatches = await queryAll("SELECT * FROM temp_batches WHERE status='active' ORDER BY machine_id, date DESC");
+  for (const tb of tempBatches) {
+    const hasRunning = (state.orders||[]).some(o => o.machineId === tb.machine_id && o.status === 'running' && !o.deleted);
+    if (!hasRunning) {
+      state.orders = state.orders || [];
+      state.orders.push({
+        id: tb.id, batchNumber: tb.id, poNumber: '', customer: '⚠️ TEMP BATCH',
+        machineId: tb.machine_id, size: tb.machine_size || '', colour: tb.colour || '',
+        pcCode: tb.pc_code || '', qty: tb.daily_cap_lakhs || 0, grossQty: tb.daily_cap_lakhs || 0,
+        actualQty: 0, actualProd: 0, status: 'running', isPrinted: false,
+        startDate: tb.date || null, endDate: null, isTemp: true,
+      });
+    }
+  }
   const row = await queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1');
   res.json({ ok: true, state, savedAt: row?.saved_at });
 }));
@@ -507,7 +522,8 @@ app.get('/api/orders/machine/:machineId', asyncRoute(async (req, res) => {
 // GET all active orders
 app.get('/api/orders/active', asyncRoute(async (req, res) => {
   const state = await getPlanningState();
-  const rawOrders = (state.orders || []).filter(o => o.status !== 'closed' && !o.deleted);
+  // Only return RUNNING orders — pending orders should not block TEMP batch creation in DPR
+  const rawOrders = (state.orders || []).filter(o => o.status === 'running' && !o.deleted);
   // Use getOrderActuals for live production qty from DPR records
   const orders = await Promise.all(rawOrders.map(async o => {
     const actual = await getOrderActuals(o.id, o.batchNumber);
@@ -993,7 +1009,8 @@ app.get('/api/temp-batches/check/:machineId', asyncRoute(async (req, res) => {
   const { machineId } = req.params;
   const today = new Date().toISOString().split('T')[0];
   const planState = await getPlanningState();
-  const activeOrders = (planState.orders||[]).filter(o=>o.machineId===machineId&&o.status!=='closed'&&!o.deleted);
+  // Only running orders block TEMP batch — pending orders should not prevent TEMP creation
+  const activeOrders = (planState.orders||[]).filter(o=>o.machineId===machineId&&o.status==='running'&&!o.deleted);
   const existing = await queryOne(`SELECT * FROM temp_batches WHERE machine_id=$1 AND date=$2`, [machineId, today]);
   const allTemp = await queryAll(`SELECT * FROM temp_batches WHERE machine_id=$1 AND status='active' ORDER BY date DESC`, [machineId]);
   const mc = (planState.machineMaster||[]).find(m=>m.id===machineId);
@@ -1218,7 +1235,7 @@ app.get('/api/tracking/labels-only', asyncRoute(async (req, res) => {
 
 // GET /api/sync/snapshot
 app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
-  const [planningState, savedAtRow, labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
+  const [planningState, savedAtRow, labels, scans, closure, wastage, dispatch, alerts, tempBatches] = await Promise.all([
     getPlanningState(),
     queryOne('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1'),
     queryAll('SELECT * FROM tracking_labels ORDER BY generated DESC'),
@@ -1227,6 +1244,7 @@ app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
     queryAll('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_dispatch_records ORDER BY ts ASC'),
     queryAll('SELECT * FROM tracking_alerts WHERE resolved=0'),
+    queryAll("SELECT * FROM temp_batches WHERE status='active' ORDER BY machine_id, date DESC"),
   ]);
 
   // Enrich orders with actual production (same as /api/planning/state does)
@@ -1256,6 +1274,36 @@ app.get('/api/sync/snapshot', asyncRoute(async (req, res) => {
       zone: o.zone || '',
       dispatchedQty: o.dispatchedQty || 0,
     });
+  }
+
+  // Add active TEMP batches as synthetic orders so tracking app can show them in label generation
+  for (const tb of tempBatches) {
+    // Only add if no running real order exists for this machine
+    const hasRunning = orders.some(o => o.machineId === tb.machine_id && o.status === 'running');
+    if (!hasRunning) {
+      orders.push({
+        id: tb.id,
+        batchNumber: tb.id,
+        poNumber: '',
+        customer: '⚠️ TEMP BATCH',
+        machineId: tb.machine_id,
+        size: tb.machine_size || '',
+        colour: tb.colour || '',
+        pcCode: tb.pc_code || '',
+        qty: tb.daily_cap_lakhs || 0,
+        grossQty: tb.daily_cap_lakhs || 0,
+        actualQty: 0,
+        actualProd: 0,
+        status: 'running', // treat as running so tracking label gen shows it
+        isPrinted: false,
+        startDate: tb.date || null,
+        endDate: null,
+        printingMatter: '',
+        zone: '',
+        dispatchedQty: 0,
+        isTemp: true,
+      });
+    }
   }
 
   res.json({

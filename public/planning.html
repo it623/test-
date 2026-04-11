@@ -840,20 +840,40 @@ const SYNC = (() => {
           if(j.ok && j.data) dprData[fl] = j.data;
         } catch(e) {}
       }));
-      // For each order, get the machine STATUS (Running/Closed) from DPR
+      // For each order, get DPR status per BATCH (not per machine)
+      // Check if this specific batch/order appears in any DPR run with closed machine status
       state.orders.forEach(ord => {
         if(!ord.machineId) return;
-        let statusFound = null;
+        let batchFoundInDpr = false;
+        let batchAllClosed = true;
+        let batchHasRun = false;
+
         Object.values(dprData).forEach(dayData => {
           ['A','B','C'].forEach(sh => {
             const mc = dayData.shifts?.[sh]?.machines?.[ord.machineId];
             if(!mc) return;
-            // If any shift has 'closed', mark closed; else running
-            if(mc.status === 'closed') statusFound = 'closed';
-            else if(!statusFound) statusFound = mc.status || 'running';
+            // Check if this specific order/batch appears in any run for this machine+shift
+            const runs = mc.runs || [];
+            const batchInThisShift = runs.some(r =>
+              (r.orderId && r.orderId === ord.id) ||
+              (r.batchNumber && r.batchNumber === ord.batchNumber)
+            );
+            if(batchInThisShift) {
+              batchFoundInDpr = true;
+              batchHasRun = true;
+              if(mc.status !== 'closed') batchAllClosed = false;
+            }
           });
         });
-        ord.dprStatus = statusFound || 'running';
+
+        // Show closed only if batch was found in DPR AND machine was closed in all shifts it appeared in
+        if(batchHasRun && batchAllClosed) {
+          ord.dprStatus = 'closed';
+        } else if(batchHasRun) {
+          ord.dprStatus = 'running';
+        } else {
+          ord.dprStatus = 'running'; // batch not in DPR yet
+        }
       });
     } catch(e) {}
   }
@@ -1585,6 +1605,23 @@ function updateOrderRemark(ordId, val) {
 function changeOrderStatus(ordId, machineId, newStatus) {
   const ord = state.orders.find(o=>o.id===ordId);
   if (!ord) return;
+
+  // ── CHECKPOINT: max 2 "In Production" orders per machine for non-admin ──
+  if (newStatus === 'running' && currentUser?.role !== 'admin') {
+    const alreadyRunning = state.orders.filter(o =>
+      o.id !== ordId &&
+      o.machineId === machineId &&
+      o.status === 'running' &&
+      !o.deleted
+    ).length;
+    if (alreadyRunning >= 2) {
+      const sel = document.querySelector(`select[onchange*="${ordId}"]`);
+      if (sel) sel.value = ord.status;
+      alert(`⚠️ Maximum 2 orders can be "In Production" on ${machineId} at a time.\n\nPlease close or move one of the current In Production orders before setting another.`);
+      return;
+    }
+  }
+
   ord.status = newStatus;
   if (newStatus === 'closed') {
     ord.closedDate = new Date();
@@ -1940,6 +1977,19 @@ function saveOrderModal(existingId, defaultMachine) {
   if (batchVal && !isValidBatch(batchVal)) {
     return alert(`Invalid batch number format: "${batchVal}"\n\nExpected format: YY + Machine Code + 3-digit serial\nExample: 26ZG061, 26U082, 26ZD033`);
   }
+  // ── CHECKPOINT: same batch number cannot be planned on the same machine twice ──
+  if (batchVal) {
+    const duplicate = state.orders.find(o =>
+      o.batchNumber === batchVal &&
+      o.machineId === machineId &&
+      !o.deleted &&
+      o.id !== existingId  // allow editing existing order
+    );
+    if (duplicate) {
+      return alert(`⚠️ Duplicate Batch Number\n\nBatch "${batchVal}" is already planned on ${machineId} (Customer: ${duplicate.customer || '-'}).\n\nPlease use a different batch number.`);
+    }
+  }
+
   // Packing is required
   const packingVal = document.getElementById('fo-packing')?.value?.trim();
   if (!packingVal) return alert('Please select a Packing type (e.g. 3 PLY, 5 PLY)');

@@ -9,25 +9,25 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
 :root {
-  --bg: #132a1e;
-  --surface: #1a3a2a;
-  --surface2: #1f4433;
-  --surface3: #153020;
-  --border: #2d5a40;
-  --accent: #e8b84b;
-  --accent2: #6dcc90;
-  --accent3: #6dcc90;
+  --bg: #f2ede3;
+  --surface: #ffffff;
+  --surface2: #f7f3ea;
+  --surface3: #ede8de;
+  --border: #d4c9a8;
+  --accent: #f5c842;
+  --accent2: #2d7a45;
+  --accent3: #2d7a45;
   --accent4: #e05c5c;
-  --accent5: #b89eea;
-  --text: #f0ede4;
-  --text2: #b8cfc0;
-  --text3: #7a9e8a;
+  --accent5: #8b7ad4;
+  --text: #1a3a20;
+  --text2: #3d6b4a;
+  --text3: #7a9e82;
   --mono: 'DM Mono', monospace;
   --head: 'Syne', sans-serif;
   --body: 'DM Sans', sans-serif;
-  --gold: #e8b84b;
-  --gold-dim: rgba(232,184,75,0.12);
-  --blue-dim: rgba(79,142,247,0.1);
+  --gold: #f5c842;
+  --gold-dim: rgba(245,200,66,0.15);
+  --blue-dim: rgba(45,122,69,0.1);
 }
 
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -43,16 +43,16 @@ body {
 #app { display:flex; height:100vh; overflow:hidden; }
 #sidebar {
   width:220px; min-width:220px;
-  background:linear-gradient(160deg,#0d1628 0%,#080d1a 60%,#060912 100%);
-  border-right:1px solid rgba(240,165,0,0.15);
+  background:#1e4d2b;
+  border-right:1px solid #2d6e3f;
   display:flex; flex-direction:column;
   overflow-y:auto; overflow-x:hidden;
-  box-shadow:4px 0 32px rgba(0,0,0,0.5), inset -1px 0 0 rgba(255,255,255,0.03);
+  box-shadow:4px 0 20px rgba(0,0,0,0.2);
 }
 #main { flex:1; overflow:hidden; display:flex; flex-direction:column; }
 #topbar {
-  background:linear-gradient(90deg,#0c1424 0%,#080d1a 50%,#0a1020 100%);
-  border-bottom:1px solid rgba(240,165,0,0.2);
+  background:#ffffff;
+  border-bottom:1px solid #d4c9a8;
   padding:0 24px; height:56px;
   display:flex; align-items:center; justify-content:space-between;
   flex-shrink:0; gap:8px; min-width:0;
@@ -67,24 +67,24 @@ body {
 
 /* SIDEBAR */
 .sidebar-logo { padding:20px 16px 8px; }
-.sidebar-logo h1 { font-family:var(--head); font-size:18px; font-weight:800; background:linear-gradient(135deg,#f0a500 0%,#ffd060 50%,#f0a500 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:-0.5px; }
-.sidebar-logo p { font-size:10px; color:var(--text3); font-family:var(--mono); margin-top:2px; }
-.sidebar-divider { height:1px; background:linear-gradient(90deg,transparent,rgba(240,165,0,0.2),transparent); margin:12px 16px; }
-.nav-section { padding:4px 8px; font-size:10px; font-family:var(--mono); color:var(--text3); letter-spacing:1px; text-transform:uppercase; margin:8px 0 4px; }
+.sidebar-logo h1 { font-family:var(--head); font-size:18px; font-weight:800; color:#f5c842; background:none; -webkit-text-fill-color:#f5c842; letter-spacing:-0.5px; }
+.sidebar-logo p { font-size:10px; color:rgba(255,255,255,0.45); font-family:var(--mono); margin-top:2px; }
+.sidebar-divider { height:1px; background:rgba(245,200,66,0.2); margin:12px 16px; }
+.nav-section { padding:4px 8px; font-size:10px; font-family:var(--mono); color:rgba(245,200,66,0.5); letter-spacing:1px; text-transform:uppercase; margin:8px 0 4px; }
 .nav-item {
   display:flex; align-items:center; gap:10px; padding:9px 16px;
   border-radius:8px; cursor:pointer; font-size:13px; font-weight:500;
-  color:var(--text2); transition:all 0.15s; margin:1px 8px;
+  color:rgba(255,255,255,0.75); transition:all 0.15s; margin:1px 8px;
   border-left:2px solid transparent;
 }
-.nav-item:hover { background:rgba(79,142,247,0.08); color:var(--text); border-left:2px solid rgba(79,142,247,0.3); }
+.nav-item:hover { background:rgba(245,200,66,0.15); color:#ffffff; border-left:2px solid rgba(245,200,66,0.4); }
 .nav-item.active {
-  background:linear-gradient(90deg,rgba(240,165,0,0.15) 0%,rgba(240,165,0,0.03) 100%);
-  color:var(--accent); border-left:2px solid var(--accent);
-  box-shadow:inset 0 0 20px rgba(240,165,0,0.05);
+  background:#f5c842;
+  color:#1e4d2b; border-left:2px solid #f5c842;
+  font-weight:700;
 }
 .nav-item .icon { width:16px; text-align:center; font-size:14px; }
-.nav-badge { margin-left:auto; background:var(--accent); color:#000; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:10px; font-weight:600; }
+.nav-badge { margin-left:auto; background:#f5c842; color:#1e4d2b; font-size:10px; font-family:var(--mono); padding:1px 6px; border-radius:10px; font-weight:700; }
 
 /* TOPBAR */
 .topbar-title { font-family:var(--head); font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
@@ -766,7 +766,26 @@ const SYNC = (() => {
       return true;
     });
     state.printOrders = serverState.printOrders || [];
-    state.dispatchPlans = serverState.dispatchPlans || [];
+
+    // ── Clean orphan dispatch plans on load ──────────────────────────────
+    // Only keep dispatch plans where the linked production order still exists
+    // and is not deleted. This removes stale plans for old/deleted orders.
+    const validOrderIds = new Set(state.orders.map(o => o.id));
+    state.dispatchPlans = (serverState.dispatchPlans || []).filter(dp => {
+      // Check primary productionOrderId
+      if (dp.productionOrderId && validOrderIds.has(dp.productionOrderId)) return true;
+      // Check consolidated export orders (allProductionOrderIds)
+      if (dp.allProductionOrderIds && dp.allProductionOrderIds.some(id => validOrderIds.has(id))) return true;
+      // Orphan — no matching order found
+      return false;
+    });
+
+    // Auto-save clean state if any orphan plans were removed
+    const orphansRemoved = (serverState.dispatchPlans||[]).length - state.dispatchPlans.length;
+    if (orphansRemoved > 0) {
+      console.log(`[DispatchClean] Removed ${orphansRemoved} orphan dispatch plan(s) with no matching production order`);
+      saveState();
+    }
     state.pcCodes = PC_CODES_RAW;
     state.zoneMap = ZONE_MAP_RAW;
     _serverDataLoaded = true;
@@ -1258,6 +1277,17 @@ async function fetchTrackingDispatch(){
 fetchTrackingDispatch();
 setInterval(fetchTrackingDispatch, 2*60*1000);
 
+function getValidDispatchPlans() {
+  // Only show dispatch plans where the linked production order:
+  // 1. Exists (not deleted)
+  // 2. Is In Production (running) or Closed — NOT pending
+  return state.dispatchPlans.filter(dp => {
+    const ord = state.orders.find(o => o.id === dp.productionOrderId && !o.deleted);
+    if (!ord) return false; // order deleted or not found
+    return ord.status === 'running' || ord.status === 'closed';
+  });
+}
+
 function recalcDispatch() {
   // Update dispatch dates dynamically based on expected end dates (tentative)
   // Once an order is closed OR dispatch date was manually set, do NOT overwrite
@@ -1265,8 +1295,9 @@ function recalcDispatch() {
     if (dp.dateManuallySet) continue; // respect manual override always
     if (dp.status === 'dispatched') continue; // already dispatched — don't touch
 
-    const ord = state.orders.find(o=>o.id===dp.productionOrderId);
+    const ord = state.orders.find(o=>o.id===dp.productionOrderId && !o.deleted);
     if (!ord) continue;
+    if (ord.status === 'pending') continue; // skip pending orders — not in production yet
 
     if (isExportZone(ord.zone)) {
       // EXPORT: use container ready date if available, else estimate from latest endDate in container
@@ -1629,6 +1660,38 @@ function changeOrderStatus(ordId, machineId, newStatus) {
   } else {
     ord.closedDate = null;
   }
+
+  // When order moves to In Production — auto-create dispatch plan if not already there
+  if (newStatus === 'running') {
+    const alreadyHasDp = state.dispatchPlans.find(d =>
+      d.productionOrderId === ord.id || (d.allProductionOrderIds||[]).includes(ord.id)
+    );
+    if (!alreadyHasDp) {
+      const size = String(ord.size||'');
+      const packSize = state.packSizes[size] || 100000;
+      const qty = ord.qty || 0;
+      const boxes = Math.ceil(qty * 100000 / packSize);
+      const offset = ord.isPrinted ? 3 : 2;
+      const dispDate = ord.endDate ? addDays(ord.endDate, offset) : null;
+      state.dispatchPlans.push({
+        id: uid(),
+        productionOrderId: ord.id,
+        customer: ord.customer,
+        batchNumber: ord.batchNumber || '',
+        poNumber: ord.poNumber || '',
+        size, pcCode: ord.pcCode || '',
+        colour: ord.colour || '',
+        packing: ord.isPrinted ? 'PTD' : 'UP',
+        zone: ord.zone || '',
+        qty, boxes,
+        plannedDate: dispDate,
+        actualDispatched: 0,
+        status: 'pending',
+        remarks: '',
+      });
+    }
+  }
+
   recalcMachineSchedule(machineId);
   saveState();
   render();
@@ -2075,8 +2138,8 @@ function saveOrderModal(existingId, defaultMachine) {
     });
   }
 
-  // Auto-create dispatch plan
-  if (!state.dispatchPlans.find(d=>d.productionOrderId===ord.id || (d.allProductionOrderIds||[]).includes(ord.id))) {
+  // Auto-create dispatch plan — only for orders In Production or Closed (not Pending)
+  if (ord.status !== 'pending' && !state.dispatchPlans.find(d=>d.productionOrderId===ord.id || (d.allProductionOrderIds||[]).includes(ord.id))) {
     const packSize = state.packSizes[size] || 100000;
     const totalCapsules = qty * 100000;
     const boxes = Math.ceil(totalCapsules / packSize);
@@ -3234,7 +3297,7 @@ function buildTruckPlans(zone) {
   const cap = getTruckCapacity(zone);
 
   // Get all non-dispatched plans for this zone
-  const plans = state.dispatchPlans
+  const plans = getValidDispatchPlans()
     .filter(p => (p.zone||'Unassigned') === zone && p.status !== 'dispatched');
 
   if (plans.length === 0) return [];
@@ -3317,7 +3380,7 @@ function buildTruckPlans(zone) {
 }
 
 function getAllTruckPlans() {
-  const zones = [...new Set(state.dispatchPlans.map(p=>p.zone||'Unassigned'))].sort();
+  const zones = [...new Set(getValidDispatchPlans().map(p=>p.zone||'Unassigned'))].sort();
   const all = [];
   for (const z of zones) {
     const trucks = buildTruckPlans(z);
@@ -3346,13 +3409,13 @@ function renderDispatch() {
     <button class="btn btn-primary btn-sm" onclick="showAddDispatchModal()">+ Add Dispatch</button>
   `;
 
-  const plans = state.dispatchPlans.sort((a,b)=>new Date(a.plannedDate)-new Date(b.plannedDate));
+  const plans = getValidDispatchPlans().sort((a,b)=>new Date(a.plannedDate)-new Date(b.plannedDate));
   const zones = [...new Set(plans.map(p=>p.zone||'Unassigned'))].sort();
 
   // Box readiness analysis
   const readyByZone = {};
   for (const z of ZONES) {
-    const zPlans = plans.filter(p=>p.zone===z && p.status!=='dispatched');
+    const zPlans = getValidDispatchPlans().filter(p=>p.zone===z && p.status!=='dispatched');
     const readyBoxes = zPlans.filter(p=>{
       const ord = state.orders.find(o=>o.id===p.productionOrderId);
       return !ord || ord.status==='closed';
@@ -3516,7 +3579,7 @@ function switchDispatchViewTab(el, view) {
 
 function renderTruckViewHTML(zones) {
   const cap = getTruckCapacity();
-  const allZones = zones.length > 0 ? zones : [...new Set(state.dispatchPlans.map(p=>p.zone||'Unassigned'))].sort();
+  const allZones = zones.length > 0 ? zones : [...new Set(getValidDispatchPlans().map(p=>p.zone||'Unassigned'))].sort();
 
   if (allZones.length === 0) {
     return '<div class="empty-state"><div class="icon">🚚</div><p>No dispatch plans to build truck view from</p></div>';
@@ -3529,7 +3592,7 @@ function renderTruckViewHTML(zones) {
     if (trucks.length === 0) continue;
 
     const totalBoxes = trucks.reduce((s,t)=>s+t.totalBoxes,0);
-    const totalDispatched = state.dispatchPlans
+    const totalDispatched = getValidDispatchPlans()
       .filter(p=>(p.zone||'Unassigned')===zone && p.status==='dispatched')
       .reduce((s,p)=>s+(p.boxes||0),0);
 
@@ -3951,7 +4014,7 @@ function dispatchRowObj(p) {
 
 // 1. FULL DISPATCH PLAN (existing — updated with tentative col)
 function exportDispatchPlan() {
-  const rows = state.dispatchPlans
+  const rows = getValidDispatchPlans()
     .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate))
     .map(p => dispatchRowObj(p));
   const wb = XLSX.utils.book_new();
@@ -3963,12 +4026,12 @@ function exportDispatchPlan() {
 // 2. CUSTOMER-WISE — separate Excel file per customer
 function exportCustomerWise() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
-  const customers = [...new Set(state.dispatchPlans.map(p => p.customer).filter(Boolean))].sort();
+  const customers = [...new Set(getValidDispatchPlans().map(p => p.customer).filter(Boolean))].sort();
   if (customers.length === 0) { alert('No dispatch plans found.'); return; }
 
   let exported = 0;
   customers.forEach(cust => {
-    const plans = state.dispatchPlans
+    const plans = getValidDispatchPlans()
       .filter(p => p.customer === cust)
       .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
     if (plans.length === 0) return;
@@ -4003,12 +4066,12 @@ function exportCustomerWise() {
 // 3. ZONE-WISE — one file, one sheet per zone
 function exportZoneWise() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
-  const zones = [...new Set(state.dispatchPlans.map(p => p.zone).filter(Boolean))].sort();
+  const zones = [...new Set(getValidDispatchPlans().map(p => p.zone).filter(Boolean))].sort();
   if (zones.length === 0) { alert('No dispatch plans found.'); return; }
 
   const wb = XLSX.utils.book_new();
   zones.forEach(zone => {
-    const plans = state.dispatchPlans
+    const plans = getValidDispatchPlans()
       .filter(p => p.zone === zone)
       .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
     if (plans.length === 0) return;
@@ -4064,7 +4127,7 @@ function exportZoneWise() {
 // 4. PENDING DISPATCH SUMMARY — only undispatched orders
 function exportPendingDispatch() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
-  const pending = state.dispatchPlans
+  const pending = getValidDispatchPlans()
     .filter(p => p.status !== 'dispatched')
     .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
 
@@ -4301,7 +4364,7 @@ function showDayDispatch(day, month, year) {
 function renderDispatchExport() {
   document.getElementById('topbar-actions').innerHTML = '';
   const zones = [...new Set(state.dispatchPlans.map(p=>p.zone).filter(Boolean))].sort();
-  const customers = [...new Set(state.dispatchPlans.map(p=>p.customer).filter(Boolean))].sort();
+  const customers = [...new Set(getValidDispatchPlans().map(p=>p.customer).filter(Boolean))].sort();
 
   document.getElementById('content').innerHTML = `
     <div class="grid-2">
@@ -4354,7 +4417,7 @@ function renderDispatchExport() {
 }
 
 function exportSingleZone(zone) {
-  const rows = state.dispatchPlans
+  const rows = getValidDispatchPlans()
     .filter(p => p.zone === zone)
     .sort((a,b) => new Date(a.plannedDate)-new Date(b.plannedDate))
     .map(p => dispatchRowObj(p));
@@ -4366,7 +4429,7 @@ function exportSingleZone(zone) {
 }
 
 function exportSingleCustomer(customer) {
-  const rows = state.dispatchPlans
+  const rows = getValidDispatchPlans()
     .filter(p => p.customer === customer)
     .sort((a,b) => new Date(a.plannedDate)-new Date(b.plannedDate))
     .map(p => dispatchRowObj(p));
@@ -4392,7 +4455,7 @@ function renderDispatchCustomer() {
   `;
 
   for (const cust of customers) {
-    const cPlans = state.dispatchPlans.filter(p=>p.customer===cust).sort((a,b)=>new Date(a.plannedDate)-new Date(b.plannedDate));
+    const cPlans = getValidDispatchPlans().filter(p=>p.customer===cust).sort((a,b)=>new Date(a.plannedDate)-new Date(b.plannedDate));
     const totalQty = cPlans.reduce((s,p)=>s+p.qty,0);
     const dispatched = cPlans.filter(p=>p.status==='dispatched').reduce((s,p)=>s+p.qty,0);
     const pending = totalQty - dispatched;
@@ -4863,8 +4926,8 @@ function renderOrderTracker() {
   const allOrders = state.orders.filter(o=>!o.deleted);
   const totalQty    = allOrders.reduce((s,o)=>s+(o.qty||0),0);
   const totalProd   = allOrders.reduce((s,o)=>s+(o.actualProd||0),0);
-  const totalDisp   = state.dispatchPlans.reduce((s,p)=>s+(p.actualDispatched||0),0);
-  const pendingDisp = state.dispatchPlans.filter(p=>p.status!=='dispatched').reduce((s,p)=>s+(p.qty||0),0);
+  const totalDisp   = getValidDispatchPlans().reduce((s,p)=>s+(p.actualDispatched||0),0);
+  const pendingDisp = getValidDispatchPlans().filter(p=>p.status!=='dispatched').reduce((s,p)=>s+(p.qty||0),0);
 
   let html = `
     <div class="kpi-grid mb-4" style="grid-template-columns:repeat(auto-fill,minmax(140px,1fr))">

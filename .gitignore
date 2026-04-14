@@ -1,0 +1,19 @@
+# Database files — never commit these
+*.db
+*.db-shm
+*.db-wal
+sunloc-backup-*.json
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Railway
+.railway/

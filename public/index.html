@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sunloc Suite</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#f0f4f8;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.container{text-align:center;padding:40px}
+h1{font-size:32px;font-weight:800;color:#2563eb;margin-bottom:8px}
+p{color:#64748b;margin-bottom:40px;font-size:14px}
+.apps{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;max-width:900px}
+.app-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:28px 20px;text-decoration:none;color:#0f172a;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.app-card:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,0,0,.1);border-color:#2563eb}
+.app-icon{font-size:36px;margin-bottom:12px}
+.app-name{font-size:16px;font-weight:700;margin-bottom:4px}
+.app-desc{font-size:11px;color:#64748b}
+.badge{display:inline-block;background:#2563eb;color:#fff;font-size:9px;padding:2px 6px;border-radius:10px;margin-top:6px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>SUNLOC</h1>
+  <p>Integrated Production Suite — Select your application</p>
+  <div class="apps">
+    <a href="/planning.html" class="app-card">
+      <div class="app-icon">📋</div>
+      <div class="app-name">Planning Suite</div>
+      <div class="app-desc">Production planning, dispatch, order management</div>
+      <div class="badge">v3.0</div>
+    </a>
+    <a href="/dpr.html" class="app-card">
+      <div class="app-icon">📊</div>
+      <div class="app-name">DPR Tracker</div>
+      <div class="app-desc">Daily production records, AIM, analytics</div>
+      <div class="badge">v7</div>
+    </a>
+    <a href="/tracking.html" class="app-card">
+      <div class="app-icon">🏷️</div>
+      <div class="app-name">Tracking Suite</div>
+      <div class="app-desc">Label generation, WIP scanning, batch tracking</div>
+      <div class="badge" style="background:#059669">v1.0 NEW</div>
+    </a>
+  </div>
+  <p style="margin-top:24px;font-size:11px;color:#94a3b8">Sunloc Integrated Server — <a href="/api/health" style="color:#2563eb">/api/health</a></p>
+</div>
+</body>
+</html>

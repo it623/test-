@@ -71,8 +71,9 @@ let readyResolve = null;
 const readyPromise = new Promise(r => { readyResolve = r; });
 
 function startWorker() {
+  const nodeModulesPath = path.join(process.cwd(), 'node_modules');
   worker = spawn(process.execPath, [workerPath], {
-    env: process.env,
+    env: { ...process.env, NODE_PATH: nodeModulesPath },
     stdio: ['pipe', 'pipe', 'inherit'],
   });
 
@@ -127,8 +128,9 @@ fs.writeFileSync(syncHelperPath, SYNC_HELPER);
 function pgQuerySync(sql, params, method) {
   const args = JSON.stringify({ sql, params: params || [], method });
   try {
+    const nodeModulesPath = path.join(process.cwd(), 'node_modules');
     const out = execFileSync(process.execPath, [syncHelperPath, args], {
-      env: process.env,
+      env: { ...process.env, NODE_PATH: nodeModulesPath },
       timeout: 10000,
       encoding: 'utf8',
     });
@@ -183,9 +185,11 @@ class PgDatabase {
     // Normalise SQLite-specific SQL to Postgres
     sql = sql
       .replace(/\bINSERT OR IGNORE INTO\b/gi, 'INSERT INTO')
+      .replace(/(VALUES\s*\([^)]+\))\s*$/i, '$1 ON CONFLICT DO NOTHING')
       .replace(/\bINSERT OR REPLACE INTO\b/gi, 'INSERT INTO')
       .replace(/datetime\('now'\)/gi, 'NOW()')
       .replace(/datetime\(\\'now\\'\)/gi, 'NOW()')
+      .replace(/(\w+)\s*<\s*NOW\(\)/gi, "CAST($1 AS TIMESTAMPTZ) < NOW()")
       .replace(/AUTOINCREMENT/gi, '')  // Postgres SERIAL handles this
       // ON CONFLICT(col) DO UPDATE ... (already standard SQL, works in PG)
     ;

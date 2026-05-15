@@ -285,7 +285,7 @@ class SapClient {
           if (this.pgPool) {
             await this.pgPool.query(
               `UPDATE sap_config SET session_cookie=$1, session_route_id=$2, session_expires_at=$3,
-                 last_login_at=NOW()::TEXT, last_login_success=TRUE, last_login_error=NULL WHERE id=1`,
+                 last_login_at=NOW()::TEXT, last_login_success=1, last_login_error=NULL WHERE id=1`,
               [b1session, routeId, expiresAt]
             );
           } else {
@@ -310,7 +310,7 @@ class SapClient {
           } catch {}
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -331,7 +331,7 @@ class SapClient {
         try {
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {

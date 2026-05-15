@@ -1547,7 +1547,7 @@ async function ensurePostgresTables() {
         session_route_id TEXT,
         session_expires_at TEXT,
         last_login_at TEXT,
-        last_login_success BOOLEAN,
+        last_login_success INTEGER,
         last_login_error TEXT,
         indent_poll_interval_minutes INTEGER NOT NULL DEFAULT 5,
         invoice_poll_interval_minutes INTEGER NOT NULL DEFAULT 5,

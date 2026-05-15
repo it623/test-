@@ -480,8 +480,8 @@ class SapClient {
   async fetchOpenSalesOrders({ lookbackDays = 30 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge datetime'YYYY-MM-DDT00:00:00'
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge datetime'${dateStr}T00:00:00'`;
+    // SAP B1 Service Layer date filter — try plain ISO date (works for most SL versions)
+    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
     const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}&$top=200` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
@@ -552,7 +552,7 @@ class SapClient {
   async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    const filter = `$filter=DocDate ge datetime'${dateStr}T00:00:00'`;
+    const filter = `$filter=DocDate ge '${dateStr}'`;
     const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocTotal,VatSum,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&${select}&$top=500&$orderby=DocEntry desc` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };

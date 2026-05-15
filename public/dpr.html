@@ -22,16 +22,16 @@
 body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px;min-height:100vh;font-weight:500}
 /* NAV — deep forest green matching Planning sidebar */
 #nav{position:fixed;top:0;left:0;right:0;height:var(--nav);background:#1a3a2e;border-bottom:3px solid #0f2a20;z-index:200;display:flex;align-items:center;padding:0 16px;gap:0;box-shadow:0 2px 8px rgba(26,19,8,0.2)}
-.nbrand{font-family:var(--fc);font-weight:800;font-size:18px;letter-spacing:1px;color:#f0c060;white-space:nowrap;margin-right:16px}
+.nbrand{font-family:var(--fc);font-weight:800;font-size:15px;letter-spacing:1px;color:#f0c060;white-space:nowrap;margin-right:6px;flex-shrink:0}
 .nbrand b{color:#ffffff}
 .nbrand small{font-size:11px;color:rgba(255,255,255,0.5);font-weight:400;margin-left:4px}
-.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none}
+.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none;min-width:0}
 .ntabs::-webkit-scrollbar{display:none}
-.ntab{display:flex;align-items:center;gap:5px;padding:0 13px;height:100%;font-family:var(--fc);font-weight:700;font-size:11.5px;letter-spacing:1px;text-transform:uppercase;color:rgba(255,255,255,0.55);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
+.ntab{display:flex;align-items:center;gap:4px;padding:0 8px;height:100%;font-family:var(--fc);font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:rgba(255,255,255,0.55);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
 .ntab:hover{color:rgba(255,255,255,0.85)}
 .ntab.on{color:#f0c060;border-bottom-color:#f0c060}
-.nright{display:flex;align-items:center;gap:6px;margin-left:8px;flex-shrink:0}
-#ndate{background:rgba(255,255,255,0.15);border:1.5px solid rgba(255,255,255,0.3);border-radius:var(--r);color:#fff;padding:5px 8px;font-family:var(--fc);font-size:12px;font-weight:700;cursor:pointer;outline:none}
+.nright{display:flex;align-items:center;gap:4px;margin-left:6px;flex-shrink:0;min-width:0;overflow:visible}
+#ndate{background:rgba(255,255,255,0.15);border:1.5px solid rgba(255,255,255,0.3);border-radius:var(--r);color:#fff;padding:5px 6px;font-family:var(--fc);font-size:11px;font-weight:700;cursor:pointer;outline:none;width:120px}
 #ndate::-webkit-calendar-picker-indicator{filter:invert(1)}
 .nbtn{padding:5px 11px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:11px;letter-spacing:.8px;cursor:pointer;border:1.5px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.12);color:rgba(255,255,255,0.85);transition:.15s;white-space:nowrap}
 .nbtn:hover{background:rgba(255,255,255,0.22);color:#fff}
@@ -112,7 +112,7 @@ td.r,th.r{text-align:right}
 .col-body{padding:14px;display:none}
 .col-body.open{display:block}
 /* REMARKS */
-.remark-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--b1)}
+.remark-row{background:var(--s2);border:2px solid var(--b2);border-radius:4px;padding:10px 12px;margin-bottom:8px;display:grid;grid-template-columns:auto auto 1fr auto;gap:8px;align-items:center}
 .remark-row:last-child{border-bottom:none}
 .rem-shift{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--cyan);font-weight:800;width:52px;flex-shrink:0}
 .rem-text{flex:1;font-size:12px;color:var(--t2);font-weight:600}
@@ -136,75 +136,245 @@ td.r,th.r{text-align:right}
 }
 
 /* ════════════════════════════════════════
-   DPR — MOBILE RESPONSIVE
+   DPR — ENHANCED MOBILE RESPONSIVE
    ════════════════════════════════════════ */
 @media(max-width:768px){
-  /* ── Nav tabs → scrollable ── */
-  #nav { height: auto; min-height: var(--nav); flex-wrap: nowrap; padding: 0 4px; }
+
+  /* ── Nav bar — horizontal scroll tabs ── */
+  #nav { height: auto; min-height: var(--nav); flex-wrap: nowrap; padding: 0 6px; gap: 0; }
+  .nbrand { font-size: 13px !important; white-space: nowrap; margin-right: 4px; }
+  .nbrand small { display: none; } /* hide version on mobile */
   .ntabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
   .ntabs::-webkit-scrollbar { display: none; }
-  .ntab { padding: 0 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
-  .nbrand { font-size: 14px; white-space: nowrap; }
-  .nright { flex-shrink: 0; gap: 4px; }
-  .nright .btn { padding: 4px 7px; font-size: 11px; }
+  .ntab { padding: 0 10px; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+  .nright { flex-shrink: 0; gap: 3px; }
+  .nright .nbtn { padding: 4px 7px; font-size: 10px; }
+  #syncBadge { font-size: 9px !important; padding: 3px 7px !important; }
 
-  /* ── Content padding ── */
-  .container, .content-wrap { padding: 10px !important; }
+  /* ── Wrap & content ── */
+  #wrap { padding: 10px 8px !important; margin-top: var(--nav); }
 
-  /* ── Floor tabs ── */
-  .ftabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
-  .ftab { white-space: nowrap; flex-shrink: 0; padding: 6px 14px; font-size: 12px; }
+  /* ── Date input ── */
+  #ndate { font-size: 11px; padding: 4px 5px; width: 105px; }
 
-  /* ── Machine table ── */
-  .mtable-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .mtable { min-width: 700px; }
-  .mtable th, .mtable td { padding: 5px 6px; font-size: 11px; }
+  /* ── Floor tabs — scrollable ── */
+  .ftabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; gap: 4px; padding-bottom: 2px; }
+  .ftab { white-space: nowrap; flex-shrink: 0; padding: 6px 12px; font-size: 11px; }
 
-  /* ── Shift header ── */
-  .shift-hdr { padding: 8px 12px; }
+  /* ── Shift block ── */
+  .shift-hdr { padding: 10px 12px; }
   .shift-title { font-size: 13px; }
+  .shift-body { padding: 8px 6px; }
 
-  /* ── Staff row ── */
-  .staff-row { grid-template-columns: 1fr !important; gap: 8px; }
+  /* ── Machine table — horizontal scroll ── */
+  .mtable-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 6px; }
+  .mtable { min-width: 740px; }
+  .mtable th { padding: 7px 7px; font-size: 10px; }
+  .mtable td { padding: 6px 6px; font-size: 11px; }
 
-  /* ── Inputs ── */
-  input[type=text], input[type=number], select {
+  /* ── v37E mobile fix: Generic horizontal-scroll wrapper class used by tables that
+     would otherwise overflow viewport on phones. Applied via wrapping div. ── */
+  .tbl-mobile-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 6px; max-width: 100%; }
+  .tbl-mobile-wrap > table { min-width: 540px; }
+
+  /* ── Run row inputs — bigger touch targets ── */
+  .run-row input[type=number] {
+    width: 60px !important;
     font-size: 16px !important;
-    min-height: 38px;
+    min-height: 40px !important;
+    padding: 6px 4px !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+    border-radius: 6px !important;
   }
-  .btn { min-height: 38px; }
+  .run-row input[type=text] { width: 72px !important; font-size: 13px !important; min-height: 36px !important; }
+  .run-row select { font-size: 11px !important; min-height: 36px !important; padding: 4px !important; border-radius: 6px !important; }
 
-  /* ── DT table ── */
+  /* ── Staff / operator row ── */
+  .staff-row { grid-template-columns: 1fr !important; gap: 8px; }
+  .grp-op-input { font-size: 14px !important; min-height: 38px !important; }
+
+  /* ── All inputs — prevent iOS zoom ── */
+  input[type=text], input[type=number], select, textarea {
+    font-size: 16px !important;
+    min-height: 40px;
+  }
+
+  /* ── Buttons ── */
+  .btn { min-height: 40px; border-radius: 6px; }
+  .nbtn { min-height: 34px; }
+
+  /* ── KPI grid ── */
+  .kpi-grid { grid-template-columns: repeat(2,1fr) !important; gap: 8px !important; }
+  .kpi { padding: 10px 8px !important; }
+  .kpi-val { font-size: 20px !important; }
+  .kpi-label { font-size: 9px !important; }
+
+  /* ── DT (Downtime) table ── */
   .dttable-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .dttable { min-width: 600px; }
 
   /* ── Analytics grids ── */
-  .agrid { grid-template-columns: 1fr !important; }
-  .kpi-grid { grid-template-columns: repeat(2,1fr) !important; }
-  .kpi { padding: 10px; }
+  .agrid { grid-template-columns: 1fr !important; gap: 10px; }
 
   /* ── History table ── */
-  .hist-table-wrap { overflow-x: auto; }
+  .hist-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
-  /* ── Modal ── */
-  .modal-box { margin: 10px; padding: 16px; max-width: calc(100vw - 20px); }
+  /* ── Modal — bottom sheet style ── */
+  .modal-box {
+    position: fixed !important;
+    bottom: 0 !important; left: 0 !important; right: 0 !important; top: auto !important;
+    margin: 0 !important;
+    padding: 20px 16px !important;
+    max-width: 100% !important;
+    border-radius: 16px 16px 0 0 !important;
+    max-height: 90vh !important;
+    overflow-y: auto;
+  }
 
-  /* ── Plant report table ── */
+  /* ── Modal overlay ── */
+  #modal-overlay { align-items: flex-end !important; }
+
+  /* ── Plant report ── */
   #plant-report-output { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── History page filters ── */
+  #page-history .field-grp { margin-bottom: 8px; }
+  #page-history > .card > div:first-of-type { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+  /* ── Close/batch buttons ── */
+  .close-btn, .closed-badge { font-size: 9px !important; padding: 2px 5px !important; }
+
+  /* ── Cards ── */
+  .card { padding: 12px 10px; border-radius: 8px; }
+  .card-title { font-size: 11px; }
+
+  /* ── AIM status blocks ── */
+  .aim-grid { grid-template-columns: 1fr !important; }
+
+  /* ── Remarks/Resort inputs ── */
+  .remark-row, .resort-row { flex-wrap: wrap; gap: 6px; }
 
   /* ── Gross qty warning ── */
   [id^="gross-warn-"] { font-size: 10px !important; padding: 5px 8px !important; }
 
-  /* ── History page filters ── */
-  #page-history .field-grp { margin-bottom: 8px; }
-  #page-history > .card > div:first-of-type { flex-direction: column; align-items: flex-start; }
+  /* ── Bottom safe area padding ── */
+  #wrap { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important; }
 
-  /* ── Close batch buttons in run rows ── */
-  .close-btn, .closed-badge { font-size: 9px !important; }
+  /* ── Qty input — bigger on mobile for data entry ── */
+  input[id^="run-qty-"] {
+    width: 64px !important;
+    font-size: 18px !important;
+    min-height: 42px !important;
+    padding: 4px 6px !important;
+    text-align: center !important;
+    font-weight: 700 !important;
+  }
 
-  /* ── User badge ── */
-  #dpr-user-badge { top: 6px; right: 8px; font-size: 10px; padding: 3px 7px; }
+  /* ── Batch run row — wrap on small screens ── */
+  .run-row { flex-wrap: wrap; gap: 4px; }
+
+  /* ── Order select — wider on mobile ── */
+  select[id^="run-ord-"] { width: 140px !important; font-size: 12px !important; min-height: 36px !important; }
+
+  /* ── Save button — full width sticky bar ── */
+  .save-bar { position: sticky; bottom: 0; background: var(--bg); padding: 10px; border-top: 1px solid var(--b2); z-index: 50; }
+
+  /* ── TEMP alert banner — full width ── */
+  #temp-alert-banner { font-size: 11px !important; padding: 6px 10px !important; flex-wrap: wrap; }
+
+  /* ── Sync badge — compact ── */
+  #syncBadge { padding: 2px 6px !important; font-size: 9px !important; }
+
+  /* ── Date picker — wider ── */
+  #ndate { width: 110px !important; }
+
+  /* ── Shift header action buttons ── */
+  .shift-hdr .btn { padding: 4px 8px !important; font-size: 10px !important; min-height: 30px !important; }
+
+  /* ── Analytics charts — full height ── */
+  .chart-wrap canvas { max-height: 220px !important; }
+
+  /* ── Plant report ── */
+  .plant-summary { flex-direction: column !important; gap: 8px; }
 }
+
+@media(max-width:480px){
+  /* ── Very small screens (iPhone SE, etc) ── */
+  .nbrand { font-size: 12px !important; }
+  .ntab { padding: 0 8px; font-size: 10px; }
+  .kpi-val { font-size: 18px !important; }
+  .kpi { padding: 8px 6px !important; }
+  .ftab { padding: 5px 10px; font-size: 10px; }
+  #wrap { padding: 8px 6px !important; }
+
+  /* ── Run row: qty input even more prominent ── */
+  .run-row input[type=number] {
+    width: 62px !important;
+    font-size: 17px !important;
+    min-height: 40px !important;
+    font-weight: 700 !important;
+    text-align: center !important;
+  }
+  /* ── Batch select: full legible ── */
+  .run-row select { width: 120px !important; font-size: 10px !important; }
+
+  /* ── Shift header: compact ── */
+  .shift-title { font-size: 12px !important; }
+  .shift-hdr { padding: 8px 10px !important; }
+
+  /* ── Date picker: compact ── */
+  #ndate { width: 100px !important; font-size: 10px !important; }
+
+  /* ── MC label: compact ── */
+  .mtable th:first-child, .mtable td:first-child { padding: 5px 5px !important; }
+
+  /* FIX 1 — Run row: stack batch number + qty vertically so nothing is cut off */
+  .run-row {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 4px !important;
+  }
+  .run-row select {
+    width: 100% !important;
+    max-width: 100% !important;
+    font-size: 12px !important;
+  }
+  .run-row input[type=text] {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* FIX 2 — Downtime table: show scroll hint shadow on right edge */
+  .dttable-wrap {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    background:
+      linear-gradient(to right, white 30%, rgba(255,255,255,0)),
+      linear-gradient(to left, #fef3c7 30%, rgba(255,255,255,0)) 100% 0;
+    background-repeat: no-repeat;
+    background-size: 40px 100%, 40px 100%;
+    background-attachment: local, scroll;
+    border-radius: 6px;
+  }
+
+  /* FIX 3 — Navbar: hide username text on mobile, keep icon only */
+  #nav [id^="dpr-user-wrap"] strong,
+  #nav strong { display: none !important; }
+  #nav span[style*="color:var(--t3)"] { display: none !important; }
+}
+/* ── Touch/tap feedback ── */
+@media (hover: none) and (pointer: coarse) {
+  .ntab:active { opacity: 0.7; }
+  .ftab:active { opacity: 0.7; }
+  .btn:active { opacity: 0.85; transform: scale(0.97); }
+  .nbtn:active { opacity: 0.7; }
+  .run-row input:focus { outline: 2px solid var(--cyan); outline-offset: 1px; border-color: var(--cyan) !important; }
+  .mtable td { -webkit-tap-highlight-color: rgba(0,212,255,0.08); }
+  /* Bigger close batch button target on touch */
+  .close-btn { padding: 5px 10px !important; min-height: 32px !important; }
+}
+
 /* TABLE */
 .data-table{width:100%;border-collapse:collapse;font-size:12px}
 .data-table th{font-family:var(--fc);font-size:10px;letter-spacing:.8px;color:var(--t3);padding:7px 10px;border-bottom:1px solid var(--b1);text-align:left}
@@ -228,6 +398,15 @@ td.r,th.r{text-align:right}
 #toast{position:fixed;bottom:20px;right:20px;padding:10px 16px;border-radius:var(--r);font-family:var(--fc);font-weight:700;font-size:12px;letter-spacing:.5px;z-index:900;opacity:0;transition:.3s;pointer-events:none}
 /* SYNC STATUS */
 .sync-row{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--s2);border-radius:var(--r);margin-bottom:12px;font-size:12px;color:var(--t2)}
+/* MONTH PICKER */
+.dpr-month-wrap{display:flex;align-items:center;gap:5px;padding:3px 8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.2);border-radius:5px}
+.dpr-month-wrap select{background:transparent;border:none;color:#00d4ff;font-size:11px;font-weight:700;cursor:pointer;outline:none;padding:0 2px;-webkit-appearance:none;appearance:none;min-width:100px}
+.dpr-month-wrap select option{background:#0d1117;color:#fff}
+.dpr-month-badge{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:700}
+.dpr-month-badge.current{background:rgba(0,212,255,0.15);color:#00d4ff}
+.dpr-month-badge.grace{background:rgba(255,171,0,0.15);color:#ffab00}
+.dpr-month-badge.locked{background:rgba(255,82,82,0.15);color:#ff5252}
+@media(max-width:600px){.dpr-month-wrap select{min-width:80px;font-size:10px}}
 </style>
 <style>
 #auth-overlay{position:fixed;inset:0;background:#0b0d12;z-index:9999;display:flex;align-items:center;justify-content:center}
@@ -244,6 +423,16 @@ td.r,th.r{text-align:right}
 .auth-btn:hover{opacity:.9}
 .auth-err{color:#ff4060;font-size:12px;text-align:center;margin-top:8px;min-height:16px}
 .audit-row{display:grid;grid-template-columns:140px 70px 90px 1fr;gap:6px;padding:6px 10px;border-bottom:1px solid #1e2535;font-size:11px}
+
+/* Hide number input spinners */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+
+/* Hide number input spinners globally */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+input[type=number] { -moz-appearance:textfield; appearance:textfield; }
 </style>
 </head>
 <body>
@@ -271,7 +460,7 @@ td.r,th.r{text-align:right}
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v39</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -285,15 +474,24 @@ td.r,th.r{text-align:right}
   </div>
   <div class="nright">
     <div id="unsavedDot"></div>
+    <!-- MONTH PICKER -->
+    <div class="dpr-month-wrap" title="Select DPR month">
+      <select id="dpr-month-select" onchange="onDprMonthChange(this.value)"></select>
+      <span id="dpr-month-badge" class="dpr-month-badge current">●</span>
+    </div>
     <span id="syncBadge" class="offline" onclick="configureServer()">⚙ Server</span>
+    <!-- v39 Phase 15: SAP Status badge -->
+    <span id="v39-sap-status-badge" class="v39-sap-badge" title="SAP status — checking..." onclick="_v39_sapStatusBadgeShowDetail()" style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer;background:#e5e7eb;color:#6b7280;border:1px solid #d1d5db;user-select:none">
+      <span class="v39-sap-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af"></span>SAP
+    </span>
     <input type="date" id="ndate" onchange="onDateChange()">
-    <select id="recentDatesSelect" style="background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--t1);padding:5px 8px;font-family:var(--fc);font-size:11px;cursor:pointer;outline:none;max-width:140px" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}" title="Jump to a previous date">
+    <select id="recentDatesSelect" style="display:none" onchange="if(this.value){document.getElementById('ndate').value=this.value;onDateChange();this.value=''}">
       <option value="">📅 History</option>
     </select>
-    <button class="nbtn" onclick="exportData()">↓ Export</button>
-    <button class="nbtn" onclick="document.getElementById('imp').click()">↑ Import</button>
+    <button class="nbtn" onclick="exportData()" title="Export data" style="padding:5px 7px">↓</button>
+    <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import data" style="padding:5px 7px">↑</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
-    <button class="nbtn primary" id="saveBtn" onclick="saveDay()">Save</button>
+    <button class="nbtn primary" id="saveBtn" onclick="saveDay()" style="padding:5px 14px;font-size:12px">💾 Save</button>
   </div>
 </div>
 
@@ -319,7 +517,7 @@ td.r,th.r{text-align:right}
       <span class="col-title">⏱ Machine-wise Downtime (minutes per shift)</span>
       <span style="font-size:11px;color:var(--t3)">▼ expand</span>
     </div>
-    <div class="col-body" id="dtBlock"><div id="dtTable"></div></div>
+    <div class="col-body open" id="dtBlock"><div id="dtTable"></div></div>
   </div>
   <!-- Shift DT summary -->
   <div class="collapsible">
@@ -327,25 +525,32 @@ td.r,th.r{text-align:right}
       <span class="col-title">📋 Shift-level Downtime Summary</span>
       <span style="font-size:11px;color:var(--t3)">▼ expand</span>
     </div>
-    <div class="col-body" id="dtSumBlock"><div id="dtSumTable"></div></div>
+    <div class="col-body open" id="dtSumBlock"><div id="dtSumTable"></div></div>
   </div>
-  <!-- Remarks -->
+  <!-- Remarks — always visible at bottom -->
   <div class="collapsible">
     <div class="col-hdr" onclick="toggleCol('remBlock')">
       <span class="col-title" style="color:var(--t2)">💬 Shift Remarks / Issues</span>
-      <button class="btn-add" onclick="event.stopPropagation();addRemark()">+ Add Remark</button>
     </div>
-    <div class="col-body" id="remBlock"><div id="remList"><p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log issues.</p></div></div>
+    <div class="col-body open" id="remBlock">
+      <p style="color:var(--t3);font-size:11px;margin-bottom:8px">Log machine-wise shift remarks and issues. Each entry links to a machine and shift.</p>
+      <div id="remList"><p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log shift issues.</p></div>
+      <div style="padding:10px 0 2px 0">
+        <button class="btn-add" onclick="addRemark()" style="width:100%;padding:8px;text-align:center">+ Add Remark</button>
+      </div>
+    </div>
   </div>
-  <!-- Resort -->
+  <!-- Resort — always visible at bottom -->
   <div class="collapsible">
     <div class="col-hdr" onclick="toggleCol('resortBlock')">
       <span class="col-title" style="color:var(--amber)">↩ Re-Sort Entry — Machine-wise Reasons</span>
-      <button class="btn-add" onclick="event.stopPropagation();addResort()">+ Add Re-Sort Entry</button>
     </div>
-    <div class="col-body" id="resortBlock">
-      <p style="color:var(--t3);font-size:11px;margin-bottom:10px">Log machine-wise re-sort quantity and root cause. Target is always ZERO. Each entry links to a machine, shift, and defect reason.</p>
+    <div class="col-body open" id="resortBlock">
+      <p style="color:var(--t3);font-size:11px;margin-bottom:8px">Log machine-wise re-sort quantity and root cause. Target is always ZERO. Each entry links to a machine, shift, and defect reason.</p>
       <div id="resortList"><p style="color:var(--t3);font-size:12px">No re-sort entries. Click "+ Add Re-Sort Entry" to log machine-wise re-sort reasons.</p></div>
+      <div style="padding:10px 0 2px 0">
+        <button class="btn-add" onclick="addResort()" style="width:100%;padding:8px;text-align:center">+ Add Re-Sort Entry</button>
+      </div>
     </div>
   </div>
 </div>
@@ -353,17 +558,18 @@ td.r,th.r{text-align:right}
 <!-- ═══ ANALYTICS ════════════════════════════════════════ -->
 <div id="page-analytics" class="page">
   <div class="card" style="padding:10px 14px;margin-bottom:12px">
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px">FLOOR</span>
-      <select id="analyticsFloor" onchange="renderAnalytics()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
+      <select id="analyticsFloor" onchange="this.dataset.userSet='1';renderAnalytics()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
         <option value="GF">Ground Floor</option>
         <option value="1F">First Floor (FF)</option>
         <option value="2F">Second Floor (SF)</option>
       </select>
       <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px;margin-left:8px">DATE</span>
-      <input type="date" id="analyticsDate" onchange="renderAnalytics()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
-      <button class="btn-sm" onclick="document.getElementById('analyticsDate').value=today();renderAnalytics()">Today</button>
+      <input type="date" id="analyticsDate" onchange="window._analyticsRangeMode='today';renderAnalytics()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
+      <button class="btn-sm" onclick="document.getElementById('analyticsDate').value=today();window._analyticsRangeMode='today';renderAnalytics()">Today</button>
     </div>
+    <div id="analytics-range-bar"></div>
   </div>
   <div class="agrid">
     <div class="card"><div class="card-title">Production vs Target</div><div class="chart-wrap"><canvas id="ch-pvt"></canvas></div></div>
@@ -378,14 +584,21 @@ td.r,th.r{text-align:right}
 <!-- ═══ TRENDS ═══════════════════════════════════════════ -->
 <div id="page-trends" class="page">
   <div class="card" style="padding:12px 16px;margin-bottom:12px">
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px">RANGE</span>
-      <select id="trendRange" onchange="renderTrends()" style="width:120px">
-        <option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="30" selected>Last 30 days</option><option value="60">Last 60 days</option>
-      </select>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px">FLOOR</span>
       <select id="trendFloor" onchange="renderTrends()" style="width:130px">
         <option value="ALL">All Floors</option><option value="GF">Ground Floor</option><option value="1F">First Floor</option><option value="2F">Second Floor</option>
       </select>
+    </div>
+    <div id="trends-range-bar"></div>
+  </div>
+      <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px">SCOPE</span>
+      <div style="display:flex;border:1px solid var(--b2);border-radius:5px;overflow:hidden">
+        <button id="btn-scope-month" onclick="_dprCumulativeMode=false;document.getElementById('btn-scope-month').style.background='var(--cyan)';document.getElementById('btn-scope-cumul').style.background='';renderTrends()"
+          style="padding:4px 10px;font-size:11px;font-weight:700;border:none;background:var(--cyan);color:#000;cursor:pointer">This Month</button>
+        <button id="btn-scope-cumul" onclick="_dprCumulativeMode=true;document.getElementById('btn-scope-cumul').style.background='var(--cyan)';document.getElementById('btn-scope-month').style.background='';renderTrends()"
+          style="padding:4px 10px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--t1);cursor:pointer">Up To This Month</button>
+      </div>
     </div>
   </div>
   <div class="agrid">
@@ -398,34 +611,31 @@ td.r,th.r{text-align:right}
 
 <!-- ═══ AIM STATUS ═══════════════════════════════════════ -->
 <div id="page-aim" class="page">
-  <div class="card"><div class="card-title">AIM vs Backlog — Machine Wise</div><div id="aimTable"></div></div>
-  <div class="card"><div class="card-title">Cumulative AIM Progress</div><div class="chart-wrap-lg"><canvas id="ch-aim"></canvas></div></div>
+  <div class="card" style="padding:10px 14px;margin-bottom:12px">
+    <div id="aim-range-bar"></div>
+  </div>
+  <div class="card"><div class="card-title">AIM vs Backlog (Produced − AIM = Backlog)</div><div id="aimTable"></div></div>
+  <div class="card"><div class="card-title">AIM vs Production — Machine Wise</div><div class="chart-wrap-lg"><canvas id="ch-aim"></canvas></div></div>
 </div>
 
 <!-- ═══ SHIFT PERFORMANCE ════════════════════════════════ -->
 <div id="page-perf" class="page">
   <div class="card" style="padding:10px 14px;margin-bottom:12px">
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px">FLOOR</span>
-      <select id="perfFloor" onchange="renderPerf()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
+      <select id="perfFloor" onchange="this.dataset.userSet='1';renderPerf()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
         <option value="GF">Ground Floor</option>
         <option value="1F">First Floor (FF)</option>
         <option value="2F">Second Floor (SF)</option>
       </select>
       <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px;margin-left:8px">DATE</span>
-      <input type="date" id="perfDate" onchange="renderPerf()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
-      <button class="btn-sm" onclick="document.getElementById('perfDate').value=today();renderPerf()">Today</button>
-      <span style="font-family:var(--fc);font-size:10px;color:var(--t3);letter-spacing:1px;margin-left:8px">OPERATOR RANGE</span>
-      <select id="perfOpRange" onchange="renderPerf()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
-        <option value="ALL">All Time (Cumulative)</option>
-        <option value="30">Last 30 days</option>
-        <option value="14">Last 14 days</option>
-        <option value="7">Last 7 days</option>
-      </select>
+      <input type="date" id="perfDate" onchange="window._perfRangeMode='today';renderPerf()" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 10px;font-size:12px;font-weight:700">
+      <button class="btn-sm" onclick="document.getElementById('perfDate').value=today();window._perfRangeMode='today';renderPerf()">Today</button>
     </div>
+    <div id="perf-range-bar"></div>
   </div>
   <div class="card"><div class="card-title">Shift Incharge Scorecard</div><div id="perfTable"></div></div>
-  <div class="card"><div class="card-title">Incharge vs Efficiency (last 30 days)</div><div class="chart-wrap-lg"><canvas id="ch-perf"></canvas></div></div>
+  <div class="card"><div class="card-title">Incharge vs Efficiency</div><div class="chart-wrap-lg"><canvas id="ch-perf"></canvas></div></div>
   <div class="card"><div class="card-title">👤 Operator-wise Performance</div><div id="operatorPerfSection"><p style="color:var(--t3);font-size:12px">Loading...</p></div></div>
   <div class="card"><div class="card-title">🏭 Shift Personnel Performance</div><div id="shiftPersonnelSection"><p style="color:var(--t3);font-size:12px">Loading...</p></div></div>
 </div>
@@ -438,6 +648,12 @@ td.r,th.r{text-align:right}
       <div class="field-grp" style="margin:0;min-width:160px">
         <label>REPORT DATE</label>
         <input type="date" id="plant-date" style="background:var(--s2);border:2px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px;font-weight:700" oninput="renderPlantReport()">
+      </div>
+      <div style="display:flex;border:1px solid var(--b2);border-radius:5px;overflow:hidden;align-self:flex-end">
+        <button id="pr-scope-month" onclick="_dprCumulativeMode=false;document.getElementById('pr-scope-month').style.background='var(--cyan)';document.getElementById('pr-scope-cumul').style.background='';renderPlantReport()"
+          style="padding:5px 10px;font-size:11px;font-weight:700;border:none;background:var(--cyan);color:#000;cursor:pointer">This Month</button>
+        <button id="pr-scope-cumul" onclick="_dprCumulativeMode=true;document.getElementById('pr-scope-cumul').style.background='var(--cyan)';document.getElementById('pr-scope-month').style.background='';renderPlantReport()"
+          style="padding:5px 10px;font-size:11px;font-weight:700;border:none;background:transparent;color:var(--t1);cursor:pointer">Up To This Month</button>
       </div>
       <button class="btn-sm primary" onclick="exportPlantReport()">📥 Export Excel</button>
       <button class="btn-sm" onclick="document.getElementById('plant-date').value=today();renderPlantReport()">Today</button>
@@ -551,6 +767,7 @@ td.r,th.r{text-align:right}
 // ═══════════════════════════════════════════════════════
 const FLOORS = {
   GF: { label:'Ground Floor', machines:[
+    {id:'MC7',sz:'#4'},{id:'MC8',sz:'#4'},
     {id:'MC20',sz:'#2'},{id:'MC21',sz:'#0'},{id:'MC22',sz:'#0'},
     {id:'MC29',sz:'#0'},{id:'MC30',sz:'#2'},{id:'MC31',sz:'#2'},
     {id:'MC32',sz:'#3'},{id:'MC33',sz:'#1'},{id:'MC34',sz:'#00'}
@@ -568,10 +785,11 @@ const FLOORS = {
 // Multiple operators allowed per group
 const MC_GROUPS = {
   GF: [
+    { label:'MC 7 & 8',       machines:['MC7','MC8'] },
+    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
     { label:'MC 29 & 30',     machines:['MC29','MC30'] },
     { label:'MC 31, 32 & 33', machines:['MC31','MC32','MC33'] },
     { label:'MC 34',          machines:['MC34'] },
-    { label:'MC 20, 21 & 22', machines:['MC20','MC21','MC22'] },
   ],
   '1F': [
     { label:'MC 14, 15 & 16', machines:['MC14','MC15','MC16'] },
@@ -588,6 +806,7 @@ const MC_GROUPS = {
 const MANPOWER_MASTER = {
   common: {
     hvac:       ['Pawan','Monu Kumar','Sunil Saini','Pradeep Kumar'],
+    utility:    ['Pawan','Monu Kumar','Sunil Saini','Pradeep Kumar'],
     electrical: ['Mr. Narendra Singh','Mr. Arun Solanki','Mr. Anil Singh Rajput',
                  'Mr. Sachin Sharma','Manog Gaur','Jitendra Sharma','Gajendra Pal Singh'],
     chemist:    ['Satyendra Singh','Manish Kumar Saini','Govind Singh','Satyendra Sharma',
@@ -648,6 +867,7 @@ function getCustomNames(key, defaults){
 function saveCustomNames(fl, role, names){
   const key = MANPOWER_MASTER.common[role] ? role : `${fl}_${role}`;
   localStorage.setItem('dpr_manpower_'+key, JSON.stringify(names));
+  pushSettingsToServer();
 }
 
 const SHIFTS = ['A','B','C'];
@@ -682,7 +902,12 @@ function sanitizeServerUrl(url) {
   }
 }
 
-let serverUrl = sanitizeServerUrl(localStorage.getItem('sunloc_server_url') || '');
+// Auto-detect server URL from page origin (works even when localStorage is blocked)
+const _dprDefaultUrl = (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1')
+  ? window.location.origin : '';
+let _dprSavedUrl = '';
+try { _dprSavedUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+let serverUrl = sanitizeServerUrl(_dprSavedUrl || _dprDefaultUrl);
 let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
 let unsaved = false;
 
@@ -691,6 +916,160 @@ function getDate(){ return document.getElementById('ndate').value || today(); }
 function skey(fl,d){ return `dpr3_${fl}_${d}`; }
 function tgt(fl,mcId){ return parseFloat(targets[`${fl}_${mcId}`]||8); }
 
+// ── DPR range setter functions ────────────────────────────────
+function _setAnalyticsRange(mode) {
+  window._analyticsRangeMode = mode;
+  renderAnalytics();
+}
+function _setTrendsRange(mode) {
+  window._trendsRangeMode = mode;
+  renderTrends();
+}
+function _setPerfRange(mode) {
+  window._perfRangeMode = mode;
+  renderPerf();
+}
+function _setAimRange(mode) {
+  window._aimDateMode = mode;
+  renderAIM();
+}
+
+// Wire AIM range bar on tab open
+const _origGo = go;
+function go(page) {
+  _origGo(page);
+  if (page === 'aim') {
+    setTimeout(() => {
+      const rangeEl = document.getElementById('aim-range-bar');
+      if (rangeEl) rangeEl.innerHTML = _dprRangeSelectorHtml(window._aimDateMode||'today', '_setAimRange');
+    }, 50);
+  }
+}
+let _dprSelectedMonth = today().slice(0,7); // 'YYYY-MM'
+let _dprMonthArchiveCache = {};
+let _dprCumulativeMode = false; // false = This Month, true = Up To This Month
+
+function dprCurrentYM(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; }
+
+function dprGetMonthEditStatus(ym) {
+  const now = dprCurrentYM();
+  if (ym === now) return 'current';
+  if (ym > now) return 'future';
+  const cached = _dprMonthArchiveCache[ym];
+  if (!cached) return 'grace';
+  const daysSince = (Date.now() - new Date(cached.archived_at)) / 86400000;
+  return daysSince <= 7 ? 'grace' : 'locked';
+}
+
+function isDprMonthEditable(ym) {
+  const status = dprGetMonthEditStatus(ym);
+  if (status === 'current' || status === 'grace') return true;
+  if (status === 'locked') return dprUser?.role === 'admin' || dprUser?.role === 'DPR_Admin';
+  if (status === 'future') return false; // can't enter future DPR
+  return true;
+}
+
+async function loadDprArchiveList() {
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/archives/list', { signal: AbortSignal.timeout(5000) });
+    const j = await r.json();
+    if (j.ok) {
+      _dprMonthArchiveCache = {};
+      j.archives.forEach(a => { _dprMonthArchiveCache[a.month] = a; });
+    }
+  } catch(e) {}
+}
+
+async function autoDprArchiveIfNeeded() {
+  if (!serverUrl) return;
+  const now = dprCurrentYM();
+  const lastMonth = localStorage.getItem('dpr_activeMonth');
+  if (!lastMonth) { localStorage.setItem('dpr_activeMonth', now); return; }
+  if (lastMonth === now) return;
+  // Month changed — trigger archive via server (planning app owns the snapshot; DPR just signals)
+  try {
+    await fetch(serverUrl + '/api/archives/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ month: lastMonth, archivedBy: dprUser?.username || 'dpr-auto', isAuto: true, snapshot: {} }),
+      signal: AbortSignal.timeout(5000)
+    });
+  } catch(e) {}
+  localStorage.setItem('dpr_activeMonth', now);
+  await loadDprArchiveList();
+}
+
+function buildDprMonthPicker() {
+  const sel = document.getElementById('dpr-month-select');
+  if (!sel) return;
+  const now = dprCurrentYM();
+  const [ny, nm] = now.split('-').map(Number);
+  const opts = [];
+  for (let i = -12; i <= 1; i++) { // DPR: past 12 months + current + 1 future month
+    let y = ny, m = nm + i;
+    while (m < 1) { m += 12; y--; }
+    const ym = `${y}-${String(m).padStart(2,'0')}`;
+    const label = new Date(y, m-1, 1).toLocaleString('default',{month:'short',year:'numeric'});
+    opts.push(`<option value="${ym}" ${ym===_dprSelectedMonth?'selected':''}>${label}</option>`);
+  }
+  sel.innerHTML = opts.reverse().join(''); // newest first
+  updateDprMonthBadge();
+  restrictDprDatePicker();
+}
+
+function updateDprMonthBadge() {
+  const badge = document.getElementById('dpr-month-badge');
+  if (!badge) return;
+  const status = dprGetMonthEditStatus(_dprSelectedMonth);
+  badge.className = `dpr-month-badge ${status}`;
+  badge.textContent = status === 'current' ? '●' : status === 'grace' ? '✎' : status === 'locked' ? '🔒' : '●';
+}
+
+function restrictDprDatePicker() {
+  const input = document.getElementById('ndate');
+  if (!input) return;
+  const [y, m] = _dprSelectedMonth.split('-').map(Number);
+  const minD = `${_dprSelectedMonth}-01`;
+  const maxD = new Date(y, m, 0).toISOString().slice(0,10); // last day of month
+  input.min = minD;
+  input.max = maxD;
+  // If current date value is outside month range, reset to first day of month
+  const cur = input.value;
+  if (cur < minD || cur > maxD) {
+    input.value = _dprSelectedMonth === dprCurrentYM() ? today() : minD;
+    onDateChange();
+  }
+}
+
+function onDprMonthChange(ym) {
+  _dprSelectedMonth = ym;
+  updateDprMonthBadge();
+  restrictDprDatePicker();
+  // Refresh current tab
+  const curTab = document.querySelector('.ntab.on');
+  if (curTab) curTab.click();
+}
+
+// Helper: get all DPR dates for selected month
+function getDprMonthDates(fl) {
+  const prefix = `dpr3_${fl}_${_dprSelectedMonth}`;
+  return Object.keys(localStorage)
+    .filter(k => k.startsWith(prefix))
+    .map(k => k.split('_')[2])
+    .filter(d => d && d.startsWith(_dprSelectedMonth))
+    .sort();
+}
+
+// Helper: get all DPR dates up to and including selected month
+function getDprCumulativeDates(fl) {
+  return Object.keys(localStorage)
+    .filter(k => k.startsWith(`dpr3_${fl}_`))
+    .map(k => k.split('_')[2])
+    .filter(d => d && d <= _dprSelectedMonth + '-31')
+    .sort();
+}
+
 // Each machine entry now has:
 //   runs: [{orderId, batchNumber, qty, note}]  — one per batch run in the shift
 //   aim: number — AIM target for this machine this shift
@@ -698,14 +1077,17 @@ function tgt(fl,mcId){ return parseFloat(targets[`${fl}_${mcId}`]||8); }
 //   DT fields: proc, mech, elec, gpr, hvac, dw — stay at machine level
 function blankRun(){ return {orderId:'', batchNumber:'', qty:'', note:''}; }
 // Machine availability — admin managed per floor
+function mcNum(id){ return parseInt((id||'').replace(/[^0-9]/g,''))||999; }
+function sortMcNumerically(arr){ return [...arr].sort((a,b)=>mcNum(a.id)-mcNum(b.id)); }
+
 function getActiveMachines(fl){
   try{
     const saved=localStorage.getItem('dpr_active_machines');
     const cfg=saved?JSON.parse(saved):{};
     const all=FLOORS[fl]?FLOORS[fl].machines:[];
-    if(!cfg[fl]||cfg[fl].length===0) return all; // default: all active
-    return all.filter(m=>cfg[fl].includes(m.id));
-  }catch{ return FLOORS[fl]?FLOORS[fl].machines:[]; }
+    const active=(!cfg[fl]||cfg[fl].length===0)?all:all.filter(m=>cfg[fl].includes(m.id));
+    return sortMcNumerically(active);
+  }catch{ return sortMcNumerically(FLOORS[fl]?FLOORS[fl].machines:[]); }
 }
 
 function setMachineActive(fl, mcId, active){
@@ -821,6 +1203,7 @@ function addManpowerName(storeKey){
   if(!names.includes(name)){
     names.push(name);
     localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
+    pushSettingsToServer();
   }
   inp.value = '';
   renderManpowerSettings();
@@ -831,6 +1214,7 @@ function removeManpowerName(storeKey, idx){
   const names = getCustomNames(storeKey, defaults);
   names.splice(idx, 1);
   localStorage.setItem('dpr_manpower_'+storeKey, JSON.stringify(names));
+  pushSettingsToServer();
   renderManpowerSettings();
 }
 
@@ -849,6 +1233,28 @@ function getDefaultsForKey(storeKey){
   return (MANPOWER_MASTER[fl]||{})[role] || [];
 }
 
+function addMachineToFloor(fl){
+  const mcId = prompt('Enter Machine ID (e.g. MC35, MC36):','')?.trim().toUpperCase();
+  if(!mcId) return;
+  if(!mcId.match(/^MC\d+$/)) { alert('Invalid format. Use format like MC35, MC36'); return; }
+  if(FLOORS[fl].machines.find(m=>m.id===mcId)){ alert(mcId+' already exists on this floor.'); return; }
+  const sz = prompt('Enter default size (#0, #1, #2, #3, #4, #00):', '#2')?.trim() || '#2';
+  FLOORS[fl].machines.push({id:mcId, sz:sz});
+  // Save to localStorage so it persists
+  const saved = JSON.parse(localStorage.getItem('dpr_machine_sizes')||'{}');
+  saved[fl+'_'+mcId] = sz;
+  localStorage.setItem('dpr_machine_sizes', JSON.stringify(saved));
+  // Also mark active
+  const active = JSON.parse(localStorage.getItem('dpr_active_machines')||'{}');
+  if(!active[fl]) active[fl] = {};
+  active[fl][mcId] = true;
+  localStorage.setItem('dpr_active_machines', JSON.stringify(active));
+  pushSettingsToServer();
+  renderMachineSettings();
+  renderEntry();
+  toast('✅ '+mcId+' added to '+FLOORS[fl].label,'var(--green)',3000);
+}
+
 function renderMachineSettings(){
   const container=document.getElementById('machine-settings-area');
   if(!container) return;
@@ -860,6 +1266,8 @@ function renderMachineSettings(){
         ${flData.label}
         <button onclick="resetAllMachinesActive('${fl}');renderMachineSettings();renderEntry()"
           style="margin-left:8px;font-size:10px;padding:2px 8px;background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--t3);cursor:pointer">Reset All</button>
+        <button onclick="addMachineToFloor('${fl}')"
+          style="margin-left:6px;font-size:10px;padding:2px 8px;background:rgba(0,212,255,0.12);border:1px solid var(--accent);border-radius:3px;color:var(--accent);cursor:pointer;font-weight:700">+ Add Machine</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px">
         ${flData.machines.map(m=>{
@@ -923,22 +1331,108 @@ function loadDay(fl,d){
     return p;
   }catch{return blankDay(fl);}
 }
+// Always load from server and update localStorage — server is ALWAYS source of truth
+async function syncFromServer(fl, d){
+  if(!serverUrl) return;
+  // Never sync if user has unsaved data on screen for this floor/date
+  if(unsaved && fl === curFloor && d === getDate()) return;
+  // Never sync if a save is pending for this floor/date
+  if(_dprPendingSaves.has(fl+'|'+d)) return;
+  // Never sync within 60 seconds of any save — gives server time to process and protects fresh data
+  if((Date.now() - _dprLastSaveTime) < 60000) return;
+  try{
+    const r=await fetch(serverUrl+'/api/dpr/'+encodeURIComponent(fl)+'/'+d, {signal:AbortSignal.timeout(8000)});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j.data){
+      // Only update localStorage if server savedAt is after our last save time
+      const serverSavedAt = j.savedAt ? new Date(j.savedAt).getTime() : 0;
+      const localRaw = localStorage.getItem(skey(fl,d));
+      const localSavedAt = localRaw ? (JSON.parse(localRaw)._savedAt || 0) : 0;
+      // Server data must be significantly newer than local data (>5s gap)
+      if(serverSavedAt > localSavedAt + 5000){
+        j.data._savedAt = serverSavedAt;
+        localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        console.log('[DPR] Synced from server:', fl, d);
+      }
+    }
+  }catch(e){ console.warn('[DPR] syncFromServer failed:', e?.message); }
+}
+
+function validateBeforeSave(){
+  // Check all runs with qty entered have an order selected
+  const fl=curFloor;
+  const errors=[];
+  const pendingWarnings=[];
+  SHIFTS.forEach(sh=>{
+    getActiveMachines(fl).forEach(mc=>{
+      const runEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mc.id}"]`);
+      runEls.forEach(el=>{
+        const ri=el.dataset.ri;
+        const qty=parseFloat(v(`run-qty-${sh}-${mc.id}-${ri}`)||0);
+        const orderId=v(`run-ord-${sh}-${mc.id}-${ri}`);
+        const batchNo=v(`run-batch-${sh}-${mc.id}-${ri}`);
+        // If qty is entered but no order selected AND no batch number typed
+        if(qty>0 && !orderId && !batchNo){
+          errors.push(`Shift ${sh} → ${mc.id}: Please select active order`);
+        }
+        // If qty entered and order is Pending — warn only, do not block save
+        if(qty>0 && orderId){
+          const allMcOrders = Object.values(activeOrders).flat();
+          const ord = allMcOrders.find(o=>o.id===orderId);
+          if(ord && ord.status === 'pending'){
+            pendingWarnings.push(`⚠️ Order ${ord.batchNumber||orderId} is not In Production. Please set it In Production in Planning first.`);
+          }
+        }
+      });
+    });
+  });
+  return { errors, pendingWarnings };
+}
+
 function saveDay(){
+  if (!isDprMonthEditable(_dprSelectedMonth)) {
+    toast('🔒 This month is archived and locked. Contact admin to make corrections.', 'var(--red)', 4000);
+    return;
+  }
   const fl=curFloor, d=getDate();
+  // If localStorage empty (browser history cleared), fetch from server first
+  const localRaw = localStorage.getItem(skey(fl,d));
+  if (!localRaw) {
+    toast('⏳ Loading server data before save...', 'var(--amber)', 3000);
+    syncFromServer(fl, d).then(() => { _doSaveDay(fl, d); });
+    return;
+  }
+  _doSaveDay(fl, d);
+}
+function _doSaveDay(fl, d){
   const data=collectForm();
+  data._savedAt = Date.now();
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   setUnsaved(false);
-  pushToServer(fl,d,data);
+  _dprLastSaveTime = Date.now(); // block fetch for 10s after save
+  pushToServer(fl,d,data); // goes to server regardless
   renderDayKpis();
-  toast('✓ Saved — '+fl+' '+d,'var(--green)');
+  // Show warning toast — save always goes through
+  const {errors, pendingWarnings} = validateBeforeSave();
+  if(pendingWarnings.length>0){
+    // Show each pending order warning individually
+    pendingWarnings.forEach((msg,i)=>{ setTimeout(()=>toast(msg,'var(--amber)',6000), i*500); });
+  } else if(errors.length>0){
+    toast('✓ Saved — ⚠️ '+errors.length+' run(s) missing order selection','var(--amber)',4000);
+  } else {
+    toast('✓ Saved — '+fl+' '+d,'var(--green)');
+  }
 }
 function collectForm(){
   const d=getDate(), fl=curFloor;
   const day=loadDay(fl,d);
   SHIFTS.forEach(sh=>{
-    day.shifts[sh].incharge=v(`si-${sh}-incharge`)||'';
-    day.shifts[sh].fitter=v(`si-${sh}-fitter`)||'';
-    day.shifts[sh].chemist=v(`si-${sh}-chemist`)||'';
+    // Read multi-staff dropdowns (incharge/chemist/fitter now use renderMultiStaff)
+    const readMS=(role)=>{const c=document.getElementById(`ms-${sh}-${role}`);if(!c)return[];return [...c.querySelectorAll('select.ms-input')].map(s=>s.value).filter(Boolean);};
+    day.shifts[sh].incharge=readMS('incharge');
+    day.shifts[sh].chemist=readMS('chemist');
+    day.shifts[sh].fitter=readMS('fitter');
     day.shifts[sh].electrical=getMultiStaff(sh,'electrical');
     day.shifts[sh].utility=getMultiStaff(sh,'utility');
     day.shifts[sh].aim_staff=getMultiStaff(sh,'aim_staff');
@@ -956,9 +1450,14 @@ function collectForm(){
       if(runEls.length>0){
         m.runs=Array.from(runEls).map(el=>{
           const ri=el.dataset.ri;
+          const selEl=document.getElementById(`run-ord-${sh}-${mc.id}-${ri}`);
+          // Use select.value first; fall back to data-orderid attribute
+          // This ensures orderId is NEVER lost — survives refresh, cleared history, new device
+          const savedOrderId = selEl?.value || selEl?.dataset?.orderid || '';
+          const savedBatch = v(`run-batch-${sh}-${mc.id}-${ri}`) || selEl?.dataset?.batchnumber || '';
           return{
-            orderId:v(`run-ord-${sh}-${mc.id}-${ri}`)||'',
-            batchNumber:v(`run-batch-${sh}-${mc.id}-${ri}`)||'',
+            orderId: savedOrderId,
+            batchNumber: savedBatch,
             qty:v(`run-qty-${sh}-${mc.id}-${ri}`)||'',
             note:v(`run-note-${sh}-${mc.id}-${ri}`)||''
           };
@@ -991,8 +1490,14 @@ function calcDayStats(fl,d){
   (day.resort||[]).forEach(r=>totResort+=parseFloat(r.qty||0));
   const dtPct = mcs.length>0 ? (totDT/(480*mcs.length*3)*100) : 0;
   const eff = totTgt>0 ? (totProd/totTgt*100):0;
-  const backlog = Math.max(0, totAim - totProd);
-  return {totTgt,totProd,totAim,totResort,totDT,dtPct,eff,backlog};
+  const backlog = totAim>0 ? parseFloat((totProd - totAim).toFixed(2)) : null;
+  return {
+    totTgt:    parseFloat(totTgt.toFixed(2)),
+    totProd:   parseFloat(totProd.toFixed(2)),
+    totAim:    parseFloat(totAim.toFixed(2)),
+    totResort: parseFloat(totResort.toFixed(2)),
+    totDT, dtPct, eff, backlog
+  };
 }
 
 function calcShiftDT(fl,d,sh){
@@ -1001,15 +1506,16 @@ function calcShiftDT(fl,d,sh){
   const cats={proc:0,mech:0,elec:0,gpr:0,hvac:0,dw:0};
   mcs.forEach(mc=>{
     DT_CATS.forEach(c=>{
-      // Prefer live DOM value (unsaved entry), fall back to stored data
+      // Prefer live DT-table input (id: dt-sh-mc-cat), then shift DT summary input (id: dts-sh-cat)
+      // These exist when the user is on the Data Entry page with that shift/floor/date loaded
       const liveEl=document.getElementById(`dt-${sh}-${mc.id}-${c}`);
       const val=liveEl ? parseFloat(liveEl.value||0)
                        : parseFloat((migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine()))[c]||0);
       cats[c]+=val;
     });
   });
-  const total=Object.values(cats).reduce((a,b)=>a+b,0);
-  const dtPct=mcs.length>0?(total/(480*mcs.length)*100):0;
+  const total=parseFloat(Object.values(cats).reduce((a,b)=>a+b,0).toFixed(2));
+  const dtPct=mcs.length>0?parseFloat((total/(480*mcs.length)*100).toFixed(2)):0;
   return {...cats,total,dtPct};
 }
 
@@ -1020,14 +1526,43 @@ async function checkServer(){
   if(!serverUrl){ setSyncBadge('offline'); return false; }
   setSyncBadge('syncing');
   try{
-    const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(4000)});
+    const r=await fetch(serverUrl+'/api/health',{signal:AbortSignal.timeout(10000)});
     if(r.ok){ setSyncBadge('synced'); return true; }
     setSyncBadge('offline'); return false;
   }catch{ setSyncBadge('offline'); return false; }
 }
-async function pushToServer(fl,d,data){
-  if(!serverUrl) return;
-  // Flatten runs into actuals array for server to process
+// ── Pending save queue: retries every 15s until server confirms ─────
+let _dprPendingSaves = new Map(); // keyed by "fl|d" — no save is ever overwritten
+let _dprRetryTimer = null;
+let _dprLastSaveTime = 0; // timestamp of last save — blocks fetch for 10s after save
+let _suppressRenderShifts = false;
+function _updatePendingBadge(){
+  const badge=document.getElementById('syncBadge');
+  if(!badge) return;
+  if(_dprPendingSaves.size>0){
+    badge.textContent='⚠️ '+_dprPendingSaves.size+' unsaved';
+    badge.style.background='var(--red)';badge.style.color='#fff';
+  }
+}
+// Legacy alias so old code still works
+Object.defineProperty(window,'_dprPendingSave',{
+  get(){ const v=[..._dprPendingSaves.values()]; return v.length?v[v.length-1]:null; },
+  set(v){ if(v) _dprPendingSaves.set(v.fl+'|'+v.d,v); else _dprPendingSaves.clear(); }
+});
+function _dprScheduleRetry(){
+  if(_dprRetryTimer) return;
+  _dprRetryTimer = setInterval(async()=>{
+    if(!_dprPendingSaves.size||!serverUrl) return;
+    for(const [key,{fl,d,data}] of _dprPendingSaves){
+      const ok=await _dprPushRaw(fl,d,data);
+      if(ok) _dprPendingSaves.delete(key);
+    }
+    if(!_dprPendingSaves.size){ clearInterval(_dprRetryTimer); _dprRetryTimer=null; }
+    _updatePendingBadge();
+    if(!_dprPendingSaves.size){ clearInterval(_dprRetryTimer); _dprRetryTimer=null; setSyncBadge('synced'); }
+  },10000); // retry every 10s until server confirms
+}
+async function _dprPushRaw(fl,d,data){
   const actuals=[];
   Object.keys(FLOORS).forEach(f=>{
     if(!data.shifts) return;
@@ -1044,15 +1579,123 @@ async function pushToServer(fl,d,data){
     });
   });
   try{
-    await fetch(serverUrl+'/api/dpr/save',{
+    const r=await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({floor:fl,date:d,data,actuals}),
-      signal:AbortSignal.timeout(6000)
+      signal:AbortSignal.timeout(15000)
     });
-    setSyncBadge('synced');
-  }catch{ setSyncBadge('offline'); }
+    if(r.ok){
+      // Update _savedAt in localStorage from server-confirmed time
+      // This ensures fetchDayFromServer staleness check is accurate
+      try{
+        const j=await r.json();
+        if(j.savedAt){
+          const raw=localStorage.getItem(skey(fl,d));
+          if(raw){
+            const saved=JSON.parse(raw);
+            saved._savedAt=new Date(j.savedAt).getTime();
+            localStorage.setItem(skey(fl,d),JSON.stringify(saved));
+          }
+        }
+      }catch(_){}
+      setSyncBadge('synced'); return true;
+    }
+    setSyncBadge('offline'); return false;
+  }catch(e){
+    console.warn('[DPR] save failed:',e?.message);
+    setSyncBadge('offline'); return false;
+  }
 }
+async function pushToServer(fl,d,data){
+  // Stamp local save time so fetchDayFromServer can compare freshness
+  if(!data._savedAt) data._savedAt = Date.now();
+  // Always keep localStorage in sync with the stamped data
+  try{ localStorage.setItem(skey(fl,d), JSON.stringify(data)); }catch(_){}
+  if(!serverUrl){ _dprPendingSaves.set(fl+'|'+d,{fl,d,data}); _dprScheduleRetry(); return; }
+  setSyncBadge('syncing');
+  const ok=await _dprPushRaw(fl,d,data);
+  if(!ok){
+    _dprPendingSaves.set(fl+'|'+d,{fl,d,data});
+    _dprScheduleRetry();
+    _updatePendingBadge();
+  } else {
+    _dprPendingSaves.delete(fl+'|'+d);
+    _dprLastSaveTime = Date.now(); // refresh save time on server confirmation
+    _updatePendingBadge();
+  }
+}
+async function fetchDayFromServer(fl, d){
+  if(!serverUrl) return null;
+  // Don't fetch if this floor/date has a pending (unsaved) save in the queue
+  if(_dprPendingSaves.has(fl+'|'+d)) return null;
+  // Don't fetch for 10 seconds after user saved — prevents server returning stale data
+  if((Date.now() - _dprLastSaveTime) < 10000) return null;
+  try{
+    const r=await fetch(serverUrl+'/api/dpr/'+encodeURIComponent(fl)+'/'+d, {signal:AbortSignal.timeout(6000)});
+    if(!r.ok) return null;
+    const j=await r.json();
+    if(j.data){
+      // Server is ALWAYS authoritative — always update localStorage
+      // (pending saves protected by _dprPendingSaves.has() guard above)
+      const serverSavedAt = j.savedAt ? new Date(j.savedAt).getTime() : Date.now();
+      j.data._savedAt = serverSavedAt;
+      localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+      return j.data;
+    }
+  }catch(e){ console.warn('fetchDayFromServer failed:', e?.message); }
+  return null;
+}
+
+// v37I (restoring v37H): Sync a date range of DPR data from server into localStorage for one
+// or all floors. Required by Trends / Analytics / Shift Performance pages, which read from
+// localStorage but never previously hydrated it from the server. On a fresh browser session
+// (or after cache clear), localStorage is empty and these pages render blank charts even
+// though the server has the data. This helper fetches the dates list from
+// /api/dpr/dates/:floor, filters to the requested range, and pulls each missing day in
+// parallel.
+//
+// Concurrency: up to 6 parallel fetches per batch to avoid hammering the server.
+// Skip already-present dates (localStorage has them) to keep refresh-after-data-load fast.
+// fromDate / toDate are YYYY-MM-DD inclusive bounds.
+async function syncDateRangeFromServer(floors, fromDate, toDate) {
+  if (!serverUrl || !floors || !floors.length) return;
+  const targets = []; // {fl, d}
+  for (const fl of floors) {
+    try {
+      const r = await fetch(serverUrl + '/api/dpr/dates/' + encodeURIComponent(fl), {signal: AbortSignal.timeout(6000)});
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (!j.ok || !Array.isArray(j.dates)) continue;
+      for (const d of j.dates) {
+        if (d < fromDate || d > toDate) continue;
+        if (localStorage.getItem(skey(fl, d))) continue;
+        targets.push({fl, d});
+      }
+    } catch (e) { console.warn('[DPR sync] dates list failed for', fl, e?.message); }
+  }
+  if (!targets.length) return;
+  const BATCH = 6;
+  for (let i = 0; i < targets.length; i += BATCH) {
+    const slice = targets.slice(i, i + BATCH);
+    await Promise.all(slice.map(t => fetchDayFromServer(t.fl, t.d)));
+  }
+}
+
+// v37I (restoring v37H): Resolve from-date for a range mode (mirrors getDprDateRange's logic
+// but returns just the from-bound for the server sync call).
+function _dprFromDateForMode(mode) {
+  const t = today();
+  switch (mode) {
+    case 'month':  return `${_dprSelectedMonth}-01`;
+    case '30d':    return addDaysStr(t, -30);
+    case '90d':    return addDaysStr(t, -90);
+    case '180d':   return addDaysStr(t, -180);
+    case '365d':   return addDaysStr(t, -365);
+    default:       return t; // 'today'
+  }
+}
+
 async function fetchActiveOrders(){
   if(!serverUrl){
     const cached=localStorage.getItem('dpr_active_orders');
@@ -1064,20 +1707,32 @@ async function fetchActiveOrders(){
     if(!r.ok) return;
     const j=await r.json();
     if(j.ok && j.orders){
-      // Build map by machineId — only include orders that have a specific machineId assigned
+      // Build map by machineId — admin sees all orders, others only see In Production
       activeOrders={};
-      j.orders.filter(o => o.machineId).forEach(o=>{
+      const isDprAdmin = dprUser?.role === 'admin';
+      j.orders.filter(o => o.machineId && (isDprAdmin || o.status === 'running')).forEach(o=>{
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
       });
       // Cache locally
       localStorage.setItem('dpr_active_orders',JSON.stringify(activeOrders));
-      toast('✓ Orders synced from Planning App','var(--green)');
+      // Orders synced silently — toast only on manual sync button click
 
-      // Check each machine on current floor — if no active order, ensure TEMP batch exists
+      // Check each machine — if no active order, ensure TEMP batch exists for today
       await checkAndCreateTempBatches();
 
-      renderShifts(); // Re-render so dropdowns populate
+      // Only re-render if user has no unsaved typed data AND is not actively typing
+      // This prevents wiping qty/note fields the user is filling in
+      if(!_suppressRenderShifts && !unsaved && !_userIsFocused()){
+        renderShifts(); // Safe — no unsaved data will be lost
+      } else if(!_suppressRenderShifts && !unsaved && _userIsFocused()){
+        // User is typing in a non-data field (e.g. search) — defer render
+        clearTimeout(_deferredRender);
+        _deferredRender = setTimeout(()=>{
+          if(!unsaved && !_userIsFocused()) renderShifts();
+        }, 800);
+      }
+      // If unsaved=true: skip render entirely — user's typed data is safe in the DOM
     }
   }catch{
     const cached=localStorage.getItem('dpr_active_orders');
@@ -1100,8 +1755,7 @@ async function fetchClosedBatches(){
 }
 
 async function closeBatchInDPR(orderId, batchNumber){
-  const canClose = dprUser?.role==='admin' || dprUser?.role==='incharge';
-  if(!canClose){ alert('Only Admin or Shift Incharge can close a batch.'); return; }
+  if(!dprUser){ alert('Please log in to close a batch.'); return; }
   if(dprClosedBatches[orderId]){ alert(`Batch ${batchNumber} is already closed in DPR.`); return; }
   if(!confirm(`Close batch ${batchNumber} in DPR?\n\nThis marks production as complete. Planning will then be able to close this order.\n\nThis action can only be undone by Admin.`)) return;
   if(serverUrl){
@@ -1120,33 +1774,39 @@ async function closeBatchInDPR(orderId, batchNumber){
   renderShifts();
 }
 
+
+
+// ── TEMP Batch Logic ─────────────────────────────────────────────
 // Check all machines on current floor — create TEMP batch if no active order
 async function checkAndCreateTempBatches(){
   if(!serverUrl) return;
   const fl = curFloor;
-  const machines = FLOORS[fl]?.machines || [];
+  const machines = getActiveMachines(fl) || [];
   for(const mc of machines){
+    // Skip if machine already has at least one real running order
+    const hasRealOrder = (activeOrders[mc.id]||[]).some(o => !o.isTemp && o.status === 'running');
+    if(hasRealOrder) continue;
     if(!activeOrders[mc.id] || activeOrders[mc.id].length === 0){
       try{
-        // Check/create TEMP batch for today
         const r = await fetch(serverUrl+'/api/temp-batches/check/'+mc.id, {signal:AbortSignal.timeout(4000)});
         const j = await r.json();
         if(j.ok && j.needsTemp){
-          // Create TEMP if not exists for today
+          // Create TEMP if not yet exists for today
           if(!j.todayTempBatch){
             await fetch(serverUrl+'/api/temp-batches/create',{
               method:'POST', headers:{'Content-Type':'application/json'},
               body:JSON.stringify({machineId:mc.id}), signal:AbortSignal.timeout(4000)
             });
           }
-          // Add TEMP batch as a synthetic "order" in activeOrders
-          const tb = j.todayTempBatch || (await fetch(serverUrl+'/api/temp-batches/check/'+mc.id,{signal:AbortSignal.timeout(4000)}).then(r=>r.json()).then(j=>j.todayTempBatch));
+          // Fetch the batch (may have just been created)
+          const tb = j.todayTempBatch || (await fetch(serverUrl+'/api/temp-batches/check/'+mc.id,
+            {signal:AbortSignal.timeout(4000)}).then(r=>r.json()).then(j=>j.todayTempBatch));
           if(tb){
             if(!activeOrders[mc.id]) activeOrders[mc.id]=[];
             activeOrders[mc.id].push({
               id: tb.id,
               batchNumber: tb.id,
-              customer: '⚠️ TEMP BATCH',
+              customer: 'TEMP BATCH',
               machineId: mc.id,
               size: tb.machine_size,
               qty: tb.daily_cap_lakhs,
@@ -1159,7 +1819,7 @@ async function checkAndCreateTempBatches(){
               colourConfirmed: !!tb.colour_confirmed
             });
             // Prompt for PC Code if not yet confirmed (one-time per TEMP batch)
-            if (!tb.colour_confirmed) {
+            if(!tb.colour_confirmed){
               setTimeout(() => promptTempBatchDetails(tb.id, mc.id), 400);
             }
           }
@@ -1167,7 +1827,6 @@ async function checkAndCreateTempBatches(){
       }catch(e){ /* non-blocking */ }
     }
   }
-  // Update TEMP alert banner
   updateTempAlertBanner();
 }
 
@@ -1185,11 +1844,23 @@ async function updateTempAlertBanner(){
       document.body.appendChild(banner);
     }
     if(j.ok && j.count > 0){
-      const machines = [...new Set(j.batches.map(b=>b.machine_id))];
-      banner.style.display = 'flex';
-      banner.innerHTML = `⚠️ <strong style="color:var(--amber)">${j.count} TEMP batch${j.count>1?'es':''} active</strong>
-        — Machines: ${machines.join(', ')} — No planned orders assigned.
-        <span style="color:var(--amber);margin-left:4px">Planning entry + Admin reconciliation required.</span>`;
+      // Only show machines that truly have no real planned order
+      const realOrderMachines = new Set(Object.keys(activeOrders).filter(mid => {
+        return (activeOrders[mid]||[]).some(o => !o.isTemp && o.status === 'running');
+      }));
+      // Get all active machines across all floors from DPR settings
+      const activeMachineCfg = JSON.parse(localStorage.getItem('dpr_active_machines')||'{}');
+      const allActiveMcIds = new Set(Object.values(activeMachineCfg).flat());
+      const trueTempBatches = j.batches.filter(b => !realOrderMachines.has(b.machine_id) && allActiveMcIds.has(b.machine_id));
+      if(trueTempBatches.length > 0){
+        const machines = [...new Set(trueTempBatches.map(b=>b.machine_id))];
+        banner.style.display = 'flex';
+        banner.innerHTML = `⚠️ <strong style="color:var(--amber)">${trueTempBatches.length} TEMP batch${trueTempBatches.length>1?'es':''} active</strong>
+          — Machines: ${machines.join(', ')} — No planned orders assigned.
+          <span style="color:var(--amber);margin-left:4px">Planning entry + Admin reconciliation required.</span>`;
+      } else {
+        banner.style.display = 'none';
+      }
     } else {
       banner.style.display = 'none';
     }
@@ -1252,14 +1923,14 @@ function configureServer(){
   const url=prompt('Enter Sunloc Server URL:\n(e.g. https://sunloc.up.railway.app)\n\nLeave blank for offline mode.',serverUrl||'');
   if(url===null) return;
   serverUrl=sanitizeServerUrl(url);
-  localStorage.setItem('sunloc_server_url',serverUrl);
+  try { localStorage.setItem('sunloc_server_url',serverUrl); } catch(e) {}
   checkServer().then(ok=>{ 
   if(ok){ 
     fetchActiveOrders(); 
   } else {
     // Try cache even if offline
     const cached=localStorage.getItem('dpr_active_orders');
-    if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
+    if(cached) try{activeOrders=JSON.parse(cached); if(!unsaved&&!_userIsFocused()) renderShifts();}catch{}
   }
 });
   // Update settings input
@@ -1269,7 +1940,7 @@ function configureServer(){
 function saveServerUrl(){
   const val=sanitizeServerUrl(document.getElementById('serverUrlInput').value);
   serverUrl=val;
-  localStorage.setItem('sunloc_server_url',val);
+  try { localStorage.setItem('sunloc_server_url',val); } catch(e) {}
   checkServer().then(ok=>{
     if(ok){ fetchActiveOrders(); toast('Server connected!','var(--green)'); }
     else toast('Cannot reach server — saved for retry','var(--amber)');
@@ -1277,7 +1948,7 @@ function saveServerUrl(){
 }
 function clearServerUrl(){
   serverUrl='';
-  localStorage.removeItem('sunloc_server_url');
+  try { localStorage.removeItem('sunloc_server_url'); } catch(e) {}
   setSyncBadge('offline');
   document.getElementById('serverUrlInput').value='';
   toast('Offline mode — data saved locally only','var(--amber)');
@@ -1301,17 +1972,47 @@ function getDprNavCells(sh){
 }
 
 function dprTableNav(e, sh){
-  if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='Enter') return;
+  if(!['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Enter','Tab'].includes(e.key)) return;
+  // ArrowLeft/Right: move between run-qty and aim in same row
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+    const allInputs=[...document.querySelectorAll(`input[id^="run-qty-${sh}-"],input[id^="aim-${sh}-"],input[id^="dt-${sh}-"]`)];
+    const idx=allInputs.indexOf(e.target);
+    if(idx<0) return;
+    e.preventDefault();
+    const next=e.key==='ArrowRight'?allInputs[idx+1]:allInputs[idx-1];
+    if(next){next.focus();next.select();}
+    return;
+  }
   e.preventDefault();
   const cells=getDprNavCells(sh);
   const idx=cells.indexOf(e.target);
   if(idx<0) return;
-  if((e.key==='ArrowDown'||e.key==='Enter') && idx<cells.length-1){
+  if((e.key==='ArrowDown'||e.key==='Enter'||e.key==='Tab') && idx<cells.length-1){
     cells[idx+1].focus(); cells[idx+1].select();
   }
   if(e.key==='ArrowUp' && idx>0){
     cells[idx-1].focus(); cells[idx-1].select();
   }
+}
+
+// Global keyboard nav for downtime table
+function dtNav(e){
+  if(!['ArrowDown','ArrowUp','ArrowLeft','ArrowRight','Enter','Tab'].includes(e.key)) return;
+  // Get all DT table inputs from the dttable element (excludes dts- summary inputs)
+  const tbl=document.querySelector('.dttable');
+  if(!tbl) return;
+  const allDt=[...tbl.querySelectorAll('input[type="number"]')];
+  const idx=allDt.indexOf(e.target);
+  if(idx<0) return;
+  e.preventDefault();
+  // Hardcoded: SHIFTS(3) * DT_CATS(6) = 18 columns per row — reliable even if DOM query fails
+  const colCount = SHIFTS.length * DT_CATS.length;
+  let next=null;
+  if(e.key==='ArrowRight'||e.key==='Tab') next=allDt[idx+1];
+  else if(e.key==='ArrowLeft') next=allDt[idx-1];
+  else if(e.key==='ArrowDown'||e.key==='Enter') next=allDt[idx+colCount];
+  else if(e.key==='ArrowUp') next=allDt[idx-colCount];
+  if(next){next.focus();next.select();}
 }
 
 function dprQtyNav(e, sh, mcId){
@@ -1329,12 +2030,16 @@ function getGroupForMachine(fl, mcId){
 function collectGroupOperators(sh, fl, mcId){
   const grp = getGroupForMachine(fl, mcId);
   if(!grp) return null;
-  const grpKey = grp.machines[0]; // use first MC as group key
-  if(mcId !== grpKey) return null; // only collect from first MC
+  // Use first ACTIVE machine as group key
+  const activeMcIds = getActiveMachines(fl).map(m=>m.id);
+  const grpKey = grp.machines.find(id => activeMcIds.includes(id));
+  if(!grpKey) return null;
+  if(mcId !== grpKey) return null; // only collect from first active MC in group
   const container = document.getElementById(`grp-ops-${sh}-${grpKey}`);
   if(!container) return null;
-  return Array.from(container.querySelectorAll('.grp-op-input'))
+  const ops = Array.from(container.querySelectorAll('.grp-op-input'))
     .map(el=>el.value.trim()).filter(Boolean);
+  return ops; // always return array (even empty) so save always updates
 }
 
 function addGroupOperator(sh, mcId){
@@ -1363,13 +2068,12 @@ function renderMultiStaff(sh, role, label, values){
   const fl = curFloor;
   const masterNames = getMasterNames(fl, role);
   const vals = (values&&values.length) ? values : [''];
-  const opts = masterNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   return `<div class="field-grp" id="ms-${sh}-${role}">
     <label>${label}</label>
     ${vals.map((v,i)=>`<div style="display:flex;gap:4px;margin-bottom:3px">
-      <select class="ms-input" oninput="markUnsaved()" style="flex:1;font-size:11px">
+      <select class="ms-input" oninput="markUnsaved()" style="flex:1;font-size:11px" data-saved="${esc(v||'')}">
         <option value="">— Select —</option>
-        ${opts}
+        ${masterNames.map(n=>`<option value="${esc(n)}" ${v===n?'selected':''}>${esc(n)}</option>`).join('')}
         ${v && !masterNames.includes(v)?`<option value="${esc(v)}" selected>${esc(v)}</option>`:''}
       </select>
       ${i===0?`<button onclick="addStaffName('${sh}','${role}')" style="background:transparent;border:1px solid var(--b2);border-radius:3px;color:var(--accent);font-size:11px;padding:2px 6px;cursor:pointer" title="Add another person">+</button>`
@@ -1404,13 +2108,53 @@ function removeStaffName(btn){
   markUnsaved();
 }
 
+
+// --- Cursor/focus preservation + anti-flicker guard ---
+function _saveFocus(){
+  const el=document.activeElement;
+  if(!el||el===document.body)return null;
+  return{id:el.id,sel:el.selectionStart,selE:el.selectionEnd};
+}
+function _restoreFocus(s){
+  if(!s||!s.id)return;
+  const el=document.getElementById(s.id);
+  if(!el)return;
+  try{el.focus({preventScroll:true});if(s.sel!=null&&el.setSelectionRange)el.setSelectionRange(s.sel,s.selE);}catch(e){}
+}
+// Returns true if user is actively typing in any input/textarea/select
+function _userIsFocused(){
+  const el=document.activeElement;
+  if(!el||el===document.body||el===document.documentElement)return false;
+  return['INPUT','TEXTAREA','SELECT'].includes(el.tagName);
+}
+let _userActiveUntil = 0;
+function _markUserActive(){ _userActiveUntil = Date.now() + 10000; }
+function _userIsActive(){ return Date.now() < _userActiveUntil; }
+document.addEventListener('mousedown', _markUserActive, true);
+document.addEventListener('keydown',   _markUserActive, true);
+document.addEventListener('touchstart',_markUserActive, true);
+// Safe render: if user is typing, defer render until they leave the field
+let _deferredRender=null;
+function _safeRenderAll(){
+  if(_userIsActive()||_userIsFocused()){
+    // Queue a render for when focus leaves current field
+    clearTimeout(_deferredRender);
+    _deferredRender=setTimeout(()=>{
+      if(!_userIsFocused()){renderShifts();renderRemarks();renderResort();renderDayKpis();}
+    },500);
+    return;
+  }
+  renderShifts();renderRemarks();renderResort();renderDayKpis();
+}
 function renderEntry(){
+  const _f=_saveFocus();
   renderDayKpis();
   renderShifts();
   renderDTTable();
   renderDTSummary();
   renderRemarks();
   renderResort();
+  if(_f)setTimeout(()=>_restoreFocus(_f),0);
 }
 
 function renderDayKpis(){
@@ -1419,13 +2163,13 @@ function renderDayKpis(){
   const effCls=s.eff>=90?'green':s.eff>=75?'amber':'red';
   const dtCls=s.dtPct<=5?'green':s.dtPct<=10?'amber':'red';
   document.getElementById('dayKpis').innerHTML=`
-    <div class="kpi"><div class="kpi-label">Target</div><div class="kpi-val cyan">${s.totTgt||'—'}</div><div class="kpi-sub">units/day</div></div>
-    <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd||'—'}</div><div class="kpi-sub">units today</div></div>
-    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>0?'+':'')+(s.totProd-s.totTgt):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
-    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim||'—'}</div><div class="kpi-sub">planned today</div></div>
-    <div class="kpi"><div class="kpi-label">Net Backlog</div><div class="kpi-val ${s.backlog>0?'amber':'green'}">${s.backlog||'—'}</div><div class="kpi-sub">units behind</div></div>
-    <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort}</div><div class="kpi-sub">units</div></div>
-    <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT||'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
+    <div class="kpi"><div class="kpi-label">Target</div><div class="kpi-val cyan">${s.totTgt>0?parseFloat(s.totTgt).toFixed(2):'—'}</div><div class="kpi-sub">units/day</div></div>
+    <div class="kpi"><div class="kpi-label">Production</div><div class="kpi-val ${s.totProd>0?'green':'t2'}">${s.totProd>0?parseFloat(s.totProd).toFixed(2):'—'}</div><div class="kpi-sub">units today</div></div>
+    <div class="kpi"><div class="kpi-label">VS Target</div><div class="kpi-val ${effCls}">${s.totTgt>0?(s.totProd-s.totTgt>=0?'+':'')+parseFloat((s.totProd-s.totTgt).toFixed(2)):'—'}</div><div class="kpi-sub">${s.totTgt>0?s.eff.toFixed(1)+'%':''}</div></div>
+    <div class="kpi"><div class="kpi-label">AIM Output</div><div class="kpi-val cyan">${s.totAim>0?parseFloat(s.totAim).toFixed(2):'—'}</div><div class="kpi-sub">planned today</div></div>
+    <div class="kpi"><div class="kpi-label">Net Backlog</div><div class="kpi-val ${s.backlog===null?'':s.backlog>0?'red':'green'}">${s.backlog===null?'—':(s.backlog>=0?'+':'')+s.backlog.toFixed(2)}</div><div class="kpi-sub">${s.backlog===null?'':'vs AIM (Prod−AIM)'}</div></div>
+    <div class="kpi"><div class="kpi-label">Re-Sort</div><div class="kpi-val ${s.totResort>0?'red':'green'}">${s.totResort>0?parseFloat(s.totResort).toFixed(2):'0'}</div><div class="kpi-sub">units</div></div>
+    <div class="kpi"><div class="kpi-label">Downtime</div><div class="kpi-val ${dtCls}">${s.totDT>0?parseFloat(s.totDT).toFixed(0):'—'}</div><div class="kpi-sub">${s.totDT>0?s.dtPct.toFixed(1)+'% DT':''}</div></div>
   `;
 }
 
@@ -1440,16 +2184,18 @@ function renderShifts(){
       const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
       return mcTotalProd(m)>0;
     });
-    html+=`<div class="shift-block">
-      <div class="shift-hdr" onclick="toggleShift('sb-${sh}')">
-        <span class="shift-title">SHIFT — ${sh}</span>
-        <span class="shift-badge ${hasData?'done':'pending'}">${hasData?'DATA ENTERED':'PENDING'}</span>
+    const shColors={A:{bg:'#064e3b',border:'#6ee7b7',badge:'#d1fae5',badgeTxt:'#064e3b'},B:{bg:'#1e3a5f',border:'#60a5fa',badge:'#dbeafe',badgeTxt:'#1e3a5f'},C:{bg:'#78350f',border:'#fcd34d',badge:'#fef3c7',badgeTxt:'#78350f'}};
+    const sc=shColors[sh]||shColors.A;
+    html+=`<div class="shift-block" style="border-color:${sc.border}">
+      <div class="shift-hdr" onclick="toggleShift('sb-${sh}')" style="background:${sc.bg};color:#fff">
+        <span class="shift-title" style="color:#fff">SHIFT — ${sh}</span>
+        <span class="shift-badge ${hasData?'done':'pending'}" style="background:${sc.badge};color:${sc.badgeTxt};border-color:${sc.border}">${hasData?'DATA ENTERED':'PENDING'}</span>
       </div>
       <div class="shift-body open" id="sb-${sh}">
         <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px">
-          <div class="field-grp"><label>Process Incharge</label><input type="text" id="si-${sh}-incharge" value="${esc(sd.incharge||'')}" placeholder="Name" oninput="markUnsaved()"></div>
-          <div class="field-grp"><label>Shift Chemist</label><input type="text" id="si-${sh}-chemist" value="${esc(sd.chemist||'')}" placeholder="Name" oninput="markUnsaved()"></div>
-          <div class="field-grp"><label>Shift Fitter</label><input type="text" id="si-${sh}-fitter" value="${esc(sd.fitter||'')}" placeholder="Name" oninput="markUnsaved()"></div>
+          ${renderMultiStaff(sh,'incharge','Process Incharge',Array.isArray(sd.incharge)?sd.incharge:(sd.incharge?[sd.incharge]:[]))}
+          ${renderMultiStaff(sh,'chemist','Shift Chemist',Array.isArray(sd.chemist)?sd.chemist:(sd.chemist?[sd.chemist]:[]))}
+          ${renderMultiStaff(sh,'fitter','Shift Fitter',Array.isArray(sd.fitter)?sd.fitter:(sd.fitter?[sd.fitter]:[]))}
           <div class="field-grp"></div>
         </div>
         <div class="staff-row" style="grid-template-columns:repeat(4,1fr);gap:8px;margin-top:6px">
@@ -1477,11 +2223,11 @@ function renderShifts(){
     mcs.forEach(mc=>{
       const mRaw=sd.machines[mc.id]||blankMachine();
       const m=migrateMachineData(mRaw);
-      const t=tgt(fl,mc.id);
+      const t=parseFloat(tgt(fl,mc.id).toFixed(2));
       const p=mcTotalProd(m);
       const a=parseFloat(m.aim||0);
-      const vs=p>0?p-t:null;
-      const bl=p>0?Math.max(0,p-a):null;
+      const vs=p>0?parseFloat((p-t).toFixed(2)):null;
+      const bl=p>0?parseFloat(Math.max(0,p-a).toFixed(2)):null;
       shTgt+=t; shProd+=p; shAim+=a;
       const mcResort=(day.resort||[]).filter(r=>r.mc===mc.id&&r.shift===sh).reduce((s,r)=>s+parseFloat(r.qty||0),0);
       shResort+=mcResort;
@@ -1491,13 +2237,26 @@ function renderShifts(){
       let runsHtml='';
       runs.forEach((run,ri)=>{
         const orders=activeOrders[mc.id]||[];
-        const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}" ${run.orderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
-        const runColour = run.colour || (run.orderId && activeOrders[mc.id]?.find(o=>o.id===run.orderId)?.colour) || '';
+        // Resolve effective orderId: use saved orderId, or match by batchNumber if orderId missing
+        const matchedOrder = orders.find(o=>o.id===run.orderId) || orders.find(o=>o.batchNumber===run.batchNumber);
+        const effectiveOrderId = matchedOrder?.id || run.orderId || '';
+        // Keep run.orderId in sync with matched order id
+        if(matchedOrder && run.orderId !== matchedOrder.id) run.orderId = matchedOrder.id;
+        // If saved batch is not in activeOrders — only refresh, never show pending orders
+        const orphanOpt = (run.batchNumber && !matchedOrder)
+          ? `<option value="${run.orderId||run.batchNumber}" selected disabled>[saved] ${run.batchNumber}</option>`
+          : '';
+        // If orphan detected — refresh active orders from server (order may now be running)
+        if(run.batchNumber && !matchedOrder && serverUrl){
+          setTimeout(()=>{ fetchActiveOrders().then(()=>{ if(!unsaved&&!_userIsFocused()) renderShifts(); }); }, 500);
+        }
+        const ordOpts=`<option value="">— Order —</option>`+orphanOpt+orders.map(o=>`<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
+        const runColour = run.colour || matchedOrder?.colour || '';
         const isMult=runs.length>1;
         runsHtml+=`
           <div class="run-row" data-sh="${sh}" data-mc="${mc.id}" data-ri="${ri}" style="display:flex;align-items:center;gap:5px;margin-bottom:${ri<runs.length-1?'5':'0'}px;${isMult&&ri>0?'padding-top:5px;border-top:1px dashed var(--b2)':''}">
             ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
-            <select id="run-ord-${sh}-${mc.id}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mc.id}',${ri})" title="Select active order">
+            <select id="run-ord-${sh}-${mc.id}-${ri}" data-orderid="${esc(run.orderId||effectiveOrderId||'')}" data-batchnumber="${esc(run.batchNumber||'')}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mc.id}',${ri})" title="Select active order">
               ${ordOpts}
             </select>
             <input type="text" id="run-batch-${sh}-${mc.id}-${ri}" value="${esc(run.batchNumber||'')}" placeholder="Batch #" readonly style="width:80px;font-size:10px;font-family:var(--mono);flex-shrink:0;background:var(--s2);cursor:default;opacity:0.8" title="Auto-filled from order selection">
@@ -1505,12 +2264,26 @@ function renderShifts(){
             <span id="run-colour-${sh}-${mc.id}-${ri}" style="font-size:10px;font-weight:700;color:var(--cyan);font-family:var(--mono);flex-shrink:0;min-width:60px">${esc(runColour)}</span>
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
+            ${(()=>{ 
+              // Fix 1: Show Gross/Prod/Rem summary inline for every run with a known order
+              const ord2 = run.orderId ? (activeOrders[mc.id]||[]).find(o=>o.id===run.orderId) : null;
+              if(!ord2) return '';
+              const planned2 = ord2.qty || 0;
+              const gross2   = ord2.grossQty || planned2;
+              const actual2  = ord2.actualProd || ord2.actualQty || 0;
+              const rem2     = Math.max(0, gross2 - actual2);
+              const over2    = actual2 > gross2;
+              const col2     = over2 ? 'var(--red)' : rem2 <= 0 ? 'var(--green)' : 'var(--t3)';
+              return `<span class="run-ord-info" style="font-size:9px;color:${col2};font-family:var(--mono);white-space:nowrap;flex-shrink:0">Gross:${parseFloat(gross2).toFixed(2)}L Prod:${parseFloat(actual2).toFixed(2)}L Rem:${parseFloat(rem2).toFixed(2)}L</span>`;
+            })()}
           </div>`;
       });
 
       // Group operator row — rendered before first machine in group
       const grp = getGroupForMachine(fl, mc.id);
-      const isFirstInGrp = grp && grp.machines[0]===mc.id;
+      const activeMcIds = mcs.map(m=>m.id);
+      const firstActiveInGrp = grp && grp.machines.find(id=>activeMcIds.includes(id));
+      const isFirstInGrp = grp && firstActiveInGrp === mc.id;
       const isInGrp = !!grp;
       if(isFirstInGrp){
         const grpOps = (m.operators&&m.operators.length) ? m.operators : [''];
@@ -1544,12 +2317,14 @@ function renderShifts(){
           <div id="runs-${sh}-${mc.id}">${runsHtml}</div>
           <div style="display:flex;gap:6px;margin-top:5px;flex-wrap:wrap">
             <button onclick="addRun('${sh}','${mc.id}')" style="padding:2px 8px;background:transparent;border:1px dashed var(--b2);border-radius:3px;color:var(--t3);font-size:10px;font-family:var(--fc);letter-spacing:.5px;cursor:pointer" title="Add another batch/colour change run">+ Add Run</button>
-            ${runs.filter(r=>r.orderId).map(r=>{
-              const isClosed=dprClosedBatches[r.orderId];
-              const canClose=dprUser?.role==='admin'||dprUser?.role==='incharge';
+            ${runs.filter(r=>r.orderId||r.batchNumber).map(r=>{
+              // Match closed status by orderId OR batchNumber
+              const isClosed=dprClosedBatches[r.orderId]||
+                (r.batchNumber&&Object.values(dprClosedBatches).find(cb=>cb.batchNumber===r.batchNumber));
+              // Resolve orderId from activeOrders if not set (fallback by batchNumber)
+              const resolvedOrderId=r.orderId||(activeOrders[mc.id]||[]).find(o=>o.batchNumber===r.batchNumber)?.id||'';
               if(isClosed) return `<span style="padding:2px 8px;background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.3);border-radius:3px;color:var(--green);font-size:10px;font-family:var(--fc)">✅ ${r.batchNumber||'Batch'} Closed in DPR</span>`;
-              if(canClose) return `<button onclick="closeBatchInDPR('${r.orderId}','${r.batchNumber||''}')" style="padding:2px 8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:3px;color:var(--red);font-size:10px;font-family:var(--fc);cursor:pointer" title="Mark production complete for this batch">🔒 Close ${r.batchNumber||'Batch'}</button>`;
-              return '';
+              return `<button onclick="closeBatchInDPR('${resolvedOrderId}','${r.batchNumber||''}')" style="padding:2px 8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:3px;color:var(--red);font-size:10px;font-family:var(--fc);cursor:pointer" title="Mark production complete for this batch">🔒 Close ${r.batchNumber||'Batch'}</button>`;
             }).join('')}
           </div>
         </td>
@@ -1565,11 +2340,11 @@ function renderShifts(){
     const shVs=shProd>0?shProd-shTgt:null;
     html+=`</tbody><tfoot><tr class="tot-row">
       <td colspan="4" style="font-family:var(--fc);font-size:10px;letter-spacing:.8px">SHIFT ${sh} TOTAL</td>
-      <td class="r" style="font-family:var(--mono)">${shTgt}</td>
-      <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd||'—'}</td>
-      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${shVs}</span>`:`<span class="vs-neg">${shVs}</span>`}</td>
-      <td class="r" id="shaim-${sh}" style="font-family:var(--mono)">${shAim||'—'}</td>
-      <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${shResort}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
+      <td class="r" style="font-family:var(--mono)">${shTgt>0?parseFloat(shTgt).toFixed(2):'—'}</td>
+      <td class="r" id="shtot-${sh}" style="font-family:var(--mono)">${shProd>0?parseFloat(shProd).toFixed(2):'—'}</td>
+      <td class="r">${shVs===null?'<span class="vs-zero">—</span>':shVs>=0?`<span class="vs-pos">+${parseFloat(shVs).toFixed(2)}</span>`:`<span class="vs-neg">${parseFloat(shVs).toFixed(2)}</span>`}</td>
+      <td class="r" id="shaim-${sh}" style="font-family:var(--mono)">${shAim>0?parseFloat(shAim).toFixed(2):'—'}</td>
+      <td class="r" style="font-family:var(--mono);color:var(--amber)">${shResort>0?`<span style="color:var(--red)">${parseFloat(shResort).toFixed(2)}</span>`:'<span style="color:var(--t3)">0</span>'}</td>
       <td></td>
     </tr></tfoot></table></div></div></div>`;
   });
@@ -1585,6 +2360,7 @@ function addRun(sh, mcId){
   m.runs.push(blankRun());
   data.shifts[sh].machines[mcId]=m;
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
+  pushToServer(fl,d,data);
   markUnsaved();
 
   // Inject new run row directly into DOM without full re-render (avoids shift collapse)
@@ -1597,7 +2373,7 @@ function addRun(sh, mcId){
     div.dataset.sh=sh; div.dataset.mc=mcId; div.dataset.ri=ri;
     div.style.cssText=`display:flex;align-items:center;gap:5px;margin-bottom:0;${isMult?'padding-top:5px;border-top:1px dashed var(--b2)':''}`;
     const orders=activeOrders[mcId]||[];
-    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}">${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp&&o.pcCode?' | PC:'+esc(o.pcCode):''}${o.isTemp&&!o.colourConfirmed?' ⚠️ PC not set':''}</option>`).join('');
+    const ordOpts=`<option value="">— Order —</option>`+orders.map(o=>`<option value="${esc(o.id)}">${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp&&o.pcCode?' | PC:'+esc(o.pcCode):''}${o.isTemp&&!o.colourConfirmed?' ⚠️ PC not set':''}</option>`).join('');
     div.innerHTML=`
       ${isMult?`<span style="font-family:var(--mono);font-size:9px;color:var(--t3);width:14px;flex-shrink:0">${ri+1}</span>`:''}
       <select id="run-ord-${sh}-${mcId}-${ri}" style="font-size:10px;padding:3px 5px;width:150px;flex-shrink:0" onchange="onRunOrderChange('${sh}','${mcId}',${ri})" title="Select active order">${ordOpts}</select>
@@ -1608,12 +2384,12 @@ function addRun(sh, mcId){
       <button onclick="removeRun('${sh}','${mcId}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>
     `;
     runsContainer.appendChild(div);
-    div.scrollIntoView({behavior:'smooth',block:'nearest'});
+/* scrollIntoView removed */
   } else {
     // Fallback: full re-render
     renderShifts();
     document.getElementById(`sb-${sh}`)?.classList.add('open');
-    setTimeout(()=>document.getElementById(`mcrow-${sh}-${mcId}`)?.scrollIntoView({behavior:'smooth',block:'nearest'}),50);
+/* scrollIntoView removed */
   }
 }
 
@@ -1625,6 +2401,7 @@ function removeRun(sh, mcId, ri){
   m.runs.splice(ri,1);
   data.shifts[sh].machines[mcId]=m;
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
+  pushToServer(fl,d,data);
   markUnsaved();
   renderShifts();
   document.getElementById(`sb-${sh}`)?.classList.add('open');
@@ -1653,15 +2430,27 @@ function onRunOrderChange(sh, mcId, ri){
         }
         const planned  = ord.qty     || 0;
         const gross    = ord.grossQty || planned;
-        const actual   = ord.actualQty || 0;
+        const actual   = ord.actualProd || ord.actualQty || 0;
         const remaining = Math.max(0, gross - actual);
         const overrun   = actual > gross;
-        infoEl.textContent = `Gross:${gross}L Prod:${actual}L Rem:${remaining}L`;
+        infoEl.textContent = `Gross:${parseFloat(gross).toFixed(2)}L Prod:${parseFloat(actual).toFixed(2)}L Rem:${parseFloat(remaining).toFixed(2)}L`;
         infoEl.style.color = overrun ? 'var(--red)' : remaining <= 0 ? 'var(--green)' : 'var(--t3)';
       }
     }
   }
+  // Sync data-* attributes immediately so collectForm always has correct orderId
+  const _selEl=document.getElementById(`run-ord-${sh}-${mcId}-${ri}`);
+  const _batchEl=document.getElementById(`run-batch-${sh}-${mcId}-${ri}`);
+  if(_selEl){
+    _selEl.dataset.orderid=_selEl.value||'';
+    _selEl.dataset.batchnumber=_batchEl?.value||'';
+  }
   markUnsaved();
+  // Auto-save to server immediately — order selection persists permanently:
+  // page refresh, browser history clear, new device, any browser
+  const _fl=curFloor, _d=getDate(), _data=collectForm();
+  localStorage.setItem(skey(_fl,_d), JSON.stringify(_data));
+  pushToServer(_fl,_d,_data);
 }
 
 // Recalculate total prod + VS TGT for a machine live as user types qty
@@ -1670,8 +2459,9 @@ function updateMcTotals(sh, mcId){
   const runQtyEls=document.querySelectorAll(`.run-row[data-sh="${sh}"][data-mc="${mcId}"] input[id^="run-qty-"]`);
   let total=0;
   runQtyEls.forEach(el=>total+=parseFloat(el.value||0));
-  const t=tgt(fl,mcId);
-  const vs=total>0?total-t:null;
+  total=parseFloat(total.toFixed(2));
+  const t=parseFloat(tgt(fl,mcId).toFixed(2));
+  const vs=total>0?parseFloat((total-t).toFixed(2)):null;
   const totEl=document.getElementById(`tot-${sh}-${mcId}`);
   const vsEl=document.getElementById(`vs-${sh}-${mcId}`);
   if(totEl){
@@ -1731,6 +2521,8 @@ function updateShiftTotals(sh){
     const aimEl=document.getElementById(`aim-${sh}-${mc.id}`);
     shAim+=parseFloat(aimEl?.value||0);
   });
+  shProd=parseFloat(shProd.toFixed(2));
+  shAim=parseFloat(shAim.toFixed(2));
   const totEl=document.getElementById(`shtot-${sh}`);
   if(totEl) totEl.textContent=shProd||'—';
   const aimEl=document.getElementById(`shaim-${sh}`);
@@ -1755,19 +2547,59 @@ function updateBacklog(sh,mcId){
 function renderDTTable(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const mcs=getActiveMachines(fl);
-  let html=`<table class="dttable"><thead><tr><th>Machine</th>`;
-  SHIFTS.forEach(sh=>DT_CATS.forEach(c=>html+=`<th>${sh}/${DT_LABELS[c].substring(0,4)}</th>`));
+  // Shift colour scheme: A=dark green, B=dark blue, C=dark amber
+  const shClr={
+    A:{bg:'rgba(6,78,59,0.15)',border:'#6ee7b7',hdr:'#064e3b',text:'#d1fae5',inputBg:'rgba(6,78,59,0.07)'},
+    B:{bg:'rgba(30,58,95,0.15)',border:'#60a5fa',hdr:'#1e3a5f',text:'#dbeafe',inputBg:'rgba(30,58,95,0.07)'},
+    C:{bg:'rgba(120,53,15,0.15)',border:'#fcd34d',hdr:'#78350f',text:'#fef3c7',inputBg:'rgba(120,53,15,0.07)'}
+  };
+  // 2-row header: row 1 = Shift group, row 2 = category names
+  let html=`<table class="dttable"><thead>`;
+  html+=`<tr><th rowspan="2" style="vertical-align:middle;min-width:52px">Machine</th>`;
+  SHIFTS.forEach(sh=>{
+    const clr=shClr[sh];
+    html+=`<th colspan="${DT_CATS.length}" style="background:${clr.hdr};color:${clr.text};border-left:2px solid ${clr.border};border-right:2px solid ${clr.border};text-align:center;padding:5px 3px;font-size:11px;letter-spacing:.6px">SHIFT ${sh}</th>`;
+  });
+  html+=`</tr><tr>`;
+  SHIFTS.forEach(sh=>{
+    const clr=shClr[sh];
+    DT_CATS.forEach((cat,ci)=>{
+      const bL=ci===0?`border-left:2px solid ${clr.border}`:'';
+      const bR=ci===DT_CATS.length-1?`border-right:2px solid ${clr.border}`:'';
+      html+=`<th style="background:${clr.bg};color:var(--t1);${bL};${bR};font-size:9px;padding:4px 3px;font-weight:700;letter-spacing:.3px">${DT_LABELS[cat].substring(0,4)}</th>`;
+    });
+  });
   html+=`</tr></thead><tbody>`;
   mcs.forEach(mc=>{
-    html+=`<tr><td>MC${mc.id.replace('MC','')}</td>`;
-    SHIFTS.forEach(sh=>DT_CATS.forEach(c=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      const val=m[c]||'';
-      html+=`<td><input type="number" id="dt-${sh}-${mc.id}-${c}" value="${val}" placeholder="0" min="0" style="width:44px" oninput="markUnsaved();updateDTSummary()"></td>`;
-    }));
+    html+=`<tr><td style="font-weight:700;color:var(--cyan)">MC${mc.id.replace('MC','')}</td>`;
+    SHIFTS.forEach(sh=>{
+      const clr=shClr[sh];
+      DT_CATS.forEach((cat,ci)=>{
+        const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+        const val=m[cat]||'';
+        const bL=ci===0?`border-left:2px solid ${clr.border}`:'';
+        const bR=ci===DT_CATS.length-1?`border-right:2px solid ${clr.border}`:'';
+        html+=`<td style="${bL};${bR};background:${clr.inputBg};padding:2px"><input type="number" id="dt-${sh}-${mc.id}-${cat}" value="${val}" placeholder="0" min="0" style="width:44px;background:var(--s1);border:1px solid var(--b2);border-radius:3px;color:var(--t1);text-align:center;padding:3px 2px" oninput="markUnsaved();updateDTSummary()" onkeydown="dtNav(event)"></td>`;
+      });
+    });
     html+=`</tr>`;
   });
-  html+=`</tbody></table>`;
+  // Totals row with shift colour per group
+  html+=`</tbody><tfoot><tr id="dt-totals-row" style="font-weight:700;border-top:2px solid var(--b2)"><td style="font-size:10px;padding:4px 6px;color:var(--t3)">TOTAL</td>`;
+  SHIFTS.forEach(sh=>{
+    const clr=shClr[sh];
+    DT_CATS.forEach((cat,ci)=>{
+      let colTotal=0;
+      mcs.forEach(mc=>{
+        const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+        colTotal+=parseFloat(m[cat]||0);
+      });
+      const bL=ci===0?`border-left:2px solid ${clr.border}`:'';
+      const bR=ci===DT_CATS.length-1?`border-right:2px solid ${clr.border}`:'';
+      html+=`<td id="dt-tot-${sh}-${cat}" style="text-align:center;font-family:var(--mono);font-size:12px;padding:4px;background:${clr.bg};${bL};${bR};color:${colTotal>0?'var(--amber)':'var(--t3)'}">${colTotal||'0'}</td>`;
+    });
+  });
+  html+=`</tr></tfoot></table>`;
   document.getElementById('dtTable').innerHTML=`<div class="dttable-wrap">`+html+`</div>`;
 }
 
@@ -1788,14 +2620,14 @@ function renderDTSummary(){
         <span style="font-family:var(--mono);font-size:12px;color:${clr}">Total: ${s.total||'0'} min</span>
         <span style="font-family:var(--mono);font-size:12px;color:${clr}">${s.total>0?s.dtPct.toFixed(1)+'% DT':''}</span>
       </div>
-      <table style="width:100%;border-collapse:collapse">
+      <div class="tbl-mobile-wrap"><table style="width:100%;border-collapse:collapse">
         <thead><tr>${DT_CATS.map(c=>`<th style="padding:5px 8px;font-size:10px;letter-spacing:.5px;color:var(--t3);font-family:var(--fc);border-right:1px solid var(--b1);text-align:center">${DT_LABELS[c]}</th>`).join('')}</tr></thead>
         <tbody><tr>${DT_CATS.map(c=>`<td style="padding:4px 6px;border-right:1px solid var(--b1);text-align:center">
           <input type="number" id="dts-${sh}-${c}" value="${s[c]||''}" placeholder="0"
             style="width:60px;font-size:13px;font-family:var(--mono);text-align:center"
             oninput="markUnsaved();updateDTSummary()">
         </td>`).join('')}</tr></tbody>
-      </table>
+      </table></div>
     </div>`;
   });
   // Day total
@@ -1811,25 +2643,66 @@ function renderDTSummary(){
   html+='</div>';
   document.getElementById('dtSumTable').innerHTML=html;
 }
-function updateDTSummary(){ renderDTSummary(); renderDayKpis(); }
+function updateDTSummary(){
+  // Update live total cells in DT table without full re-render
+  const fl=curFloor;
+  const mcs=getActiveMachines(fl);
+  SHIFTS.forEach(sh=>DT_CATS.forEach(cat=>{
+    let colTotal=0;
+    mcs.forEach(mc=>{
+      const inp=document.getElementById(`dt-${sh}-${mc.id}-${cat}`);
+      colTotal+=parseFloat(inp?.value||0);
+    });
+    const totEl=document.getElementById(`dt-tot-${sh}-${cat}`);
+    if(totEl){
+      totEl.textContent=colTotal||'0';
+      totEl.style.color=colTotal>0?'var(--amber)':'var(--t3)';
+    }
+  }));
+  renderDTSummary();
+  renderDayKpis();
+}
+
+function updateDTTotals(){
+  // Refresh the live totals row in the downtime table from actual input values
+  const fl=curFloor;
+  const mcs=getActiveMachines(fl);
+  SHIFTS.forEach(sh=>DT_CATS.forEach(cat=>{
+    const cell=document.getElementById(`dt-tot-${sh}-${cat}`);
+    if(!cell) return;
+    let colTotal=0;
+    mcs.forEach(mc=>{
+      const inp=document.getElementById(`dt-${sh}-${mc.id}-${cat}`);
+      colTotal+=parseFloat(inp?.value||0);
+    });
+    cell.textContent=colTotal||'0';
+    cell.style.color=colTotal>0?'var(--amber)':'var(--t3)';
+  }));
+}
 
 function renderRemarks(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const rem=day.remarks||[];
-  if(rem.length===0){document.getElementById('remList').innerHTML=`<div style="color:var(--t3);font-size:12px;padding:8px">No remarks. Click "+ Add Remark" to log issues.</div>`;return;}
+  if(rem.length===0){document.getElementById('remList').innerHTML=`<p style="color:var(--t3);font-size:12px">No remarks. Click "+ Add Remark" to log shift issues.</p>`;return;}
+  const shColors={A:{bg:'rgba(6,78,59,0.12)',border:'#6ee7b7',badge:'#064e3b'},B:{bg:'rgba(30,58,95,0.12)',border:'#60a5fa',badge:'#1e3a5f'},C:{bg:'rgba(120,53,15,0.12)',border:'#fcd34d',badge:'#78350f'},General:{bg:'rgba(100,100,100,0.08)',border:'var(--b2)',badge:'var(--t2)'}};
+  const shOrder={A:0,B:1,C:2,General:3};
+  const sorted=[...rem.map((r,i)=>({...r,origIdx:i}))].sort((a,b)=>(shOrder[a.shift]??9)-(shOrder[b.shift]??9));
   let html='';
-  rem.forEach((r,i)=>{
-    const mcLabel=r.mc?`<span style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-right:6px">${r.mc}</span>`:'';
-    html+=`<div class="remark-row" style="align-items:flex-start;gap:8px;padding:7px 10px;border-bottom:1px solid var(--b1)">
-      <span class="rem-shift" style="flex-shrink:0">Shift ${r.shift}</span>
-      ${mcLabel}
-      <div style="flex:1;min-width:0">
-        <textarea id="rem-edit-${i}" style="width:100%;min-height:48px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px 4px;color:var(--t1)" oninput="saveRemarkEdit(${i})" onfocus="this.style.borderColor='var(--cyan)'" onblur="this.style.borderColor='transparent'">${esc(r.text)}</textarea>
-      </div>
-      <button class="btn-sm danger" style="flex-shrink:0" onclick="deleteRemark(${i})">✕</button>
+  sorted.forEach(r=>{
+    const i=r.origIdx;
+    const sc=shColors[r.shift]||shColors.General;
+    const mcOpts=`<option value="">— All —</option>`+getActiveMachines(fl).map(m=>`<option value="${m.id}" ${r.mc===m.id?'selected':''}>${m.id}</option>`).join('');
+    const shOpts=['A','B','C','General'].map(s=>`<option value="${s}" ${r.shift===s?'selected':''}>${s}</option>`).join('');
+    html+=`<div class="remark-row" style="background:${sc.bg};border-color:${sc.border};border-left:3px solid ${sc.border}">
+      <select onchange="saveRemarkMc(${i},this.value)" style="font-family:var(--mono);font-weight:700;color:var(--cyan);font-size:12px;min-width:60px;background:transparent;border:1px solid var(--b2);border-radius:3px;padding:1px 3px">${mcOpts}</select>
+      <select onchange="saveRemarkShift(${i},this.value)" style="font-family:var(--mono);font-weight:700;color:#fff;font-size:11px;background:${sc.badge};border:none;border-radius:4px;padding:2px 6px;cursor:pointer">${shOpts}</select>
+      <textarea id="rem-edit-${i}" style="width:100%;min-height:36px;resize:vertical;font-size:12px;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px 4px;color:var(--t1)" oninput="saveRemarkEdit(${i})" onfocus="this.style.borderColor='${sc.border}'" onblur="this.style.borderColor='transparent'" placeholder="Describe the issue...">${esc(r.text)}</textarea>
+      <button class="btn-sm danger" onclick="deleteRemark(${i})">✕</button>
     </div>`;
   });
   document.getElementById('remList').innerHTML=html;
+  const rows=document.querySelectorAll('#remList .remark-row');
+  if(rows.length) rows[rows.length-1].id='rem-last';
 }
 
 function saveRemarkEdit(i){
@@ -1838,15 +2711,32 @@ function saveRemarkEdit(i){
   if(!el||!day.remarks[i]) return;
   day.remarks[i].text=el.value;
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  markUnsaved();
+}
+function saveRemarkMc(i,val){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  if(!day.remarks[i]) return;
+  day.remarks[i].mc=val;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  markUnsaved();
+}
+function saveRemarkShift(i,val){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  if(!day.remarks[i]) return;
+  day.remarks[i].shift=val;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  renderRemarks();
   markUnsaved();
 }
 function addRemark(){
   const fl=curFloor;
-  const mcOpts=`<option value="">— All Machines —</option>`+
-    getActiveMachines(fl).map(m=>`<option value="${m.id}">${m.id} (${m.sz})</option>`).join('');
+  const mcOpts=getActiveMachines(fl).map(m=>`<option value="${m.id}">${m.id} (${m.sz})</option>`).join('');
   openModal('Add Remark',`
+    <div class="modal-fgrp"><label>Machine</label><select id="rem-mc" style="width:100%"><option value="">— All Machines —</option>${mcOpts}</select></div>
     <div class="modal-fgrp"><label>Shift</label><select id="rem-shift" style="width:100%"><option>A</option><option>B</option><option>C</option><option>General</option></select></div>
-    <div class="modal-fgrp"><label>Machine (optional)</label><select id="rem-mc" style="width:100%">${mcOpts}</select></div>
     <div class="modal-fgrp"><label>Remark / Issue</label><textarea id="rem-text" placeholder="Describe the issue..." style="width:100%;min-height:80px;resize:vertical"></textarea></div>
   `,[
     {label:'Add',cls:'primary',fn:()=>{
@@ -1854,7 +2744,9 @@ function addRemark(){
       const mc=v('rem-mc')||'';
       day.remarks.push({shift:v('rem-shift'),mc,text:v('rem-text'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
+      pushToServer(fl,d,day);
       closeModal();renderRemarks();markUnsaved();
+/* scrollIntoView removed */
     }},
     {label:'Cancel',fn:closeModal}
   ]);
@@ -1864,6 +2756,7 @@ function deleteRemark(i){
   const fl=curFloor,d=getDate(),day=loadDay(fl,d);
   day.remarks.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
   renderRemarks();
 }
 
@@ -1871,17 +2764,78 @@ function renderResort(){
   const fl=curFloor, d=getDate(), day=loadDay(fl,d);
   const entries=day.resort||[];
   if(entries.length===0){document.getElementById('resortList').innerHTML=`<p style="color:var(--t3);font-size:12px">No re-sort entries. Click "+ Add Re-Sort Entry" to log machine-wise re-sort reasons.</p>`;return;}
+  const shColors={A:{bg:'rgba(6,78,59,0.12)',border:'#6ee7b7',badge:'#064e3b'},B:{bg:'rgba(30,58,95,0.12)',border:'#60a5fa',badge:'#1e3a5f'},C:{bg:'rgba(120,53,15,0.12)',border:'#fcd34d',badge:'#78350f'}};
+  // Sort: A → B → C
+  const shOrder={A:0,B:1,C:2};
+  const sorted=[...entries.map((r,i)=>({...r,origIdx:i}))].sort((a,b)=>(shOrder[a.shift]??9)-(shOrder[b.shift]??9));
   let html='';
-  entries.forEach((r,i)=>{
-    html+=`<div class="resort-entry">
-      <span style="font-family:var(--fc);font-weight:700;color:var(--cyan)">${r.mc}</span>
-      <span class="pill a">${r.shift}</span>
-      <span style="font-size:11px;color:var(--t2)">${esc(r.reason)} — <b style="color:var(--red)">${r.qty} units</b></span>
-      <span style="font-size:11px;color:var(--t3)">${esc(r.note||'')}</span>
-      <button class="btn-sm danger" onclick="deleteResort(${i})">✕</button>
+  sorted.forEach(r=>{
+    const i=r.origIdx;
+    const sc=shColors[r.shift]||shColors.A;
+    const rsMcOpts=getActiveMachines(fl).map(m=>`<option value="${m.id}" ${r.mc===m.id?'selected':''}>${m.id}</option>`).join('');
+    const rsShOpts=['A','B','C'].map(s=>`<option value="${s}" ${r.shift===s?'selected':''}>${s}</option>`).join('');
+    html+=`<div class="resort-entry" style="align-items:flex-start;gap:8px;padding:8px 10px;border-bottom:1px solid var(--b1);background:${sc.bg};border-left:3px solid ${sc.border}">
+      <select onchange="saveResortMc(${i},this.value)" style="font-family:var(--mono);font-weight:700;color:var(--cyan);font-size:12px;min-width:60px;background:transparent;border:1px solid var(--b2);border-radius:3px;padding:1px 3px;flex-shrink:0">${rsMcOpts}</select>
+      <select onchange="saveResortShift(${i},this.value)" style="font-family:var(--mono);font-weight:700;color:#fff;font-size:11px;background:${sc.badge};border:none;border-radius:4px;padding:2px 6px;cursor:pointer;flex-shrink:0">${rsShOpts}</select>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:var(--t2);display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          ${esc(r.reason)} —
+          <input type="number" id="rs-edit-qty-${i}" value="${r.qty}" min="0" step="1"
+            style="width:70px;font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono);padding:1px 4px;border:1px solid var(--b2);border-radius:3px;background:var(--s2)"
+            oninput="saveResortQty(${i})" title="Edit quantity"> units
+        </div>
+        <textarea id="rs-edit-note-${i}" style="width:100%;min-height:36px;resize:vertical;font-size:11px;background:transparent;border:1px solid transparent;border-radius:3px;padding:2px 4px;color:var(--t3);margin-top:2px" oninput="saveResortEdit(${i})" onfocus="this.style.borderColor='${sc.border}'" onblur="this.style.borderColor='transparent'" placeholder="Add note...">${esc(r.note||'')}</textarea>
+      </div>
+      <button class="btn-sm danger" style="flex-shrink:0" onclick="deleteResort(${i})">✕</button>
     </div>`;
   });
   document.getElementById('resortList').innerHTML=html;
+  const rrows=document.querySelectorAll('#resortList .resort-entry');
+  if(rrows.length) rrows[rrows.length-1].id='resort-last';
+}
+
+function saveResortEdit(i){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  const el=document.getElementById(`rs-edit-note-${i}`);
+  if(!el||!day.resort[i]) return;
+  day.resort[i].note=el.value;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  markUnsaved();
+}
+function saveResortQty(i){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  const el=document.getElementById(`rs-edit-qty-${i}`);
+  if(!el||!day.resort[i]) return;
+  const val=parseFloat(el.value||0);
+  if(isNaN(val)||val<0) return;
+  day.resort[i].qty=val;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  renderDayKpis();
+  renderShifts();
+  markUnsaved();
+}
+function saveResortMc(i,val){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  if(!day.resort[i]) return;
+  day.resort[i].mc=val;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  renderDayKpis();
+  renderShifts();
+  markUnsaved();
+}
+function saveResortShift(i,val){
+  const fl=curFloor,d=getDate(),day=loadDay(fl,d);
+  if(!day.resort[i]) return;
+  day.resort[i].shift=val;
+  localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
+  renderResort();
+  renderDayKpis();
+  renderShifts();
+  markUnsaved();
 }
 function addResort(){
   const fl=curFloor;
@@ -1899,7 +2853,10 @@ function addResort(){
       if(!v('rs-qty')){toast('Enter quantity','var(--red)');return;}
       day.resort.push({mc:v('rs-mc'),shift:v('rs-shift'),reason:v('rs-reason'),qty:parseFloat(v('rs-qty')),note:v('rs-note'),ts:new Date().toISOString()});
       localStorage.setItem(skey(fl,d),JSON.stringify(day));
+      pushToServer(fl,d,day);
       closeModal();renderResort();renderDayKpis();renderShifts();markUnsaved();
+      // Scroll to bottom so new re-sort entry is visible
+/* scrollIntoView removed */
     }},
     {label:'Cancel',fn:closeModal}
   ]);
@@ -1908,6 +2865,7 @@ function deleteResort(i){
   const fl=curFloor,d=getDate(),day=loadDay(fl,d);
   day.resort.splice(i,1);
   localStorage.setItem(skey(fl,d),JSON.stringify(day));
+  pushToServer(fl,d,day);
   renderResort();renderDayKpis();renderShifts();
 }
 
@@ -1918,16 +2876,113 @@ let chartInstances={};
 function destroyChart(id){ if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id];} }
 function newChart(id,cfg){ destroyChart(id); const c=document.getElementById(id); if(!c)return; chartInstances[id]=new Chart(c,cfg); }
 
-function renderAnalytics(){
-  // Sync floor selector to current floor when first opening, then use selector value
+// Helper: restrict a date input to selected DPR month
+function restrictDateToMonth(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const [y, m] = _dprSelectedMonth.split('-').map(Number);
+  const minD = `${_dprSelectedMonth}-01`;
+  const maxD = new Date(y, m, 0).toISOString().slice(0,10);
+  input.min = minD;
+  input.max = maxD;
+  if (input.value < minD || input.value > maxD) {
+    input.value = _dprSelectedMonth === dprCurrentYM() ? today() : minD;
+  }
+}
+
+// ── DPR shared date range helper ─────────────────────────────
+// Returns array of dates to aggregate based on selected range mode
+function getDprDateRange(fl, mode) {
+  const t = today();
+  const [ty, tm] = t.split('-').map(Number);
+  let fromDate;
+  switch(mode) {
+    case 'month':   fromDate = `${_dprSelectedMonth}-01`; break;
+    case '30d':     fromDate = addDaysStr(t, -30); break;
+    case '90d':     fromDate = addDaysStr(t, -90); break;
+    case '180d':    fromDate = addDaysStr(t, -180); break;
+    case '365d':    fromDate = addDaysStr(t, -365); break;
+    default:        return [t]; // 'today'
+  }
+  // Collect all localStorage keys for this floor within range
+  const floors = fl === 'ALL' ? Object.keys(FLOORS) : [fl];
+  const dates = new Set();
+  floors.forEach(f => {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith(`dpr3_${f}_`))
+      .map(k => k.split('_')[2])
+      .filter(d => d && d >= fromDate && d <= t)
+      .forEach(d => dates.add(d));
+  });
+  return [...dates].sort();
+}
+
+function addDaysStr(dateStr, n) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// Renders a date range selector bar — returns HTML string
+function _dprRangeSelectorHtml(currentMode, onchange='') {
+  const modes = [
+    ['today','Today'], ['month','This Month'], ['30d','30 Days'],
+    ['90d','90 Days'], ['180d','6 Months'], ['365d','1 Year']
+  ];
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:11px;color:var(--t3);font-weight:700;letter-spacing:.5px">RANGE:</span>
+    ${modes.map(([m,l]) =>
+      `<button onclick="${onchange}('${m}')" style="padding:3px 10px;border:1px solid var(--b2);border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;background:${currentMode===m?'var(--cyan)':'var(--s2)'};color:${currentMode===m?'#000':'var(--t1)'}">${l}</button>`
+    ).join('')}
+  </div>`;
+}
+
+async function renderAnalytics(){
+  restrictDateToMonth('analyticsDate');
   const flSel = document.getElementById('analyticsFloor');
   if(flSel && !flSel.dataset.userSet) flSel.value = curFloor;
   const fl = flSel ? flSel.value : curFloor;
   const dateSel = document.getElementById('analyticsDate');
   if(dateSel && !dateSel.value) dateSel.value = getDate();
   const d = (dateSel && dateSel.value) ? dateSel.value : getDate();
-  const day = loadDay(fl, d);
+
+  // Date range selector
+  const rangeMode = window._analyticsRangeMode || 'today';
+  const rangeEl = document.getElementById('analytics-range-bar');
+  if (rangeEl) rangeEl.innerHTML = _dprRangeSelectorHtml(rangeMode, '_setAnalyticsRange');
+
+  // v37I (restoring v37H): For ALL range modes, sync server data before computing.
+  // Previously only 'today' fetched from server; range modes used localStorage which was
+  // empty on fresh browser sessions, causing blank charts and missing values.
+  if (rangeMode === 'today') {
+    const serverData = await fetchDayFromServer(fl, d);
+    if(serverData) localStorage.setItem(skey(fl,d), JSON.stringify(serverData));
+  } else {
+    await syncDateRangeFromServer([fl], _dprFromDateForMode(rangeMode), today());
+  }
+
+  // For range modes other than 'today', aggregate across date range
+  const dates = getDprDateRange(fl, rangeMode);
+
+  // Build aggregated stats across all dates in range
   const mcs = getActiveMachines(fl);
+  const mcStats = {};
+  mcs.forEach(mc => { mcStats[mc.id] = {prod:0, tgt:0, dt:0, resort:0}; });
+
+  dates.forEach(date => {
+    const day = loadDay(fl, date);
+    mcs.forEach(mc => {
+      SHIFTS.forEach(sh => {
+        const m = migrateMachineData(day.shifts[sh].machines[mc.id] || blankMachine());
+        mcStats[mc.id].prod += mcTotalProd(m);
+        mcStats[mc.id].tgt  += tgt(fl, mc.id);
+        mcStats[mc.id].dt   += (m.dtEntries||[]).reduce((s,e)=>s+(e.mins||0),0);
+        mcStats[mc.id].resort += parseFloat(m.resort||0);
+      });
+    });
+  });
+
+  const day = loadDay(fl, d); // for single-date charts fall back
 
   // P vs T
   const pvtData=mcs.map(mc=>{
@@ -1952,13 +3007,21 @@ function renderAnalytics(){
     const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
     DT_CATS.forEach(c=>dtCats[c]+=parseFloat(m[c]||0));
   }));
+  const dtTotal = Object.values(dtCats).reduce((a,b)=>a+b,0);
   const dtPcts = {};
   DT_CATS.forEach(c=>dtPcts[c]=Math.min(100,(dtCats[c]/DT_MAX_MINS*100)));
-  // Donut: minutes breakdown
-  newChart('ch-dt',{type:'doughnut',data:{
-    labels:DT_CATS.map(c=>DT_LABELS[c]+' ('+dtCats[c]+'min)'),
-    datasets:[{data:DT_CATS.map(c=>dtCats[c]||0.001),backgroundColor:CHART_COLORS,borderWidth:0}]
-  },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}}},responsive:true,maintainAspectRatio:false}});
+  // Donut: minutes breakdown — show zero-state if no DT recorded
+  if(dtTotal === 0){
+    newChart('ch-dt',{type:'doughnut',data:{
+      labels:['No Downtime Recorded'],
+      datasets:[{data:[1],backgroundColor:['rgba(200,200,200,0.2)'],borderWidth:0}]
+    },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}},tooltip:{callbacks:{label:()=>'No DT entered'}}},responsive:true,maintainAspectRatio:false}});
+  } else {
+    newChart('ch-dt',{type:'doughnut',data:{
+      labels:DT_CATS.map(c=>DT_LABELS[c]+' ('+dtCats[c]+'min)'),
+      datasets:[{data:DT_CATS.map(c=>dtCats[c]||0),backgroundColor:CHART_COLORS,borderWidth:0}]
+    },options:{plugins:{legend:{position:'right',labels:{color:'#7a8ba8',font:{size:10},boxWidth:10}}},responsive:true,maintainAspectRatio:false}});
+  }
   // Bar: DT % per department
   newChart('ch-dt-pct',{type:'bar',data:{
     labels:DT_CATS.map(c=>DT_LABELS[c]),
@@ -1998,7 +3061,7 @@ function renderAnalytics(){
   },options:{...chartOpts(),plugins:{...chartOpts().plugins,legend:{display:false}}}});
 
   // Machine summary table
-  let html=`<table class="data-table"><thead><tr><th>Machine</th><th>Size</th><th>Batches Run</th><th>Target</th><th>Produced</th><th>Efficiency</th><th>DT (min)</th><th>Re-Sort</th></tr></thead><tbody>`;
+  let html=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Machine</th><th>Size</th><th>Batches Run</th><th>Target</th><th>Produced</th><th>Efficiency</th><th>DT (min)</th><th>Re-Sort</th></tr></thead><tbody>`;
   mcs.forEach(mc=>{
     let prod=0,dt=0,batchCount=0;
     SHIFTS.forEach(sh=>{
@@ -2013,11 +3076,34 @@ function renderAnalytics(){
     const effCls=eff>=90?'g':eff>=75?'a':'r';
     html+=`<tr><td class="mono">${mc.id}</td><td style="color:var(--t3)">${mc.sz}</td>
       <td style="color:var(--t2)">${batchCount>1?`<span class="pill a">${batchCount} runs</span>`:'<span style="color:var(--t3)">1</span>'}</td>
-      <td class="mono">${t}</td><td class="mono">${prod||'—'}</td>
+      <td class="mono">${t}</td><td class="mono">${prod>0?prod.toFixed(2):'—'}</td>
       <td><span class="pill ${effCls}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
-      <td class="mono">${dt||'—'}</td><td class="mono">${rs>0?`<span style="color:var(--red)">${rs}</span>`:'—'}</td></tr>`;
+      <td class="mono">${dt||'—'}</td><td class="mono">${rs>0?`<span style="color:var(--red)">${parseFloat(rs).toFixed(2)}</span>`:'—'}</td></tr>`;
   });
-  html+=`</tbody></table>`;
+  // Totals row
+  let totProd=0,totDT=0,totBatches=0,totTarget=0,totRs=0;
+  mcs.forEach(mc=>{
+    let prod=0,dt=0,batchCount=0;
+    SHIFTS.forEach(sh=>{
+      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
+      prod+=mcTotalProd(m);
+      batchCount+=m.runs.filter(r=>r.qty||r.batchNumber).length;
+      DT_CATS.forEach(cat=>dt+=parseFloat(m[cat]||0));
+    });
+    const t=tgt(fl,mc.id)*3;
+    const rs=(day.resort||[]).filter(r=>r.mc===mc.id).reduce((s,r)=>s+parseFloat(r.qty||0),0);
+    totProd+=prod; totDT+=dt; totBatches+=batchCount; totTarget+=t; totRs+=rs;
+  });
+  const totEff=totTarget>0?(totProd/totTarget*100):0;
+  html+=`</tbody><tfoot><tr style="font-weight:700;background:rgba(100,100,100,0.1);border-top:2px solid var(--b2)">
+    <td colspan="2" style="font-size:11px;color:var(--t3);padding:6px 8px">TOTAL</td>
+    <td class="mono">${totBatches}</td>
+    <td class="mono">${totTarget.toFixed(2)}</td>
+    <td class="mono">${totProd>0?totProd.toFixed(2):'—'}</td>
+    <td><span class="pill ${totEff>=90?'g':totEff>=75?'a':'r'}">${totProd>0?totEff.toFixed(1)+'%':'—'}</span></td>
+    <td class="mono">${totDT||'—'}</td>
+    <td class="mono">${totRs>0?`<span style="color:var(--red)">${totRs.toFixed(2)}</span>`:'—'}</td>
+  </tr></tfoot></table></div>`;
   document.getElementById('mcSummaryTable').innerHTML=html;
 }
 
@@ -2029,12 +3115,26 @@ function chartOpts(){
 // ═══════════════════════════════════════════════════════
 // TRENDS
 // ═══════════════════════════════════════════════════════
-function renderTrends(){
-  const days=parseInt(document.getElementById('trendRange').value||30);
-  const fl=document.getElementById('trendFloor').value;
-  const dates=[];
-  for(let i=days-1;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);dates.push(d.toISOString().split('T')[0]);}
-  const floors=fl==='ALL'?Object.keys(FLOORS):[fl];
+async function renderTrends(){
+  const fl  = document.getElementById('trendFloor')?.value || 'ALL';
+  const floors = fl === 'ALL' ? Object.keys(FLOORS) : [fl];
+  const rangeMode = window._trendsRangeMode || 'month';
+
+  // Update range bar
+  const rangeEl = document.getElementById('trends-range-bar');
+  if (rangeEl) rangeEl.innerHTML = _dprRangeSelectorHtml(rangeMode, '_setTrendsRange');
+
+  // v37I (restoring v37H): Sync server data for the date range BEFORE reading localStorage.
+  // Previously this only used localStorage — fresh browser sessions saw blank charts.
+  await syncDateRangeFromServer(floors, _dprFromDateForMode(rangeMode), today());
+
+  const dates = getDprDateRange(fl, rangeMode);
+
+  if (dates.length === 0) {
+    ['ch-tprod','ch-tdt','ch-teff','ch-trs'].forEach(id => destroyChart(id));
+    return;
+  }
+
   const prods=[],dtPcts=[],effs=[],resorts=[];
   dates.forEach(d=>{
     let p=0,dt=0,tg=0,rs=0;
@@ -2049,52 +3149,119 @@ function renderTrends(){
     resorts.push(rs||null);
   });
   const labels=dates.map(d=>{const[y,m,dy]=d.split('-');return `${dy}/${m}`;});
-  const lineOpts={...chartOpts(),elements:{line:{tension:.3},point:{radius:3,hoverRadius:5}}};
-  newChart('ch-tprod',{type:'line',data:{labels,datasets:[{label:'Production',data:prods,borderColor:'#00d4ff',backgroundColor:'rgba(0,212,255,.08)',fill:true,borderWidth:2}]},options:lineOpts});
-  newChart('ch-tdt',{type:'line',data:{labels,datasets:[{label:'DT%',data:dtPcts,borderColor:'#ff4060',backgroundColor:'rgba(255,64,96,.08)',fill:true,borderWidth:2}]},options:lineOpts});
-  newChart('ch-teff',{type:'line',data:{labels,datasets:[{label:'Efficiency%',data:effs,borderColor:'#00e676',backgroundColor:'rgba(0,230,118,.08)',fill:true,borderWidth:2},{label:'Target 90%',data:dates.map(()=>90),borderColor:'rgba(255,171,0,.4)',borderDash:[4,4],borderWidth:1,pointRadius:0}]},options:{...lineOpts,plugins:{...lineOpts.plugins,legend:{display:true,labels:{color:'#7a8ba8',font:{size:10}}}}}});
+  const lineOpts={...chartOpts(),elements:{line:{tension:.3},point:{radius:2,hoverRadius:4}}};
+  newChart('ch-tprod',{type:'line',data:{labels,datasets:[{label:'Production',data:prods,borderColor:'#00d4ff',backgroundColor:'rgba(0,212,255,.06)',fill:true,borderWidth:2}]},options:lineOpts});
+  newChart('ch-tdt',{type:'line',data:{labels,datasets:[{label:'DT%',data:dtPcts,borderColor:'#ff4060',backgroundColor:'rgba(255,64,96,.06)',fill:true,borderWidth:2}]},options:lineOpts});
+  newChart('ch-teff',{type:'line',data:{labels,datasets:[{label:'Efficiency%',data:effs,borderColor:'#00e676',backgroundColor:'rgba(0,230,118,.06)',fill:true,borderWidth:2},{label:'Target 90%',data:dates.map(()=>90),borderColor:'rgba(255,171,0,.4)',borderDash:[4,4],borderWidth:1,pointRadius:0}]},options:{...lineOpts,plugins:{...lineOpts.plugins,legend:{display:true,labels:{color:'#7a8ba8',font:{size:10}}}}}});
   newChart('ch-trs',{type:'bar',data:{labels,datasets:[{label:'Re-Sort',data:resorts,backgroundColor:'rgba(255,171,0,.5)',borderRadius:2}]},options:chartOpts()});
 }
 
 // ═══════════════════════════════════════════════════════
 // AIM STATUS
 // ═══════════════════════════════════════════════════════
-function renderAIM(){
-  const fl=curFloor, d=getDate(), day=loadDay(fl,d);
-  const mcs=getActiveMachines(fl);
-  let html=`<table class="data-table"><thead><tr><th>Machine</th><th>Sz</th><th>AIM</th><th>Produced</th><th>Backlog</th><th>Status</th></tr></thead><tbody>`;
-  mcs.forEach(mc=>{
-    let prod=0,aim=0;
-    SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m);
-      aim+=parseFloat(m.aim||0);
-    });
-    const bl=aim>0?Math.max(0,aim-prod):null;
-    const st=aim===0?'<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>':
-      bl===0?'<span class="pill g">On Track</span>':
-      bl>0?`<span class="pill a">Behind by ${bl}</span>`:
-      '<span class="pill g">Ahead</span>';
-    html+=`<tr><td class="mono">${mc.id}</td><td style="color:var(--t3)">${mc.sz}</td><td class="mono">${aim||'—'}</td><td class="mono">${prod||'—'}</td><td class="mono">${bl===null?'—':bl}</td><td>${st}</td></tr>`;
-  });
-  html+=`</tbody></table>`;
-  document.getElementById('aimTable').innerHTML=html;
+async function renderAIM(){
+  // Floor selector — default to curFloor but allow override via _aimFloor
+  const fl = window._aimFloor || curFloor;
+  const d  = getDate();
 
-  // AIM chart
-  const labels=mcs.map(m=>m.id.replace('MC',''));
-  const aims=[],prods=[];
-  mcs.forEach(mc=>{
-    let prod=0,aim=0;
-    SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m); aim+=parseFloat(m.aim||0);
+  // Date range — default to today; if cumulative mode use all dates in selected month
+  const dateMode = window._aimDateMode || 'today'; // 'today' | 'month' | 'custom'
+
+  // v37I (restoring v37H): When in month mode, sync the entire month from server so
+  // localStorage is populated before we filter it. Without this, switching to 'This Month'
+  // on a fresh browser session only showed today.
+  if (dateMode === 'month') {
+    const aimAllFl = fl === 'ALL' ? Object.keys(FLOORS) : [fl];
+    await syncDateRangeFromServer(aimAllFl, `${_dprSelectedMonth}-01`, today());
+  }
+
+  let datesToSum = [d];
+  if (dateMode === 'month') {
+    datesToSum = Object.keys(localStorage)
+      .filter(k => k.startsWith(`dpr3_${fl}_${_dprSelectedMonth}`))
+      .map(k => k.split('_')[2]).filter(Boolean).sort();
+    if (!datesToSum.length) datesToSum = [d];
+  }
+
+  const allFloors = fl === 'ALL' ? Object.keys(FLOORS) : [fl];
+  const mcs = allFloors.flatMap(f => getActiveMachines(f));
+
+  // Floor selector HTML
+  const floorTabs = ['ALL', ...Object.keys(FLOORS)].map(f =>
+    `<button onclick="window._aimFloor='${f}';renderAIM()" style="padding:4px 12px;border:1px solid var(--b2);border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;background:${fl===f?'var(--cyan)':'var(--s2)'};color:${fl===f?'#000':'var(--t1)'}">${f}</button>`
+  ).join('');
+
+  // Date mode selector
+  const modeBtns = [
+    ['today','Today'], ['month','This Month']
+  ].map(([m,l]) =>
+    `<button onclick="window._aimDateMode='${m}';renderAIM()" style="padding:4px 10px;border:1px solid var(--b2);border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;background:${dateMode===m?'var(--amber)':'var(--s2)'};color:${dateMode===m?'#000':'var(--t1)'}">${l}</button>`
+  ).join('');
+
+  let html = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+    <span style="font-size:11px;color:var(--t3);font-weight:700">FLOOR:</span>${floorTabs}
+    <span style="font-size:11px;color:var(--t3);font-weight:700;margin-left:8px">PERIOD:</span>${modeBtns}
+  </div>`;
+
+  html += `<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Machine</th><th>Floor</th><th>Sz</th><th>AIM Run</th><th>Produced</th><th>Backlog</th><th>Status</th></tr></thead><tbody>`;
+  let totAIM=0, totProd=0;
+
+  mcs.forEach(mc => {
+    let prod=0, aim=0;
+    const mcFloor = allFloors.find(f => getActiveMachines(f).some(m => m.id === mc.id)) || fl;
+    datesToSum.forEach(date => {
+      const day = loadDay(mcFloor, date);
+      SHIFTS.forEach(sh => {
+        const m = migrateMachineData(day.shifts[sh].machines[mc.id] || blankMachine());
+        prod += mcTotalProd(m);
+        aim  += parseFloat(m.aim || 0);
+      });
     });
-    aims.push(aim);prods.push(prod);
+    prod = parseFloat(prod.toFixed(2));
+    aim  = parseFloat(aim.toFixed(2));
+    // CORRECTED: Backlog = Produced − AIM (positive = capsules awaiting AIM; if AIM > produced = ahead)
+    const bl = prod > 0 ? parseFloat((prod - aim).toFixed(2)) : null;
+    const st = aim === 0
+      ? '<span class="pill" style="background:rgba(58,70,90,.5);color:var(--t3)">No AIM</span>'
+      : bl === null ? '—'
+      : bl <= 0 ? '<span class="pill g">AIM Clear</span>'
+      : `<span class="pill a">Backlog: ${bl.toFixed(2)}L</span>`;
+    totAIM += aim; totProd += prod;
+    html += `<tr><td class="mono">${mc.id}</td><td style="color:var(--t3);font-size:11px">${mcFloor}</td><td style="color:var(--t3)">${mc.sz}</td><td class="mono">${aim||'—'}</td><td class="mono">${prod||'—'}</td><td class="mono ${bl>0?'style="color:var(--amber)"':''}">${bl===null?'—':bl.toFixed(2)}</td><td>${st}</td></tr>`;
   });
-  newChart('ch-aim',{type:'bar',data:{labels,datasets:[
-    {label:'AIM',data:aims,backgroundColor:'rgba(0,212,255,.3)',borderRadius:3},
-    {label:'Produced',data:prods,backgroundColor:'rgba(0,230,118,.6)',borderRadius:3}
-  ]},options:{...chartOpts(),plugins:{...chartOpts().plugins,legend:{display:true,labels:{color:'#7a8ba8',font:{size:10}}}}}});
+
+  const totBl = parseFloat((totProd - totAIM).toFixed(2));
+  html += `</tbody><tfoot><tr style="font-weight:700;background:rgba(100,100,100,0.1);border-top:2px solid var(--b2)">
+    <td colspan="3" style="font-size:11px;color:var(--t3);padding:6px 8px">TOTAL</td>
+    <td class="mono">${totAIM.toFixed(2)}</td>
+    <td class="mono">${totProd.toFixed(2)}</td>
+    <td class="mono">${totBl.toFixed(2)}</td>
+    <td>${totBl<=0?'<span class="pill g">AIM Clear</span>':`<span class="pill a">Backlog: ${totBl.toFixed(2)}L</span>`}</td>
+  </tr></tfoot></table></div>`;
+
+  document.getElementById('aimTable').innerHTML = html;
+
+  // Chart
+  const chartMcs = mcs.slice(0, 20); // cap chart at 20 machines
+  const labels = chartMcs.map(m => m.id.replace('MC',''));
+  const aims=[], prods=[];
+  chartMcs.forEach(mc => {
+    let p=0, a=0;
+    const mcFloor = allFloors.find(f => getActiveMachines(f).some(m => m.id === mc.id)) || fl;
+    datesToSum.forEach(date => {
+      const day = loadDay(mcFloor, date);
+      SHIFTS.forEach(sh => {
+        const m = migrateMachineData(day.shifts[sh].machines[mc.id] || blankMachine());
+        p += mcTotalProd(m); a += parseFloat(m.aim || 0);
+      });
+    });
+    aims.push(parseFloat(a.toFixed(2)));
+    prods.push(parseFloat(p.toFixed(2)));
+  });
+  newChart('ch-aim', {type:'bar', data:{labels, datasets:[
+    {label:'AIM', data:aims, backgroundColor:'rgba(0,212,255,.3)', borderRadius:3},
+    {label:'Produced', data:prods, backgroundColor:'rgba(0,230,118,.6)', borderRadius:3}
+  ]}, options:{...chartOpts(), plugins:{...chartOpts().plugins, legend:{display:true, labels:{color:'#7a8ba8', font:{size:10}}}}}});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2203,7 +3370,7 @@ function renderShiftPersonnelPerf(){
         ${roleCfg.label.toUpperCase()}
         ${roleCfg.isAIM?'— scored on AIM lakhs inspected':'— scored on linked DT ('+roleCfg.dtCats.map(c=>c.toUpperCase()).join('+')+')'}
       </div>
-      <table class="data-table"><thead><tr>
+      <div class="tbl-mobile-wrap"><table class="data-table"><thead><tr>
         <th>Name</th>
         <th>Shifts Worked</th>
         ${roleCfg.isAIM
@@ -2249,24 +3416,49 @@ function renderShiftPersonnelPerf(){
         </tr>`;
       }
     });
-    html+=`</tbody></table></div>`;
+    html+=`</tbody></table></div></div>`;
   });
 
   section.innerHTML=html;
 }
 
-function renderPerf(){
-  const flSel  = document.getElementById('perfFloor');
+async function renderPerf(){
+  restrictDateToMonth('perfDate');
+  const flSel = document.getElementById('perfFloor');
   if(flSel && !flSel.dataset.userSet) flSel.value = curFloor;
-  const fl = flSel ? flSel.value : curFloor;
+  const fl = (flSel && flSel.value) ? flSel.value : curFloor;
   const dateSel = document.getElementById('perfDate');
   if(dateSel && !dateSel.value) dateSel.value = getDate();
   const d = (dateSel && dateSel.value) ? dateSel.value : getDate();
+
+  const rangeMode = window._perfRangeMode || 'today';
+  const rangeEl = document.getElementById('perf-range-bar');
+  if (rangeEl) rangeEl.innerHTML = _dprRangeSelectorHtml(rangeMode, '_setPerfRange');
+
+  // v37I (restoring v37H): For range modes, sync FULL range from server (was limited to
+  // last 7 days). Without this, charts for 30d / 90d / 6 months / 1 year had blank data
+  // on fresh sessions.
+  if (rangeMode === 'today') {
+    const serverData = await fetchDayFromServer(fl, d);
+    if(serverData) localStorage.setItem(skey(fl,d), JSON.stringify(serverData));
+  } else {
+    await syncDateRangeFromServer([fl], _dprFromDateForMode(rangeMode), today());
+  }
+  // Always ensure selected date itself is fresh
+  const serverData = await fetchDayFromServer(fl, d);
+  if(serverData) localStorage.setItem(skey(fl,d), JSON.stringify(serverData));
+
+  // v37I: Compute dates AFTER sync so newly-fetched data is reflected
+  const dates = getDprDateRange(fl, rangeMode);
   const day = loadDay(fl, d);
 
   // Scorecard for selected date
-  let html=`<div class="text-sm" style="color:var(--t3);margin-bottom:10px">Date: <b style="color:var(--t1)">${d}</b> &nbsp;|&nbsp; Floor: <b style="color:var(--cyan)">${FLOORS[fl]?.label||fl}</b></div>`;
-  html+=`<table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
+  const isToday = (d === today());
+  const unsavedNote = (isToday && unsaved)
+    ? `<div style="background:rgba(255,171,0,0.12);border:1.5px solid var(--amber);border-radius:4px;padding:6px 10px;margin-bottom:10px;font-size:11px;color:var(--amber);font-weight:700">⚠️ Unsaved changes detected — Save data first (Save button) so DT and production figures reflect your latest entries.</div>`
+    : '';
+  let html=`${unsavedNote}<div class="text-sm" style="color:var(--t3);margin-bottom:10px">Date: <b style="color:var(--t1)">${d}</b> &nbsp;|&nbsp; Floor: <b style="color:var(--cyan)">${FLOORS[fl]?.label||fl}</b></div>`;
+  html+=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
   SHIFTS.forEach(sh=>{
     const sd=day.shifts[sh];
     let prod=0,t=0;
@@ -2290,7 +3482,7 @@ function renderPerf(){
       <td><span class="pill ${scCls}">${prod>0?score:'—'}</span></td>
     </tr>`;
   });
-  html+=`</tbody></table>`;
+  html+=`</tbody></table></div>`;
   document.getElementById('perfTable').innerHTML=html;
 
   // Operator-wise performance — use selected range
@@ -2335,7 +3527,7 @@ function renderPerf(){
   const rangeLabel = rangeVal==='ALL' ? 'All Time (Cumulative)' : `Last ${rangeVal} days`;
   if(ops.length>0){
     opHtml=`<div style="font-size:11px;color:var(--t3);margin-bottom:8px">${rangeLabel} · ${ops.length} operators · Floor: ${FLOORS[fl]?.label||fl}</div>`;
-    opHtml+=`<div style="overflow-x:auto"><table class="data-table"><thead><tr>
+    opHtml+=`<div style="overflow-x:auto"><div class="tbl-mobile-wrap"><table class="data-table"><thead><tr>
       <th>Operator</th><th>Total Prod (L)</th><th>Shifts Active</th><th>Avg Efficiency</th><th>Re-Sort</th><th>Performance</th>
     </tr></thead><tbody>`;
     ops.forEach(([name,s])=>{
@@ -2352,7 +3544,7 @@ function renderPerf(){
         </div></td>
       </tr>`;
     });
-    opHtml+=`</tbody></table></div>`;
+    opHtml+=`</tbody></table></div></div>`;
   } else {
     opHtml=`<p style="color:var(--t3);font-size:12px">No operator data for ${rangeLabel} on ${FLOORS[fl]?.label||fl}. Enter operator names in the shift table.</p>`;
   }
@@ -2364,9 +3556,9 @@ function renderPerf(){
   renderShiftPersonnelPerf();
 
   // Trend chart — last 30 days for selected floor
-  const dates=[];
-  for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);dates.push(d2.toISOString().split('T')[0]);}
-  const scores=dates.map(date=>{
+  const perfTrendDates=[];
+  for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);perfTrendDates.push(d2.toISOString().split('T')[0]);}
+  const scores=perfTrendDates.map(date=>{
     const dy=loadDay(fl,date);
     let totalScore=0,cnt=0;
     SHIFTS.forEach(sh=>{
@@ -2380,7 +3572,7 @@ function renderPerf(){
     });
     return cnt>0?parseFloat((totalScore/cnt).toFixed(1)):null;
   });
-  newChart('ch-perf',{type:'line',data:{labels:dates.map(d=>{const[,m,dy]=d.split('-');return`${dy}/${m}`;}),datasets:[{label:'Avg Score',data:scores,borderColor:'#b388ff',backgroundColor:'rgba(179,136,255,.08)',fill:true,borderWidth:2,tension:.3,pointRadius:3,spanGaps:true}]},options:chartOpts()});
+  newChart('ch-perf',{type:'line',data:{labels:perfTrendDates.map(d=>{const[,m,dy]=d.split('-');return`${dy}/${m}`;}),datasets:[{label:'Avg Score',data:scores,borderColor:'#b388ff',backgroundColor:'rgba(179,136,255,.08)',fill:true,borderWidth:2,tension:.3,pointRadius:3,spanGaps:true}]},options:chartOpts()});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2389,49 +3581,59 @@ function renderPerf(){
 // ═══════════════════════════════════════════════════════
 // PLANT REPORT — consolidated machine-wise, all floors
 // ═══════════════════════════════════════════════════════
-function getPlantReportData(selectedDate){
-  // Build flat list of all machines across all floors
+
+// Build plant report rows from a map of { GF: dayData|null, '1F': dayData|null, '2F': dayData|null }
+// floorDataMap values are the same structure as loadDay() returns, or null if no data.
+// allDates is used for cumulative calculation — passed in so caller controls the range.
+function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
+  // allDatesMap: { GF: [dates...], '1F': [dates...], '2F': [dates...] }
   const allMachines = [];
-  Object.entries(FLOORS).forEach(([fl, flData])=>{
-    flData.machines.forEach(mc=>{ allMachines.push({id:mc.id, sz:mc.sz, floor:fl, flLabel:flData.label}); });
+  Object.entries(FLOORS).forEach(([fl, flData]) => {
+    flData.machines.forEach(mc => { allMachines.push({id:mc.id, sz:mc.sz, floor:fl, flLabel:flData.label}); });
   });
 
-  // Get all saved DPR dates (all floors) up to and including selectedDate
-  const allKeys = Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
-  const allDates = [...new Set(allKeys.map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
+  const rows = allMachines.map(mc => {
+    const fl = mc.floor;
+    const shiftTgt = parseFloat(targets[`${fl}_${mc.id}`] || 8);
+    const dailyTgt = parseFloat((shiftTgt * 3).toFixed(2));
 
-  const rows = allMachines.map(mc=>{
-    const floorKey = mc.floor;
-    const tgtKey   = `${floorKey}_${mc.id}`;
-    const shiftTgt = parseFloat(targets[tgtKey] || 8);
-    const dailyTgt = parseFloat((shiftTgt * 3).toFixed(2)); // Daily = 3 shifts × shift target
-
-    // ── Daily production (selected date, all shifts) ──────────────
-    const dayData  = loadDay(floorKey, selectedDate);
+    // Daily: from server-fetched (or localStorage-fallback) day data
+    const dayData = floorDataMap[fl];
     let dayA=0, dayB=0, dayC=0;
-    SHIFTS.forEach(sh=>{
-      const m = dayData.shifts[sh]?.machines[mc.id];
-      if(m) {
-        const prod = parseFloat(mcTotalProd(m).toFixed(2));
-        if(sh==='A') dayA=prod;
-        else if(sh==='B') dayB=prod;
-        else if(sh==='C') dayC=prod;
-      }
-    });
-    const dayTotal = parseFloat((dayA + dayB + dayC).toFixed(2));
-    const vsTarget = parseFloat((dayTotal - dailyTgt).toFixed(2));
-
-    // ── Cumulative production (all dates up to selected) ──────────
-    let cumTotal = 0, cumDays = 0;
-    allDates.forEach(d=>{
-      const dd = loadDay(floorKey, d);
-      let dayProd = 0;
-      SHIFTS.forEach(sh=>{
-        const m = dd.shifts[sh]?.machines[mc.id];
-        if(m) dayProd += mcTotalProd(m);
+    if (dayData && dayData.shifts) {
+      SHIFTS.forEach(sh => {
+        const m = dayData.shifts[sh]?.machines?.[mc.id];
+        if (m) {
+          const prod = parseFloat(mcTotalProd(migrateMachineData(m)).toFixed(2));
+          if (sh==='A') dayA=prod;
+          else if (sh==='B') dayB=prod;
+          else if (sh==='C') dayC=prod;
+        }
       });
-      dayProd = parseFloat(dayProd.toFixed(2));
-      if(dayProd > 0){ cumTotal += dayProd; cumDays++; }
+    }
+    const dayTotal  = parseFloat((dayA + dayB + dayC).toFixed(2));
+    const vsTarget  = parseFloat((dayTotal - dailyTgt).toFixed(2));
+
+    // Cumulative: scope based on _dprCumulativeMode
+    const flDates = (allDatesMap[fl] || []).filter(d => {
+      if (_dprCumulativeMode) return d <= selectedDate; // all history up to date
+      return d >= _dprSelectedMonth + '-01' && d <= selectedDate; // this month only
+    });
+    let cumTotal=0, cumDays=0;
+    flDates.forEach(d => {
+      // Try server-cached data first (stored in localStorage by previous fetches), then localStorage
+      const cached = localStorage.getItem(skey(fl, d));
+      if (!cached) return;
+      try {
+        const dd = JSON.parse(cached);
+        let dayProd = 0;
+        SHIFTS.forEach(sh => {
+          const m = dd.shifts?.[sh]?.machines?.[mc.id];
+          if (m) dayProd += mcTotalProd(migrateMachineData(m));
+        });
+        dayProd = parseFloat(dayProd.toFixed(2));
+        if (dayProd > 0) { cumTotal += dayProd; cumDays++; }
+      } catch(e) {}
     });
     cumTotal = parseFloat(cumTotal.toFixed(2));
     const cumAvg = cumDays > 0 ? parseFloat((cumTotal / cumDays).toFixed(2)) : 0;
@@ -2439,32 +3641,100 @@ function getPlantReportData(selectedDate){
     return { ...mc, dailyTgt, dayA, dayB, dayC, dayTotal, vsTarget, cumTotal, cumDays, cumAvg };
   });
 
-  // ── Column totals ─────────────────────────────────────────────
-  const totals = rows.reduce((acc, r)=>{
-    acc.dailyTgt  += r.dailyTgt;
-    acc.dayA      += r.dayA;
-    acc.dayB      += r.dayB;
-    acc.dayC      += r.dayC;
-    acc.dayTotal  += r.dayTotal;
-    acc.cumTotal  += r.cumTotal;
-    acc.cumDays    = Math.max(acc.cumDays, r.cumDays);
+  const totals = rows.reduce((acc, r) => {
+    acc.dailyTgt += r.dailyTgt;
+    acc.dayA     += r.dayA;
+    acc.dayB     += r.dayB;
+    acc.dayC     += r.dayC;
+    acc.dayTotal += r.dayTotal;
+    acc.cumTotal += r.cumTotal;
+    acc.cumDays   = Math.max(acc.cumDays, r.cumDays);
     return acc;
   }, {dailyTgt:0,dayA:0,dayB:0,dayC:0,dayTotal:0,cumTotal:0,cumDays:0});
-  totals.vsTarget   = totals.dayTotal - totals.dailyTgt;
-  totals.cumAvg     = totals.cumDays > 0 ? totals.cumTotal / totals.cumDays : 0;
+  totals.vsTarget = parseFloat((totals.dayTotal - totals.dailyTgt).toFixed(2));
+  totals.cumAvg   = totals.cumDays > 0 ? parseFloat((totals.cumTotal / totals.cumDays).toFixed(2)) : 0;
 
+  return { rows, totals };
+}
+
+// Legacy helper kept for Trends/History which still use localStorage only
+function getPlantReportData(selectedDate) {
+  const allKeys  = Object.keys(localStorage).filter(k => k.startsWith('dpr3_'));
+  const allDates = [...new Set(allKeys.map(k => k.split('_')[2]).filter(d => d && d <= selectedDate))].sort();
+
+  const floorDataMap = {};
+  Object.keys(FLOORS).forEach(fl => { floorDataMap[fl] = loadDay(fl, selectedDate); });
+
+  const allDatesMap = {};
+  Object.keys(FLOORS).forEach(fl => {
+    allDatesMap[fl] = allDates.filter(d => localStorage.getItem(skey(fl, d)));
+  });
+
+  const { rows, totals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
   return { rows, totals, allDates };
 }
 
-function renderPlantReport(){
+async function renderPlantReport(){
+  restrictDateToMonth('plant-date');
   const selectedDate = document.getElementById('plant-date')?.value || today();
   const el = document.getElementById('plant-report-output');
   if(!el) return;
 
-  const {rows, totals, allDates} = getPlantReportData(selectedDate);
+  // Show loading state
+  el.innerHTML = `<div style="padding:20px;color:var(--t3);font-family:var(--fc);font-size:12px">⏳ Loading plant data${serverUrl ? ' from server' : ' from local cache'}...</div>`;
+
+  // ── Step 1: Fetch all three floors from server for this date ──
+  const floorDataMap = {};
+  let serverFetched = false;
+
+  if(serverUrl){
+    try {
+      const r = await fetch(serverUrl + `/api/dpr/plant-report/${selectedDate}`, {
+        signal: AbortSignal.timeout(6000)
+      });
+      if(r.ok){
+        const j = await r.json();
+        if(j.ok && j.floors){
+          serverFetched = true;
+          Object.entries(j.floors).forEach(([fl, data]) => {
+            floorDataMap[fl] = data; // may be null if no data saved for that floor+date
+            // Cache to localStorage so cumulative calc can use it
+            if(data) localStorage.setItem(skey(fl, selectedDate), JSON.stringify(data));
+          });
+        }
+      }
+    } catch(e) { /* fall through to localStorage */ }
+  }
+
+  // ── Step 2: Fill any missing floors from localStorage ──
+  Object.keys(FLOORS).forEach(fl => {
+    if(floorDataMap[fl] === undefined){
+      floorDataMap[fl] = loadDay(fl, selectedDate);
+    }
+  });
+
+  // ── Step 3: Build allDatesMap for cumulative — use all localStorage dates per floor ──
+  const allDatesMap = {};
+  Object.keys(FLOORS).forEach(fl => {
+    allDatesMap[fl] = [...new Set(
+      Object.keys(localStorage)
+        .filter(k => k.startsWith(`dpr3_${fl}_`))
+        .map(k => k.split('_')[2])
+        .filter(d => d && d <= selectedDate)
+    )].sort();
+  });
+
+  // ── Step 4: Build rows and render ──
+  const { rows, totals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
+
+  const allDates = [...new Set(Object.values(allDatesMap).flat())].filter(d => d <= selectedDate).sort();
   const cumLabel = allDates.length > 0
     ? `Cumulative up to ${selectedDate} (${allDates.length} day${allDates.length!==1?'s':''})`
     : 'No cumulative data yet';
+
+  const sourceNote = serverFetched
+    ? `<span style="color:var(--green);font-family:var(--mono);font-size:9px">🟢 Live from server</span>`
+    : `<span style="color:var(--amber);font-family:var(--mono);font-size:9px">🟡 Local cache only — connect server for complete data</span>`;
 
   const fmt2 = n => (+n).toFixed(2);
   const fmtVS = n => n===0 ? '<span style="color:var(--t3)">—</span>'
@@ -2499,13 +3769,26 @@ function renderPlantReport(){
       <td class="r" style="font-family:var(--mono);font-weight:800;color:#f0c060">${totals.cumTotal>0?fmt2(totals.cumTotal):'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:800;color:#f0c060">${totals.cumDays>0?totals.cumDays:'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:800;color:#f0c060">${totals.cumAvg>0?fmt2(totals.cumAvg):'—'}</td>
+    </tr>
+    <tr style="background:#142e22">
+      <td colspan="3" style="font-family:var(--fc);font-weight:800;font-size:11px;letter-spacing:.8px;color:rgba(240,192,96,0.7)">PLANT AVERAGE</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">${rows.length>0?fmt2(totals.dailyTgt/rows.length):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,0.6)">${totals.dayA>0?fmt2(totals.dayA/(rows.filter(r=>r.dayA>0).length||1)):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,0.6)">${totals.dayB>0?fmt2(totals.dayB/(rows.filter(r=>r.dayB>0).length||1)):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,0.6)">${totals.dayC>0?fmt2(totals.dayC/(rows.filter(r=>r.dayC>0).length||1)):'—'}</td>
+      <td class="r" style="font-family:var(--fc);font-weight:800;color:rgba(240,192,96,0.7)">${totals.dayTotal>0?fmt2(totals.dayTotal/(rows.filter(r=>r.dayTotal>0).length||1)):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.6)">${totals.dayTotal>0?fmt2(totals.vsTarget/(rows.filter(r=>r.dayTotal>0).length||1)):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">${totals.cumTotal>0?fmt2(totals.cumTotal/(rows.filter(r=>r.cumTotal>0).length||1)):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.6)">—</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">${totals.cumAvg>0?fmt2(totals.cumAvg):'—'}</td>
     </tr>`;
 
   el.innerHTML = `
-    <div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:8px;font-family:var(--fc);letter-spacing:.5px">
-      📅 Daily: <strong style="color:var(--t1)">${selectedDate}</strong>
-      &nbsp;|&nbsp; 📊 ${cumLabel}
-      &nbsp;|&nbsp; All quantities in Lakhs (L)
+    <div style="font-size:11px;color:var(--t3);font-weight:700;margin-bottom:8px;font-family:var(--fc);letter-spacing:.5px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span>📅 Daily: <strong style="color:var(--t1)">${selectedDate}</strong></span>
+      <span>📊 ${cumLabel}</span>
+      <span>All quantities in Lakhs (L)</span>
+      ${sourceNote}
     </div>
     <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:6px;border:2px solid var(--b2)">
       <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:700px">
@@ -2538,9 +3821,25 @@ function renderPlantReport(){
     </div>`;
 }
 
-function exportPlantReport(){
+async function exportPlantReport(){
+  restrictDateToMonth('plant-date');
   const selectedDate = document.getElementById('plant-date')?.value || today();
-  const {rows, totals} = getPlantReportData(selectedDate);
+
+  // Re-use same server fetch as renderPlantReport to ensure export matches display
+  const floorDataMap = {};
+  if(serverUrl){
+    try {
+      const r = await fetch(serverUrl + `/api/dpr/plant-report/${selectedDate}`, {signal:AbortSignal.timeout(6000)});
+      if(r.ok){ const j = await r.json(); if(j.ok && j.floors) Object.assign(floorDataMap, j.floors); }
+    } catch(e) {}
+  }
+  Object.keys(FLOORS).forEach(fl => { if(floorDataMap[fl]===undefined) floorDataMap[fl]=loadDay(fl,selectedDate); });
+  const allDatesMap = {};
+  Object.keys(FLOORS).forEach(fl => {
+    allDatesMap[fl] = [...new Set(Object.keys(localStorage).filter(k=>k.startsWith(`dpr3_${fl}_`)).map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
+  });
+
+  const { rows, totals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
   const fmt2 = n => parseFloat((+n).toFixed(2));
 
   const data = rows.map(r=>({
@@ -2588,34 +3887,36 @@ function renderHistory(){
     return{key:k,floor:parts[1],date:parts[2]};
   }).sort((a,b)=>b.date.localeCompare(a.date));
 
-  // Date filter controls
+  // Date filter controls — default to selected month
   const filterDate=document.getElementById('hist-filter-date')?.value||'';
   const filterFloor=document.getElementById('hist-filter-floor')?.value||'';
   const filtered=entries.filter(e=>{
     if(filterDate && e.date!==filterDate) return false;
     if(filterFloor && e.floor!==filterFloor) return false;
+    // Default: scope to selected month unless a specific date filter is set
+    if(!filterDate && !e.date.startsWith(_dprSelectedMonth)) return false;
     return true;
   });
 
   if(!entries.length){document.getElementById('historyList').innerHTML=`<p style="color:var(--t3);padding:10px">No saved records yet.</p>`;return;}
 
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  let html=`<table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
+  let html=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
   (filtered.length?filtered:entries).forEach(e=>{
     const s=calcDayStats(e.floor,e.date);
     const[y,mo,dy]=e.date.split('-');
     html+=`<tr>
       <td class="mono">${parseInt(dy)} ${months[parseInt(mo)-1]} ${y}</td>
       <td style="color:var(--t2)">${FLOORS[e.floor]?.label||e.floor}</td>
-      <td class="mono">${s.totProd||'—'}</td>
+      <td class="mono">${s.totProd>0?parseFloat(s.totProd).toFixed(2):'—'}</td>
       <td><span class="pill ${s.eff>=90?'g':s.eff>=75?'a':'r'}">${s.totProd>0?s.eff.toFixed(1)+'%':'—'}</span></td>
       <td><span class="pill ${s.dtPct<=5?'g':s.dtPct<=10?'a':'r'}">${s.totDT>0?s.dtPct.toFixed(1)+'%':'—'}</span></td>
-      <td class="mono">${s.totResort>0?`<span style="color:var(--red)">${s.totResort}</span>`:'—'}</td>
+      <td class="mono">${s.totResort>0?`<span style="color:var(--red)">${parseFloat(s.totResort).toFixed(2)}</span>`:'—'}</td>
       <td><button class="btn-sm" onclick="loadRecord('${e.floor}','${e.date}')">Load</button></td>
     </tr>`;
   });
   if(filtered.length===0 && filterDate) html+=`<tr><td colspan="7" style="color:var(--t3);text-align:center;padding:12px">No records for selected date/floor.</td></tr>`;
-  html+=`</tbody></table>`;
+  html+=`</tbody></table></div>`;
   document.getElementById('historyList').innerHTML=html;
 }
 function loadRecord(fl,d){
@@ -2666,7 +3967,16 @@ function go(page){
   document.querySelectorAll('.ntab')[idx[page]]?.classList.add('on');
   if(page==='analytics') renderAnalytics();
   else if(page==='trends') renderTrends();
-  else if(page==='aim') renderAIM();
+  else if(page==='aim'){
+    renderAIM(); // render immediately from localStorage (fast)
+    if(serverUrl && dprUser){
+      (async()=>{
+        const d=getDate();
+        await Promise.all(Object.keys(FLOORS).map(f=>syncFromServer(f,d)));
+        renderAIM(); // re-render with fresh server data
+      })();
+    }
+  }
   else if(page==='perf') renderPerf();
   else if(page==='history') renderHistory();
   else if(page==='plant'){ document.getElementById('plant-date').value=document.getElementById('plant-date').value||today(); renderPlantReport(); }
@@ -2674,15 +3984,44 @@ function go(page){
 }
 
 function setFloor(fl){
+  // Backup current floor to localStorage before switching (no server push)
+  if(unsaved && curFloor && dprUser){
+    try{
+      const data=collectForm();
+      localStorage.setItem(skey(curFloor,getDate()),JSON.stringify(data));
+    }catch(_){}
+  }
   curFloor=fl;
   document.querySelectorAll('.ftab').forEach(t=>t.classList.remove('on'));
   document.getElementById('ftab-'+fl)?.classList.add('on');
-  renderEntry();
+  renderEntry(); // render immediately from localStorage
+  // Always sync from server — server is source of truth
+  if(serverUrl && dprUser){
+    (async()=>{
+      const d=getDate();
+      await syncFromServer(fl, d);
+      if(!unsaved){ renderDayKpis(); renderShifts(); renderRemarks(); renderResort(); }
+    })();
+  }
 }
 
 function onDateChange(){
   refreshRecentDates();
   renderEntry();
+  // Fetch day data from server when date changes
+  if(serverUrl){
+    (async ()=>{
+      const fl=curFloor, d=getDate();
+      if(!Object.keys(activeOrders).length) await fetchActiveOrders();
+      await syncFromServer(fl, d);
+      if(!unsaved){ renderDayKpis(); renderShifts(); renderRemarks(); renderResort(); }
+      // If user is on AIM/Analytics/Trends page, re-render with fresh data for new date
+      const curPage = document.querySelector('.ntab.on')?.getAttribute('onclick')?.match(/go\('(\w+)'\)/)?.[1];
+      if(curPage==='aim') renderAIM();
+      else if(curPage==='analytics') renderAnalytics();
+      else if(curPage==='trends') renderTrends();
+    })();
+  }
   // C-shift date handling: if current time is 00:00–08:00 and today is selected, auto-switch to previous day
   const now=new Date(), h=now.getHours();
   const selectedDate=getDate(), todayStr=now.toISOString().split('T')[0];
@@ -2756,12 +4095,18 @@ function toggleCol(id){ const el=document.getElementById(id); if(el){el.classLis
 // UTILS
 // ═══════════════════════════════════════════════════════
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
-function markUnsaved(){ unsaved=true; document.getElementById('unsavedDot').style.display='flex'; }
+function markUnsaved(){
+  unsaved=true;
+  document.getElementById('unsavedDot').style.display='flex';
+  // Backup to localStorage on every change — protects against browser crash
+  // No server push — user must press Save button for that
+  try{ const data=collectForm(); localStorage.setItem(skey(curFloor,getDate()),JSON.stringify(data)); }catch(_){}
+}
 function setUnsaved(v){ unsaved=v; document.getElementById('unsavedDot').style.display=v?'flex':'none'; }
-function toast(msg,col){
+function toast(msg,col,dur){
   const t=document.getElementById('toast');
-  t.textContent=msg;t.style.background=col||'var(--green)';t.style.color=col==='var(--amber)'?'#000':'#000';
-  t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity='0',2500);
+  t.textContent=msg;t.style.background=col||'var(--green)';t.style.color='#000';
+  t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity='0',dur||2500);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2776,7 +4121,10 @@ function openModal(title,body,actions){
   });
   document.getElementById('modal-actions').innerHTML=actHtml;
   (actions||[]).forEach(a=>{
-    document.getElementById('modal-btn-'+a.label)?.addEventListener('click',a.fn);
+    const btn=document.getElementById('modal-btn-'+a.label);
+    if(!btn) return;
+    if(typeof a.fn==='function') btn.addEventListener('click',a.fn);
+    else if(typeof a.fn==='string') btn.addEventListener('click',()=>{ try{eval(a.fn);}catch(e){console.warn('modal action error:',e);} });
   });
   document.getElementById('modal-overlay').classList.add('open');
 }
@@ -2801,6 +4149,29 @@ function importData(input){
       Object.keys(data).forEach(k=>localStorage.setItem(k,data[k]));
       toast('Import successful!','var(--green)');
       renderEntry();
+      // Push all DPR records to server
+      if(serverUrl){
+        const records = [];
+        Object.keys(localStorage).filter(k=>k.startsWith('dpr3_') && k.match(/\d{4}-\d{2}-\d{2}$/)).forEach(k=>{
+          try {
+            const date = k.slice(-10);
+            const floor = k.slice(5, -11);
+            const data = JSON.parse(localStorage.getItem(k));
+            if(data) records.push({floor, date, data});
+          } catch(e){}
+        });
+        if(records.length > 0){
+          fetch(serverUrl+'/api/dpr/bulk-import',{
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({records}),
+            signal:AbortSignal.timeout(60000)
+          }).then(r=>r.json()).then(d=>{
+            if(d.ok) toast('✅ '+d.saved+' DPR records saved to server','var(--green)',5000);
+            else toast('⚠️ Server save failed: '+d.error,'var(--amber)',5000);
+          }).catch(()=>toast('⚠️ Could not reach server','var(--amber)',4000));
+        }
+      }
     }catch{toast('Invalid file','var(--red)');}
     input.value='';
   };
@@ -2829,9 +4200,9 @@ function renderDprSearch(){
     return false;
   });
   if(matched.length===0){out.innerHTML='<p style="color:var(--t3);font-size:12px">No results found.</p>';return;}
-  let html=`<table class="data-table"><thead><tr><th>Batch No</th><th>Customer</th><th>PC Code</th><th>Size</th><th>Machine</th><th>Qty (L)</th><th>Actual (L)</th><th>Remaining (L)</th><th>Status</th></tr></thead><tbody>`;
+  let html=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Batch No</th><th>Customer</th><th>PC Code</th><th>Size</th><th>Machine</th><th>Qty (L)</th><th>Actual (L)</th><th>Remaining (L)</th><th>Status</th></tr></thead><tbody>`;
   matched.forEach(o=>{
-    const rem=Math.max(0,(o.qty||0)-(o.actualQty||0));
+    const rem=Math.max(0,(o.qty||0)-((o.actualProd||o.actualQty)||0));
     html+=`<tr>
       <td class="mono">${o.batchNumber||o.poNumber||'-'}</td>
       <td>${o.customer||'-'}</td>
@@ -2839,12 +4210,12 @@ function renderDprSearch(){
       <td class="mono">${o.size||'-'}</td>
       <td class="mono">${o.machineId||'-'}</td>
       <td class="mono">${o.qty||0}</td>
-      <td class="mono">${o.actualQty||0}</td>
+      <td class="mono">${o.actualProd||o.actualQty||0}</td>
       <td class="mono" style="color:${rem>0?'var(--amber)':'var(--green)'}">${rem}</td>
       <td><span class="pill ${o.status==='closed'?'g':o.status==='running'?'a':'r'}">${o.status||'-'}</span></td>
     </tr>`;
   });
-  html+=`</tbody></table>`;
+  html+=`</tbody></table></div>`;
   out.innerHTML=html;
 }
 
@@ -2859,6 +4230,15 @@ setTimeout(()=>onDateChange&&onDateChange(),200);
 // Pushes targets + active machines + machine sizes to server so any
 // device opening DPR picks up the same configuration.
 
+function collectAllManpower(){
+  try{
+    const mp={};
+    const keys=Object.keys(localStorage).filter(k=>k&&k.startsWith('dpr_manpower_'));
+    keys.forEach(k=>{ try{ mp[k.replace('dpr_manpower_','')]=JSON.parse(localStorage.getItem(k)||'[]'); }catch{} });
+    return mp;
+  }catch{ return {}; }
+}
+
 function pushSettingsToServer(){
   if(!serverUrl) return;
   const activeMachines = JSON.parse(localStorage.getItem('dpr_active_machines')||'{}');
@@ -2870,6 +4250,7 @@ function pushSettingsToServer(){
       dpr_targets:        targets,
       dpr_active_machines:activeMachines,
       dpr_machine_sizes:  machineSizes,
+      dpr_manpower:       collectAllManpower(),
     }}),
     signal:AbortSignal.timeout(5000)
   }).catch(()=>{});
@@ -2888,33 +4269,121 @@ async function loadSettingsFromServer(){
       Object.assign(targets, s.dpr_targets);
       localStorage.setItem('dpr_targets',JSON.stringify(targets));
     }
-    // Active machines
+    // Active machines — merge server config with FLOORS definition
+    // If server has a config for a floor, trust it exactly (respects disabled machines).
+    // Only auto-fill all machines if this floor has never been configured on server before.
     if(s.dpr_active_machines && Object.keys(s.dpr_active_machines).length>0){
-      localStorage.setItem('dpr_active_machines',JSON.stringify(s.dpr_active_machines));
+      const merged={};
+      Object.keys(FLOORS).forEach(fl=>{
+        const floorMcs=(FLOORS[fl]?.machines||[]).map(m=>m.id);
+        if(!s.dpr_active_machines[fl]){
+          // Floor never configured on server — include all machines by default
+          merged[fl]=floorMcs;
+        } else {
+          // Floor was configured on server — trust it exactly, do not re-add disabled machines
+          merged[fl]=[...s.dpr_active_machines[fl]];
+        }
+      });
+      localStorage.setItem('dpr_active_machines',JSON.stringify(merged));
     }
     // Machine sizes
     if(s.dpr_machine_sizes && Object.keys(s.dpr_machine_sizes).length>0){
       localStorage.setItem('dpr_machine_sizes',JSON.stringify(s.dpr_machine_sizes));
+    }
+    // Manpower names
+    if(s.dpr_manpower && Object.keys(s.dpr_manpower).length>0){
+      Object.entries(s.dpr_manpower).forEach(([k,v])=>{
+        localStorage.setItem('dpr_manpower_'+k, JSON.stringify(v));
+      });
     }
     toast('✓ Settings loaded from server','var(--cyan)');
   }catch(e){}
 }
 
 function postAuthServerInit() {
+  loadDprArchiveList().then(() => {
+    autoDprArchiveIfNeeded().then(() => {
+      buildDprMonthPicker();
+    });
+  });
   checkServer().then(ok=>{
     if(ok){
-      loadSettingsFromServer().then(()=>{
-        fetchActiveOrders();
-        fetchClosedBatches();
+      loadSettingsFromServer().then(async ()=>{
+        // Step 1: fetch orders + closed batches — suppress early renderShifts inside fetchActiveOrders
+        _suppressRenderShifts = true;
+        await Promise.all([fetchActiveOrders(), fetchClosedBatches()]);
+        _suppressRenderShifts = false;
+        // Step 2: fetch today's data for all floors — server is always source of truth
+        // Must run AFTER fetchActiveOrders so activeOrders is populated when rendering
+        const d=getDate();
+        const allFloors=Object.keys(FLOORS);
+        await Promise.all(allFloors.map(fl=>syncFromServer(fl, d)));
+        // Step 3: both activeOrders AND day data ready — render once, correctly
+        renderDayKpis();
+        renderShifts();
+        renderRemarks();
+        renderResort();
+        toast('✓ Data loaded from server','var(--green)',2000);
+        _startAutoSync(); // 30s polling — all devices stay in sync
       });
     } else {
       const cached=localStorage.getItem('dpr_active_orders');
-      if(cached) try{activeOrders=JSON.parse(cached); renderShifts();}catch{}
+      if(cached) try{activeOrders=JSON.parse(cached); if(!unsaved&&!_userIsFocused()) renderShifts();}catch{}
     }
   });
 }
 
-window.addEventListener('beforeunload',e=>{ if(unsaved){e.preventDefault();e.returnValue='';} });
+window.addEventListener('beforeunload', e => {
+  if(unsaved){
+    // Last chance — backup to localStorage before page closes
+    try{
+      const data=collectForm();
+      localStorage.setItem(skey(curFloor,getDate()),JSON.stringify(data));
+    }catch(_){}
+    e.preventDefault();
+    e.returnValue='You have unsaved data. Press Save before leaving.';
+  }
+});
+
+// ── Auto-sync: all devices get same data every 30s ───────────────────
+let _dprSyncTimer=null;
+async function _dprAutoSync(){
+  if(!serverUrl||!dprUser) return;
+  // First flush any pending saves (they take priority over fetching)
+  if(_dprPendingSaves.size){
+    for(const [key,{fl,d,data}] of _dprPendingSaves){
+      const ok=await _dprPushRaw(fl,d,data);
+      if(ok) _dprPendingSaves.delete(key);
+    }
+  }
+  if(!unsaved && !_dprPendingSaves.size){
+    const d=getDate();
+    await Promise.all(Object.keys(FLOORS).map(fl=>syncFromServer(fl,d)));
+    _safeRenderAll(); // skips rebuild if user is actively typing
+  }
+  await fetchActiveOrders();
+}
+function _startAutoSync(){
+  if(_dprSyncTimer) clearInterval(_dprSyncTimer);
+  _dprSyncTimer=setInterval(_dprAutoSync,30000);
+}
+// Flush pending save + pull fresh when user returns to this tab
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState==='visible'&&serverUrl&&dprUser){
+    // Flush ALL pending saves (one per floor/date) before pulling fresh data
+    if(_dprPendingSaves.size){
+      for(const [key,{fl,d,data}] of _dprPendingSaves){
+        const ok=await _dprPushRaw(fl,d,data);
+        if(ok) _dprPendingSaves.delete(key);
+      }
+    }
+    if(!unsaved){
+      const d=getDate();
+      await Promise.all(Object.keys(FLOORS).map(fl=>syncFromServer(fl,d)));
+      _safeRenderAll();
+    }
+  }
+});
 
 // ══════════════════════════════════════════════════════
 // AUTH SYSTEM — DPR
@@ -3008,10 +4477,13 @@ function addDprUserBadge() {
   if (document.getElementById('dpr-user-badge')) return;
   const wrap = document.createElement('div');
   wrap.id = 'dpr-user-badge';
-  wrap.style.cssText = 'position:fixed;top:8px;right:10px;z-index:500;display:flex;align-items:center;gap:6px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer';
-  wrap.innerHTML = `👤 ${dprUser.username} <span style="color:var(--t3)">[${dprUser.role.toUpperCase()}]</span> <span style="color:var(--t3)">▾</span>`;
+  wrap.style.cssText = 'display:flex;align-items:center;gap:5px;background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:6px;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;flex-shrink:0';
+  wrap.innerHTML = `👤 <strong>${dprUser.username}</strong> <span style="color:var(--t3);font-size:9px">[${dprUser.role.toUpperCase()}]</span>`;
   wrap.onclick = showDprUserMenu;
-  document.body.appendChild(wrap);
+  // Insert into nright BEFORE save button
+  const saveBtn = document.getElementById('saveBtn');
+  if(saveBtn) saveBtn.parentNode.insertBefore(wrap, saveBtn);
+  else document.body.appendChild(wrap);
 
   // Show audit tab for admin
   if (dprUser.role === 'admin') {
@@ -3139,8 +4611,33 @@ function showDprAuditPage() {
   }
 }
 
-// On init — check saved session
-(function initDprAuth() {
+// On init — load settings from server first, then check saved session
+(async function initDprAuth() {
+  // Load settings from server before rendering so machine/target config
+  // is available even after browser history is cleared
+  const savedUrl = localStorage.getItem('sunloc_server_url') || '';
+  if (savedUrl) {
+    try {
+      const r = await fetch(savedUrl + '/api/dpr/settings', {signal: AbortSignal.timeout(4000)});
+      if (r.ok) {
+        const j = await r.json();
+        if (j.ok && j.settings) {
+          const s = j.settings;
+          if (s.dpr_targets && Object.keys(s.dpr_targets).length > 0) {
+            Object.assign(targets, s.dpr_targets);
+            localStorage.setItem('dpr_targets', JSON.stringify(targets));
+          }
+          if (s.dpr_active_machines && Object.keys(s.dpr_active_machines).length > 0) {
+            localStorage.setItem('dpr_active_machines', JSON.stringify(s.dpr_active_machines));
+          }
+          if (s.dpr_machine_sizes && Object.keys(s.dpr_machine_sizes).length > 0) {
+            localStorage.setItem('dpr_machine_sizes', JSON.stringify(s.dpr_machine_sizes));
+          }
+        }
+      }
+    } catch(e) {} // silent — offline fallback to localStorage
+  }
+  // Now restore session
   const saved = sessionStorage.getItem('dpr_session');
   if (saved) {
     try {
@@ -3157,30 +4654,28 @@ function showDprAuditPage() {
   document.getElementById('auth-overlay').classList.remove('hidden');
 })();
 
-// ── TEMP Batch PC Code Prompt (one-time per TEMP batch) ────────
+// ── TEMP Batch PC Code Prompt ────────────────────────────────────
 const _tempPromptShown = new Set();
 
-async function promptTempBatchDetails(tempBatchId, machineId) {
-  if (_tempPromptShown.has(tempBatchId)) return;
+async function promptTempBatchDetails(tempBatchId, machineId){
+  if(_tempPromptShown.has(tempBatchId)) return;
   _tempPromptShown.add(tempBatchId);
   openModal('⚠️ TEMP Batch — Enter PC Code', `
     <div style="padding:4px 0">
       <div style="background:rgba(255,64,96,0.08);border:1px solid rgba(255,64,96,0.3);border-left:4px solid #ff4060;border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px">
         <strong>TEMP Batch:</strong> ${tempBatchId}<br>
-        <span style="font-size:12px;color:var(--t2)">Machine is running without a planned order. Please enter the PC Code being produced. Colour is derived automatically from PC Code.</span>
+        <span style="font-size:12px;color:var(--t2)">Machine is running without a planned order. Please enter the PC Code being produced.</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
         <div>
           <label style="font-size:11px;font-weight:600;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.8px">PC Code <span style="color:var(--red)">*</span></label>
           <input id="tmp-pccode" style="width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:5px;color:var(--t1);padding:9px 12px;font-size:13px" placeholder="e.g. 00145" oninput="onTempPcInput(this.value)">
-          <div style="font-size:11px;color:var(--t3);margin-top:4px">Enter the PC Code of the capsule being produced</div>
         </div>
         <div>
           <label style="font-size:11px;font-weight:600;display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.8px">Colour (from PC Code)</label>
-          <input id="tmp-colour" style="width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:5px;color:var(--t1);padding:9px 12px;font-size:13px;opacity:0.7" placeholder="Auto-filled from PC Code" readonly>
+          <input id="tmp-colour" style="width:100%;background:var(--s2);border:1px solid var(--b1);border-radius:5px;color:var(--t1);padding:9px 12px;font-size:13px;opacity:0.7" placeholder="Auto-filled" readonly>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--t3);margin-top:10px">These details will migrate to the real order when Planning reconciles this batch.</div>
     </div>
   `, [
     { label: 'Save', fn: 'saveTempBatchDetails(\'' + tempBatchId + '\')' },
@@ -3188,41 +4683,150 @@ async function promptTempBatchDetails(tempBatchId, machineId) {
   ]);
 }
 
-function onTempPcInput(pcCode) {
+function onTempPcInput(pcCode){
   const colourEl = document.getElementById('tmp-colour');
-  if (!colourEl) return;
+  if(!colourEl) return;
   let found = '';
-  Object.values(activeOrders || {}).forEach(orders => {
-    orders.forEach(o => { if (o.pcCode === pcCode && o.colour) found = o.colour; });
+  Object.values(activeOrders||{}).forEach(orders=>{
+    orders.forEach(o=>{ if(o.pcCode===pcCode && o.colour) found=o.colour; });
   });
-  colourEl.value = found || '';
-  colourEl.placeholder = found ? '' : 'Colour not found for this PC Code';
+  colourEl.value = found||'';
+  colourEl.placeholder = found?'':'— not found for this PC Code';
 }
 
-async function saveTempBatchDetails(tempBatchId) {
+async function saveTempBatchDetails(tempBatchId){
   const pcCode = document.getElementById('tmp-pccode')?.value?.trim();
   const colour = document.getElementById('tmp-colour')?.value?.trim();
-  if (!pcCode) { alert('Please enter a PC Code'); return; }
-  if (!serverUrl) { closeModal(); return; }
-  try {
-    const r = await fetch(serverUrl + '/api/temp-batches/update-details', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tempBatchId, colour, pcCode }),
-      signal: AbortSignal.timeout(5000)
+  if(!pcCode){ alert('Please enter a PC Code'); return; }
+  if(!serverUrl){ closeModal(); return; }
+  try{
+    const r = await fetch(serverUrl+'/api/temp-batches/update-details',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tempBatchId, colour, pcCode}),
+      signal:AbortSignal.timeout(5000)
     });
     const j = await r.json();
-    if (j.ok) {
-      Object.values(activeOrders || {}).forEach(orders => {
-        orders.forEach(o => {
-          if (o.id === tempBatchId) { o.colour = colour; o.pcCode = pcCode; o.colourConfirmed = true; }
+    if(j.ok){
+      Object.values(activeOrders||{}).forEach(orders=>{
+        orders.forEach(o=>{
+          if(o.id===tempBatchId){ o.colour=colour; o.pcCode=pcCode; o.colourConfirmed=true; }
         });
       });
       closeModal();
-      renderEntry();
-      dprAuditLog('TEMP_DETAILS_SET', 'TEMP ' + tempBatchId + ': PC Code=' + pcCode + ', Colour=' + (colour||'—'));
-    } else alert('Error saving: ' + j.error);
-  } catch(e) { alert('Server error: ' + e.message); }
+      renderShifts();
+      dprAuditLog('TEMP_DETAILS_SET','TEMP '+tempBatchId+': PC Code='+pcCode+', Colour='+(colour||'—'));
+    } else alert('Error saving: '+j.error);
+  }catch(e){ alert('Server error: '+e.message); }
 }
+
+// =============================
+// v39 Phase 15 — SAP STATUS BADGE
+// =============================
+// Topbar badge showing live SAP connection health. Polls /api/sap/status
+// every 60s. Click → popover with details + manual refresh button.
+// Identical implementation lives in planning.html and tracking.html; keep
+// the three copies in sync if changed.
+
+window._v39_sapStatusState = window._v39_sapStatusState || { status: 'loading', message: 'Checking...', lastCallAt: null, configured: null };
+window._v39_sapStatusTimer = window._v39_sapStatusTimer || null;
+
+const _V39_SAP_BADGE_COLORS = {
+  online:         { dot: '#10b981', bg: 'rgba(16,185,129,0.10)',  border: 'rgba(16,185,129,0.35)',  text: '#047857' },
+  degraded:       { dot: '#f59e0b', bg: 'rgba(245,158,11,0.10)',  border: 'rgba(245,158,11,0.35)',  text: '#92400e' },
+  stale:          { dot: '#f97316', bg: 'rgba(249,115,22,0.10)',  border: 'rgba(249,115,22,0.35)',  text: '#9a3412' },
+  offline:        { dot: '#dc2626', bg: 'rgba(220,38,38,0.10)',   border: 'rgba(220,38,38,0.35)',   text: '#991b1b' },
+  not_configured: { dot: '#9ca3af', bg: 'rgba(156,163,175,0.10)', border: 'rgba(156,163,175,0.35)', text: '#4b5563' },
+  unknown:        { dot: '#9ca3af', bg: 'rgba(156,163,175,0.10)', border: 'rgba(156,163,175,0.35)', text: '#4b5563' },
+  loading:        { dot: '#9ca3af', bg: '#e5e7eb',                 border: '#d1d5db',                 text: '#6b7280' },
+};
+
+function _v39_sapStatusResolveServerUrl() {
+  let u = '';
+  try { u = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!u && typeof window !== 'undefined' && window.location.hostname !== 'localhost') u = window.location.origin;
+  return u;
+}
+
+async function _v39_sapStatusBadgeTick() {
+  const badgeEl = document.getElementById('v39-sap-status-badge');
+  if (!badgeEl) return;
+  const serverUrlVal = _v39_sapStatusResolveServerUrl();
+  if (!serverUrlVal) {
+    window._v39_sapStatusState = { status: 'unknown', message: 'Server not connected', lastCallAt: null, configured: null };
+    _v39_sapStatusBadgePaint();
+    return;
+  }
+  try {
+    const r = await fetch(serverUrlVal + '/api/sap/status', { signal: AbortSignal.timeout(6000) });
+    const j = await r.json();
+    if (j.ok && j.status) {
+      window._v39_sapStatusState = {
+        status: j.status.status || 'unknown',
+        message: j.status.message || '',
+        lastCallAt: j.status.lastCallAt || null,
+        configured: j.status.configured,
+      };
+    } else if (j.ok) {
+      window._v39_sapStatusState = {
+        status: j.status || 'unknown',
+        message: j.message || '',
+        lastCallAt: j.lastCallAt || null,
+        configured: j.configured,
+      };
+    } else {
+      window._v39_sapStatusState = { status: 'unknown', message: j.error || 'Status check failed', lastCallAt: null, configured: null };
+    }
+  } catch (e) {
+    window._v39_sapStatusState = { status: 'unknown', message: 'Could not reach server', lastCallAt: null, configured: null };
+  }
+  _v39_sapStatusBadgePaint();
+}
+
+function _v39_sapStatusBadgePaint() {
+  const badgeEl = document.getElementById('v39-sap-status-badge');
+  if (!badgeEl) return;
+  const st = window._v39_sapStatusState || { status: 'unknown', message: '' };
+  const colors = _V39_SAP_BADGE_COLORS[st.status] || _V39_SAP_BADGE_COLORS.unknown;
+  badgeEl.style.background = colors.bg;
+  badgeEl.style.borderColor = colors.border;
+  badgeEl.style.color = colors.text;
+  const dot = badgeEl.querySelector('.v39-sap-dot');
+  if (dot) dot.style.background = colors.dot;
+  const lastAt = st.lastCallAt ? new Date(st.lastCallAt).toLocaleTimeString() : 'never';
+  badgeEl.title = `SAP: ${st.status} — ${st.message || ''}\nLast call: ${lastAt}\nClick for details`;
+}
+
+function _v39_sapStatusBadgeShowDetail() {
+  const st = window._v39_sapStatusState || { status: 'unknown', message: '', lastCallAt: null, configured: null };
+  const lastAt = st.lastCallAt ? new Date(st.lastCallAt).toLocaleString() : 'never';
+  const labels = {
+    online: '🟢 Online — SAP responding normally',
+    degraded: '🟡 Degraded — no successful call in last 5+ minutes',
+    stale: '🟠 Stale — no successful call in last 15+ minutes',
+    offline: '🔴 Offline — last SAP call failed',
+    not_configured: '⚪ Not Configured — SAP credentials not set',
+    unknown: '⚪ Unknown — status unavailable',
+    loading: '⏳ Checking...',
+  };
+  const friendly = labels[st.status] || st.status;
+  // DPR doesn't have openModal — use alert
+  alert(`SAP Status: ${friendly}\n${st.message ? '\n' + st.message : ''}\nConfigured: ${st.configured ? 'Yes' : st.configured === false ? 'No' : '—'}\nLast call: ${lastAt}`);
+}
+
+function _v39_sapStatusBadgeInit() {
+  if (window._v39_sapStatusTimer) clearInterval(window._v39_sapStatusTimer);
+  _v39_sapStatusBadgeTick();
+  window._v39_sapStatusTimer = setInterval(_v39_sapStatusBadgeTick, 60000);
+}
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(_v39_sapStatusBadgeInit, 1000);
+  } else {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(_v39_sapStatusBadgeInit, 1000));
+  }
+}
+
 </script>
 </body>
 </html>

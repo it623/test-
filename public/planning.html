@@ -513,7 +513,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v39</p>
+      <p>Planning Suite v3.0 · build v40</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -2438,6 +2438,8 @@ function _renderImmediate() {
     else window.scrollTo(0, _scrollTop);
   }, 0);
   if(_f)setTimeout(()=>_restoreFocus(_f),0);
+  // v40 Phase 18.1: keep the floating multi-select bar in sync after render
+  try { if (typeof _v40_renderInvoiceFloatingBar === 'function') _v40_renderInvoiceFloatingBar(); } catch (e) {}
 }
 
 // Debounced render — collapses multiple rapid render() calls into ONE DOM rebuild
@@ -2523,7 +2525,7 @@ function renderProduction() {
           <strong style="font-size:13px">${_v39_needsSapLink.length} order${_v39_needsSapLink.length!==1?'s':''} need SAP reference linking</strong>
           ${_v39_sapLinkSubcounts.length ? `<span style="margin-left:6px;font-size:11px;color:#78350f">(${_v39_sapLinkSubcounts.join(', ')})</span>` : ''}
           <div style="margin-top:6px;font-size:11px;color:#78350f;line-height:1.5">
-            Every order — indent, WO, TEMP, verbal, or PO — must have a SAP DocEntry + DocNum attached before it can be invoiced and dispatched. Once SAP indent is received, link it here. Unlinked orders cannot complete dispatch in v39.
+            Every order — indent, WO, TEMP, verbal, or PO — must have a Sales Order Number attached before it can be invoiced and dispatched. Once SAP indent is received, link it here. Unlinked orders cannot complete dispatch in v39.
           </div>
           <button onclick="_v39_showSapLinkList()" style="margin-top:8px;background:#d97706;color:#fff;border:none;padding:5px 12px;border-radius:4px;font-size:11px;font-weight:600;cursor:pointer">📋 Show list &amp; link now</button>
         </div>
@@ -2790,7 +2792,7 @@ function renderOrderRow(ord, idx, mc) {
       (ord.batchNumber || '').startsWith('TEMP-')
     );
   const sapLinkBadge = needsSapLink
-    ? `<span class="badge" title="No SAP DocEntry/DocNum attached — click to link" onclick="event.stopPropagation();_v39_jumpToOrderForBackfill('${ord.id}')" style="background:rgba(245,158,11,0.12);color:#d97706;border:1px solid rgba(245,158,11,0.4);font-size:10px;cursor:pointer">🔗 SAP?</span>`
+    ? `<span class="badge" title="No Sales Order Number attached — click to link" onclick="event.stopPropagation();_v39_jumpToOrderForBackfill('${ord.id}')" style="background:rgba(245,158,11,0.12);color:#d97706;border:1px solid rgba(245,158,11,0.4);font-size:10px;cursor:pointer">🔗 SAP?</span>`
     : '';
   const _rowBg = isClosed ? "var(--surface3,#1a2a1e)" : isWO ? "rgba(255,171,0,0.03)" : "var(--surface2,#0f2a20)";
   return `<tr class="${isClosed?'closed':''}" style="${isWO?'background:rgba(255,171,0,0.03);border-left:3px solid rgba(255,171,0,0.4)':''}">
@@ -3065,14 +3067,14 @@ function showAddOrderModal(machineId, existingOrder) {
       <!-- v39 Phase 7: SAP Doc reference fields. Required for indent orders.
            Pre-filled and locked when order was created from Unplanned Orders flow. -->
       <div class="form-group">
-        <label>SAP DocEntry ${ord.createdFrom==='sap_indent'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">🔗 LINKED</span>':''}</label>
+        <label>Sales Order ID ${ord.createdFrom==='sap_indent'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">🔗 LINKED</span>':''}</label>
         <input class="form-control" id="fo-sap-docentry" type="number" value="${ord.sapDocEntry||''}" placeholder="e.g. 12345 (from SAP indent)" ${ord.createdFrom==='sap_indent'?'readonly style="opacity:0.7;cursor:not-allowed"':''}>
         <div style="font-size:10px;color:var(--text3);margin-top:3px">From SAP Sales Order. Required for indent-type orders.</div>
       </div>
       <div class="form-group">
-        <label>SAP DocNum ${ord.createdFrom==='sap_indent'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">🔗 LINKED</span>':''}</label>
+        <label>Sales Order Number ${ord.createdFrom==='sap_indent'?'<span style="color:var(--accent3);font-size:10px;margin-left:4px">🔗 LINKED</span>':''}</label>
         <input class="form-control" id="fo-sap-docnum" value="${ord.sapDocNum||''}" placeholder="e.g. SO-26-1234" ${ord.createdFrom==='sap_indent'?'readonly style="opacity:0.7;cursor:not-allowed"':''}>
-        <div style="font-size:10px;color:var(--text3);margin-top:3px">SAP DocNum (the human-readable invoice/order number).</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">The Sales Order Number from SAP (e.g. 46, 1024 — visible in SAP Sales Indent Analysis).</div>
       </div>
       <div class="form-group">
         <label>Batch Number</label>
@@ -3419,7 +3421,7 @@ function saveOrderModal(existingId, defaultMachine) {
     ? (state.orders.find(o=>o.id===existingId)?.pcCode || document.getElementById('fo-pccode')?.value)
     : document.getElementById('fo-pccode')?.value;
 
-  // v39 Phase 7: Read SAP DocEntry + DocNum from form
+  // v39 Phase 7: Read Sales Order Number from form
   const _existing = existingId ? state.orders.find(o=>o.id===existingId) : null;
   const _sapDocEntryRaw = document.getElementById('fo-sap-docentry')?.value || '';
   const _sapDocEntryNum = _sapDocEntryRaw ? parseInt(_sapDocEntryRaw, 10) : null;
@@ -3462,27 +3464,33 @@ function saveOrderModal(existingId, defaultMachine) {
     actualProd: existingId ? (_existing?.actualProd||0) : 0,
   };
 
-  // ─── v39 Phase 7: mandatory SAP Doc ID enforcement ───
+  // ─── v39 Phase 7 + v40 Phase 18.4: SAP Doc ID enforcement ───
   // Hard-block save when poType='indent' and SAP DocEntry+DocNum are missing.
-  // Indent-type orders come from SAP Sales Orders — they MUST be linkable.
-  // Exemptions:
-  //   - poType !== 'indent' (verbal/PO orders don't have a SAP indent)
-  //   - woStatus === 'wo' (work orders are pre-SAP)
-  //   - existing legacy order that doesn't have SAP refs (admin can fix via backfill banner)
-  // For brand new indent orders: BOTH sapDocEntry AND sapDocNum required.
+  // For verbal/PO/WO-reconciled/TEMP: SOFT WARNING only — order saves, but user is
+  // reminded it won't be invoiceable until linked. Hard block stays only for indent
+  // because indent orders by definition come from SAP (no excuse to skip linking).
+  let _v40_softSapWarning = null;
   if (ord.poType === 'indent' && ord.woStatus !== 'wo') {
     const isNewIndent = !existingId;
     const wasLegacy = existingId && _existing && !_existing.sapDocEntry && !_existing.sapDocNum;
     if (isNewIndent || !wasLegacy) {
-      // New indent order, OR edit of an indent that already had SAP refs — require them
       if (!ord.sapDocEntry || !ord.sapDocNum) {
         const missing = [];
-        if (!ord.sapDocEntry) missing.push('SAP DocEntry');
-        if (!ord.sapDocNum) missing.push('SAP DocNum');
-        alert(`⚠️ Cannot save indent order without SAP reference.\n\nMissing: ${missing.join(' and ')}.\n\nEither:\n  • Enter the SAP DocEntry + DocNum manually (if you have them), OR\n  • Use the Unplanned Orders page to assign from SAP (recommended — fields auto-fill).\n\nFor non-SAP orders, change PO Type to "Verbal" or "Purchase Order".`);
+        if (!ord.sapDocEntry) missing.push('Sales Order ID');
+        if (!ord.sapDocNum) missing.push('Sales Order Number');
+        alert(`⚠️ Cannot save indent order without SAP reference.\n\nMissing: ${missing.join(' and ')}.\n\nEither:\n  • Enter the Sales Order Number + DocEntry manually (if you have them), OR\n  • Use the Unplanned Orders page to assign from SAP (recommended — fields auto-fill).\n\nFor non-SAP orders, change PO Type to "Verbal" or "Purchase Order".`);
         return;
       }
     }
+  } else if (ord.qty > 0 && !ord.sapDocEntry && !ord.sapDocNum &&
+             (ord.poType === 'verbal' || ord.poType === 'po' ||
+              ord.woStatus === 'wo-reconciled' ||
+              (ord.batchNumber || '').startsWith('TEMP-'))) {
+    // v40 Phase 18.4: queue a soft reminder after save
+    const typeLabel = ord.woStatus === 'wo-reconciled' ? 'WO-Reconciled'
+                    : (ord.batchNumber || '').startsWith('TEMP-') ? 'TEMP'
+                    : ord.poType === 'verbal' ? 'Verbal' : 'PO';
+    _v40_softSapWarning = `🔗 Reminder: this ${typeLabel} order has no Sales Order Number yet. It cannot be invoiced or dispatched until you link it to a SAP indent. Use Production Schedule → 🔗 SAP? badge when SAP indent is available.`;
   }
 
   if (existingId) {
@@ -3670,6 +3678,11 @@ function saveOrderModal(existingId, defaultMachine) {
   saveState();
   closeModal();
   render();
+  // v40 Phase 18.4: fire soft SAP-link reminder for non-indent orders saved without SAP refs.
+  // Hard-block path (indent) returns earlier via alert(); only successful saves reach this point.
+  if (_v40_softSapWarning) {
+    setTimeout(() => toast(_v40_softSapWarning, '#f59e0b', 6000), 100);
+  }
 }
 
 // Save a single order to the dedicated production_orders table permanently
@@ -3958,12 +3971,27 @@ function _v39_reconcileSapIndents(indents) {
       const line = lines[li];
       const lineQty = parseFloat(line.Quantity) || 0;
       if (lineQty <= 0) continue;
-      // Map SAP line attributes to Sunloc semantics. SAP item code likely encodes size/colour;
-      // for now we extract size if it's in a known UDF. Adjust mapping when SAP UDF schema confirmed.
+      // v40 Phase 18.2: Lookup ItemCode against Sunloc's PC Code master to derive
+      // Size + Colour. SAP UDFs (U_Size, U_Colour, U_PCCode) are NOT populated in
+      // Sunil Healthcare's SAP — ItemCode IS the PC Code. Search all size buckets
+      // for the matching code; first match wins.
       const itemCode = String(line.ItemCode || '');
-      const size = line.U_Size || line.ItemDescription?.match(/\bSize\s+([0-4]|00)\b/i)?.[1] || '';
-      const colour = line.U_Colour || '';
-      const pcCode = line.U_PCCode || '';
+      let size = '', colour = '', pcCode = '';
+      if (itemCode && state.pcCodes) {
+        for (const sz of Object.keys(state.pcCodes)) {
+          const found = (state.pcCodes[sz] || []).find(p => String(p.c) === itemCode);
+          if (found) {
+            size = sz;
+            colour = found.colour || found.col || '';
+            pcCode = itemCode;
+            break;
+          }
+        }
+      }
+      // Fallback: if not found in PC master, try SAP UDFs / ItemDescription parsing (legacy)
+      if (!size) size = line.U_Size || line.ItemDescription?.match(/\bSize\s+([0-4]|00)\b/i)?.[1] || '';
+      if (!colour) colour = line.U_Colour || '';
+      if (!pcCode) pcCode = line.U_PCCode || itemCode || '';
       // Find matching planned orders
       const planned = (state.orders || []).filter(o =>
         !o.deleted &&
@@ -4161,7 +4189,7 @@ function _v39_openAssignModal(idx) {
     <div style="background:var(--surface2);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px;line-height:1.6">
       <div style="font-weight:700;color:var(--text);margin-bottom:6px">SAP Indent reference</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;color:var(--text2)">
-        <div><span style="color:var(--text3)">SAP DocNum:</span> <strong style="font-family:monospace;color:var(--accent2)">${u.docNum||'—'}</strong></div>
+        <div><span style="color:var(--text3)">Sales Order Number:</span> <strong style="font-family:monospace;color:var(--accent2)">${u.docNum||'—'}</strong></div>
         <div><span style="color:var(--text3)">DocEntry:</span> <strong style="font-family:monospace">${u.docEntry}</strong></div>
         <div><span style="color:var(--text3)">Customer:</span> <strong>${u.cardName||u.cardCode||'—'}</strong></div>
         <div><span style="color:var(--text3)">Due Date:</span> <strong>${_v39_fmtDate(u.dueDate)}</strong></div>
@@ -4188,7 +4216,7 @@ function _v39_openAssignModal(idx) {
       </select>
     </div>
     <div style="font-size:11px;color:var(--text3);padding:8px;background:rgba(0,150,255,0.05);border-radius:4px;line-height:1.5">
-      🔗 SAP DocEntry <strong>${u.docEntry}</strong> + DocNum <strong>${u.docNum}</strong> will be auto-attached to the production order.<br>
+      🔗 Sales Order Number <strong>${u.docNum}</strong> (ID ${u.docEntry}) will be auto-attached to the production order.<br>
       📌 Customer "<strong>${u.cardName||u.cardCode}</strong>" auto-filled from SAP. PC code and colour copied where present.
     </div>`;
   openModal(`Assign Indent — ${u.docNum||'SAP'}`, html, [
@@ -4298,7 +4326,7 @@ async function _v39_confirmAssign() {
   renderUnplannedOrders();
 }
 
-// v39 Phase 7: Show modal listing legacy orders missing SAP DocEntry/DocNum.
+// v39 Phase 7: Show modal listing legacy orders missing Sales Order Number.
 // Admin can click any order to jump to it and fill in the SAP refs.
 function _v39_showSapLinkList() {
   const needs = (state.orders || []).filter(o => {
@@ -4352,7 +4380,7 @@ function _v39_showSapLinkList() {
   openModal(`Orders needing SAP linking (${needs.length})`, `
     <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px;color:#92400e;line-height:1.5">
       <strong>📋 What to do:</strong><br>
-      • Click <strong>🔗 Link SAP</strong> on each row to open the edit form, paste SAP DocEntry + DocNum, save.<br>
+      • Click <strong>🔗 Link SAP</strong> on each row to open the edit form, paste Sales Order Number, save.<br>
       • Use the <strong>📥 Unplanned Orders</strong> page in the sidebar to auto-fill SAP refs from the SAP indent list.<br>
       • Until linked, the order cannot be invoiced or dispatched in v39.
     </div>
@@ -4415,13 +4443,15 @@ async function _v39_loadInvoiceState({ silent = false } = {}) {
     || localStorage.getItem('sunloc_server_url') || '';
   if (!baseUrl) return;
   try {
-    // Fetch both in parallel
-    const [reqResp, recvResp] = await Promise.all([
+    // v40 Phase 18.12: also fetch active scan sessions to surface "Scanning" badges.
+    const [reqResp, recvResp, scanResp] = await Promise.all([
       fetch(baseUrl + '/api/invoice/requests?limit=500', { signal: AbortSignal.timeout(8000) }),
       fetch(baseUrl + '/api/invoice/received?limit=500', { signal: AbortSignal.timeout(8000) }),
+      fetch(baseUrl + '/api/invoice/active-scan-sessions', { signal: AbortSignal.timeout(8000) }).catch(() => null),
     ]);
     const reqJ = await reqResp.json();
     const recvJ = await recvResp.json();
+    const scanJ = scanResp ? await scanResp.json().catch(() => null) : null;
     const state = {};
     if (reqJ.ok) {
       for (const r of (reqJ.requests || [])) {
@@ -4432,6 +4462,8 @@ async function _v39_loadInvoiceState({ silent = false } = {}) {
         e.lastRequestStatus = r.status;
       }
     }
+    // Build invoiceId → batch_number lookup for scan-session mapping
+    const idToBatch = {};
     if (recvJ.ok) {
       for (const r of (recvJ.invoices || [])) {
         if (!r.batch_number) continue;
@@ -4439,6 +4471,21 @@ async function _v39_loadInvoiceState({ silent = false } = {}) {
         e.hasReceived = true;
         e.docNum = r.sap_doc_num || r.sap_invoice_no;
         e.dispatchStatus = r.dispatch_status;
+        e.dispatchedAt = r.dispatched_at || null;
+        e.vehicleNo = r.vehicle_no || null;
+        e.invoiceId = r.id;
+        idToBatch[r.id] = r.batch_number;
+      }
+    }
+    // v40 Phase 18.12: merge in active scan sessions
+    if (scanJ && scanJ.ok && scanJ.sessions) {
+      for (const [invId, sess] of Object.entries(scanJ.sessions)) {
+        const batch = idToBatch[invId];
+        if (!batch) continue;
+        const e = state[batch] = state[batch] || {};
+        e.isScanning = true;
+        e.scanningTruck = sess.truckNumber;
+        e.scanCount = sess.scannedCount;
       }
     }
     window._v39_invoiceState = state;
@@ -4454,7 +4501,7 @@ function _v39_openGenerateInvoiceModal(planId, mode) {
   const ord = state.orders.find(o => o.id === p.productionOrderId);
   if (!ord) { toast('Production order not found for this plan', 'var(--red)'); return; }
   if (!ord.sapDocEntry) {
-    alert('⚠️ This order has no SAP DocEntry. Cannot generate invoice.\n\nThe order must be linked to a SAP Sales Order before invoicing. Edit the order to add the SAP DocEntry, or recreate it via the Unplanned Orders page.');
+    alert('⚠️ This order has no Sales Order Number. Cannot generate invoice.\n\nThe order must be linked to a SAP Sales Order before invoicing. Edit the order to add the Sales Order Number, or recreate it via the Unplanned Orders page.');
     return;
   }
   const packedOut = p.packedQty || 0;
@@ -4480,15 +4527,15 @@ function _v39_openGenerateInvoiceModal(planId, mode) {
   const ctx = window._v39_pendingInvoiceContext;
   openModal(`🧾 Generate Invoice — ${ctx.batchNumber}`, `
     <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.5;color:#0e7490">
-      <strong>Draft invoice — will be sent to SAP Service Layer.</strong><br>
-      SAP will: (1) book a Goods Receipt against the linked Sales Order to add FG stock, then (2) generate the A/R Invoice which consumes that stock. Net stock impact in SAP = 0.
+      <strong>📋 Sunloc will create a Delivery in SAP (not the Invoice itself).</strong><br>
+      A Delivery referencing this Sales Order will be created in SAP. The SAP user then opens the Delivery in SAP and converts it to an A/R Invoice via Copy-To. Sunloc's 5-min poller picks up the resulting Invoice and routes it to the Tracking → Invoice Queue.
     </div>
     <div style="background:var(--surface2);border-radius:6px;padding:14px;margin-bottom:14px;font-size:12px;line-height:1.7">
       <div style="font-weight:700;color:var(--text);margin-bottom:8px;font-size:13px">Invoice details</div>
       <div style="display:grid;grid-template-columns:130px 1fr;gap:6px 12px">
         <div style="color:var(--text3)">Customer:</div><div style="font-weight:600">${ctx.customer || '—'}</div>
-        <div style="color:var(--text3)">SAP DocEntry:</div><div style="font-family:monospace;color:var(--accent2);font-weight:700">${ctx.sapDocEntry}</div>
-        <div style="color:var(--text3)">SAP DocNum:</div><div style="font-family:monospace">${ctx.sapDocNum || '—'}</div>
+        <div style="color:var(--text3)">Sales Order ID:</div><div style="font-family:monospace;color:var(--accent2);font-weight:700">${ctx.sapDocEntry}</div>
+        <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:monospace">${ctx.sapDocNum || '—'}</div>
         <div style="color:var(--text3)">PO Number:</div><div style="font-family:monospace">${ctx.poNumber || '—'}</div>
         <div style="color:var(--text3)">Batch Number:</div><div style="font-family:monospace;color:var(--accent2);font-weight:700">${ctx.batchNumber}</div>
         <div style="color:var(--text3)">Size:</div><div style="font-family:monospace">${ctx.size || '—'}</div>
@@ -4508,7 +4555,7 @@ function _v39_openGenerateInvoiceModal(planId, mode) {
       After SAP responds with the DocNum/IRN, this batch's status updates to "Sent to SAP".
     </div>
   `, [
-    { label: '🧾 Send to SAP', cls: 'btn-primary', fn: '_v39_submitInvoiceRequest()' },
+    { label: '🧾 Create Delivery in SAP', cls: 'btn-primary', fn: '_v39_submitInvoiceRequest()' },
     { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' },
   ]);
 }
@@ -4522,7 +4569,7 @@ async function _v39_submitInvoiceRequest() {
   const remarks = document.getElementById('v39-inv-remarks')?.value || '';
   // Disable submit while in flight
   const submitBtn = document.querySelector('.modal-actions .btn-primary');
-  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Sending to SAP…'; }
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Creating Delivery in SAP…'; }
   try {
     const body = {
       batchNumber: ctx.batchNumber,
@@ -4548,7 +4595,7 @@ async function _v39_submitInvoiceRequest() {
     const j = await r.json();
     closeModal();
     if (j.ok) {
-      toast(`✅ Invoice request sent to SAP — DocNum: ${j.sap_response?.docNum || j.request_id}`, 'var(--accent3)');
+      toast(`✅ Delivery created in SAP — Delivery DocNum: ${j.sap_response?.docNum || j.request_id}`, 'var(--accent3)');
     } else if (j.degraded) {
       toast(`⚠️ Request saved but SAP unreachable. Will retry once SAP is online. Request ID: ${j.request_id}`, '#f59e0b');
     } else {
@@ -4558,7 +4605,7 @@ async function _v39_submitInvoiceRequest() {
     await _v39_loadInvoiceState();
     render();
   } catch (e) {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '🧾 Send to SAP'; }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = '🧾 Create Delivery in SAP'; }
     alert('Network error: ' + e.message);
   }
 }
@@ -4598,7 +4645,7 @@ async function _v39_showInvoiceState(batchNumber) {
       <div style="margin-bottom:14px">
         <div style="font-weight:700;color:var(--text);font-size:13px;margin-bottom:6px">📤 Invoice Requests (Sunloc → SAP)</div>
         <table style="width:100%;font-size:11px;border-collapse:collapse">
-          <thead style="background:var(--surface2)"><tr><th style="padding:4px 6px;text-align:left">Req ID</th><th>Status</th><th>Qty</th><th>SAP DocNum</th><th>Created</th><th>Error</th></tr></thead>
+          <thead style="background:var(--surface2)"><tr><th style="padding:4px 6px;text-align:left">Req ID</th><th>Status</th><th>Qty</th><th>Sales Order Number</th><th>Created</th><th>Error</th></tr></thead>
           <tbody>${reqRows}</tbody>
         </table>
       </div>
@@ -4627,7 +4674,7 @@ function _v39_openTruckInvoiceModal(truckIdx, zone) {
     return ord?.sapDocEntry && (o.packedQty || 0) > 0;
   });
   if (!eligible.length) {
-    alert('⚠️ No batches in this truck are ready to invoice.\n\nA batch needs:\n  • SAP DocEntry (linked to SAP Sales Order)\n  • At least one packed box\n\nCheck the Order View tab to see batch-level state.');
+    alert('⚠️ No batches in this truck are ready to invoice.\n\nA batch needs:\n  • Sales Order Number\n  • At least one packed box\n\nCheck the Order View tab to see batch-level state.');
     return;
   }
   const rows = eligible.map((o, i) => {
@@ -4645,11 +4692,11 @@ function _v39_openTruckInvoiceModal(truckIdx, zone) {
   window._v39_truckInvoiceContext = { truckIdx, zone, eligible };
   openModal(`🧾 Generate Invoices for Truck #${truck.truckNumber || truckIdx+1}`, `
     <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.5;color:#0e7490">
-      <strong>One SAP invoice per batch.</strong> Each batch in this truck will be sent as a separate SAP invoice trigger (SAP convention — one invoice per SO line).
+      <strong>One Delivery per Sales Order.</strong> Each batch in this truck will be sent as a separate Delivery to SAP, referencing its own Sales Order. SAP user will then convert each Delivery → Invoice in SAP via Copy-To.
     </div>
     <table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:12px">
       <thead style="background:var(--surface2)">
-        <tr><th style="padding:6px 8px;text-align:center">Send?</th><th style="padding:6px 8px;text-align:left">Batch</th><th style="padding:6px 8px;text-align:left">Customer</th><th style="padding:6px 8px;text-align:left">SAP DocEntry</th><th style="padding:6px 8px;text-align:right">Boxes</th><th style="padding:6px 8px;text-align:right">Qty</th></tr>
+        <tr><th style="padding:6px 8px;text-align:center">Send?</th><th style="padding:6px 8px;text-align:left">Batch</th><th style="padding:6px 8px;text-align:left">Customer</th><th style="padding:6px 8px;text-align:left">Sales Order ID</th><th style="padding:6px 8px;text-align:right">Boxes</th><th style="padding:6px 8px;text-align:right">Qty</th></tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
@@ -4657,7 +4704,7 @@ function _v39_openTruckInvoiceModal(truckIdx, zone) {
       💡 Uncheck any batch you don't want to invoice now. Each checked batch fires one SAP API call.
     </div>
   `, [
-    { label: '🧾 Send Checked Batches to SAP', cls: 'btn-primary', fn: '_v39_submitTruckInvoices()' },
+    { label: '🧾 Create Deliveries for Checked Batches', cls: 'btn-primary', fn: '_v39_submitTruckInvoices()' },
     { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' },
   ]);
 }
@@ -4715,6 +4762,190 @@ async function _v39_submitTruckInvoices() {
   }
   await _v39_loadInvoiceState();
   render();
+}
+
+// v40 Phase 18.1: Open the consolidated approval screen. Triggered from the
+// floating action bar when batches are selected in multi-select mode, OR from
+// a single-batch/truck entry path that auto-selects.
+function _v40_openConsolidatedApprovalModal() {
+  const selectedIds = [...window._v40_invoiceSelections];
+  if (selectedIds.length === 0) {
+    alert('No batches selected.');
+    return;
+  }
+  // Gather full context per selected plan
+  const items = [];
+  for (const planId of selectedIds) {
+    const plan = (state.dispatchPlans || []).find(p => p.id === planId);
+    if (!plan) continue;
+    const ord = (state.orders || []).find(o => o.id === plan.productionOrderId);
+    if (!ord) continue;
+    // Re-check eligibility (in case state changed since selection)
+    const elig = _v40_isInvoiceEligible(plan, ord);
+    if (!elig.eligible) continue;
+    items.push({
+      planId,
+      batchNumber: plan.batchNumber,
+      customer: plan.customer || ord.customer,
+      cardCode: ord.cardCode || '',
+      poNumber: ord.poNumber || '',
+      sapDocEntry: ord.sapDocEntry,
+      sapDocNum: ord.sapDocNum,
+      size: plan.size || ord.size,
+      colour: plan.colour || ord.colour,
+      pcCode: plan.pcCode || ord.pcCode,
+      itemCode: ord.itemCode || plan.pcCode || '',
+      boxes: plan.boxes || 0,
+      qtyLakhs: plan.packedQty || 0,
+      truckNumber: plan.truckNumber || null,
+    });
+  }
+  if (items.length === 0) {
+    alert('None of the selected batches are still eligible for invoicing. Please refresh.');
+    return;
+  }
+  window._v40_approvalContext = { items, results: null };
+  _v40_renderConsolidatedApprovalModalBody();
+}
+
+function _v40_renderConsolidatedApprovalModalBody() {
+  const ctx = window._v40_approvalContext;
+  if (!ctx || !ctx.items) return;
+  const items = ctx.items;
+  const results = ctx.results;  // null until submit fires
+  // Build rows
+  const rows = items.map((it, idx) => {
+    let statusCell = '';
+    if (results) {
+      const r = results.find(x => x.batchNumber === it.batchNumber);
+      if (r?.ok) {
+        statusCell = `<td style="padding:5px 8px;text-align:center;color:#10b981;font-weight:700">✅ Delivery #${r.delivery_doc_num || r.delivery_doc_entry || '✓'}</td>`;
+      } else if (r) {
+        statusCell = `<td style="padding:5px 8px;text-align:center;color:#dc2626;font-size:11px" title="${r.error||''}">❌ Failed</td>`;
+      } else {
+        statusCell = `<td style="padding:5px 8px;text-align:center;color:var(--text3)">—</td>`;
+      }
+    } else {
+      statusCell = `<td style="padding:5px 8px;text-align:center"><input type="checkbox" checked id="v40-conf-cb-${idx}" style="cursor:pointer"></td>`;
+    }
+    return `
+      <tr style="border-bottom:1px solid var(--border)">
+        ${statusCell}
+        <td style="padding:5px 8px;font-family:var(--mono);font-size:11px">${it.batchNumber}</td>
+        <td style="padding:5px 8px;font-size:11px">${(it.customer||'').substring(0,30)}</td>
+        <td style="padding:5px 8px;font-family:var(--mono);font-size:11px;color:#0891b2;font-weight:600">${it.sapDocNum || '—'}</td>
+        <td style="padding:5px 8px;font-family:var(--mono);font-size:11px">${it.pcCode || '—'}</td>
+        <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:11px">${it.boxes}</td>
+        <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600">
+          ${results ? it.qtyLakhs.toFixed(3) :
+            `<input type="number" step="0.001" min="0" value="${it.qtyLakhs.toFixed(3)}" id="v40-conf-qty-${idx}" style="width:70px;text-align:right;background:var(--surface3);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-family:var(--mono);font-size:11px">`}
+        </td>
+        <td style="padding:5px 8px;text-align:center;font-family:var(--mono);font-size:11px">${it.truckNumber || '—'}</td>
+      </tr>`;
+  }).join('');
+  // Footer summary
+  const totalBoxes = items.reduce((s, i) => s + i.boxes, 0);
+  const totalQty = items.reduce((s, i) => s + i.qtyLakhs, 0);
+  const distinctCustomers = new Set(items.map(i => i.customer)).size;
+  const distinctTrucks = new Set(items.map(i => i.truckNumber).filter(Boolean)).size;
+  const distinctOrders = new Set(items.map(i => i.sapDocEntry)).size;
+  let footerHtml = '';
+  if (results) {
+    const okCount = results.filter(r => r.ok).length;
+    const failCount = results.length - okCount;
+    footerHtml = `
+      <div style="background:${failCount===0?'rgba(16,185,129,0.08)':(okCount===0?'rgba(220,38,38,0.08)':'rgba(245,158,11,0.08)')};border:1px solid ${failCount===0?'rgba(16,185,129,0.3)':(okCount===0?'rgba(220,38,38,0.3)':'rgba(245,158,11,0.3)')};border-radius:6px;padding:10px 14px;margin-top:12px;font-size:12px;line-height:1.6">
+        <strong>${failCount===0?'✅ All Deliveries created':okCount===0?'❌ All Deliveries failed':'⚠️ Partial: '+okCount+' succeeded, '+failCount+' failed'}</strong><br>
+        ${okCount > 0 ? `<span style="color:#047857">${okCount} Delivery document${okCount!==1?'s':''} created in SAP. SAP user will convert each Delivery → Invoice via Copy-To. Sunloc's 5-min poller will pick up the resulting Invoices.</span><br>` : ''}
+        ${failCount > 0 ? `<span style="color:#7c2d2d">Failures preserved as 'failed' in invoice_requests for audit.</span>` : ''}
+      </div>`;
+  } else {
+    footerHtml = `
+      <div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;line-height:1.6;color:#0e7490">
+        <strong>📋 Sunloc will create ${items.length} Deliveries in SAP (one per Sales Order).</strong><br>
+        SAP user converts each Delivery → A/R Invoice via Copy-To in SAP. Sunloc's 5-min poller picks up the resulting Invoices and routes them to the Tracking → Invoice Queue.
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <label style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Remarks (optional, applied to all):</label>
+        <input type="text" id="v40-conf-remarks" placeholder="Optional notes for all Deliveries..." style="flex:1;font-size:11px;padding:5px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface3);color:var(--text)">
+      </div>`;
+  }
+  const body = `
+    <div style="font-size:12px;line-height:1.5">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden">
+        <thead style="background:var(--surface2);font-weight:700">
+          <tr>
+            <th style="padding:6px 8px;text-align:center">${results?'Status':'Send?'}</th>
+            <th style="padding:6px 8px;text-align:left">Batch</th>
+            <th style="padding:6px 8px;text-align:left">Customer</th>
+            <th style="padding:6px 8px;text-align:left">Sales Order #</th>
+            <th style="padding:6px 8px;text-align:left">PC Code</th>
+            <th style="padding:6px 8px;text-align:right">Boxes</th>
+            <th style="padding:6px 8px;text-align:right">Qty (L)</th>
+            <th style="padding:6px 8px;text-align:center">Truck</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="display:flex;justify-content:space-between;gap:12px;padding:8px 12px;background:var(--surface2);border-radius:4px;margin-top:8px;font-size:11px;font-weight:600">
+        <span><strong>${items.length}</strong> batches</span>
+        <span><strong>${totalBoxes}</strong> boxes</span>
+        <span><strong>${totalQty.toFixed(2)}</strong> L</span>
+        <span><strong>${distinctOrders}</strong> Sales Orders</span>
+        <span><strong>${distinctCustomers}</strong> customers</span>
+        <span><strong>${distinctTrucks}</strong> trucks</span>
+      </div>
+      ${footerHtml}
+    </div>`;
+  const buttons = results ? [
+    { label: '✅ Done', cls: 'btn-primary', fn: 'closeModal();window._v40_invoiceSelections.clear();_v40_renderInvoiceFloatingBar();render();' },
+  ] : [
+    { label: '🚀 Approve and Send ' + items.length + ' Deliveries to SAP', cls: 'btn-primary', fn: '_v40_submitConsolidated()' },
+    { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' },
+  ];
+  openModal('🧾 Generate Invoices — Review & Approve', `${items.length} batches selected`, body, buttons);
+}
+
+async function _v40_submitConsolidated() {
+  const ctx = window._v40_approvalContext;
+  if (!ctx || !ctx.items) return;
+  // Filter to only-checked rows + read editable qtys
+  const toSend = [];
+  ctx.items.forEach((it, idx) => {
+    const cb = document.getElementById('v40-conf-cb-' + idx);
+    if (cb && !cb.checked) return;
+    const qtyInput = document.getElementById('v40-conf-qty-' + idx);
+    const qty = qtyInput ? parseFloat(qtyInput.value) : it.qtyLakhs;
+    toSend.push({ ...it, qtyLakhs: qty });
+  });
+  if (toSend.length === 0) {
+    alert('No batches checked. Tick at least one to proceed.');
+    return;
+  }
+  const remarks = document.getElementById('v40-conf-remarks')?.value || '';
+  // Show progress state
+  const btn = document.querySelector('.modal-actions .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Creating Deliveries in SAP… (' + toSend.length + ')'; }
+  const baseUrl = (typeof SYNC !== 'undefined' && SYNC._url) || localStorage.getItem('sunloc_server_url') || '';
+  try {
+    const r = await fetch(baseUrl + '/api/invoice/request-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batches: toSend,
+        remarks,
+        createdBy: currentUser?.username || currentUser?.role || 'unknown',
+      }),
+    });
+    const j = await r.json();
+    ctx.results = j.results || [];
+    _v40_renderConsolidatedApprovalModalBody();
+    // Refresh invoice state cache so badges/buttons update
+    await _v39_loadInvoiceState();
+  } catch (e) {
+    alert('Network error: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Approve and Send to SAP'; }
+  }
 }
 
 // =============================
@@ -6370,9 +6601,10 @@ function renderDispatch() {
   const bannerHtml = status === 'locked' && currentUser?.role !== 'admin'
     ? `<div style="background:rgba(255,82,82,0.1);border:1px solid rgba(255,82,82,0.3);border-radius:6px;padding:8px 14px;margin-bottom:12px;font-size:12px;color:#ff5252">🔒 <strong>${monthLabel(_selectedPlanMonth)}</strong> — read-only.</div>` : '';
 
-  // v39 Phase 8: Refresh invoice state cache if stale (>30s old). Non-blocking.
+  // v39 Phase 8 + v40 Phase 18.6: Refresh invoice state cache if stale.
+  // Threshold raised from 30s → 5min to align with SAP polling cadence.
   const _v39_stateAge = Date.now() - (window._v39_invoiceStateLoadedAt || 0);
-  if (_v39_stateAge > 30000) {
+  if (_v39_stateAge > 5 * 60 * 1000) {
     _v39_loadInvoiceState({ silent: true }).then(() => {
       // If we got new state and the dispatch page is still active, re-render
       if (state.currentPage === 'dispatch') {
@@ -6446,9 +6678,18 @@ function renderDispatch() {
         }).join('')}
       </div>
     </div>
-    <div class="tabs" id="dispatch-view-tabs" style="margin-bottom:0">
+    <div class="tabs" id="dispatch-view-tabs" style="margin-bottom:0;display:flex;align-items:center;gap:0">
       <div class="tab active" onclick="switchDispatchViewTab(this,'orders')">📋 Order View</div>
       <div class="tab" onclick="switchDispatchViewTab(this,'trucks')">🚚 Truck View</div>
+      <div style="flex:1"></div>
+      <!-- v40 Phase 18.1: multi-select mode toggle (only shown for invoice-eligible roles) -->
+      ${(currentUser?.role === 'admin' || currentUser?.role === 'planning_manager' || currentUser?.role === 'dispatch_manager') ? `
+        <button class="btn btn-sm" id="v40-multiselect-btn"
+                onclick="_v40_toggleInvoiceMultiSelect()"
+                style="background:${window._v40_invoiceMultiSelect ? '#0891b2' : 'var(--surface2)'};color:${window._v40_invoiceMultiSelect ? '#fff' : 'var(--text)'};border:1px solid ${window._v40_invoiceMultiSelect ? '#0891b2' : 'var(--border)'};font-size:11px;font-weight:600;padding:5px 12px;margin-right:8px"
+                title="Toggle multi-select mode to invoice multiple batches at once">
+          ${window._v40_invoiceMultiSelect ? '✓ Multi-select ON' : '☐ Multi-select'}
+        </button>` : ''}
     </div>
     <div id="dispatch-view-orders">
     <div class="tabs" id="dispatch-zone-tabs" style="border-top:none;border-radius:0 0 0 0">
@@ -6644,29 +6885,137 @@ function renderDispatchRow(p) {
   </tr>`;
 }
 
+// v40 Phase 18.1: Compute invoice eligibility once — used by both the
+// per-row Invoice button AND the multi-select checkbox visibility/state.
+// Returns { eligible: bool, reason: string|null, alreadyInvoiced: bool, state: string }
+function _v40_isInvoiceEligible(p, ord) {
+  if (!p) return { eligible: false, reason: 'No plan data', alreadyInvoiced: false, state: 'no_plan' };
+  const packedOut = p.packedQty || 0;
+  if (packedOut <= 0) return { eligible: false, reason: 'No packed boxes yet', alreadyInvoiced: false, state: 'not_packed' };
+  const batch = p.batchNumber || '';
+  const invState = (window._v39_invoiceState || {})[batch];
+  if (invState && (invState.hasPending || invState.hasReceived)) {
+    return { eligible: false, reason: invState.hasReceived ? 'Already invoiced' : 'Delivery already sent', alreadyInvoiced: true, state: invState.hasReceived ? 'invoiced' : 'pending' };
+  }
+  const sapDocEntry = ord?.sapDocEntry || null;
+  const sapDocNum = ord?.sapDocNum || null;
+  if (!sapDocEntry || !sapDocNum) {
+    return { eligible: false, reason: 'No Sales Order Number linked', alreadyInvoiced: false, state: 'no_sap' };
+  }
+  return { eligible: true, reason: null, alreadyInvoiced: false, state: 'ready' };
+}
+
+// v40 Phase 18.1: Toggle multi-select mode for Order View / Truck View invoice generation.
+window._v40_invoiceMultiSelect = false;
+window._v40_invoiceSelections = new Set();   // set of plan IDs selected
+function _v40_toggleInvoiceMultiSelect() {
+  window._v40_invoiceMultiSelect = !window._v40_invoiceMultiSelect;
+  if (!window._v40_invoiceMultiSelect) {
+    // Leaving mode — clear selections
+    window._v40_invoiceSelections.clear();
+  }
+  render();
+}
+function _v40_toggleRowSelection(planId) {
+  if (window._v40_invoiceSelections.has(planId)) {
+    window._v40_invoiceSelections.delete(planId);
+  } else {
+    window._v40_invoiceSelections.add(planId);
+  }
+  // Update floating action bar without full re-render
+  _v40_renderInvoiceFloatingBar();
+}
+
+// Render or hide the floating action bar at the bottom of the screen.
+function _v40_renderInvoiceFloatingBar() {
+  let bar = document.getElementById('v40-invoice-floating-bar');
+  if (!window._v40_invoiceMultiSelect || window._v40_invoiceSelections.size === 0) {
+    if (bar) bar.remove();
+    return;
+  }
+  // Compute totals
+  let totalBoxes = 0, totalQty = 0;
+  for (const id of window._v40_invoiceSelections) {
+    const plan = (state.dispatchPlans || []).find(pp => pp.id === id);
+    if (plan) {
+      totalBoxes += (parseInt(plan.boxes) || 0);
+      totalQty += (parseFloat(plan.packedQty) || 0);
+    }
+  }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'v40-invoice-floating-bar';
+    bar.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#0e7490;color:white;padding:10px 18px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:1000;display:flex;align-items:center;gap:14px;font-size:13px;font-weight:600';
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = `
+    <span>${window._v40_invoiceSelections.size} batches selected</span>
+    <span style="opacity:0.7;font-weight:400">·  ${totalBoxes} boxes · ${totalQty.toFixed(2)} L</span>
+    <button onclick="_v40_openConsolidatedApprovalModal()" style="background:white;color:#0e7490;border:none;padding:6px 14px;border-radius:4px;font-weight:700;font-size:13px;cursor:pointer">🧾 Generate Invoices →</button>
+    <button onclick="window._v40_invoiceSelections.clear();_v40_renderInvoiceFloatingBar();" style="background:transparent;color:white;border:1px solid rgba(255,255,255,0.4);padding:6px 12px;border-radius:4px;font-size:12px;cursor:pointer">Clear</button>`;
+}
+
 // v39 Phase 8 + 9b: Renders the per-row invoice action.
+// v40 Phase 18.1: In multi-select mode, renders a checkbox instead of the button.
 // Button states:
 //   - hidden:                    not enough packed yet (packedQty <= 0)
 //   - "📤 Invoiced":             invoice already received from SAP
 //   - "⏳ Sent to SAP":          request fired, awaiting SAP response
 //   - "🔗 Awaiting SAP Link":    packed but no sapDocEntry on the order
 //                                (variant text per WO/TEMP/verbal/PO origin)
-//   - "🧾 Invoice":              ready to fire (packed + has SAP DocEntry)
+//   - "🧾 Invoice":              ready to fire (packed + has Sales Order Number)
 function _v39_renderInvoiceBtnForRow(p, ord) {
   if (currentUser?.role !== 'dispatch_manager' && currentUser?.role !== 'admin' && currentUser?.role !== 'planning_manager') return '';
+  // v40 Phase 18.1: in multi-select mode, render checkbox
+  if (window._v40_invoiceMultiSelect) {
+    const elig = _v40_isInvoiceEligible(p, ord);
+    if (elig.eligible) {
+      const checked = window._v40_invoiceSelections.has(p.id) ? 'checked' : '';
+      return `<label style="display:inline-flex;align-items:center;cursor:pointer;padding:3px 6px;background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:3px;font-size:11px;color:#0e7490">
+        <input type="checkbox" ${checked} onchange="_v40_toggleRowSelection('${p.id}')" style="margin-right:4px;cursor:pointer">
+        Select
+      </label>`;
+    } else {
+      return `<span title="${elig.reason}" style="display:inline-flex;align-items:center;padding:3px 6px;background:rgba(0,0,0,0.05);border-radius:3px;font-size:11px;color:var(--text3);opacity:0.6">
+        <input type="checkbox" disabled style="margin-right:4px">
+        ${elig.alreadyInvoiced ? (elig.state==='invoiced'?'Invoiced':'Sent') : 'N/A'}
+      </span>`;
+    }
+  }
   const packedOut = p.packedQty || 0;
   if (packedOut <= 0) return '';
   const batch = p.batchNumber || '';
-  // State 1: invoice already in flight or received
+  // v40 Phase 18.12: Extended state machine for the invoice badge:
+  //   ⏳ Sent to SAP     — Delivery created, awaiting Invoice conversion (amber)
+  //   📤 Invoiced        — Invoice received from SAP, awaiting Scan Out (cyan)
+  //   🔍 Scanning        — Active scan session in progress for this batch (yellow)
+  //   🚚 Dispatched      — dispatch_status='dispatched' or 'deemed_dispatched' (green)
+  // Click on any badge opens _v39_showInvoiceState for full details.
   const invState = (window._v39_invoiceState || {})[batch];
   if (invState && (invState.hasPending || invState.hasReceived)) {
-    const status = invState.hasReceived ? '📤 Invoiced' : '⏳ Sent to SAP';
-    const tooltip = invState.hasReceived
-      ? `Invoice received from SAP (DocNum: ${invState.docNum||'—'})`
-      : `Invoice request sent to SAP — awaiting response`;
-    return `<button class="btn btn-ghost btn-sm" title="${tooltip}" onclick="_v39_showInvoiceState('${batch}')" style="color:#10b981">${status}</button>`;
+    let status, color, tooltip;
+    if (invState.dispatchStatus === 'dispatched' || invState.dispatchStatus === 'deemed_dispatched') {
+      status = '🚚 Dispatched';
+      color = '#16a34a';  // green
+      const dispDate = invState.dispatchedAt ? invState.dispatchedAt.slice(0,10) : '';
+      const vehicle = invState.vehicleNo ? ` via ${invState.vehicleNo}` : '';
+      tooltip = `Dispatched${dispDate ? ' on ' + dispDate : ''}${vehicle}`;
+    } else if (invState.isScanning) {
+      status = '🔍 Scanning';
+      color = '#d97706';  // amber
+      tooltip = `Scan-out in progress — Truck-${invState.scanningTruck || '?'} (${invState.scanCount || 0} boxes scanned so far)`;
+    } else if (invState.hasReceived) {
+      status = '📤 Invoiced';
+      color = '#0891b2';  // cyan
+      tooltip = `Invoice received from SAP (DocNum: ${invState.docNum || '—'}) — awaiting Scan Out`;
+    } else {
+      status = '⏳ Sent to SAP';
+      color = '#10b981';  // mint
+      tooltip = 'Delivery created in SAP — awaiting Invoice conversion by SAP user';
+    }
+    return `<button class="btn btn-ghost btn-sm" title="${tooltip}" onclick="_v39_showInvoiceState('${batch}')" style="color:${color}">${status}</button>`;
   }
-  // v39 Phase 9b: State 2: packed but no SAP DocEntry — explain why no Invoice button.
+  // v39 Phase 9b: State 2: packed but no Sales Order Number — explain why no Invoice button.
   // Different message per origin so dispatch manager knows next step.
   const sapDocEntry = ord?.sapDocEntry || null;
   if (!sapDocEntry) {
@@ -6676,22 +7025,24 @@ function _v39_renderInvoiceBtnForRow(p, ord) {
       tooltip = 'Work Order — customer info not yet assigned. Use the Reconciliation page in Planning App to convert this to a real order with SAP refs.';
     } else if (ord?.woStatus === 'wo-reconciled') {
       reason  = '🔗 Awaiting SAP Link';
-      tooltip = 'Work Order reconciled, but no SAP indent attached yet. Edit the order to add SAP DocEntry + DocNum.';
+      tooltip = 'Work Order reconciled, but no SAP indent attached yet. Edit the order to add Sales Order Number.';
     } else if ((ord?.batchNumber || '').startsWith('TEMP-')) {
       reason  = '🔗 Awaiting Reconciliation';
       tooltip = 'Auto-created TEMP batch — needs reconciliation in Planning App before it can be invoiced.';
     } else if (ord?.poType === 'verbal' || ord?.poType === 'po') {
       reason  = '🔗 No SAP Indent';
-      tooltip = 'Verbal/PO order — no SAP indent attached. Edit the order to add SAP DocEntry + DocNum once SAP indent is received.';
+      tooltip = 'Verbal/PO order — no SAP indent attached. Edit the order to add Sales Order Number once SAP indent is received.';
     } else {
       reason  = '🔗 Awaiting SAP Link';
-      tooltip = 'Order has no SAP DocEntry. Edit the order to attach SAP indent.';
+      tooltip = 'Order has no Sales Order Number. Edit the order to attach SAP indent.';
     }
     const safeTooltip = tooltip.split("'").join("\\'");
     return `<button class="btn btn-ghost btn-sm" title="${tooltip}" onclick="alert('${safeTooltip}')" style="color:#f59e0b;font-size:11px">${reason}</button>`;
   }
   // State 3: packed + linked to SAP — ready to invoice
-  return `<button class="btn btn-sm" style="background:#0891b2;color:white;border:none" onclick="_v39_openGenerateInvoiceModal('${p.id}','batch')" title="Generate SAP invoice for this batch">🧾 Invoice</button>`;
+  // v40 Phase 18.1: route single-batch click through the consolidated approval modal.
+  // Auto-selects this one batch and opens the modal — same UX as multi-select with N=1.
+  return `<button class="btn btn-sm" style="background:#0891b2;color:white;border:none" onclick="window._v40_invoiceSelections=new Set(['${p.id}']);_v40_openConsolidatedApprovalModal();" title="Generate Delivery in SAP for this batch">🧾 Invoice</button>`;
 }
 
 function switchDispatchTab(el, zone) {
@@ -6900,11 +7251,34 @@ function _v39_renderTruckInvoiceBtn(truck, truckIdx, zone) {
   }
   return `<div onclick="event.stopPropagation();" style="margin-top:8px;text-align:center">
     <button class="btn btn-sm" style="background:#0891b2;color:white;border:none;font-size:11px"
-            onclick="event.stopPropagation();_v39_openTruckInvoiceModal(${truckIdx}, '${zone.replace(/'/g,"\\'")}')"
-            title="Generate invoice for ${remaining} pending batch${remaining!==1?'es':''} in this truck">
+            onclick="event.stopPropagation();_v40_openConsolidatedForTruck(${truckIdx}, '${zone.replace(/'/g,"\\'")}')"
+            title="Open consolidated approval modal for ${remaining} pending batch${remaining!==1?'es':''} in this truck">
       🧾 Generate Invoices for Truck (${remaining} pending)
     </button>
   </div>`;
+}
+
+// v40 Phase 18.1: Auto-select all eligible non-invoiced batches in this truck and
+// open the consolidated approval modal. Replaces the v39 truck-specific modal.
+function _v40_openConsolidatedForTruck(truckIdx, zone) {
+  const trucks = window._lastRenderedTrucks?.[zone] || [];
+  const truck = trucks[truckIdx];
+  if (!truck || !truck.orders) { toast('Truck not found', 'var(--red)'); return; }
+  const invState = window._v39_invoiceState || {};
+  window._v40_invoiceSelections = new Set();
+  for (const o of truck.orders) {
+    const ord = state.orders.find(x => x.id === o.productionOrderId);
+    if (!ord?.sapDocEntry) continue;
+    if (!(o.packedQty > 0)) continue;
+    const e = invState[o.batchNumber];
+    if (e && (e.hasPending || e.hasReceived)) continue;
+    window._v40_invoiceSelections.add(o.id);
+  }
+  if (window._v40_invoiceSelections.size === 0) {
+    alert('⚠️ No batches in this truck are ready for invoicing.\n\nA batch needs:\n  • Sales Order Number linked\n  • At least one packed box\n  • Not already invoiced');
+    return;
+  }
+  _v40_openConsolidatedApprovalModal();
 }
 
 async function showBatchTrackingModal(batchNumber) {
@@ -7008,9 +7382,12 @@ async function showBatchTrackingModal(batchNumber) {
 }
 
 function renderTruckOrdersTable(truck) {
+  // v40 Phase 18.1: in multi-select mode, prepend a checkbox column
+  const isMS = !!window._v40_invoiceMultiSelect;
   return `
     <div class="tbl-wrap"><table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="color:var(--text3);font-size:11px">
+        ${isMS ? '<th style="padding:4px 8px;text-align:center;width:50px">Select</th>' : ''}
         <th style="padding:4px 8px;text-align:left">Customer</th>
         <th style="padding:4px 8px;text-align:left">Batch</th>
         <th style="padding:4px 8px;text-align:left">PC Code</th>
@@ -7025,6 +7402,18 @@ function renderTruckOrdersTable(truck) {
           const packed = p.packedBoxes || 0;
           const pending = Math.max(0,(p.boxes||0) - packed);
           const isBottleneck = p.id === truck.bottleneckOrderId;
+          // v40 Phase 18.1: eligibility for multi-select checkbox
+          let checkboxCell = '';
+          if (isMS) {
+            const ord = state.orders.find(o => o.id === p.productionOrderId);
+            const elig = _v40_isInvoiceEligible(p, ord);
+            if (elig.eligible) {
+              const checked = window._v40_invoiceSelections.has(p.id) ? 'checked' : '';
+              checkboxCell = `<td style="padding:5px 8px;text-align:center"><input type="checkbox" ${checked} onchange="_v40_toggleRowSelection('${p.id}')" style="cursor:pointer" title="Select for invoice"></td>`;
+            } else {
+              checkboxCell = `<td style="padding:5px 8px;text-align:center" title="${elig.reason}"><input type="checkbox" disabled style="opacity:0.4"></td>`;
+            }
+          }
           // Determine ready date and its source
           let readyDate, readySource;
           if (p.packingReadyDate) {
@@ -7040,12 +7429,21 @@ function renderTruckOrdersTable(truck) {
               readySource = '<span style="color:var(--text3);font-size:10px">Planned</span>';
             }
           }
+          // v40 Phase 18.1: dim ineligible rows in multi-select mode
+          const rowOpacity = isMS ? (
+            (function(){
+              const ord = state.orders.find(o => o.id === p.productionOrderId);
+              const elig = _v40_isInvoiceEligible(p, ord);
+              return elig.eligible ? '' : 'opacity:0.6;';
+            })()
+          ) : '';
           const statusBadge = p.status==='dispatched'
             ? '<span class="badge badge-completed" style="font-size:10px">Dispatched</span>'
             : packed >= (p.boxes||0) && p.boxes > 0
             ? '<span class="badge badge-running" style="font-size:10px">Packed ✓</span>'
             : '<span class="badge badge-pending" style="font-size:10px">Pending</span>';
-          return `<tr style="border-top:1px solid var(--surface3);${isBottleneck?'background:rgba(255,171,0,0.05)':''}">
+          return `<tr style="border-top:1px solid var(--surface3);${rowOpacity}${isBottleneck?'background:rgba(255,171,0,0.05)':''}">
+            ${checkboxCell}
             <td style="padding:5px 8px">${p.customer||'-'}${isBottleneck?' <span title="Bottleneck order — driving this truck ETD" style="color:var(--accent3);font-size:11px">⏳</span>':''}</td>
             <td style="padding:5px 8px;font-family:var(--mono);font-size:11px">
               <span onclick="showBatchTrackingModal('${p.batchNumber||''}')" 
@@ -9398,14 +9796,14 @@ function openAssignCustomerModal(orderId) {
         </div>
         <!-- v39 Phase 9c: optional SAP refs at reconciliation time -->
         <div class="form-group">
-          <label>SAP DocEntry <span style="font-size:11px;color:var(--text3);font-weight:400">(optional)</span></label>
+          <label>Sales Order ID <span style="font-size:11px;color:var(--text3);font-weight:400">(optional)</span></label>
           <input class="form-control" id="woc-sap-docentry" type="number" placeholder="e.g. 12345">
           <div style="font-size:10px;color:var(--text3);margin-top:3px">From the SAP Sales Order — leave blank if SAP indent not yet received.</div>
         </div>
         <div class="form-group">
-          <label>SAP DocNum <span style="font-size:11px;color:var(--text3);font-weight:400">(optional)</span></label>
+          <label>Sales Order Number <span style="font-size:11px;color:var(--text3);font-weight:400">(optional)</span></label>
           <input class="form-control" id="woc-sap-docnum" placeholder="e.g. SO-26-1234">
-          <div style="font-size:10px;color:var(--text3);margin-top:3px">SAP DocNum to attach. Required only if you're invoicing this order.</div>
+          <div style="font-size:10px;color:var(--text3);margin-top:3px">Sales Order Number to attach. Required only if you're invoicing this order.</div>
         </div>
       </div>
       <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.25);border-radius:6px;padding:8px 12px;margin-top:10px;font-size:11px;color:#0e7490;line-height:1.5">
@@ -9434,7 +9832,7 @@ async function proposeWOReconciliation(orderId) {
   const sapDocNum = document.getElementById('woc-sap-docnum')?.value?.trim() || '';
   // Partial-link guard
   if ((sapDocEntry && !sapDocNum) || (!sapDocEntry && sapDocNum)) {
-    alert('⚠️ Please fill BOTH SAP DocEntry and SAP DocNum, or leave BOTH blank.\n\nA partial SAP reference is not useful for invoicing.');
+    alert('⚠️ Please fill BOTH Sales Order ID and Sales Order Number, or leave BOTH blank.\n\nA partial SAP reference is not useful for invoicing.');
     return;
   }
   let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
@@ -9449,7 +9847,7 @@ async function proposeWOReconciliation(orderId) {
     if (j.ok) {
       closeModal();
       const sapMsg = sapDocEntry
-        ? `\nSAP DocEntry: ${sapDocEntry}\nSAP DocNum: ${sapDocNum}`
+        ? `\nSales Order ID: ${sapDocEntry}\nSales Order Number: ${sapDocNum}`
         : '\n(No SAP refs attached — order will show "Awaiting SAP Link" badge until backfilled)';
       alert(`✅ W/O Reconciliation request submitted for Admin approval.\n\nBatch: ${state.orders.find(o=>o.id===orderId)?.batchNumber}\nCustomer: ${customer}${sapMsg}\n\nOnce Admin approves, replacement labels will be ready for printing.`);
       auditLog('WO_RECON_PROPOSED', `W/O reconciliation proposed for order ${orderId} → ${customer}${sapDocEntry?` (SAP ${sapDocEntry})`:''}`);

@@ -285,7 +285,7 @@ class SapClient {
           if (this.pgPool) {
             await this.pgPool.query(
               `UPDATE sap_config SET session_cookie=$1, session_route_id=$2, session_expires_at=$3,
-                 last_login_at=NOW()::TEXT, last_login_success=1, last_login_error=NULL WHERE id=1`,
+                 last_login_at=NOW()::TEXT, last_login_success=TRUE, last_login_error=NULL WHERE id=1`,
               [b1session, routeId, expiresAt]
             );
           } else {
@@ -310,7 +310,7 @@ class SapClient {
           } catch {}
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -331,7 +331,7 @@ class SapClient {
         try {
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -480,8 +480,8 @@ class SapClient {
   async fetchOpenSalesOrders({ lookbackDays = 30 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    // SAP B1 Service Layer date filter — try plain ISO date (works for most SL versions)
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
+    // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge datetime'YYYY-MM-DDT00:00:00'
+    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge datetime'${dateStr}T00:00:00'`;
     const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}&$top=200` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
@@ -490,23 +490,27 @@ class SapClient {
   }
 
   /**
-   * Push an A/R Invoice creation trigger to SAP. SAP does the actual invoice math,
-   * stock GR, tax, eInvoice generation internally.
+   * v40 Phase 18.2: Push a Delivery creation trigger to SAP.
    *
-   * Per Ishan's spec: we send the BASE SO reference + quantity from packed boxes.
-   * SAP first does a Goods Receipt against the linked Production Order to add FG stock,
-   * then generates the AR Invoice that consumes that stock. Net stock impact = 0.
+   * IMPORTANT ARCHITECTURE CHANGE FROM v39:
+   *   v39 posted to /b1s/v1/Invoices (created A/R Invoice directly).
+   *   v40 posts to /b1s/v1/DeliveryNotes — Sunloc creates the Delivery; SAP user
+   *   manually converts Delivery → A/R Invoice in SAP via Copy-To.
+   *   This matches Sunil Healthcare's actual SAP workflow (Delivery form → Invoice).
+   *
+   * The Sunloc 5-minute poller picks up the resulting Invoice once SAP user
+   * completes the conversion, and routes it to the Tracking → Invoice Queue.
    *
    * @param {object} args
    * @param {string} args.cardCode - SAP customer code from the SO
    * @param {number} args.baseDocEntry - the SAP Sales Order DocEntry (mandatory link)
-   * @param {Array<{lineNum, quantity, itemCode?}>} args.lines - which SO lines and quantities to invoice
+   * @param {Array<{lineNum, quantity, itemCode?}>} args.lines - which SO lines and quantities to deliver
    * @param {string} args.batchNumber - Sunloc batch reference (stored as UDF)
    * @param {string} args.poNumber - customer PO ref
    * @param {string} args.remarks
    */
-  async createInvoice({ cardCode, baseDocEntry, lines, batchNumber, poNumber, remarks }) {
-    // Build OData payload for AR Invoice based on Sales Order
+  async createDelivery({ cardCode, baseDocEntry, lines, batchNumber, poNumber, remarks }) {
+    // Build OData payload for Delivery based on Sales Order
     // SAP's "BaseType" 17 = Sales Order. Each line references the SO line via BaseLine.
     const today = new Date().toISOString().slice(0, 10);
     const documentLines = (lines || []).map((l, i) => ({
@@ -527,22 +531,37 @@ class SapClient {
       U_SunlocBatch: batchNumber || '',
       U_SunlocPO: poNumber || '',
     };
-    const r = await this.call({ method: 'POST', path: 'Invoices', body: payload });
+    // v40 P18.2: POST to DeliveryNotes endpoint (not Invoices)
+    const r = await this.call({ method: 'POST', path: 'DeliveryNotes', body: payload });
     if (!r.ok) {
       return { ok: false, error: r.error, degraded: r.degraded, status: r.status };
     }
-    const inv = r.data || {};
+    const dlv = r.data || {};
     return {
       ok: true,
-      docEntry: inv.DocEntry,
-      docNum: inv.DocNum,
-      docDate: inv.DocDate,
-      cardCode: inv.CardCode,
-      cardName: inv.CardName,
-      docTotal: inv.DocTotal,
-      irn: inv.U_IRN || inv.IRN || null,
-      raw: inv,
+      docEntry: dlv.DocEntry,        // Delivery DocEntry — used by poller to match returning Invoice
+      docNum: dlv.DocNum,            // Delivery DocNum (NOT Invoice DocNum — that comes later)
+      docDate: dlv.DocDate,
+      cardCode: dlv.CardCode,
+      cardName: dlv.CardName,
+      docTotal: dlv.DocTotal,
+      objectType: 'Delivery',        // marker so the consumer knows what kind of doc came back
+      raw: dlv,
     };
+  }
+
+  /**
+   * Backward-compat shim: createInvoice() now calls createDelivery() under the hood.
+   * Server code that called sap.createInvoice(...) gets the same result shape but
+   * the actual SAP-side document created is a Delivery, not an Invoice.
+   *
+   * @deprecated since v40 — prefer sap.createDelivery() directly.
+   */
+  async createInvoice(args) {
+    const r = await this.createDelivery(args);
+    // Map result back to the old "invoice" naming for callers that haven't migrated
+    if (r.ok) return { ...r, irn: null };  // IRN only exists on real Invoices, not Deliveries
+    return r;
   }
 
   /**
@@ -552,8 +571,12 @@ class SapClient {
   async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    const filter = `$filter=DocDate ge '${dateStr}'`;
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocTotal,VatSum,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
+    const filter = `$filter=DocDate ge datetime'${dateStr}T00:00:00'`;
+    // v40 P18.7: Pull richer line-item fields and addresses for Scan-Out matching.
+    // Replaces previously-planned PDF download with structured Sales Register data.
+    // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total
+    // Lines: ItemCode (=PC Code), ItemDescription, Quantity, UnitPrice, LineTotal, VAT%, VAT amount
+    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&${select}&$top=500&$orderby=DocEntry desc` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
     return { ok: true, invoices: r.data?.value || [] };

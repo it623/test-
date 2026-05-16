@@ -642,6 +642,26 @@ const MIGRATIONS = [
     name: 'invoices_recv_add_dispatch_rec_id',
     sql: `ALTER TABLE invoices_received ADD COLUMN dispatch_record_id TEXT;`
   },
+  {
+    // v40 Phase 18.11: Track in-progress truck-level scan-out sessions so workers
+    // can resume after modal close, browser crash, or being called away.
+    // Session keyed by truck_number (one session per truck at a time).
+    // Sessions auto-expire after 24h of no activity (cleaned by background sweep).
+    version: 21,
+    name: 'truck_scan_session_state',
+    sql: `CREATE TABLE IF NOT EXISTS truck_scan_session_state (
+      truck_number TEXT PRIMARY KEY,
+      invoice_ids_json TEXT NOT NULL,
+      scanned_labels_json TEXT NOT NULL DEFAULT '[]',
+      vehicle_no TEXT DEFAULT '',
+      lr_no TEXT DEFAULT '',
+      remarks TEXT DEFAULT '',
+      started_by TEXT,
+      started_at TEXT DEFAULT (datetime('now')),
+      last_updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_truck_scan_last_updated ON truck_scan_session_state(last_updated_at);`
+  },
 ];
 
 function runMigrations() {
@@ -1547,7 +1567,7 @@ async function ensurePostgresTables() {
         session_route_id TEXT,
         session_expires_at TEXT,
         last_login_at TEXT,
-        last_login_success INTEGER,
+        last_login_success BOOLEAN,
         last_login_error TEXT,
         indent_poll_interval_minutes INTEGER NOT NULL DEFAULT 5,
         invoice_poll_interval_minutes INTEGER NOT NULL DEFAULT 5,
@@ -1608,6 +1628,23 @@ async function ensurePostgresTables() {
     try { await pgPool.query(`ALTER TABLE wo_reconciliation_requests ADD COLUMN IF NOT EXISTS sap_doc_num TEXT`); } catch (e) { console.warn('[v39 P9c PG] add sap_doc_num:', e.message); }
     // v39 Phase 10a: dispatch_record_id link on invoices_received
     try { await pgPool.query(`ALTER TABLE invoices_received ADD COLUMN IF NOT EXISTS dispatch_record_id TEXT`); } catch (e) { console.warn('[v39 P10a PG] add dispatch_record_id:', e.message); }
+    // v40 Phase 18.11: truck-level scan-out session persistence
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS truck_scan_session_state (
+          truck_number TEXT PRIMARY KEY,
+          invoice_ids_json TEXT NOT NULL,
+          scanned_labels_json TEXT NOT NULL DEFAULT '[]',
+          vehicle_no TEXT DEFAULT '',
+          lr_no TEXT DEFAULT '',
+          remarks TEXT DEFAULT '',
+          started_by TEXT,
+          started_at TEXT DEFAULT NOW()::TEXT,
+          last_updated_at TEXT DEFAULT NOW()::TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_truck_scan_last_updated ON truck_scan_session_state(last_updated_at)`);
+    } catch (e) { console.warn('[v40 P18.11 PG] truck_scan_session_state:', e.message); }
     // ─── end v39 SAP tables ────────────────────────────────────────
 
 
@@ -2493,8 +2530,11 @@ app.post('/api/invoice/request', async (req, res) => {
     } catch (e) {
       return res.status(500).json({ ok: false, error: 'Failed to write invoice_requests row: ' + e.message });
     }
-    // 2. Call SAP
-    const sapResult = await sap.createInvoice({
+    // 2. v40 P18.2: Push to SAP — creates a DELIVERY (not an Invoice).
+    // SAP user will then manually convert Delivery → A/R Invoice via Copy-To.
+    // Sunloc's 5-min poller picks up the resulting Invoice and routes it to Tracking → Invoice Queue.
+    // Note: invoice_requests table name retained for historical compat — rows now represent Delivery requests.
+    const sapResult = await sap.createDelivery({
       cardCode: body.cardCode,
       baseDocEntry: parseInt(body.sapDocEntry),
       lines: [{
@@ -2557,6 +2597,140 @@ app.post('/api/invoice/request', async (req, res) => {
     } catch (e) {
       return res.status(500).json({ ok: false, error: 'SAP completed but DB update failed: ' + e.message, request_id: id });
     }
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// v40 Phase 18.1: POST /api/invoice/request-batch
+// Consolidated multi-batch Delivery creation. Accepts array of batches, iterates
+// server-side calling sap.createDelivery() for each. Returns per-batch results
+// so the client can show per-row success/failure in the consolidated approval modal.
+// Server-side validation re-enforces eligibility gates (defense in depth):
+//   - Must have sapDocEntry + sapDocNum
+//   - Must have boxes > 0 AND qtyLakhs > 0
+//   - Must not already have a pending or received invoice
+// Body: { batches: [{ batchNumber, customer, cardCode, poNumber, sapDocEntry, size, colour, pcCode, boxes, qtyLakhs, truckNumber, itemCode? }], createdBy, remarks }
+app.post('/api/invoice/request-batch', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const batches = Array.isArray(body.batches) ? body.batches : [];
+    if (batches.length === 0) {
+      return res.status(400).json({ ok: false, error: 'batches array is empty or missing' });
+    }
+    if (batches.length > 50) {
+      return res.status(400).json({ ok: false, error: 'too many batches in one request (max 50)' });
+    }
+    const results = [];
+    for (const b of batches) {
+      const batchRes = { batchNumber: b.batchNumber, ok: false };
+      try {
+        // Validate
+        if (!b.batchNumber || !b.customer || !b.sapDocEntry) {
+          batchRes.error = 'missing required fields (batchNumber/customer/sapDocEntry)';
+          results.push(batchRes); continue;
+        }
+        if (!(parseInt(b.boxes) > 0) || !(parseFloat(b.qtyLakhs) > 0)) {
+          batchRes.error = 'invalid boxes or qty (both must be > 0)';
+          results.push(batchRes); continue;
+        }
+        // Check for existing pending/received invoice for this batch
+        let existing;
+        if (pgPool) {
+          const ex = await pgPool.query(
+            `SELECT id FROM invoice_requests WHERE batch_number=$1 AND status IN ('pending','sent_to_sap') LIMIT 1`,
+            [b.batchNumber]
+          );
+          existing = ex.rows[0];
+        } else {
+          existing = db.prepare(`SELECT id FROM invoice_requests WHERE batch_number=? AND status IN ('pending','sent_to_sap') LIMIT 1`).get(b.batchNumber);
+        }
+        if (existing) {
+          batchRes.error = 'already has a pending invoice request (id: ' + existing.id + ')';
+          results.push(batchRes); continue;
+        }
+        // Insert pending row
+        const id = 'invreq_' + crypto.randomBytes(8).toString('hex');
+        const selectedLabelsJson = JSON.stringify(b.selectedLabels || []);
+        if (pgPool) {
+          await pgPool.query(`
+            INSERT INTO invoice_requests (id, batch_number, customer, card_code, po_number,
+              sap_doc_entry, size, colour, pc_code, boxes, qty_lakhs, rate_per_lakh,
+              selected_labels, selection_mode, truck_number, status, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending',$16)
+          `, [id, b.batchNumber, b.customer, b.cardCode || '', b.poNumber || '',
+              b.sapDocEntry, b.size || '', b.colour || '', b.pcCode || '',
+              parseInt(b.boxes) || 0, parseFloat(b.qtyLakhs) || 0, parseFloat(b.ratePerLakh) || 0,
+              selectedLabelsJson, 'consolidated', b.truckNumber || null,
+              body.createdBy || 'unknown']);
+        } else {
+          db.prepare(`
+            INSERT INTO invoice_requests (id, batch_number, customer, card_code, po_number,
+              sap_doc_entry, size, colour, pc_code, boxes, qty_lakhs, rate_per_lakh,
+              selected_labels, selection_mode, truck_number, status, created_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)
+          `).run(id, b.batchNumber, b.customer, b.cardCode || '', b.poNumber || '',
+              b.sapDocEntry, b.size || '', b.colour || '', b.pcCode || '',
+              parseInt(b.boxes) || 0, parseFloat(b.qtyLakhs) || 0, parseFloat(b.ratePerLakh) || 0,
+              selectedLabelsJson, 'consolidated', b.truckNumber || null,
+              body.createdBy || 'unknown');
+        }
+        // Call SAP — creates a Delivery (not Invoice)
+        const sapResult = await sap.createDelivery({
+          cardCode: b.cardCode,
+          baseDocEntry: parseInt(b.sapDocEntry),
+          lines: [{
+            lineNum: 0,
+            quantity: parseFloat(b.qtyLakhs),
+            itemCode: b.itemCode || null,
+          }],
+          batchNumber: b.batchNumber,
+          poNumber: b.poNumber || '',
+          remarks: body.remarks || `Sunloc consolidated dispatch — ${b.boxes} boxes`,
+        });
+        // Update row with result
+        if (sapResult.ok) {
+          if (pgPool) {
+            await pgPool.query(`
+              UPDATE invoice_requests SET status='sent_to_sap',
+                sap_response_doc_num=$1, sap_response_doc_entry=$2,
+                updated_at=NOW()::TEXT WHERE id=$3
+            `, [String(sapResult.docNum || ''), sapResult.docEntry, id]);
+          } else {
+            db.prepare(`
+              UPDATE invoice_requests SET status='sent_to_sap',
+                sap_response_doc_num=?, sap_response_doc_entry=?,
+                updated_at=datetime('now') WHERE id=?
+            `).run(String(sapResult.docNum || ''), sapResult.docEntry, id);
+          }
+          batchRes.ok = true;
+          batchRes.request_id = id;
+          batchRes.delivery_doc_num = sapResult.docNum;
+          batchRes.delivery_doc_entry = sapResult.docEntry;
+        } else {
+          // Mark request as failed (preserve for audit / retry)
+          const errMsg = sapResult.error || 'SAP rejected';
+          if (pgPool) {
+            await pgPool.query(`
+              UPDATE invoice_requests SET status='failed', error_message=$1, updated_at=NOW()::TEXT WHERE id=$2
+            `, [errMsg, id]);
+          } else {
+            db.prepare(`
+              UPDATE invoice_requests SET status='failed', error_message=?, updated_at=datetime('now') WHERE id=?
+            `).run(errMsg, id);
+          }
+          batchRes.error = errMsg;
+          batchRes.degraded = sapResult.degraded || false;
+          batchRes.request_id = id;
+        }
+      } catch (e) {
+        batchRes.error = 'server error: ' + e.message;
+      }
+      results.push(batchRes);
+    }
+    const okCount = results.filter(r => r.ok).length;
+    const failCount = results.length - okCount;
+    res.json({ ok: okCount > 0, results, ok_count: okCount, fail_count: failCount });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -2810,6 +2984,295 @@ app.post('/api/invoice/:id/dispatch-out', async (req, res) => {
   }
 });
 
+// ─── v40 Phase 18.11: Truck-level scan-out session endpoints ───────────
+// Workers scanning multiple batches in one truck need their progress preserved
+// across browser close, modal close, or being called away. These endpoints
+// persist the scan session keyed by truck_number.
+
+// GET — load session state (or return empty session if none exists)
+app.get('/api/invoice/truck-scan-session/:truckNumber', async (req, res) => {
+  try {
+    const tn = String(req.params.truckNumber);
+    let row;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM truck_scan_session_state WHERE truck_number=$1`, [tn]);
+      row = r.rows[0];
+    } else {
+      row = db.prepare(`SELECT * FROM truck_scan_session_state WHERE truck_number=?`).get(tn);
+    }
+    if (!row) return res.json({ ok: true, exists: false });
+    res.json({
+      ok: true,
+      exists: true,
+      session: {
+        truckNumber: tn,
+        invoiceIds: JSON.parse(row.invoice_ids_json || '[]'),
+        scannedLabels: JSON.parse(row.scanned_labels_json || '[]'),
+        vehicleNo: row.vehicle_no || '',
+        lrNo: row.lr_no || '',
+        remarks: row.remarks || '',
+        startedBy: row.started_by || '',
+        startedAt: row.started_at,
+        lastUpdatedAt: row.last_updated_at,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT — upsert session state. Body: { invoiceIds, scannedLabels, vehicleNo, lrNo, remarks, startedBy }
+app.put('/api/invoice/truck-scan-session/:truckNumber', async (req, res) => {
+  try {
+    const tn = String(req.params.truckNumber);
+    const body = req.body || {};
+    const invoiceIdsJson = JSON.stringify(body.invoiceIds || []);
+    const scannedLabelsJson = JSON.stringify(body.scannedLabels || []);
+    const vehicleNo = String(body.vehicleNo || '');
+    const lrNo = String(body.lrNo || '');
+    const remarks = String(body.remarks || '');
+    const startedBy = String(body.startedBy || 'unknown');
+    const now = new Date().toISOString();
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO truck_scan_session_state (truck_number, invoice_ids_json, scanned_labels_json, vehicle_no, lr_no, remarks, started_by, started_at, last_updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)
+         ON CONFLICT (truck_number) DO UPDATE SET
+           invoice_ids_json=EXCLUDED.invoice_ids_json,
+           scanned_labels_json=EXCLUDED.scanned_labels_json,
+           vehicle_no=EXCLUDED.vehicle_no,
+           lr_no=EXCLUDED.lr_no,
+           remarks=EXCLUDED.remarks,
+           last_updated_at=EXCLUDED.last_updated_at`,
+        [tn, invoiceIdsJson, scannedLabelsJson, vehicleNo, lrNo, remarks, startedBy, now]
+      );
+    } else {
+      // SQLite uses ON CONFLICT for upsert
+      db.prepare(
+        `INSERT INTO truck_scan_session_state (truck_number, invoice_ids_json, scanned_labels_json, vehicle_no, lr_no, remarks, started_by, started_at, last_updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?)
+         ON CONFLICT (truck_number) DO UPDATE SET
+           invoice_ids_json=excluded.invoice_ids_json,
+           scanned_labels_json=excluded.scanned_labels_json,
+           vehicle_no=excluded.vehicle_no,
+           lr_no=excluded.lr_no,
+           remarks=excluded.remarks,
+           last_updated_at=excluded.last_updated_at`
+      ).run(tn, invoiceIdsJson, scannedLabelsJson, vehicleNo, lrNo, remarks, startedBy, now, now);
+    }
+    res.json({ ok: true, truckNumber: tn, lastUpdatedAt: now });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// DELETE — discard session (after successful dispatch or explicit abandon)
+app.delete('/api/invoice/truck-scan-session/:truckNumber', async (req, res) => {
+  try {
+    const tn = String(req.params.truckNumber);
+    if (pgPool) {
+      await pgPool.query(`DELETE FROM truck_scan_session_state WHERE truck_number=$1`, [tn]);
+    } else {
+      db.prepare(`DELETE FROM truck_scan_session_state WHERE truck_number=?`).run(tn);
+    }
+    res.json({ ok: true, truckNumber: tn, deleted: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// v40 Phase 18.12: GET /api/invoice/active-scan-sessions — list all in-progress
+// truck scan sessions (sessions updated within the last 24h). Used by Planning's
+// invoice-state loader to mark batches whose dispatch worker is mid-scan, surfacing
+// the "🔍 Scanning" badge in Order View.
+app.get('/api/invoice/active-scan-sessions', async (req, res) => {
+  try {
+    let rows;
+    if (pgPool) {
+      const r = await pgPool.query(
+        `SELECT truck_number, invoice_ids_json, scanned_labels_json, last_updated_at
+         FROM truck_scan_session_state
+         WHERE last_updated_at > (NOW() - interval '24 hours')::TEXT`
+      );
+      rows = r.rows;
+    } else {
+      rows = db.prepare(
+        `SELECT truck_number, invoice_ids_json, scanned_labels_json, last_updated_at
+         FROM truck_scan_session_state
+         WHERE last_updated_at > datetime('now','-24 hours')`
+      ).all();
+    }
+    // Flatten: return a map of invoiceId → { truckNumber, scannedCount, lastUpdatedAt }
+    const byInvoice = {};
+    for (const row of rows) {
+      let invoiceIds = [];
+      let scannedLabels = [];
+      try { invoiceIds = JSON.parse(row.invoice_ids_json || '[]'); } catch {}
+      try { scannedLabels = JSON.parse(row.scanned_labels_json || '[]'); } catch {}
+      // scannedLabels is array of { invoiceId, labelId, batchNumber, ts } — count by invoice
+      const scanCountByInv = {};
+      for (const s of scannedLabels) {
+        if (s.invoiceId) scanCountByInv[s.invoiceId] = (scanCountByInv[s.invoiceId] || 0) + 1;
+      }
+      for (const invId of invoiceIds) {
+        byInvoice[invId] = {
+          truckNumber: row.truck_number,
+          scannedCount: scanCountByInv[invId] || 0,
+          lastUpdatedAt: row.last_updated_at,
+        };
+      }
+    }
+    res.json({ ok: true, sessions: byInvoice });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/invoice/dispatch-out-truck — atomic per-batch processing.
+// Body: { truckNumber, vehicleNo, lrNo, remarks, dispatchedBy, batches: [{ invoiceId, scannedBoxes: <count> }] }
+// Processes each batch individually using the same logic as /api/invoice/:id/dispatch-out.
+// Returns per-batch results — partial failures are surfaced so the worker can retry just the failed batches.
+app.post('/api/invoice/dispatch-out-truck', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const truckNumber = String(body.truckNumber || '');
+    const vehicleNo = String(body.vehicleNo || '');
+    const lrNo = String(body.lrNo || '');
+    const remarks = String(body.remarks || '');
+    const dispatchedBy = String(body.dispatchedBy || 'unknown');
+    const batches = Array.isArray(body.batches) ? body.batches : [];
+    if (!truckNumber) return res.status(400).json({ ok: false, error: 'truckNumber required' });
+    if (!vehicleNo) return res.status(400).json({ ok: false, error: 'vehicleNo required' });
+    if (!lrNo) return res.status(400).json({ ok: false, error: 'lrNo required' });
+    if (batches.length === 0) return res.status(400).json({ ok: false, error: 'No batches to dispatch' });
+    if (batches.length > 50) return res.status(400).json({ ok: false, error: 'Too many batches in one truck (max 50)' });
+
+    const results = [];
+    for (const b of batches) {
+      const invId = b.invoiceId;
+      const scannedBoxes = parseInt(b.scannedBoxes) || 0;
+      if (!invId) {
+        results.push({ invoiceId: null, ok: false, error: 'Missing invoiceId' });
+        continue;
+      }
+      // Load invoice
+      let inv;
+      try {
+        if (pgPool) {
+          const r = await pgPool.query(`SELECT * FROM invoices_received WHERE id=$1`, [invId]);
+          inv = r.rows[0];
+        } else {
+          inv = db.prepare(`SELECT * FROM invoices_received WHERE id=?`).get(invId);
+        }
+      } catch (e) {
+        results.push({ invoiceId: invId, ok: false, error: 'DB read failed: ' + e.message });
+        continue;
+      }
+      if (!inv) {
+        results.push({ invoiceId: invId, ok: false, error: 'Invoice not found' });
+        continue;
+      }
+      if (inv.dispatch_status === 'dispatched' || inv.dispatch_status === 'deemed_dispatched') {
+        results.push({ invoiceId: invId, ok: false, error: 'Already dispatched', alreadyDispatched: true });
+        continue;
+      }
+      if (!inv.batch_number) {
+        results.push({ invoiceId: invId, ok: false, error: 'No batch_number on invoice — admin must attach first' });
+        continue;
+      }
+      // Build dispatch record
+      const recId = 'tdr_' + crypto.randomBytes(8).toString('hex');
+      const qty = parseFloat(inv.total_qty_lakhs) > 0
+        ? parseFloat(inv.total_qty_lakhs)
+        : (parseInt(inv.total_boxes) > 0 ? parseInt(inv.total_boxes) / 100 : 0);
+      const boxes = scannedBoxes || parseInt(inv.total_boxes) || 0;
+      const ts = new Date().toISOString();
+      // Insert dispatch record
+      try {
+        if (pgPool) {
+          await pgPool.query(
+            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by")
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo, inv.sap_doc_num || '', remarks, ts, dispatchedBy]
+          );
+        } else {
+          db.prepare(
+            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by)
+             VALUES (?,?,?,?,?,?,?,?,?,?)`
+          ).run(recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo, inv.sap_doc_num || '', remarks, ts, dispatchedBy);
+        }
+      } catch (e) {
+        results.push({ invoiceId: invId, ok: false, error: 'Insert dispatch record failed: ' + e.message });
+        continue;
+      }
+      // Mark invoice dispatched. Also stamp lr_no via remarks suffix since invoices_received has no lr_no col.
+      try {
+        if (pgPool) {
+          await pgPool.query(
+            `UPDATE invoices_received SET dispatch_status='dispatched', dispatched_at=$1, dispatched_by=$2, vehicle_no=$3, dispatch_record_id=$4 WHERE id=$5`,
+            [ts, dispatchedBy, vehicleNo, recId, invId]
+          );
+        } else {
+          db.prepare(
+            `UPDATE invoices_received SET dispatch_status='dispatched', dispatched_at=?, dispatched_by=?, vehicle_no=?, dispatch_record_id=? WHERE id=?`
+          ).run(ts, dispatchedBy, vehicleNo, recId, invId);
+        }
+      } catch (e) {
+        console.warn('[v40 P18.11] invoice update failed (record was created):', e.message);
+      }
+      // Recompute dispatch actuals
+      try {
+        if (typeof _recomputeDispatchActuals === 'function') {
+          await _recomputeDispatchActuals(inv.batch_number, vehicleNo, inv.sap_doc_num || null);
+        }
+      } catch (e) {
+        console.warn('[v40 P18.11] _recomputeDispatchActuals failed:', e.message);
+      }
+      // Annotate dispatch_plans
+      try {
+        await _v39_updateDispatchPlansForInvoice(inv.batch_number, {
+          invoice_dispatched_at: ts,
+          invoice_dispatched_by: dispatchedBy,
+          invoice_status: 'dispatched',
+        });
+      } catch (e) {
+        console.warn('[v40 P18.11] dispatch_plans annotate failed:', e.message);
+      }
+      results.push({
+        invoiceId: invId,
+        ok: true,
+        dispatchRecordId: recId,
+        batchNumber: inv.batch_number,
+        boxes,
+        qty,
+        ts,
+      });
+    }
+    // Clear session once truck dispatch attempted (whether all succeeded or not).
+    // Worker can retry just failed batches via single-batch dispatch-out endpoint.
+    try {
+      if (pgPool) {
+        await pgPool.query(`DELETE FROM truck_scan_session_state WHERE truck_number=$1`, [truckNumber]);
+      } else {
+        db.prepare(`DELETE FROM truck_scan_session_state WHERE truck_number=?`).run(truckNumber);
+      }
+    } catch (e) {
+      console.warn('[v40 P18.11] session cleanup failed:', e.message);
+    }
+    const okCount = results.filter(r => r.ok).length;
+    res.json({
+      ok: okCount > 0,
+      truckNumber,
+      totalRequested: batches.length,
+      successCount: okCount,
+      failureCount: batches.length - okCount,
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/invoice/pending-scan-out — list invoices ready for the Scan Out
 // activity. Returns invoices_received where dispatch_status='pending' and
 // either source='sunloc' or (source='direct_sap' AND admin_approved_at IS NOT NULL).
@@ -2836,7 +3299,103 @@ app.get('/api/invoice/pending-scan-out', async (req, res) => {
          LIMIT ?`
       ).all(limit);
     }
+    // v40 Phase 18.5: enrich each invoice with truck_number looked up from
+    // dispatch_plans by batch_number. Falls back to null if no plan found.
+    const batchNumbers = [...new Set(rows.map(r => r.batch_number).filter(Boolean))];
+    const truckByBatch = {};
+    if (batchNumbers.length > 0) {
+      try {
+        let planRows;
+        if (pgPool) {
+          const r = await pgPool.query(
+            `SELECT data_json FROM dispatch_plans WHERE deleted=false AND batch_number = ANY($1)`,
+            [batchNumbers]
+          );
+          planRows = r.rows.map(r => typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r.data_json);
+        } else {
+          // SQLite — fallback to per-batch query; small N so cheap
+          const stmt = db.prepare(`SELECT data_json FROM dispatch_plans WHERE deleted=0 AND batch_number=?`);
+          planRows = batchNumbers.flatMap(bn => stmt.all(bn).map(r => JSON.parse(r.data_json)));
+        }
+        // For each plan with a truck assigned, record first match per batch
+        for (const plan of planRows) {
+          const bn = plan.batchNumber || '';
+          const tn = plan.truckNumber || plan.truck_number || null;
+          if (bn && tn && !truckByBatch[bn]) truckByBatch[bn] = tn;
+        }
+      } catch (e) {
+        console.warn('[v40 P18.5] truck lookup failed:', e.message);
+      }
+    }
+    // Annotate response rows
+    for (const r of rows) {
+      if (r.batch_number && truckByBatch[r.batch_number]) {
+        r.suggested_truck_number = truckByBatch[r.batch_number];
+      }
+    }
     res.json({ ok: true, count: rows.length, invoices: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// v40 Phase 18.7: GET /api/invoice/:id/details
+// Returns the parsed Sales Register structure for an invoice — header fields plus
+// DocumentLines with ItemCode/Description/Qty/UnitPrice/LineTotal/VAT. Powers
+// Scan-Out matching (Phase 18.8), close-the-loop register link (Phase 18.9), and
+// the Tracking → Invoice detail view.
+app.get('/api/invoice/:id/details', async (req, res) => {
+  try {
+    const id = req.params.id;
+    let row;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM invoices_received WHERE id=$1`, [id]);
+      row = r.rows[0];
+    } else {
+      row = db.prepare(`SELECT * FROM invoices_received WHERE id=?`).get(id);
+    }
+    if (!row) return res.status(404).json({ ok: false, error: 'invoice not found' });
+    // Parse the SAP payload — payload_json holds the full SAP Invoice response
+    let payload = {};
+    try {
+      payload = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : (row.payload_json || {});
+    } catch (e) { payload = {}; }
+    // Header: DocNum, Customer, addresses, dates, totals
+    const header = {
+      invoice_id: row.id,
+      sap_doc_entry: row.sap_doc_entry,
+      sap_doc_num: row.sap_doc_num,
+      customer: row.customer,
+      card_code: row.card_code,
+      po_number: row.po_number,
+      batch_number: row.batch_number,
+      invoice_date: row.invoice_date,
+      due_date: payload.DocDueDate || null,
+      bill_to_address: payload.Address || '',
+      ship_to_address: payload.Address2 || '',
+      sales_order_ref: payload.U_SunlocPO || '',
+      taxable_amount: parseFloat(row.taxable_amount) || 0,
+      igst_amount: parseFloat(row.igst_amount) || 0,
+      total_amount: parseFloat(row.total_amount) || 0,
+      irn: row.irn || '',
+      source: row.source,
+      dispatch_status: row.dispatch_status,
+      comments: payload.Comments || '',
+    };
+    // Lines: ItemCode (PC Code), ItemDescription, Quantity, UnitPrice, LineTotal, VAT%, VAT amount
+    const lines = (payload.DocumentLines || []).map((ln, idx) => ({
+      line_num: ln.LineNum != null ? ln.LineNum : idx,
+      item_code: ln.ItemCode || '',
+      item_description: ln.ItemDescription || '',
+      quantity: parseFloat(ln.Quantity) || 0,
+      unit_price: parseFloat(ln.UnitPrice) || 0,
+      line_total: parseFloat(ln.LineTotal) || 0,
+      vat_percent: parseFloat(ln.VatPercent || ln.TaxPercentagePerRow) || 0,
+      vat_amount: parseFloat(ln.VatSum) || 0,
+      base_entry: ln.BaseEntry || null,   // Sales Order reference
+      base_line: ln.BaseLine,
+    }));
+    res.json({ ok: true, header, lines, line_count: lines.length });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -6573,10 +7132,8 @@ async function _draScanAndInsert() {
     const exportBatches = await _getExportBatchSet();
 
     // ── Flow A: pack-IN scans older than per-batch threshold with no dispatch-in for same label ──
-    // We do two queries: one for export-batch labels (15d threshold) and one for non-export
-    // (7d threshold). Combine results.
-    // NOTE: SQLite IN with placeholders for arbitrary-length set is awkward; we do per-batch
-    // filtering in JS after the query. Query selects all pack-in scans without dispatch-in.
+    // v40 Phase 18.14: Also EXCLUDE labels whose batch has Phase 18 truck dispatch records.
+    // Those labels are physically shipped — they just don't have per-box dispatch-IN scans.
     let candidatesA = [];
     if (pgPool) {
       const r = await pgPool.query(`
@@ -6587,6 +7144,10 @@ async function _draScanAndInsert() {
           AND NOT EXISTS (
             SELECT 1 FROM tracking_scans di
             WHERE di.label_id = p.label_id AND di.dept='dispatch' AND di.type='in'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM tracking_dispatch_records dr
+            WHERE dr.batch_number = p.batch_number
           )
       `, [cutoffExportIso]); // Use export cutoff to get widest set; filter per-batch below
       candidatesA = r.rows;
@@ -6600,6 +7161,10 @@ async function _draScanAndInsert() {
             SELECT 1 FROM tracking_scans di
             WHERE di.label_id = p.label_id AND di.dept='dispatch' AND di.type='in'
           )
+          AND NOT EXISTS (
+            SELECT 1 FROM tracking_dispatch_records dr
+            WHERE dr.batch_number = p.batch_number
+          )
       `).all(cutoffExportIso);
     }
     // Filter per-batch using per-batch threshold
@@ -6611,17 +7176,24 @@ async function _draScanAndInsert() {
     });
 
     // Auto-resolve: any Flow A active alert whose label_id now has dispatch-in
+    // v40 Phase 18.14: Also auto-resolve when the batch received Phase 18 truck dispatch.
     if (pgPool) {
       await pgPool.query(`
         UPDATE dispatch_reconcile_alerts SET resolved_at=$1
         WHERE alert_type='A' AND resolved_at IS NULL
-          AND label_id IN (SELECT label_id FROM tracking_scans WHERE dept='dispatch' AND type='in')
+          AND (
+            label_id IN (SELECT label_id FROM tracking_scans WHERE dept='dispatch' AND type='in')
+            OR batch_number IN (SELECT batch_number FROM tracking_dispatch_records)
+          )
       `, [now]);
     } else {
       db.prepare(`
         UPDATE dispatch_reconcile_alerts SET resolved_at=?
         WHERE alert_type='A' AND resolved_at IS NULL
-          AND label_id IN (SELECT label_id FROM tracking_scans WHERE dept='dispatch' AND type='in')
+          AND (
+            label_id IN (SELECT label_id FROM tracking_scans WHERE dept='dispatch' AND type='in')
+            OR batch_number IN (SELECT batch_number FROM tracking_dispatch_records)
+          )
       `).run(now);
     }
     // Insert new candidates (idempotent: only if no active alert exists for same label_id)
@@ -6910,9 +7482,15 @@ app.get('/api/tracking/labels-all', async (req, res) => {
     else{const labels=db.prepare('SELECT * FROM tracking_labels ORDER BY generated DESC').all();res.json({ok:true,labels:labels.map(m)});}
   }catch(err){res.status(500).json({ok:false,error:err.message});}
 });
-// ── Recent scans fast endpoint ──
+// ── All scans endpoint (formerly "scans-recent", LIMIT removed in v40 P18.14) ──
+// Returns ALL scans by default. Optional ?since=YYYY-MM-DD to limit to recent.
+// Phase 18.14 — data consistency: client needs every scan to compute per-box stage
+// correctly in Batch Tracker. Previously LIMIT 2000 dropped older batches' label-scan
+// linkage, causing Batch Tracker to show all-empty rows for any batch whose scans
+// were older than the last 2000 scans system-wide.
 app.get('/api/tracking/scans-recent', async (req, res) => {
   try {
+    const since = req.query.since || null;   // optional: 'YYYY-MM-DD'
     const mapScan = r => ({
       id: r.id,
       labelId: r.label_id,
@@ -6925,32 +7503,183 @@ app.get('/api/tracking/scans-recent', async (req, res) => {
       qty: r.qty || null,
       labelNumber: r.label_number || null
     });
+    const whereClause = since ? `WHERE ts >= '${since.replace(/'/g,'')}'` : '';
     if (pgPool) {
       // Try with label_number column first (after migration v10)
       let rows;
       try {
         const r = await pgPool.query(
-          'SELECT * FROM tracking_scans ORDER BY ts DESC LIMIT 2000'
+          `SELECT * FROM tracking_scans ${whereClause} ORDER BY ts DESC`
         );
         rows = r.rows;
       } catch(e) {
         // Fallback if column issues — select without label_number
         const r = await pgPool.query(
-          'SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ORDER BY ts DESC LIMIT 2000'
+          `SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ${whereClause} ORDER BY ts DESC`
         );
         rows = r.rows;
       }
-      res.json({ ok: true, scans: rows.map(mapScan) });
+      res.json({ ok: true, scans: rows.map(mapScan), count: rows.length });
     } else {
       let scans;
       try {
-        scans = db.prepare('SELECT * FROM tracking_scans ORDER BY ts DESC LIMIT 2000').all();
+        scans = db.prepare(`SELECT * FROM tracking_scans ${whereClause} ORDER BY ts DESC`).all();
       } catch(e) {
-        scans = db.prepare('SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ORDER BY ts DESC LIMIT 2000').all();
+        scans = db.prepare(`SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ${whereClause} ORDER BY ts DESC`).all();
       }
-      res.json({ ok: true, scans: scans.map(mapScan) });
+      res.json({ ok: true, scans: scans.map(mapScan), count: scans.length });
     }
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// ── v40 P18.14: Box-stages endpoint (data-consistency upgrade) ──
+// Returns authoritative current stage per label_id, computed server-side from
+// the full DB. Eliminates client-side guesswork that previously broke when
+// (a) tracking_scans was paginated, or (b) Phase 18 truck dispatch wrote to
+// tracking_dispatch_records without per-box scan rows.
+//
+// Stage values:
+//   'production'  — no scans yet, still in production
+//   'aim'         — at AIM Inspection (in or partway through)
+//   'printing'    — at Printing (printed batches only)
+//   'pi'          — at Print Inspection
+//   'packing'     — at Packing
+//   'at_dispatch' — packed-OUT, sitting at dispatch dock awaiting truck
+//   'dispatched'  — physically shipped (either per-box dispatch scan, OR Phase 18 truck dispatch)
+//
+// Flow rules:
+//   - Box has zero scans → 'production'
+//   - Box's last scan is type='in' → currently at that dept ('aim', 'printing', 'pi', 'packing')
+//   - Box's last scan is type='out' → moved to next dept; packing→'at_dispatch'; dispatch→'dispatched'
+//   - If batch has Phase 18 dispatches (tracking_dispatch_records rows), the FIFO-earliest
+//     'at_dispatch' boxes are promoted to 'dispatched' up to the dispatched-box count.
+app.get('/api/tracking/box-stages', async (req, res) => {
+  try {
+    // 1. Load all non-voided labels
+    let labels;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT id, batch_number, label_number, COALESCE(voided, 0) AS voided FROM tracking_labels WHERE COALESCE(voided, 0) = 0`);
+      labels = r.rows;
+    } else {
+      labels = db.prepare(`SELECT id, batch_number, label_number, COALESCE(voided, 0) AS voided FROM tracking_labels WHERE COALESCE(voided, 0) = 0`).all();
+    }
+    // 2. Load all scans (FULL — no limit) and group by label_id
+    let scans;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT label_id, batch_number, dept, type, ts FROM tracking_scans ORDER BY ts ASC`);
+      scans = r.rows;
+    } else {
+      scans = db.prepare(`SELECT label_id, batch_number, dept, type, ts FROM tracking_scans ORDER BY ts ASC`).all();
+    }
+    // 3. Load all dispatch records to capture Phase 18 dispatches
+    let dispatchRecs;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT batch_number, boxes, ts FROM tracking_dispatch_records ORDER BY ts ASC`);
+      dispatchRecs = r.rows;
+    } else {
+      dispatchRecs = db.prepare(`SELECT batch_number, boxes, ts FROM tracking_dispatch_records ORDER BY ts ASC`).all();
+    }
+    // 4. Build batch flow map — derive isPrinted from planning state (production_orders).
+    // tracking_labels has no is_printed column; the flow info lives in planning's orders.
+    const isPrintedByBatch = {};
+    try {
+      const planState = await getPlanningStateAsync();
+      const orders = planState.orders || [];
+      for (const ord of orders) {
+        if (ord.batchNumber) isPrintedByBatch[ord.batchNumber] = !!ord.isPrinted;
+      }
+    } catch (e) {
+      console.warn('[v40 P18.14 box-stages] planning state load failed:', e.message);
+    }
+    // Note: 'at_dispatch' and 'dispatched' are pseudo-stages beyond the scan flow.
+    // The flow array stops at 'dispatch' (the literal dept used in scans).
+    const flowFor = (batchNo) => isPrintedByBatch[batchNo]
+      ? ['production', 'aim', 'printing', 'pi', 'packing', 'dispatch']
+      : ['production', 'aim', 'packing', 'dispatch'];
+
+    // 5. Build per-label scan history map
+    const scansByLabel = {};
+    for (const s of scans) {
+      if (!s.label_id) continue;
+      if (!scansByLabel[s.label_id]) scansByLabel[s.label_id] = [];
+      scansByLabel[s.label_id].push(s);
+    }
+    // 6. Build per-batch dispatched-box count (sum of all dispatch records for that batch)
+    const dispatchedByBatch = {};
+    for (const dr of dispatchRecs) {
+      if (!dr.batch_number) continue;
+      dispatchedByBatch[dr.batch_number] = (dispatchedByBatch[dr.batch_number] || 0) + (parseInt(dr.boxes) || 0);
+    }
+    // 7. Determine each label's current stage based on per-box scans first
+    const stages = {};
+    const labelsByBatch = {};
+    for (const l of labels) {
+      if (!labelsByBatch[l.batch_number]) labelsByBatch[l.batch_number] = [];
+      labelsByBatch[l.batch_number].push(l);
+      const sc = scansByLabel[l.id] || [];
+      if (sc.length === 0) {
+        stages[l.id] = 'production';
+      } else {
+        const last = sc[sc.length - 1];
+        if (last.type === 'in') {
+          stages[l.id] = last.dept;  // 'aim', 'printing', 'pi', 'packing'
+        } else {
+          // type === 'out'
+          if (last.dept === 'packing') {
+            stages[l.id] = 'at_dispatch';   // packed-OUT, awaiting truck
+          } else if (last.dept === 'dispatch') {
+            stages[l.id] = 'dispatched';    // per-box dispatch scan
+          } else {
+            // aim-out, printing-out, pi-out → next dept in flow
+            const fl = flowFor(l.batch_number);
+            const idx = fl.indexOf(last.dept);
+            stages[l.id] = (idx >= 0 && idx < fl.length - 1) ? fl[idx + 1] : 'complete';
+          }
+        }
+      }
+    }
+    // 8. Overlay Phase 18 dispatched-box info — promote FIFO-earliest 'at_dispatch' boxes
+    // to 'dispatched' status when the batch has Phase 18 dispatch records.
+    for (const [batchNo, dispatchedCount] of Object.entries(dispatchedByBatch)) {
+      if (!dispatchedCount) continue;
+      const batchLabels = labelsByBatch[batchNo] || [];
+      // Count how many are already at 'dispatched' (from per-box scans)
+      const alreadyDispatched = batchLabels.filter(l => stages[l.id] === 'dispatched').length;
+      if (alreadyDispatched >= dispatchedCount) continue;
+      // Need to promote (dispatchedCount - alreadyDispatched) more boxes from 'at_dispatch' → 'dispatched'.
+      // Order: FIFO by packing-out ts (first packed = first shipped).
+      const candidates = batchLabels.filter(l => stages[l.id] === 'at_dispatch').map(l => {
+        const sc = scansByLabel[l.id] || [];
+        const packOut = sc.find(x => x.dept === 'packing' && x.type === 'out');
+        return { label: l, sortTs: packOut?.ts || '9999' };
+      });
+      candidates.sort((a, b) => (a.sortTs || '').localeCompare(b.sortTs || ''));
+      const needed = dispatchedCount - alreadyDispatched;
+      for (let i = 0; i < Math.min(needed, candidates.length); i++) {
+        stages[candidates[i].label.id] = 'dispatched';
+      }
+    }
+    // 9. Build per-batch box counts (server-side authoritative aggregate)
+    const boxCounts = {};
+    for (const s of scans) {
+      if (!s.batch_number || !s.dept || !s.type) continue;
+      if (!boxCounts[s.batch_number]) boxCounts[s.batch_number] = {};
+      const key = `${s.dept}_${s.type}`;
+      boxCounts[s.batch_number][key] = (boxCounts[s.batch_number][key] || 0) + 1;
+    }
+    res.json({
+      ok: true,
+      stages,
+      boxCounts,
+      dispatchedByBatch,
+      labelCount: labels.length,
+      scanCount: scans.length,
+      dispatchRecCount: dispatchRecs.length,
+    });
+  } catch (err) {
+    console.error('[v40 P18.14 box-stages] error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ── Wastage fast endpoint ──
@@ -6964,12 +7693,13 @@ app.get('/api/tracking/wastage', async (req, res) => {
 // ── Individual scan save (called after each scan in/out) ──
 app.post('/api/tracking/scan', async (req, res) => {
   try {
-    const { scan } = req.body;
+    const { scan, adminOverride } = req.body;
     if(!scan || !scan.id) return res.status(400).json({ok:false,error:'Missing scan'});
     const labelId = scan.labelId||scan.label_id;
     const batchNumber = scan.batchNumber||scan.batch_number;
     // HARD BLOCK: Unprinted batches can never be scanned at Printing or PI
     // Check planning state to get isPrinted for this batch
+    let isPrintedBatch = true;  // default assumption (printed flow)
     if (scan.dept === 'printing' || scan.dept === 'pi') {
       const planState = await getPlanningStateAsync();
       const order = (planState.orders||[]).find(o =>
@@ -6979,6 +7709,65 @@ app.post('/api/tracking/scan', async (req, res) => {
         return res.json({ok:false, blocked:true,
           error:`Batch ${batchNumber} is UNPRINTED — scanning at ${scan.dept} is not allowed. Unprinted batches go AIM → Packing directly.`
         });
+      }
+      if (order) isPrintedBatch = !!order.isPrinted;
+    } else {
+      // For other depts, still determine flow type so packing previous-stage logic is correct.
+      try {
+        const planState = await getPlanningStateAsync();
+        const order = (planState.orders||[]).find(o =>
+          o.batchNumber === batchNumber || o.id === batchNumber
+        );
+        if (order) isPrintedBatch = !!order.isPrinted;
+      } catch (e) { /* assume printed flow if planning state unavailable */ }
+    }
+
+    // v40 Phase 18.14b: PER-LABEL UPSTREAM PROGRESSION CHECK
+    // Prevents inconsistent counts (e.g. packing.in > aim.out) at the data layer.
+    // For a scan-IN at dept X, the same label MUST have a scan-OUT at the previous scannable stage.
+    // Flow: unprinted = production → aim → packing → dispatch
+    //       printed   = production → aim → printing → pi → packing → dispatch
+    // AIM IN is the entry point — no upstream requirement.
+    // Type=OUT is checked downstream (must have matching IN at same dept).
+    // Admin override allowed but logged for audit.
+    if (scan.type === 'in' && scan.dept !== 'aim' && scan.dept !== 'production') {
+      // Determine previous scannable stage
+      let prevDept = null;
+      if (scan.dept === 'printing') prevDept = 'aim';
+      else if (scan.dept === 'pi')   prevDept = 'printing';
+      else if (scan.dept === 'packing') prevDept = isPrintedBatch ? 'pi' : 'aim';
+      else if (scan.dept === 'dispatch') prevDept = 'packing';
+      // Special case: if packing-in on a printed batch and prev is PI, that's fine.
+      // Special case: if packing-in on UNPRINTED batch, prev is AIM, but boxes can be sent
+      // straight from AIM to packing if 'manual' inspection bypass was done. For data integrity,
+      // we still require AIM-out scan.
+      if (prevDept) {
+        let prevOutScan;
+        if (pgPool) {
+          const r = await pgPool.query(
+            `SELECT id FROM tracking_scans WHERE label_id=$1 AND dept=$2 AND type='out' AND batch_number=$3 LIMIT 1`,
+            [labelId, prevDept, batchNumber]
+          );
+          prevOutScan = r.rows[0];
+        } else {
+          prevOutScan = db.prepare(
+            `SELECT id FROM tracking_scans WHERE label_id=? AND dept=? AND type='out' AND batch_number=? LIMIT 1`
+          ).get(labelId, prevDept, batchNumber);
+        }
+        if (!prevOutScan) {
+          if (adminOverride) {
+            console.warn(`[v40 P18.14b SCAN OVERRIDE] Admin override: label ${labelId} scanned IN at ${scan.dept} without ${prevDept} OUT scan. batch=${batchNumber} operator=${scan.operator||'?'} ts=${scan.ts}`);
+            // Allowed through with audit log
+          } else {
+            return res.json({
+              ok: false,
+              blocked: true,
+              error: `Box not yet scanned OUT of ${prevDept.toUpperCase()}. A box must complete ${prevDept.toUpperCase()} before it can enter ${scan.dept.toUpperCase()}. (Admin can override if data correction is needed.)`,
+              suggestion: `Verify the upstream scan in ${prevDept.toUpperCase()}, or request admin to override if the box was physically moved without proper scanning.`,
+              upstream_dept: prevDept
+            });
+          }
+        }
       }
     }
 
@@ -6993,6 +7782,14 @@ app.post('/api/tracking/scan', async (req, res) => {
       if(doneTypes.includes(scan.type)){
         return res.json({ok:false, duplicate:true, error:'Already scanned '+scan.type.toUpperCase()+' at '+scan.dept});
       }
+      // v40 P18.14b: For type=OUT, require matching IN exists at same dept
+      if (scan.type === 'out' && !doneTypes.includes('in')) {
+        return res.json({
+          ok: false,
+          blocked: true,
+          error: `Box not yet scanned IN at ${scan.dept.toUpperCase()}. Can't scan OUT before IN.`
+        });
+      }
       await pgPool.query(
         `INSERT INTO tracking_scans (id,label_id,batch_number,label_number,dept,type,ts,operator,size,qty)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
@@ -7000,12 +7797,36 @@ app.post('/api/tracking/scan', async (req, res) => {
          scan.operator||null, scan.size||null, scan.qty||null]
       );
     } else {
+      // SQLite path: same duplicate + IN-before-OUT check
+      const existing = db.prepare(`SELECT type FROM tracking_scans WHERE label_id=? AND dept=? AND batch_number=?`)
+        .all(labelId, scan.dept, batchNumber);
+      const doneTypes = existing.map(r=>r.type);
+      if (doneTypes.includes(scan.type)) {
+        return res.json({ok:false, duplicate:true, error:'Already scanned '+scan.type.toUpperCase()+' at '+scan.dept});
+      }
+      if (scan.type === 'out' && !doneTypes.includes('in')) {
+        return res.json({
+          ok: false, blocked: true,
+          error: `Box not yet scanned IN at ${scan.dept.toUpperCase()}. Can't scan OUT before IN.`
+        });
+      }
       db.prepare(`INSERT OR IGNORE INTO tracking_scans
         (id,label_id,batch_number,label_number,dept,type,ts,operator,size,qty)
         VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
         scan.id, labelId, batchNumber, scan.labelNumber||null, scan.dept, scan.type, scan.ts,
         scan.operator||null, scan.size||null, scan.qty||null
       );
+    }
+    // v40 P18.14d: Legacy dispatch.out scans count toward total dispatched.
+    // Recompute actuals so Planning's "Dispatched %" stays in sync.
+    if (scan.dept === 'dispatch' && scan.type === 'out' && batchNumber) {
+      try {
+        if (typeof _recomputeDispatchActuals === 'function') {
+          await _recomputeDispatchActuals(batchNumber, null, null);
+        }
+      } catch (e) {
+        console.warn('[v40 P18.14d] recompute after legacy dispatch scan failed:', e.message);
+      }
     }
     res.json({ok:true});
   } catch(err) { res.status(500).json({ok:false,error:err.message}); }
@@ -7131,12 +7952,22 @@ app.get('/api/tracking/agrade-summary', async (req, res) => {
 async function _recomputeDispatchActuals(batchNumber, vehicleNo, invoiceNo) {
   if (!batchNumber) return 0;
   let totalQty = 0;
+  // v40 P18.14d: dispatched_qty = sum of Phase 18 records + sum of legacy dispatch.out scan qty.
+  // Both flows can co-exist on a straddle batch (started under v37, finished under v40 truck flow);
+  // each represents distinct physical shipments. Planning consumes this value so it must match
+  // Tracking's combined-source helpers.
   if (pgPool) {
-    const r = await pgPool.query(
+    const r1 = await pgPool.query(
       `SELECT COALESCE(SUM(qty),0) AS total FROM tracking_dispatch_records WHERE batch_number=$1`,
       [batchNumber]
     );
-    totalQty = parseFloat(r.rows[0]?.total || 0);
+    const r2 = await pgPool.query(
+      `SELECT COALESCE(SUM(qty),0) AS total FROM tracking_scans WHERE batch_number=$1 AND dept='dispatch' AND type='out'`,
+      [batchNumber]
+    );
+    const phase18Qty = parseFloat(r1.rows[0]?.total || 0);
+    const legacyQty = parseFloat(r2.rows[0]?.total || 0);
+    totalQty = phase18Qty + legacyQty;
     await pgPool.query(`
       INSERT INTO tracking_dispatch_actuals (batch_number,dispatched_qty,vehicle_no,invoice_no,updated_at)
       VALUES ($1,$2,$3,$4,NOW())
@@ -7147,8 +7978,11 @@ async function _recomputeDispatchActuals(batchNumber, vehicleNo, invoiceNo) {
         updated_at=NOW()
     `, [batchNumber, totalQty, vehicleNo||null, invoiceNo||null]);
   } else {
-    const r = db.prepare(`SELECT COALESCE(SUM(qty),0) AS total FROM tracking_dispatch_records WHERE batch_number=?`).get(batchNumber);
-    totalQty = parseFloat(r?.total || 0);
+    const r1 = db.prepare(`SELECT COALESCE(SUM(qty),0) AS total FROM tracking_dispatch_records WHERE batch_number=?`).get(batchNumber);
+    const r2 = db.prepare(`SELECT COALESCE(SUM(qty),0) AS total FROM tracking_scans WHERE batch_number=? AND dept='dispatch' AND type='out'`).get(batchNumber);
+    const phase18Qty = parseFloat(r1?.total || 0);
+    const legacyQty = parseFloat(r2?.total || 0);
+    totalQty = phase18Qty + legacyQty;
     db.prepare(`
       INSERT INTO tracking_dispatch_actuals (batch_number,dispatched_qty,vehicle_no,invoice_no,updated_at)
       VALUES (?,?,?,?,datetime('now'))
@@ -7282,22 +8116,22 @@ app.post('/api/tracking/label-void', async (req, res) => {
 });
 
 // POST update label qty (edit)
-// ── Recent scans — lightweight endpoint (last 200 scans per dept) ─
+// ── /api/tracking/scans — deduplicated scan stream ─
+// v40 P18.14: LIMITs removed for data consistency. Dedupe keeps only the
+// earliest scan per (label_id, dept, type, minute) bucket.
 app.get('/api/tracking/scans', async (req, res) => {
   try {
-    // Return deduplicated scans — keep earliest scan per (label_id, dept, type, minute)
     const dedupeSQL = `
       SELECT DISTINCT ON (label_id, dept, type, date_trunc('minute', ts::timestamp))
         id, label_id, batch_number, dept, type, ts, operator, size, qty
       FROM tracking_scans
       ORDER BY label_id, dept, type, date_trunc('minute', ts::timestamp), ts ASC
-      LIMIT 1000
     `;
     if (pgPool) {
       const r = await pgPool.query(dedupeSQL);
       res.json({ ok: true, scans: r.rows });
     } else {
-      const scans = db.prepare('SELECT * FROM tracking_scans ORDER BY ts DESC LIMIT 500').all();
+      const scans = db.prepare('SELECT * FROM tracking_scans ORDER BY ts DESC').all();
       res.json({ ok: true, scans });
     }
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -7800,20 +8634,37 @@ async function _startSapPollers() {
 }
 
 // v37I bugfix: backfill dispatch_actuals from records on startup
+// v40 P18.14d: backfill now covers BOTH (a) batches with Phase 18 records and (b) batches with
+// only legacy dispatch.out scans. _recomputeDispatchActuals now sums both sources, so any batch
+// that has dispatched_qty > 0 in either flow gets the unified actuals row Planning consumes.
 async function _backfillDispatchActuals() {
   try {
     let batches;
     if (pgPool) {
-      const r = await pgPool.query(`SELECT DISTINCT batch_number FROM tracking_dispatch_records WHERE batch_number IS NOT NULL`);
+      // Union: batches with Phase 18 records ∪ batches with legacy dispatch.out scans
+      const r = await pgPool.query(`
+        SELECT batch_number FROM (
+          SELECT DISTINCT batch_number FROM tracking_dispatch_records WHERE batch_number IS NOT NULL
+          UNION
+          SELECT DISTINCT batch_number FROM tracking_scans WHERE batch_number IS NOT NULL AND dept='dispatch' AND type='out'
+        ) AS u
+      `);
       batches = r.rows.map(x => x.batch_number);
     } else {
-      batches = db.prepare(`SELECT DISTINCT batch_number FROM tracking_dispatch_records WHERE batch_number IS NOT NULL`).all().map(x => x.batch_number);
+      batches = db.prepare(`
+        SELECT batch_number FROM (
+          SELECT DISTINCT batch_number FROM tracking_dispatch_records WHERE batch_number IS NOT NULL
+          UNION
+          SELECT DISTINCT batch_number FROM tracking_scans WHERE batch_number IS NOT NULL AND dept='dispatch' AND type='out'
+        )
+      `).all().map(x => x.batch_number);
     }
     if (!batches.length) return;
     let updated = 0;
     for (const b of batches) {
       try {
-        // Look up latest vehicle/invoice from the most recent record (to preserve metadata)
+        // Look up latest vehicle/invoice from the most recent Phase 18 record if any (preserves metadata).
+        // Legacy-only batches will get NULL vehicle/invoice — that's expected.
         let latest;
         if (pgPool) {
           const r = await pgPool.query(`SELECT vehicle_no, invoice_no FROM tracking_dispatch_records WHERE batch_number=$1 ORDER BY ts DESC LIMIT 1`, [b]);
@@ -7825,6 +8676,6 @@ async function _backfillDispatchActuals() {
         updated++;
       } catch(e) { console.warn(`[v37I backfill] batch ${b}:`, e?.message); }
     }
-    console.log(`[v37I backfill] Recomputed dispatch_actuals for ${updated} batch(es)`);
+    console.log(`[v37I/v40 P18.14d backfill] Recomputed dispatch_actuals for ${updated} batch(es) — includes legacy-only and straddle batches.`);
   } catch(e) { console.warn('[v37I backfill] outer failure:', e?.message); }
 }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v39</title>
+<title>Sunloc Tracking Suite v1.0 · build v40</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -560,7 +560,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v39</p>
+      <p>Tracking Suite v1.0 · build v40</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -591,7 +591,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v39</p>
+      <p>Tracking Suite v1.0 · build v40</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -702,7 +702,10 @@ const SCANNABLE_STAGES = ['aim','printing','pi','packing','dispatch'];
 
 const DEPT_LABELS = {
   production:'Production', aim:'AIM Inspection', printing:'Printing',
-  pi:'Print Inspection', packing:'Packing', dispatch:'Dispatch'
+  pi:'Print Inspection', packing:'Packing', dispatch:'Dispatch',
+  // v40 P18.14: distinct labels for the two post-packing states
+  at_dispatch:'At Dispatch (awaiting truck)', dispatched:'Dispatched (shipped)',
+  complete:'Complete'
 };
 
 const DEPT_INFO = {
@@ -989,11 +992,59 @@ function hasScanSummary() {
   return state.scanSummary && Object.keys(state.scanSummary).length > 0;
 }
 
+// v40 Phase 18.14: combined-source dispatch helpers.
+// Returns total dispatched qty/boxes for a batch, considering BOTH:
+//   - legacy per-box dispatch.out scans (from scan-summary or state.scans)
+//   - Phase 18 truck-level dispatches (from state.dispatchRecs)
+// v40 Phase 18.14d: sum() not max() — straddle batches (started legacy, finished Phase 18)
+// have BOTH flows representing DIFFERENT physical shipments. The two sources operate at
+// different granularity (label-level scans vs invoice-level truck records) so they can't
+// represent the same boxes — sum is correct.
+function _v40_dispatchedLakhs(batchNumber, batchSize) {
+  const localOut = state.scans.filter(s => s.batchNumber === batchNumber && s.dept === 'dispatch' && s.type === 'out' && s._local).length;
+  const legacyBoxes = hasScanSummary()
+    ? (_ss(batchNumber, 'dispatch').out + localOut)
+    : state.scans.filter(s => s.batchNumber === batchNumber && s.dept === 'dispatch' && s.type === 'out').length;
+  const legacyLakhs = boxToLakh(legacyBoxes, batchSize);
+  const phase18Lakhs = state.dispatchRecs.filter(r => r.batchNumber === batchNumber).reduce((s, r) => s + (r.qty || 0), 0);
+  return legacyLakhs + phase18Lakhs;
+}
+
+// v40 Phase 18.14: combined-source dispatch BOX count (used where Lakhs not needed).
+// v40 Phase 18.14d: sum() not max() — see above.
+function _v40_dispatchedBoxes(batchNumber) {
+  const localOut = state.scans.filter(s => s.batchNumber === batchNumber && s.dept === 'dispatch' && s.type === 'out' && s._local).length;
+  const legacyBoxes = hasScanSummary()
+    ? (_ss(batchNumber, 'dispatch').out + localOut)
+    : state.scans.filter(s => s.batchNumber === batchNumber && s.dept === 'dispatch' && s.type === 'out').length;
+  const phase18Boxes = state.dispatchRecs.filter(r => r.batchNumber === batchNumber).reduce((s, r) => s + (parseInt(r.boxes) || 0), 0);
+  return legacyBoxes + phase18Boxes;
+}
+
+// v40 Phase 18.14: Authoritative box-stage map fetched from server.
+// Server endpoint /api/tracking/box-stages computes the canonical current stage for
+// every label from FULL DB (no scan limits) PLUS Phase 18 dispatch records.
+// Populated by loadBoxStages() during initial state load + refreshed every 5 min.
+// Stage values: production | aim | printing | pi | packing | at_dispatch | dispatched | complete
+window._v40_boxStagesMap = {};
+window._v40_boxStagesLoadedAt = 0;
+window._v40_dispatchedByBatch = {};
+window._v40_boxCountsByBatch = {};
+
 function getBoxCurrentStage(labelId){
+  // Prefer server-authoritative stage when loaded (v40 P18.14)
+  if (window._v40_boxStagesMap && labelId in window._v40_boxStagesMap) {
+    return window._v40_boxStagesMap[labelId];
+  }
+  // Fallback to client-side computation (used during initial load + offline)
   const scans = getScansForBox(labelId);
   if(!scans.length) return 'production';
   const last = scans[scans.length-1];
-  return last.type==='out' ? getNextStage(last.dept, last.batchNumber) : last.dept;
+  if (last.type === 'in') return last.dept;
+  // type === 'out'
+  if (last.dept === 'packing') return 'at_dispatch';
+  if (last.dept === 'dispatch') return 'dispatched';
+  return getNextStage(last.dept, last.batchNumber);
 }
 
 function getNextStage(dept, batchNo){
@@ -1412,6 +1463,23 @@ async function pullFromServer(){
         }
       }
     }catch(e36){ console.warn('STEP 3.6 scan-summary failed:',e36?.message||e36); }
+    // STEP 3.7 (v40 P18.14): Server-authoritative box stages — full DB, no limits.
+    // Combines per-box scans with Phase 18 dispatch records so Batch Tracker shows
+    // accurate per-label state even when scan history was paginated or Phase 18
+    // truck dispatch was used without per-box scans.
+    try {
+      const bs = await fetch(serverUrl + '/api/tracking/box-stages', { signal: AbortSignal.timeout(20000) });
+      if (bs.ok) {
+        const bj = await bs.json();
+        if (bj.ok) {
+          window._v40_boxStagesMap = bj.stages || {};
+          window._v40_boxStagesLoadedAt = Date.now();
+          window._v40_dispatchedByBatch = bj.dispatchedByBatch || {};
+          window._v40_boxCountsByBatch = bj.boxCounts || {};
+          console.log(`[v40 P18.14] Box stages loaded: ${Object.keys(window._v40_boxStagesMap).length} labels, ${bj.scanCount} scans, ${bj.dispatchRecCount} dispatch records`);
+        }
+      }
+    } catch (e37) { console.warn('STEP 3.7 box-stages failed:', e37?.message || e37); }
     // STEP 4: Full state fallback (scans + alerts + stageClosure)
     try{
       const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(30000)});
@@ -1584,7 +1652,6 @@ function recordScan(labelId, dept, type, operator, parsed){
     return {ok:false,msg:'Previous department has not closed this batch yet'};
   }
 
-
   // Strong duplicate check — matches server logic exactly
   // Check ALL scans for this label+dept, not just the last one
   const allDeptScans = getScansForBox(labelId).filter(s=>s.dept===dept);
@@ -1593,6 +1660,28 @@ function recordScan(labelId, dept, type, operator, parsed){
   if(type==='in' && alreadyIn)  return {ok:false,msg:'Box already scanned IN at this department'};
   if(type==='out' && !alreadyIn) return {ok:false,msg:'Box not scanned IN at this department'};
   if(type==='out' && alreadyOut) return {ok:false,msg:'Box already scanned OUT at this department'};
+
+  // v40 P18.14b: PER-LABEL UPSTREAM PROGRESSION CHECK (client-side mirror of server).
+  // For a scan-IN at any non-AIM dept, the SAME label must have a scan-OUT at the previous dept.
+  // This is a stricter rule than canScanDept (which is batch-aggregate level).
+  // Non-admin: hard block here. Admin: warning, server enforcement remains (admin can override via prompt there).
+  if (type === 'in' && dept !== 'aim' && dept !== 'production') {
+    const batchIsPrinted = batch.isPrinted || label.isPrinted || false;
+    let prevDept = null;
+    if (dept === 'printing') prevDept = 'aim';
+    else if (dept === 'pi') prevDept = 'printing';
+    else if (dept === 'packing') prevDept = batchIsPrinted ? 'pi' : 'aim';
+    else if (dept === 'dispatch') prevDept = 'packing';
+    if (prevDept) {
+      const hasPrevOut = getScansForBox(labelId).some(s => s.dept === prevDept && s.type === 'out');
+      if (!hasPrevOut) {
+        if (currentDept !== 'admin') {
+          return {ok:false, msg:`🚫 Box not yet scanned OUT of ${(DEPT_LABELS[prevDept]||prevDept).toUpperCase()}. Complete ${(DEPT_LABELS[prevDept]||prevDept).toUpperCase()} before ${(DEPT_LABELS[dept]||dept).toUpperCase()}.`};
+        }
+        // Admin: continue (server will challenge with override prompt)
+      }
+    }
+  }
 
   const scan = { id:uid(), labelId, batchNumber:label.batchNumber, labelNumber:label.labelNumber, dept, type, ts:now(), operator:operator||currentDept, size:label.size, qty:label.qty, _local:true };
   state.scans.push(scan);
@@ -1606,13 +1695,37 @@ function recordScan(labelId, dept, type, operator, parsed){
   }
 
   // SCANS GO DIRECTLY TO SERVER — never to localStorage
-  // Push to server, handle duplicate rejection, refresh all devices immediately
+  // Push to server, handle rejection (duplicate, upstream missing, blocked), refresh all devices immediately
   pushToServer('/api/tracking/scan',{scan}).then(result=>{
     if(result && result.duplicate){
       // Server rejected — another device already scanned this label
-      // Remove from local state and show error
       state.scans=state.scans.filter(s=>s.id!==scan.id);
-      showFlash('❌ Already scanned '+type.toUpperCase()+' at '+dept.toUpperCase()+' — duplicate rejected','#dc2626');
+      toast('❌ Already scanned '+type.toUpperCase()+' at '+dept.toUpperCase()+' — duplicate rejected','#dc2626', 4000);
+    } else if(result && result.blocked){
+      // v40 P18.14b: Server rejected due to upstream-progression rule (per-label gating).
+      // Roll back local scan immediately and tell operator clearly what's wrong.
+      state.scans=state.scans.filter(s=>s.id!==scan.id);
+      const errMsg = result.error || 'Scan blocked';
+      toast('🚫 ' + errMsg, '#dc2626', 5000);
+      // For admins, offer one-tap override
+      if (currentDept === 'admin' && result.upstream_dept) {
+        setTimeout(() => {
+          if (confirm(`ADMIN OVERRIDE\n\n${errMsg}\n\nDo you want to force this scan through?\nThis is logged for audit.\n\nUse only for data correction — never for routine scanning.`)) {
+            // Resubmit with override flag
+            const ovScan = {...scan, id: uid()};   // new id so server doesn't dedupe
+            state.scans.push({...ovScan, _local: true});
+            pushToServer('/api/tracking/scan', {scan: ovScan, adminOverride: true}).then(r2 => {
+              if (r2 && r2.ok) {
+                toast(`⚠️ Admin override applied — scan recorded. (Logged for audit.)`, '#f59e0b', 4000);
+                setTimeout(refreshScans, 500);
+              } else {
+                state.scans = state.scans.filter(s => s.id !== ovScan.id);
+                toast('❌ Override failed: ' + (r2?.error || 'unknown error'), '#dc2626', 4000);
+              }
+            });
+          }
+        }, 100);
+      }
     }
     // Refresh from server immediately so all devices see latest scans
     setTimeout(refreshScans, 500);
@@ -1865,7 +1978,12 @@ function getBatchWIPBreakdown(batchNo){
   const sz = batch.size;
   const useSummary = hasScanSummary();
 
-  // Raw scan counts — use full history from scanSummary when available
+  // v40 P18.14: UNIFORM DEFINITION — "packed" = packing.in (boxes scanned INTO packing).
+  // packing.out scans are NOT used in the workflow (boxes sit at packing dock until trucks
+  // pick up via dispatch). The 'packOut' variable below is a legacy misnomer kept for
+  // backward compatibility — it intentionally reads packing.in too, so any caller gets the
+  // same canonical "packed" count whether they ask for packIn or packOut.
+  // This same definition is enforced everywhere: Dashboard, Reports A/B/C/D/E/H/K, Dispatch page, exports.
   let aimInBoxes, aimOutBoxes, printOutBoxes, piOutBoxes, packInBoxes, packOutBoxes;
   if (useSummary) {
     const localExtra = (dept, type) =>
@@ -2415,15 +2533,16 @@ function renderDashboard(){
   const monthAlerts=state.alerts.filter(a=>monthBatchNos.has(a.batchNumber));
   const totalAlerts=monthAlerts.length;
   // Use _ss() for full history counts — fixes LIMIT 2000 gap on dashboard KPIs
+  // v40 Phase 18.14: Dispatched count combines legacy per-box dispatch scans + Phase 18 truck dispatches
   let packedBoxes=0, dispBoxes=0;
   if (hasScanSummary()) {
     monthBatchNos.forEach(bn => {
       packedBoxes += _ss(bn,'packing').in  + state.scans.filter(sc=>sc.batchNumber===bn&&sc.dept==='packing'&&sc.type==='in'&&sc._local).length;
-      dispBoxes   += _ss(bn,'dispatch').out + state.scans.filter(sc=>sc.batchNumber===bn&&sc.dept==='dispatch'&&sc.type==='out'&&sc._local).length;
+      dispBoxes   += _v40_dispatchedBoxes(bn);
     });
   } else {
     packedBoxes = state.scans.filter(s=>s.dept==='packing'&&s.type==='in'&&monthBatchNos.has(s.batchNumber)).length;
-    dispBoxes   = state.scans.filter(s=>s.dept==='dispatch'&&s.type==='out'&&monthBatchNos.has(s.batchNumber)).length;
+    monthBatchNos.forEach(bn => { dispBoxes += _v40_dispatchedBoxes(bn); });
   }
 
   // WIP by stage — filtered by month batches
@@ -2550,10 +2669,22 @@ function getBoxCurrentStageForBatch(batchNo){
   const batch=getBatch(batchNo);
   if(!batch) return '-';
   const flow=getBatchFlow(batch);
+  // v40 P18.14: prefer server-authoritative box counts when loaded (no scan limits)
+  const serverCounts = window._v40_boxCountsByBatch?.[batchNo];
+  // If batch has Phase 18 dispatches, show 'Dispatched' as current stage
+  if ((window._v40_dispatchedByBatch?.[batchNo] || 0) > 0) {
+    return DEPT_LABELS.dispatched || 'Dispatched';
+  }
   for(let i=flow.length-1;i>=0;i--){
     const dept=flow[i];
     if(isStageComplete(batchNo,dept)) return i<flow.length-1?DEPT_LABELS[flow[i+1]]:'Complete';
-    const inScans=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+    // Check server counts first (full history) then fall back to state.scans
+    let inScans;
+    if (serverCounts) {
+      inScans = serverCounts[`${dept}_in`] || 0;
+    } else {
+      inScans = state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').length;
+    }
     if(inScans>0) return DEPT_LABELS[dept];
   }
   return DEPT_LABELS[flow[0]];
@@ -3654,23 +3785,31 @@ function renderDispatch(){
   // Function declared below; safe to call even if API unreachable (graceful empty state).
   try { _v39_loadAndRenderInvoiceQueue({ silent: true }); } catch (e) { /* no-op if not yet defined */ }
   // Use scanSummary (full history) when available, else fall back to state.scans
+  // v40 P18.14: Dispatch counts now combine legacy scan dispatch.out + Phase 18 truck dispatches
   const batchSummary={};
   if (hasScanSummary()) {
-    // Use full scan history from server summary
-    Object.entries(state.scanSummary||{}).forEach(([bn, depts])=>{
-      const packOut = (depts.packing?.out || 0);
-      if (packOut === 0) return;
+    // Build set of all batches that have packing-out OR Phase 18 dispatch records
+    const candidateBatches = new Set();
+    Object.entries(state.scanSummary||{}).forEach(([bn, depts]) => {
+      if ((depts.packing?.out || 0) > 0) candidateBatches.add(bn);
+    });
+    (state.dispatchRecs || []).forEach(r => { if (r.batchNumber) candidateBatches.add(r.batchNumber); });
+    candidateBatches.forEach(bn => {
+      const depts = state.scanSummary[bn] || {};
+      const packOut = depts.packing?.out || 0;
       const b = getBatch(bn);
+      // v40 P18.14d: dispOut = legacy dispatch.out + Phase 18 truck records (sum, not max — straddle batches need both)
+      const dispOut = _v40_dispatchedBoxes(bn);
       batchSummary[bn] = {
         packed: packOut,
         dispIn: depts.dispatch?.in || 0,
-        dispOut: depts.dispatch?.out || 0,
+        dispOut,
         size: b?.size || '0',
         colour: b?.colour || '-'
       };
     });
   } else {
-    // Fallback: use state.scans (limited to last 2000)
+    // Fallback: use state.scans (limited) + Phase 18 records
     const packedOut=state.scans.filter(s=>s.dept==='packing'&&s.type==='in');
     const dispatchedIn=state.scans.filter(s=>s.dept==='dispatch'&&s.type==='in');
     const dispatchedOut=state.scans.filter(s=>s.dept==='dispatch'&&s.type==='out');
@@ -3682,44 +3821,49 @@ function renderDispatch(){
     });
     dispatchedIn.forEach(s=>{ if(batchSummary[s.batchNumber]) batchSummary[s.batchNumber].dispIn++; });
     dispatchedOut.forEach(s=>{ if(batchSummary[s.batchNumber]) batchSummary[s.batchNumber].dispOut++; });
+    // v40 Phase 18.14: Add Phase 18 dispatched boxes to any batch (or create entry for batches with only Phase 18 activity)
+    // v40 Phase 18.14d: _v40_dispatchedBoxes() now sums legacy scans + Phase 18 records correctly.
+    (state.dispatchRecs || []).forEach(r => {
+      if (!r.batchNumber) return;
+      if (!batchSummary[r.batchNumber]) {
+        const b = getBatch(r.batchNumber);
+        batchSummary[r.batchNumber] = { packed: 0, dispIn: 0, dispOut: 0, size: b?.size||'0', colour: b?.colour||'-' };
+      }
+      batchSummary[r.batchNumber].dispOut = _v40_dispatchedBoxes(r.batchNumber);
+    });
   }
 
-  // v37F: Compute totals (packed, inward, outward, pending) — boxes AND lakhs.
-  // Per user post-deployment request: "Dispatch reporting visibility requires enhancement
-  // for easier operational reconciliation" — totals at top help quick verification.
-  let totalPackedBoxes=0, totalInwardBoxes=0, totalOutwardBoxes=0, totalPendingBoxes=0;
-  let totalPackedQty=0,   totalInwardQty=0,   totalOutwardQty=0,   totalPendingQty=0;
+  // v40 P18.14c: Compute totals (packed, dispatched, pending) — boxes AND lakhs.
+  // "Inward" tracking removed — that was a legacy dispatch.in concept superseded by
+  // the unified Packed → Dispatched terminology. See Phase 18.14b for source-of-truth definitions.
+  let totalPackedBoxes=0, totalOutwardBoxes=0, totalPendingBoxes=0;
+  let totalPackedQty=0,   totalOutwardQty=0,   totalPendingQty=0;
   Object.values(batchSummary).forEach(s=>{
     const pending = Math.max(0, s.packed - s.dispOut);
     totalPackedBoxes  += s.packed;
-    totalInwardBoxes  += s.dispIn;
     totalOutwardBoxes += s.dispOut;
     totalPendingBoxes += pending;
     totalPackedQty    += boxToLakh(s.packed,  s.size);
-    totalInwardQty    += boxToLakh(s.dispIn,  s.size);
     totalOutwardQty   += boxToLakh(s.dispOut, s.size);
     totalPendingQty   += boxToLakh(pending,   s.size);
   });
 
-  // v37F: Colour-wise rollup for both ledger AND dispatch records
-  // Aggregate packed/inward/outward/pending by colour
+  // v40 P18.14c: Colour-wise rollup for both ledger AND dispatch records.
+  // 3-column rollup: packed / dispatched / pending. Inward dropped.
   const colourRollup = {};
-  // v37I B1: Also build per (batch, PC, colour) detail rows for expanded summary
   const colourDetailRows = [];
   Object.entries(batchSummary).forEach(([batchNo, s])=>{
     const c = s.colour || '-';
-    if (!colourRollup[c]) colourRollup[c] = { packedBoxes:0, inwardBoxes:0, outwardBoxes:0, pendingBoxes:0,
-                                               packedQty:0, inwardQty:0, outwardQty:0, pendingQty:0 };
+    if (!colourRollup[c]) colourRollup[c] = { packedBoxes:0, outwardBoxes:0, pendingBoxes:0,
+                                               packedQty:0, outwardQty:0, pendingQty:0 };
     const pending = Math.max(0, s.packed - s.dispOut);
     colourRollup[c].packedBoxes  += s.packed;
-    colourRollup[c].inwardBoxes  += s.dispIn;
     colourRollup[c].outwardBoxes += s.dispOut;
     colourRollup[c].pendingBoxes += pending;
     colourRollup[c].packedQty    += boxToLakh(s.packed,  s.size);
-    colourRollup[c].inwardQty    += boxToLakh(s.dispIn,  s.size);
     colourRollup[c].outwardQty   += boxToLakh(s.dispOut, s.size);
     colourRollup[c].pendingQty   += boxToLakh(pending,   s.size);
-    // v37I B1: per-batch detail row
+    // per-batch detail row
     const b = getBatch(batchNo);
     colourDetailRows.push({
       colour: c,
@@ -3729,8 +3873,6 @@ function renderDispatch(){
       size: s.size,
       packedBoxes: s.packed,
       packedQty: boxToLakh(s.packed, s.size),
-      inwardBoxes: s.dispIn,
-      inwardQty: boxToLakh(s.dispIn, s.size),
       outwardBoxes: s.dispOut,
       outwardQty: boxToLakh(s.dispOut, s.size),
       pendingBoxes: pending,
@@ -3757,20 +3899,18 @@ function renderDispatch(){
          the Scan Out activity. Falls back gracefully when SAP unreachable. -->
     <div id="v39-invoice-queue" style="margin-bottom:12px"></div>
 
-    <!-- v37F: TOTALS SUMMARY (top of page for quick reconciliation) -->
-    <div class="grid-4 mb-12" style="gap:8px">
+    <!-- v37F: TOTALS SUMMARY (top of page for quick reconciliation)
+         v40 P18.14c: Removed "Inward" tile — that concept (dispatch.in scans) is from the legacy
+         two-stage dispatch flow. Under unified terminology the meaningful states are
+         Packed (ready) → Dispatched (shipped) with Pending = packed − dispatched. -->
+    <div class="grid-3 mb-12" style="gap:8px">
       <div class="kpi" style="background:var(--surface2);padding:10px;border-radius:6px;border-left:3px solid var(--accent2)">
         <div class="kpi-label" style="font-size:10px;color:var(--text3);letter-spacing:.5px">📦 TOTAL PACKED</div>
         <div class="kpi-val" style="font-size:18px;font-weight:700;color:var(--accent2)">${totalPackedBoxes} <span style="font-size:11px;color:var(--text3)">boxes</span></div>
         <div class="kpi-sub" style="font-size:11px;color:var(--text2)">${fmt(totalPackedQty)} L</div>
       </div>
-      <div class="kpi" style="background:var(--surface2);padding:10px;border-radius:6px;border-left:3px solid var(--accent5)">
-        <div class="kpi-label" style="font-size:10px;color:var(--text3);letter-spacing:.5px">📥 TOTAL INWARD</div>
-        <div class="kpi-val" style="font-size:18px;font-weight:700;color:var(--accent5)">${totalInwardBoxes} <span style="font-size:11px;color:var(--text3)">boxes</span></div>
-        <div class="kpi-sub" style="font-size:11px;color:var(--text2)">${fmt(totalInwardQty)} L</div>
-      </div>
       <div class="kpi" style="background:var(--surface2);padding:10px;border-radius:6px;border-left:3px solid var(--green)">
-        <div class="kpi-label" style="font-size:10px;color:var(--text3);letter-spacing:.5px">🚚 TOTAL OUTWARD</div>
+        <div class="kpi-label" style="font-size:10px;color:var(--text3);letter-spacing:.5px">🚚 TOTAL DISPATCHED</div>
         <div class="kpi-val" style="font-size:18px;font-weight:700;color:var(--green)">${totalOutwardBoxes} <span style="font-size:11px;color:var(--text3)">boxes</span></div>
         <div class="kpi-sub" style="font-size:11px;color:var(--text2)">${fmt(totalOutwardQty)} L</div>
       </div>
@@ -3839,8 +3979,7 @@ function renderDispatch(){
         <th>PC Code</th>
         <th>Size</th>
         <th class="text-right">Packed (Boxes / L)</th>
-        <th class="text-right">Inward (Boxes / L)</th>
-        <th class="text-right">Outward (Boxes / L)</th>
+        <th class="text-right">Dispatched (Boxes / L)</th>
         <th class="text-right">Pending (Boxes / L)</th>
       </tr></thead>
       <tbody>
@@ -3853,7 +3992,6 @@ function renderDispatch(){
             <td class="td-mono">${r.pcCode}</td>
             <td class="td-mono">${r.size}</td>
             <td class="td-mono text-right">${r.packedBoxes} / <b>${fmt(r.packedQty)}L</b></td>
-            <td class="td-mono text-right">${r.inwardBoxes} / ${fmt(r.inwardQty)}L</td>
             <td class="td-mono text-right green">${r.outwardBoxes} / <b>${fmt(r.outwardQty)}L</b></td>
             <td class="td-mono text-right ${r.pendingBoxes>0?'amber fw-bold':''}">${r.pendingBoxes} / ${fmt(r.pendingQty)}L</td>
           </tr>`;
@@ -3862,7 +4000,6 @@ function renderDispatch(){
       <tfoot><tr style="background:var(--surface2);font-weight:700">
         <td colspan="5">TOTAL</td>
         <td class="td-mono text-right">${totalPackedBoxes} / <b>${fmt(totalPackedQty)}L</b></td>
-        <td class="td-mono text-right">${totalInwardBoxes} / ${fmt(totalInwardQty)}L</td>
         <td class="td-mono text-right green">${totalOutwardBoxes} / <b>${fmt(totalOutwardQty)}L</b></td>
         <td class="td-mono text-right amber">${totalPendingBoxes} / ${fmt(totalPendingQty)}L</td>
       </tr></tfoot>
@@ -3876,7 +4013,7 @@ function renderDispatch(){
       <input id="dispatch-search" type="text" placeholder="🔍 Search batch / customer / PC / colour…" oninput="filterDispatchTables(this.value)" style="border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:13px;background:var(--surface);color:var(--text);min-width:240px">
     </div>
     <div class="tbl-wrap"><table id="dispatch-ledger-table">
-      <thead><tr><th>Batch</th><th>Customer</th><th>PC Code</th><th>Colour</th><th>Size</th><th>Packed Boxes</th><th>Packed Qty (L)</th><th>Received</th><th>Dispatched</th><th>Pending</th><th>Action</th></tr></thead>
+      <thead><tr><th>Batch</th><th>Customer</th><th>PC Code</th><th>Colour</th><th>Size</th><th>Packed Boxes</th><th>Packed Qty (L)</th><th>Dispatched</th><th>Pending</th><th>Action</th></tr></thead>
       <tbody>
       ${Object.entries(batchSummary).map(([batchNo,s])=>{
         const batch=getBatch(batchNo);
@@ -3893,18 +4030,16 @@ function renderDispatch(){
           <td class="td-mono">${s.size}</td>
           <td class="td-mono">${s.packed}</td>
           <td class="td-mono fw-bold">${fmt(packedQty)}L</td>
-          <td class="td-mono">${s.dispIn}</td>
           <td class="td-mono green">${s.dispOut} (${fmt(dispQty)}L)</td>
           <td class="td-mono ${pending>0?'fw-bold':''}">${pending} (${fmt(pendingQty)}L)</td>
           <td>${pending>0?`<button class="btn btn-sm btn-primary" onclick="openDispatchRecord('${batchNo}')">🚚 Dispatch</button>`:'<span class="badge badge-green">All Out</span>'}</td>
         </tr>`;
-      }).join('')||'<tr><td colspan="11" class="text-center text-muted">No packed boxes yet</td></tr>'}
+      }).join('')||'<tr><td colspan="10" class="text-center text-muted">No packed boxes yet</td></tr>'}
       </tbody>
       ${Object.keys(batchSummary).length > 0 ? `<tfoot><tr style="background:var(--surface2);font-weight:700">
         <td colspan="5" class="text-right">TOTAL</td>
         <td class="td-mono">${totalPackedBoxes}</td>
         <td class="td-mono"><b>${fmt(totalPackedQty)}L</b></td>
-        <td class="td-mono">${totalInwardBoxes}</td>
         <td class="td-mono green">${totalOutwardBoxes} (<b>${fmt(totalOutwardQty)}L</b>)</td>
         <td class="td-mono amber">${totalPendingBoxes} (${fmt(totalPendingQty)}L)</td>
         <td></td>
@@ -4155,14 +4290,15 @@ async function _v39_loadAndRenderInvoiceQueue({ silent = false } = {}) {
     if (!silent) console.warn('[v39 P10b] invoice queue fetch error:', e.message);
   }
   _v39_renderInvoiceQueuePanel();
-  // Schedule next refresh (clear any prior timer)
+  // Schedule next refresh (clear any prior timer).
+  // v40 Phase 18.6: align with SAP poller — 5 min cadence instead of 30s.
   if (_v39_invoiceQueueTimer) clearTimeout(_v39_invoiceQueueTimer);
   _v39_invoiceQueueTimer = setTimeout(() => {
     // Only auto-refresh if user is still on the dispatch page
     if (typeof page !== 'undefined' && page === 'dispatch') {
       _v39_loadAndRenderInvoiceQueue({ silent: true });
     }
-  }, 30000);
+  }, 5 * 60 * 1000);
 }
 
 function _v39_renderInvoiceQueuePanel() {
@@ -4189,7 +4325,108 @@ function _v39_renderInvoiceQueuePanel() {
   const lastFetchStr = _v39_invoiceQueueLastFetch
     ? `Updated ${Math.max(0, Math.floor((Date.now() - _v39_invoiceQueueLastFetch) / 1000))}s ago`
     : '';
-  const rows = invoices.map(inv => {
+  // v40 Phase 18.6: group mode = 'flat' (default), 'truck', or 'customer'
+  const groupMode = window._v40_invoiceQueueGroupMode || 'flat';
+  const groups = _v40_groupInvoices(invoices, groupMode);
+  // Build rendered groups
+  const groupsHtml = groups.map(g => _v40_renderInvoiceGroup(g, groupMode)).join('');
+  // Toggle bar
+  const toggleBtn = (mode, label) => `
+    <button class="btn btn-sm" style="background:${groupMode===mode?'#0891b2':'var(--surface2)'};color:${groupMode===mode?'#fff':'var(--text)'};border:1px solid ${groupMode===mode?'#0891b2':'var(--border)'};font-size:11px;padding:3px 10px"
+            onclick="window._v40_invoiceQueueGroupMode='${mode}';_v39_renderInvoiceQueuePanel()">${label}</button>`;
+  panel.innerHTML = `
+    <div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+        <div>
+          <strong style="font-size:13px;color:#0e7490">📋 Invoice Queue — ${invoices.length} pending Scan Out</strong>
+          <span style="color:var(--text3);font-size:11px;margin-left:8px">${lastFetchStr}</span>
+        </div>
+        <div style="display:flex;gap:4px;align-items:center">
+          <span style="font-size:11px;color:var(--text3);margin-right:4px">View:</span>
+          ${toggleBtn('flat', '📋 Flat')}
+          ${toggleBtn('truck', '🚚 By Truck')}
+          ${toggleBtn('customer', '👥 By Customer')}
+          <button class="btn btn-ghost btn-sm" onclick="_v39_loadAndRenderInvoiceQueue()" style="font-size:11px;margin-left:6px">↻ Refresh</button>
+        </div>
+      </div>
+      <!-- v40 Phase 18.11: Fallback entry — scan any box to auto-open its truck modal -->
+      <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:4px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px">
+        <span style="font-size:12px;color:#047857;font-weight:600">⚡ Quick scan:</span>
+        <input type="text" id="v40-queue-quick-scan" placeholder="Scan any box (e.g. 26V001-1) to auto-open its truck modal" onkeydown="if(event.key==='Enter'){_v40_quickScanFromQueue(this.value);this.value='';return false;}" style="flex:1;padding:5px 8px;font-size:12px;font-family:var(--mono);border:1px solid rgba(16,185,129,0.4);border-radius:4px;background:white">
+      </div>
+      ${groupsHtml}
+    </div>`;
+}
+
+// v40 Phase 18.11: Quick-scan fallback entry. Worker scans a box anywhere in the
+// queue; system parses → finds invoice by batch_number → opens truck modal.
+function _v40_quickScanFromQueue(raw) {
+  if (!raw || !raw.trim()) return;
+  const parsed = parseScanInput(raw);
+  if (!parsed.batchNumber) {
+    toast('⚠️ Could not parse scan input', 'var(--red)');
+    return;
+  }
+  // Find pending invoice with this batch
+  const match = _v39_pendingInvoices.find(i => i.batch_number === parsed.batchNumber);
+  if (!match) {
+    toast(`⚠️ No pending invoice matches batch ${parsed.batchNumber}. Check if it's already dispatched or not yet invoiced.`, 'var(--red)', 5000);
+    return;
+  }
+  const truckNumber = match.suggested_truck_number;
+  if (!truckNumber) {
+    // No truck info — fall back to single-invoice scan-out modal
+    toast(`⚠️ Batch ${parsed.batchNumber} has no truck assigned — opening single-batch scan instead`, 'var(--amber)', 4000);
+    _v39_openScanOutModal(match.id);
+    return;
+  }
+  _v40_openTruckScanOutModal(truckNumber);
+}
+
+// v40 Phase 18.6: Group invoices by truck or customer (or no-grouping flat list).
+// Each group carries header info + the invoices belonging to it.
+function _v40_groupInvoices(invoices, mode) {
+  if (mode === 'flat') {
+    return [{ key: '__all__', label: '', invoices }];
+  }
+  const map = new Map();
+  for (const inv of invoices) {
+    let key, label, truckNumber = null;
+    if (mode === 'truck') {
+      const tn = inv.suggested_truck_number;
+      key = tn ? 'truck-' + tn : 'no-truck';
+      label = tn ? '🚚 Truck #' + tn : '🚚 (no truck assigned)';
+      truckNumber = tn || null;
+    } else {  // customer
+      key = inv.customer || '(no customer)';
+      label = '👥 ' + key;
+    }
+    if (!map.has(key)) map.set(key, { key, label, invoices: [], truckNumber });
+    map.get(key).invoices.push(inv);
+  }
+  // Sort groups: by truck number ascending, or by customer name alphabetical
+  return [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function _v40_renderInvoiceGroup(group, mode) {
+  const totalBoxes = group.invoices.reduce((s, i) => s + (parseInt(i.total_boxes) || 0), 0);
+  const totalQty = group.invoices.reduce((s, i) => s + (parseFloat(i.total_qty_lakhs) || 0), 0);
+  const totalScanned = group.invoices.reduce((s, i) => s + (parseInt(i.scanned_boxes) || 0), 0);
+  // v40 Phase 18.11: Truck-level Scan Out All button on truck-group headers.
+  // Only renders in By-Truck mode for groups with ≥1 invoice. Group.truckNumber
+  // is the numeric key extracted by _v40_groupInvoices.
+  const truckScanAllBtn = (mode === 'truck' && group.truckNumber && group.invoices.length > 0)
+    ? `<button class="btn btn-sm" style="background:#10b981;color:white;border:none;font-size:11px;padding:4px 12px;margin-left:8px" onclick="_v40_openTruckScanOutModal('${group.truckNumber}')" title="Scan all batches in this truck — boxes can be scanned in any order">🚚 Scan Out All — Truck-${group.truckNumber}</button>`
+    : '';
+  const header = mode !== 'flat' ? `
+    <div style="background:rgba(8,145,178,0.10);padding:6px 12px;border-radius:4px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;font-size:11px">
+      <strong style="color:#0e7490">${group.label}</strong>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:#0e7490">${group.invoices.length} invoice${group.invoices.length!==1?'s':''} · ${totalBoxes} boxes · ${totalQty.toFixed(2)} L · ${totalScanned}/${totalBoxes} scanned</span>
+        ${truckScanAllBtn}
+      </div>
+    </div>` : '';
+  const rows = group.invoices.map(inv => {
     const docNum   = inv.sap_doc_num || inv.sap_invoice_no || '—';
     const customer = (inv.customer || '—').substring(0, 36);
     const batch    = inv.batch_number || '—';
@@ -4199,12 +4436,15 @@ function _v39_renderInvoiceQueuePanel() {
     const sourceBadge = inv.source === 'direct_sap'
       ? '<span style="background:rgba(139,92,246,0.12);color:#7c3aed;border:1px solid rgba(139,92,246,0.3);padding:1px 6px;border-radius:3px;font-size:10px;margin-left:4px" title="Direct SAP invoice (no Sunloc-side request) — admin-approved">SAP-direct</span>'
       : '';
+    const truckBadge = inv.suggested_truck_number
+      ? '<span style="background:rgba(245,158,11,0.12);color:#92400e;padding:1px 5px;border-radius:3px;font-size:10px;margin-left:4px" title="From dispatch plan">T-' + inv.suggested_truck_number + '</span>'
+      : '';
     const progressBar = boxes > 0
       ? `<div style="background:var(--surface3);border-radius:3px;height:4px;width:60px;display:inline-block;vertical-align:middle"><div style="height:100%;width:${Math.min(100, (scanned/boxes*100))}%;background:#0891b2;border-radius:3px"></div></div>`
       : '';
     return `
       <tr style="border-bottom:1px solid var(--border)">
-        <td style="padding:6px 8px;font-family:var(--mono);font-weight:700;color:#0891b2">${docNum}${sourceBadge}</td>
+        <td style="padding:6px 8px;font-family:var(--mono);font-weight:700;color:#0891b2">${docNum}${sourceBadge}${truckBadge}</td>
         <td style="padding:6px 8px;font-size:12px">${customer}</td>
         <td style="padding:6px 8px;font-family:var(--mono);font-size:11px">${batch}</td>
         <td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-size:11px">${boxes}</td>
@@ -4216,31 +4456,22 @@ function _v39_renderInvoiceQueuePanel() {
         </td>
       </tr>`;
   }).join('');
-  panel.innerHTML = `
-    <div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-        <div>
-          <strong style="font-size:13px;color:#0e7490">📋 Invoice Queue — ${invoices.length} pending Scan Out</strong>
-          <span style="color:var(--text3);font-size:11px;margin-left:8px">${lastFetchStr}</span>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="_v39_loadAndRenderInvoiceQueue()" style="font-size:11px">↻ Refresh</button>
-      </div>
-      <div style="background:white;border-radius:4px;overflow:hidden">
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead style="background:var(--surface2)">
-            <tr>
-              <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">SAP DocNum</th>
-              <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Customer</th>
-              <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Batch</th>
-              <th style="padding:6px 8px;text-align:right;font-weight:700;font-size:11px">Boxes</th>
-              <th style="padding:6px 8px;text-align:right;font-weight:700;font-size:11px">Qty</th>
-              <th style="padding:6px 8px;text-align:center;font-weight:700;font-size:11px">Progress</th>
-              <th style="padding:6px 8px;text-align:center;font-weight:700;font-size:11px">Action</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
+  return header + `
+    <div style="background:white;border-radius:4px;overflow:hidden;margin-bottom:${mode!=='flat'?'10px':'0'}">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:var(--surface2)">
+          <tr>
+            <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Sales Order Number</th>
+            <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Customer</th>
+            <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Batch</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:700;font-size:11px">Boxes</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:700;font-size:11px">Qty</th>
+            <th style="padding:6px 8px;text-align:center;font-weight:700;font-size:11px">Progress</th>
+            <th style="padding:6px 8px;text-align:center;font-weight:700;font-size:11px">Action</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
     </div>`;
 }
 
@@ -4253,10 +4484,14 @@ function _v39_openScanOutModal(invoiceId) {
   }
   _v39_currentScanOutInvoice = inv;
   _v39_scanProgress = {
-    scanned: [],       // array of { labelId, batchNumber, boxNumber, ts }
+    scanned: [],       // array of { labelId, batchNumber, boxNumber, size, qty, lineMatch, ts }
     boxCount: inv.total_boxes || 0,
     expectedBatch: inv.batch_number,
     mismatchCount: 0,
+    // v40 Phase 18.8: strict matching state
+    invoiceLines: null,         // populated async from /api/invoice/:id/details
+    expectedByLine: null,       // Map<lineKey, { item_code, item_description, expected_qty, scanned_count }>
+    strictMode: true,
   };
   // Build modal body
   const docNum = inv.sap_doc_num || '—';
@@ -4269,13 +4504,89 @@ function _v39_openScanOutModal(invoiceId) {
       { label: 'Cancel', cls: 'btn-secondary', fn: '_v39_closeScanOut()' },
     ]
   );
-  // Apply disabled state to Dispatch Out button until all boxes scanned
+  // Apply disabled state to Dispatch Out button until all checks pass
   _v39_refreshScanOutProgress();
   // Focus the scan input
   setTimeout(() => {
     const input = document.getElementById('v39-scan-input');
     if (input) input.focus();
   }, 100);
+  // v40 Phase 18.8: fetch invoice line items asynchronously for strict matching.
+  // Non-blocking — scanning works regardless; matching becomes strict once loaded.
+  _v40_loadInvoiceLinesForScan(invoiceId);
+}
+
+// v40 Phase 18.8: fetch invoice line items + build expected-by-line map
+async function _v40_loadInvoiceLinesForScan(invoiceId) {
+  try {
+    const result = await _v40_fetchSalesRegisterDetails(invoiceId);
+    if (!result.ok || !result.lines) {
+      // Fall back to legacy box-count-only matching
+      console.warn('[v40 P18.8] Could not load invoice lines — strict matching disabled');
+      _v39_scanProgress.strictMode = false;
+      _v40_renderLineExpectationsPanel();
+      _v39_refreshScanOutProgress();
+      return;
+    }
+    _v39_scanProgress.invoiceLines = result.lines;
+    // Build expected-by-line map keyed by item_code (PC Code).
+    // If multiple lines share an item_code (rare), accumulate.
+    const expByLine = new Map();
+    for (const ln of result.lines) {
+      const key = (ln.item_code || '').trim();
+      if (!key) continue;
+      if (!expByLine.has(key)) {
+        expByLine.set(key, {
+          item_code: ln.item_code,
+          item_description: ln.item_description || '',
+          expected_qty: 0,
+          scanned_count: 0,
+        });
+      }
+      expByLine.get(key).expected_qty += parseFloat(ln.quantity) || 0;
+    }
+    _v39_scanProgress.expectedByLine = expByLine;
+    _v40_renderLineExpectationsPanel();
+    _v39_refreshScanOutProgress();
+  } catch (e) {
+    console.warn('[v40 P18.8] strict matching load error:', e.message);
+    _v39_scanProgress.strictMode = false;
+  }
+}
+
+// v40 Phase 18.8: Render the expected line-items panel inside Scan Out modal.
+// Each line shows item_code, expected qty, and live scanned-count progress.
+function _v40_renderLineExpectationsPanel() {
+  const panel = document.getElementById('v40-scan-line-expectations');
+  if (!panel) return;
+  const sp = _v39_scanProgress;
+  if (!sp.expectedByLine || sp.expectedByLine.size === 0) {
+    if (!sp.strictMode) {
+      panel.innerHTML = `<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.3);border-radius:4px;padding:6px 10px;font-size:11px;color:#92400e;margin-bottom:8px">
+        ⚠ Invoice line items not available — matching by box count only.
+      </div>`;
+    } else {
+      panel.innerHTML = `<div style="padding:6px 10px;font-size:11px;color:var(--text3);margin-bottom:8px">⏳ Loading invoice line items for strict matching…</div>`;
+    }
+    return;
+  }
+  const rows = [];
+  for (const [key, exp] of sp.expectedByLine.entries()) {
+    const done = exp.scanned_count >= exp.expected_qty;
+    const over = exp.scanned_count > exp.expected_qty;
+    const color = over ? '#dc2626' : (done ? '#10b981' : '#92400e');
+    const bg = over ? 'rgba(220,38,38,0.06)' : (done ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.04)');
+    rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:${bg};border-radius:3px;font-size:11px">
+      <span><strong style="font-family:var(--mono);color:#0891b2">${exp.item_code}</strong>
+        <span style="color:var(--text3);margin-left:8px">${(exp.item_description || '').substring(0, 32)}</span></span>
+      <span style="font-family:var(--mono);font-weight:700;color:${color}">${exp.scanned_count} / ${exp.expected_qty.toFixed(0)}${over ? ' ⚠ OVER' : (done ? ' ✓' : '')}</span>
+    </div>`);
+  }
+  panel.innerHTML = `
+    <div style="margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">Expected by Line Item (Sales Register):</div>
+      <div style="display:flex;flex-direction:column;gap:3px">${rows.join('')}</div>
+    </div>`;
 }
 
 function _v39_buildScanOutModalBody() {
@@ -4284,7 +4595,7 @@ function _v39_buildScanOutModalBody() {
   return `
     <div style="background:var(--surface2);border-radius:6px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.6">
       <div style="display:grid;grid-template-columns:130px 1fr;gap:4px 12px">
-        <div style="color:var(--text3)">SAP DocNum:</div><div style="font-family:var(--mono);font-weight:700;color:#0891b2">${inv.sap_doc_num || '—'}</div>
+        <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:var(--mono);font-weight:700;color:#0891b2">${inv.sap_doc_num || '—'}</div>
         <div style="color:var(--text3)">DocEntry:</div><div style="font-family:var(--mono)">${inv.sap_doc_entry}</div>
         <div style="color:var(--text3)">Customer:</div><div style="font-weight:600">${inv.customer || '—'}</div>
         <div style="color:var(--text3)">Batch:</div><div style="font-family:var(--mono)">${inv.batch_number}</div>
@@ -4300,6 +4611,9 @@ function _v39_buildScanOutModalBody() {
     <div id="v39-scan-progress-bar" style="margin-bottom:12px">
       <!-- Populated by _v39_refreshScanOutProgress() -->
     </div>
+    <div id="v40-scan-line-expectations" style="margin-bottom:8px">
+      <!-- v40 Phase 18.8: Populated by _v40_renderLineExpectationsPanel() -->
+    </div>
     <div id="v39-scan-mismatch-zone" style="margin-bottom:12px"></div>
     <div style="margin-bottom:8px;font-size:11px;color:var(--text3)">Scanned boxes (most recent first):</div>
     <div id="v39-scanned-list" style="max-height:200px;overflow-y:auto;background:var(--surface2);border-radius:4px;padding:8px;font-size:11px;font-family:var(--mono)">
@@ -4307,8 +4621,8 @@ function _v39_buildScanOutModalBody() {
     </div>
     <div style="margin-top:14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div>
-        <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px">Vehicle No.</label>
-        <input type="text" id="v39-vehicle-no" placeholder="e.g. KA01AB1234" style="width:100%;padding:6px 8px;font-size:12px;font-family:var(--mono);border:1px solid var(--border);border-radius:4px">
+        <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px">Vehicle / Truck No. ${inv.suggested_truck_number ? '<span style="color:#10b981;font-size:10px;margin-left:4px">📋 auto-filled from plan</span>' : ''}</label>
+        <input type="text" id="v39-vehicle-no" placeholder="e.g. KA01AB1234 or Truck-1" value="${inv.suggested_truck_number ? 'Truck-' + inv.suggested_truck_number : ''}" style="width:100%;padding:6px 8px;font-size:12px;font-family:var(--mono);border:1px solid var(--border);border-radius:4px">
       </div>
       <div>
         <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px">Remarks (optional)</label>
@@ -4326,14 +4640,15 @@ function _v39_onBoxScanned(raw) {
   }
   const inv = _v39_currentScanOutInvoice;
   if (!inv) return;
+  const sp = _v39_scanProgress;
   // Validate batch match
   if (parsed.batchNumber && parsed.batchNumber !== inv.batch_number) {
-    _v39_scanProgress.mismatchCount++;
+    sp.mismatchCount++;
     _v39_setMismatchMsg(`⚠️ Wrong batch! Scanned: <strong>${parsed.batchNumber}</strong> — expected: <strong>${inv.batch_number}</strong>. Box NOT counted.`);
     return;
   }
   // Validate duplicate (same labelId or same batch+boxNumber)
-  const dup = _v39_scanProgress.scanned.find(s =>
+  const dup = sp.scanned.find(s =>
     (parsed.labelId && s.labelId === parsed.labelId) ||
     (parsed.boxNumber && s.boxNumber === parsed.boxNumber)
   );
@@ -4342,19 +4657,66 @@ function _v39_onBoxScanned(raw) {
     return;
   }
   // Validate not over-count
-  if (_v39_scanProgress.scanned.length >= _v39_scanProgress.boxCount) {
-    _v39_setMismatchMsg(`⚠️ Already at ${_v39_scanProgress.boxCount}/${_v39_scanProgress.boxCount} boxes. Extra scan ignored.`);
+  if (sp.scanned.length >= sp.boxCount) {
+    _v39_setMismatchMsg(`⚠️ Already at ${sp.boxCount}/${sp.boxCount} boxes. Extra scan ignored.`);
     return;
   }
-  // Accept
-  _v39_scanProgress.scanned.push({
+  // v40 Phase 18.8: strict line-item matching
+  // The QR label encodes Size in parsed.size. The Sales Register lines key by item_code (PC Code).
+  // The Sunloc batch carries pc_code which equals the SAP ItemCode. We try to derive the
+  // scan's PC code via the label's batch → invoice's pc_code (single PC per batch) OR via
+  // a direct size match if invoice has multiple lines of different sizes.
+  let lineMatch = null;
+  if (sp.strictMode && sp.expectedByLine && sp.expectedByLine.size > 0) {
+    // Derive the scanned box's PC code:
+    //   1. Use invoice's own pc_code field (most reliable — one PC code per Sunloc batch)
+    //   2. Fall back to the label-embedded size field if present
+    const scanPcCode = (inv.pc_code || '').trim();
+    if (scanPcCode && sp.expectedByLine.has(scanPcCode)) {
+      lineMatch = scanPcCode;
+    } else if (sp.expectedByLine.size === 1) {
+      // Single-line invoice — any scan that passed batch+dup+overflow gates belongs to that line
+      lineMatch = [...sp.expectedByLine.keys()][0];
+    } else {
+      // Multi-line — try size-based match
+      const scanSize = (parsed.size || '').trim();
+      if (scanSize) {
+        for (const [key, exp] of sp.expectedByLine.entries()) {
+          if ((exp.item_description || '').includes('Size ' + scanSize)) {
+            lineMatch = key;
+            break;
+          }
+        }
+      }
+    }
+    if (!lineMatch) {
+      sp.mismatchCount++;
+      _v39_setMismatchMsg(`⚠️ Item description mismatch — scanned PC/size doesn't match any line on this invoice. Box NOT counted.`);
+      return;
+    }
+    // Per-line over-count check
+    const exp = sp.expectedByLine.get(lineMatch);
+    if (exp.scanned_count >= exp.expected_qty) {
+      sp.mismatchCount++;
+      _v39_setMismatchMsg(`⚠️ Line <strong>${lineMatch}</strong> already at full count (${exp.expected_qty.toFixed(0)}/${exp.expected_qty.toFixed(0)}). Box NOT counted.`);
+      return;
+    }
+    // Accept — increment line count
+    exp.scanned_count += 1;
+  }
+  // Accept the scan
+  sp.scanned.push({
     labelId: parsed.labelId,
     batchNumber: parsed.batchNumber || inv.batch_number,
     boxNumber: parsed.boxNumber || null,
+    size: parsed.size || null,
+    qty: parsed.qty || null,
+    lineMatch: lineMatch,
     ts: Date.now(),
   });
   _v39_setMismatchMsg('');
   _v39_refreshScanOutProgress();
+  _v40_renderLineExpectationsPanel();
 }
 
 function _v39_setMismatchMsg(html) {
@@ -4398,12 +4760,30 @@ function _v39_refreshScanOutProgress() {
       }).join('');
     }
   }
-  // Enable/disable Dispatch Out button
+  // Enable/disable Dispatch Out button — v40 Phase 18.8: strict 3-way gate
+  // (1) box count match  (2) per-line counts all met  (3) no overflow per line
+  const sp = _v39_scanProgress;
+  let allLinesMet = true;
+  if (sp.strictMode && sp.expectedByLine && sp.expectedByLine.size > 0) {
+    for (const exp of sp.expectedByLine.values()) {
+      if (exp.scanned_count !== Math.round(exp.expected_qty)) {
+        allLinesMet = false; break;
+      }
+    }
+  }
+  const dispatchEnabled = complete && allLinesMet;
   const dispatchBtn = document.querySelector('#modal-footer .btn-success');
   if (dispatchBtn) {
-    dispatchBtn.disabled = !complete;
-    dispatchBtn.style.opacity = complete ? '1' : '0.5';
-    dispatchBtn.style.cursor = complete ? 'pointer' : 'not-allowed';
+    dispatchBtn.disabled = !dispatchEnabled;
+    dispatchBtn.style.opacity = dispatchEnabled ? '1' : '0.5';
+    dispatchBtn.style.cursor = dispatchEnabled ? 'pointer' : 'not-allowed';
+    if (sp.strictMode && complete && !allLinesMet) {
+      dispatchBtn.title = 'Line item counts do not match invoice. Check Sales Register expectations above.';
+    } else if (!complete) {
+      dispatchBtn.title = `${scanned}/${total} boxes scanned — scan all boxes to enable dispatch`;
+    } else {
+      dispatchBtn.title = '';
+    }
   }
 }
 
@@ -4437,7 +4817,8 @@ async function _v39_dispatchOut() {
     const j = await r.json();
     if (j.ok) {
       _v39_closeScanOut();
-      toast(`✅ Dispatched ${total} boxes • Record: ${j.dispatch_record_id}`, 'var(--green)', 4000);
+      // v40 Phase 18.9: close-the-loop — show success modal with link to Invoice Register
+      _v40_showDispatchSuccessModal(inv, j, total);
       _v39_loadAndRenderInvoiceQueue();
       // Refresh the rest of renderDispatch too — new dispatch record in the ledger
       setTimeout(() => { if (typeof renderDispatch === 'function') renderDispatch(); }, 500);
@@ -4459,6 +4840,436 @@ function _v39_closeScanOut() {
   _v39_currentScanOutInvoice = null;
   _v39_scanProgress = { scanned: [], boxCount: 0 };
   closeModal();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// v40 Phase 18.11 — Truck-level scan-out modal
+// ────────────────────────────────────────────────────────────────────────
+// Worker scans boxes for ALL pending invoices in a truck from one modal.
+// Boxes can be scanned in any order; system auto-routes each scan to the
+// correct invoice by batch number. Cross-truck scans are hard-rejected.
+// Progress persists to server so worker can resume after disconnect.
+// ════════════════════════════════════════════════════════════════════════
+
+window._v40_truckScanState = null;
+// Shape: {
+//   truckNumber, invoices[], scanned[{invoiceId, labelId, batchNumber, boxNumber, ts}],
+//   linesByInvoice{ invoiceId → expectedByLine Map }, vehicleNo, lrNo, remarks,
+//   mismatchCount, lastSaveAt, saveInFlight
+// }
+
+async function _v40_openTruckScanOutModal(truckNumber) {
+  if (!truckNumber) { toast('No truck number specified', 'var(--red)'); return; }
+  // Find all pending invoices for this truck
+  const invoices = _v39_pendingInvoices.filter(i => String(i.suggested_truck_number) === String(truckNumber));
+  if (invoices.length === 0) {
+    alert('⚠️ No pending invoices in Truck-' + truckNumber + '.\n\nAll batches may already be dispatched, or the truck has no invoices linked yet.');
+    return;
+  }
+  // Check for boxless / blocked invoices
+  const blocked = invoices.filter(i => !i.batch_number);
+  if (blocked.length > 0) {
+    alert(`⚠️ Truck-${truckNumber} has ${blocked.length} invoice(s) without a batch_number attached.\n\nAn admin must approve and attach a batch from the Generated Invoices admin page first.`);
+    return;
+  }
+  // Try to restore prior session from server
+  let prior = null;
+  try {
+    const r = await fetch(serverUrl + '/api/invoice/truck-scan-session/' + encodeURIComponent(truckNumber), { signal: AbortSignal.timeout(8000) });
+    const j = await r.json();
+    if (j.ok && j.exists) prior = j.session;
+  } catch (e) {
+    console.warn('[v40 P18.11] session restore failed:', e.message);
+  }
+  // Build state — restore prior scans if present
+  window._v40_truckScanState = {
+    truckNumber: String(truckNumber),
+    invoices,
+    scanned: prior ? (prior.scannedLabels || []) : [],
+    linesByInvoice: {},
+    vehicleNo: prior?.vehicleNo || '',
+    lrNo: prior?.lrNo || '',
+    remarks: prior?.remarks || '',
+    mismatchCount: 0,
+    lastSaveAt: 0,
+    saveInFlight: false,
+  };
+  // Pre-fetch line expectations for each invoice (best-effort — strict mode requires this)
+  for (const inv of invoices) {
+    try {
+      const r = await fetch(serverUrl + '/api/invoice/' + encodeURIComponent(inv.id) + '/details', { signal: AbortSignal.timeout(10000) });
+      const j = await r.json();
+      if (j.ok && j.details && j.details.lines) {
+        const expectedByLine = new Map();
+        for (let i = 0; i < j.details.lines.length; i++) {
+          const line = j.details.lines[i];
+          expectedByLine.set(i, { itemCode: line.itemCode || '', description: line.description || '', quantity: parseFloat(line.quantity) || 0, scanned: 0 });
+        }
+        window._v40_truckScanState.linesByInvoice[inv.id] = expectedByLine;
+      }
+    } catch (e) {
+      // Fallback to box-count-only mode for this invoice
+      console.warn('[v40 P18.11] line fetch failed for ' + inv.id + ':', e.message);
+    }
+  }
+  // Open modal
+  openModal(
+    `🚚 Scan Out — Truck-${truckNumber}`,
+    `${invoices.length} batches · ${invoices.reduce((s,i)=>s+(parseInt(i.total_boxes)||0),0)} boxes`,
+    _v40_buildTruckScanModalBody(),
+    [
+      { label: '🚚 Dispatch Out', cls: 'btn-success', fn: '_v40_confirmTruckDispatch()' },
+      { label: 'Cancel', cls: 'btn-secondary', fn: '_v40_closeTruckScan()' },
+    ]
+  );
+  // Refresh progress display + focus input
+  _v40_refreshTruckScanProgress();
+  setTimeout(() => {
+    const input = document.getElementById('v40-truck-scan-input');
+    if (input) input.focus();
+  }, 100);
+}
+
+function _v40_buildTruckScanModalBody() {
+  const st = window._v40_truckScanState;
+  if (!st) return '<div style="padding:20px">No state</div>';
+  const totalBoxesAll = st.invoices.reduce((s, i) => s + (parseInt(i.total_boxes) || 0), 0);
+  return `
+    <div style="background:var(--surface2);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.5">
+      <div style="display:grid;grid-template-columns:130px 1fr;gap:4px 12px">
+        <div style="color:var(--text3)">Truck:</div><div style="font-family:var(--mono);font-weight:700">Truck-${st.truckNumber}</div>
+        <div style="color:var(--text3)">Batches:</div><div><strong>${st.invoices.length}</strong> &middot; ${totalBoxesAll} boxes total</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+      <div>
+        <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px;font-weight:600">Vehicle No. <span style="color:#dc2626">*</span></label>
+        <input type="text" id="v40-truck-vehicle" placeholder="e.g. KA01AB1234" value="${st.vehicleNo}" onblur="window._v40_truckScanState.vehicleNo=this.value;_v40_persistTruckSession()" style="width:100%;padding:6px 8px;font-size:12px;font-family:var(--mono);border:1px solid var(--border);border-radius:4px">
+      </div>
+      <div>
+        <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px;font-weight:600">LR No. <span style="color:#dc2626">*</span></label>
+        <input type="text" id="v40-truck-lr" placeholder="e.g. LR-12345" value="${st.lrNo}" onblur="window._v40_truckScanState.lrNo=this.value;_v40_persistTruckSession()" style="width:100%;padding:6px 8px;font-size:12px;font-family:var(--mono);border:1px solid var(--border);border-radius:4px">
+      </div>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px;font-weight:600">Scan box QR (any order, any batch in this truck)</label>
+      <input type="text" id="v40-truck-scan-input" placeholder="Scan or type batch-box (e.g. 26V001-1)" onkeydown="if(event.key==='Enter'){_v40_onTruckBoxScanned(this.value);this.value='';return false;}" style="width:100%;padding:8px 10px;font-size:14px;font-family:var(--mono);border:2px solid #0891b2;border-radius:4px;background:white">
+    </div>
+    <div id="v40-truck-mismatch-zone" style="min-height:0;margin-bottom:10px"></div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px">
+      <div style="font-weight:700;font-size:12px;margin-bottom:8px">Progress per batch:</div>
+      <div id="v40-truck-progress-board" style="display:grid;grid-template-columns:1fr;gap:6px;max-height:300px;overflow-y:auto"></div>
+    </div>
+    <div>
+      <label style="display:block;font-size:11px;color:var(--text3);margin-bottom:4px">Remarks (optional)</label>
+      <input type="text" id="v40-truck-remarks" placeholder="Notes..." value="${st.remarks}" onblur="window._v40_truckScanState.remarks=this.value;_v40_persistTruckSession()" style="width:100%;padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px">
+    </div>`;
+}
+
+function _v40_onTruckBoxScanned(raw) {
+  if (!raw || !raw.trim()) return;
+  const st = window._v40_truckScanState;
+  if (!st) return;
+  const parsed = parseScanInput(raw);
+  if (!parsed.labelId && !parsed.batchNumber) {
+    _v40_setTruckMismatchMsg('⚠️ Could not parse scan. Try again.');
+    return;
+  }
+  // Find which invoice in this truck this batch belongs to
+  const targetInv = st.invoices.find(i => i.batch_number === parsed.batchNumber);
+  if (!targetInv) {
+    // Cross-truck or unknown — HARD REJECT (per spec: 2)
+    st.mismatchCount++;
+    _v40_setTruckMismatchMsg(`⚠️ Wrong truck — Batch <strong>${parsed.batchNumber || '?'}</strong> is not in Truck-${st.truckNumber}. Scan ignored.`);
+    return;
+  }
+  // Duplicate check (same labelId or same batch+boxNumber within this session)
+  const dup = st.scanned.find(s =>
+    (parsed.labelId && s.labelId === parsed.labelId) ||
+    (s.batchNumber === parsed.batchNumber && parsed.boxNumber && s.boxNumber === parsed.boxNumber)
+  );
+  if (dup) {
+    _v40_setTruckMismatchMsg(`⚠️ Already scanned: ${parsed.batchNumber}-${parsed.boxNumber || parsed.labelId}. Ignored.`);
+    return;
+  }
+  // Over-count check for this batch
+  const scannedForBatch = st.scanned.filter(s => s.invoiceId === targetInv.id).length;
+  if (scannedForBatch >= (parseInt(targetInv.total_boxes) || 0)) {
+    _v40_setTruckMismatchMsg(`⚠️ Batch ${parsed.batchNumber} already at full count (${targetInv.total_boxes}). Extra scan ignored.`);
+    return;
+  }
+  // Accept
+  st.scanned.push({
+    invoiceId: targetInv.id,
+    labelId: parsed.labelId || null,
+    batchNumber: parsed.batchNumber || targetInv.batch_number,
+    boxNumber: parsed.boxNumber || null,
+    ts: Date.now(),
+  });
+  _v40_setTruckMismatchMsg('');
+  _v40_refreshTruckScanProgress();
+  _v40_persistTruckSession();
+}
+
+function _v40_setTruckMismatchMsg(html) {
+  const z = document.getElementById('v40-truck-mismatch-zone');
+  if (!z) return;
+  if (html) {
+    z.innerHTML = `<div style="background:rgba(220,38,38,0.10);border:1px solid rgba(220,38,38,0.4);color:#991b1b;padding:8px 10px;border-radius:4px;font-size:12px">${html}</div>`;
+  } else {
+    z.innerHTML = '';
+  }
+}
+
+function _v40_refreshTruckScanProgress() {
+  const st = window._v40_truckScanState;
+  if (!st) return;
+  const board = document.getElementById('v40-truck-progress-board');
+  if (!board) return;
+  const rows = st.invoices.map(inv => {
+    const scannedCount = st.scanned.filter(s => s.invoiceId === inv.id).length;
+    const expected = parseInt(inv.total_boxes) || 0;
+    const pct = expected > 0 ? Math.min(100, scannedCount / expected * 100) : 0;
+    let icon, bgColor;
+    if (scannedCount === 0)          { icon = '⏳'; bgColor = 'rgba(0,0,0,0.04)'; }
+    else if (scannedCount < expected){ icon = '🔍'; bgColor = 'rgba(245,158,11,0.10)'; }
+    else                              { icon = '✅'; bgColor = 'rgba(16,185,129,0.12)'; }
+    return `
+      <div style="display:grid;grid-template-columns:30px 100px 1fr 80px;gap:8px;align-items:center;padding:6px 8px;background:${bgColor};border-radius:4px;font-size:12px">
+        <div style="font-size:14px">${icon}</div>
+        <div style="font-family:var(--mono);font-weight:700">${inv.batch_number}</div>
+        <div>
+          <div style="height:8px;background:var(--surface3);border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${scannedCount >= expected ? '#10b981' : '#f59e0b'};transition:width 0.2s"></div>
+          </div>
+        </div>
+        <div style="text-align:right;font-family:var(--mono);font-weight:700">${scannedCount} / ${expected}</div>
+      </div>`;
+  }).join('');
+  board.innerHTML = rows;
+}
+
+let _v40_persistDebounceTimer = null;
+function _v40_persistTruckSession() {
+  // Debounce: cluster rapid saves within 500ms
+  clearTimeout(_v40_persistDebounceTimer);
+  _v40_persistDebounceTimer = setTimeout(_v40_persistTruckSessionImmediate, 500);
+}
+
+async function _v40_persistTruckSessionImmediate() {
+  const st = window._v40_truckScanState;
+  if (!st || st.saveInFlight) return;
+  st.saveInFlight = true;
+  try {
+    // Read latest input values from DOM
+    const v = document.getElementById('v40-truck-vehicle')?.value || st.vehicleNo;
+    const l = document.getElementById('v40-truck-lr')?.value || st.lrNo;
+    const r = document.getElementById('v40-truck-remarks')?.value || st.remarks;
+    st.vehicleNo = v; st.lrNo = l; st.remarks = r;
+    await fetch(serverUrl + '/api/invoice/truck-scan-session/' + encodeURIComponent(st.truckNumber), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceIds: st.invoices.map(i => i.id),
+        scannedLabels: st.scanned,
+        vehicleNo: v, lrNo: l, remarks: r,
+        startedBy: (window.currentUser?.username || 'unknown'),
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    st.lastSaveAt = Date.now();
+  } catch (e) {
+    console.warn('[v40 P18.11] persist failed:', e.message);
+  } finally {
+    st.saveInFlight = false;
+  }
+}
+
+async function _v40_confirmTruckDispatch() {
+  const st = window._v40_truckScanState;
+  if (!st) return;
+  // Read latest inputs
+  const vehicleNo = document.getElementById('v40-truck-vehicle')?.value?.trim() || '';
+  const lrNo = document.getElementById('v40-truck-lr')?.value?.trim() || '';
+  const remarks = document.getElementById('v40-truck-remarks')?.value?.trim() || '';
+  if (!vehicleNo) { alert('⚠️ Vehicle No. is required.'); return; }
+  if (!lrNo) { alert('⚠️ LR No. is required.'); return; }
+  // Determine which batches are complete
+  const completeInvoices = [];
+  const incompleteInvoices = [];
+  for (const inv of st.invoices) {
+    const scannedCount = st.scanned.filter(s => s.invoiceId === inv.id).length;
+    const expected = parseInt(inv.total_boxes) || 0;
+    if (scannedCount >= expected && expected > 0) completeInvoices.push({ inv, scannedCount });
+    else incompleteInvoices.push({ inv, scannedCount, expected });
+  }
+  if (completeInvoices.length === 0) {
+    alert('⚠️ No batches are complete yet. Scan at least one batch fully before dispatching.');
+    return;
+  }
+  // Partial dispatch confirmation (per spec: 3B)
+  if (incompleteInvoices.length > 0) {
+    const incompleteList = incompleteInvoices.map(x => `   • ${x.inv.batch_number} — ${x.scannedCount}/${x.expected} boxes`).join('\n');
+    const confirmMsg = `✅ ${completeInvoices.length} batch(es) ready to dispatch\n⏳ ${incompleteInvoices.length} batch(es) incomplete:\n${incompleteList}\n\nLeave the ${incompleteInvoices.length} incomplete batch(es) on the floor and dispatch only the ${completeInvoices.length} complete one(s)?`;
+    if (!confirm(confirmMsg)) return;
+  }
+  // Build payload and submit
+  const payload = {
+    truckNumber: st.truckNumber,
+    vehicleNo, lrNo, remarks,
+    dispatchedBy: window.currentUser?.username || 'unknown',
+    batches: completeInvoices.map(x => ({
+      invoiceId: x.inv.id,
+      scannedBoxes: x.scannedCount,
+    })),
+  };
+  // Show live progress UI
+  _v40_showTruckDispatchProgress(completeInvoices);
+  try {
+    const r = await fetch(serverUrl + '/api/invoice/dispatch-out-truck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60000),
+    });
+    const j = await r.json();
+    _v40_renderTruckDispatchResults(j, st);
+  } catch (e) {
+    alert(`⚠️ Dispatch failed: ${e.message}\n\nYou can retry — session state is preserved on the server.`);
+  }
+}
+
+function _v40_showTruckDispatchProgress(completeInvoices) {
+  const rows = completeInvoices.map(x => `
+    <div id="v40-td-row-${x.inv.id}" style="display:grid;grid-template-columns:30px 100px 1fr 100px;gap:8px;align-items:center;padding:6px 8px;background:rgba(0,0,0,0.04);border-radius:4px;margin-bottom:4px;font-size:12px">
+      <div style="font-size:14px">⏳</div>
+      <div style="font-family:var(--mono);font-weight:700">${x.inv.batch_number}</div>
+      <div style="color:var(--text3)">Dispatching...</div>
+      <div style="text-align:right;font-family:var(--mono);font-size:11px">${x.scannedCount} boxes</div>
+    </div>`).join('');
+  const body = `
+    <div style="padding:4px 0">
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px">Processing ${completeInvoices.length} batch(es)...</div>
+      ${rows}
+    </div>`;
+  openModal('🚚 Dispatch in Progress', '', body, []);
+}
+
+function _v40_renderTruckDispatchResults(j, st) {
+  const truckNumber = st.truckNumber;
+  const successCount = j.successCount || 0;
+  const failureCount = j.failureCount || 0;
+  const allOK = failureCount === 0 && successCount > 0;
+  const headerIcon = allOK ? '🎉' : (successCount > 0 ? '⚠️' : '❌');
+  const headerColor = allOK ? 'var(--green)' : (successCount > 0 ? '#f59e0b' : 'var(--red)');
+  const headerText = allOK ? `Dispatched ${successCount} batch(es) successfully`
+                            : (successCount > 0 ? `${successCount} succeeded, ${failureCount} failed`
+                                                  : `All ${failureCount} batch(es) failed`);
+  const rows = (j.results || []).map(r => {
+    const inv = st.invoices.find(i => i.id === r.invoiceId);
+    const batchLabel = inv ? inv.batch_number : (r.batchNumber || '?');
+    const icon = r.ok ? '✅' : '❌';
+    const bgColor = r.ok ? 'rgba(16,185,129,0.10)' : 'rgba(220,38,38,0.10)';
+    const detail = r.ok
+      ? `<span style="color:#15803d">Dispatched · ${r.boxes} boxes · ${parseFloat(r.qty).toFixed(2)}L</span>`
+      : `<span style="color:#991b1b">${r.error || 'Unknown error'}</span>`;
+    return `
+      <div style="display:grid;grid-template-columns:30px 100px 1fr;gap:8px;align-items:center;padding:6px 8px;background:${bgColor};border-radius:4px;margin-bottom:4px;font-size:12px">
+        <div style="font-size:14px">${icon}</div>
+        <div style="font-family:var(--mono);font-weight:700">${batchLabel}</div>
+        <div>${detail}</div>
+      </div>`;
+  }).join('');
+  const body = `
+    <div style="padding:4px 0">
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="font-size:42px">${headerIcon}</div>
+        <div style="font-size:15px;font-weight:700;color:${headerColor};margin-top:4px">${headerText}</div>
+      </div>
+      <div style="margin-bottom:12px">${rows}</div>
+      ${allOK ? `<div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px;font-size:12px;color:#0e7490;text-align:center">All ${successCount} batches now visible in <strong>Generated Invoices</strong> as Dispatched.</div>` : ''}
+    </div>`;
+  openModal(`🚚 Truck-${truckNumber} Dispatch Result`, '', body, [
+    { label: 'Done', cls: 'btn-primary', fn: '_v40_finishTruckDispatch()' },
+  ]);
+}
+
+async function _v40_finishTruckDispatch() {
+  // Clear local state and reload queue
+  window._v40_truckScanState = null;
+  closeModal();
+  // Refresh the Invoice Queue
+  if (typeof _v39_loadAndRenderInvoiceQueue === 'function') {
+    try { await _v39_loadAndRenderInvoiceQueue(); } catch (e) {}
+  }
+}
+
+function _v40_closeTruckScan() {
+  // Don't clear server state — user can resume later.
+  // Just clear local state and close modal.
+  window._v40_truckScanState = null;
+  closeModal();
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// End v40 Phase 18.11
+// ════════════════════════════════════════════════════════════════════════
+
+// v40 Phase 18.9: close-the-loop success modal after Dispatch Out completes.
+// Shows summary of what was dispatched + link to view this invoice in the Generated
+// Invoices ledger (filtered view).
+function _v40_showDispatchSuccessModal(inv, dispatchResult, totalBoxes) {
+  const docNum = inv.sap_doc_num || '—';
+  const recId = dispatchResult.dispatch_record_id || '';
+  const body = `
+    <div style="text-align:center;padding:8px 0">
+      <div style="font-size:48px;margin-bottom:8px">✅</div>
+      <div style="font-size:16px;font-weight:700;color:var(--green);margin-bottom:14px">
+        Dispatched ${totalBoxes} boxes successfully
+      </div>
+      <div style="background:var(--surface2);border-radius:6px;padding:12px 16px;text-align:left;font-size:12px;line-height:1.7;margin-bottom:14px;display:grid;grid-template-columns:130px 1fr;gap:4px 12px">
+        <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:var(--mono);font-weight:700;color:#0891b2">${docNum}</div>
+        <div style="color:var(--text3)">Customer:</div><div style="font-weight:600">${inv.customer || '—'}</div>
+        <div style="color:var(--text3)">Batch:</div><div style="font-family:var(--mono)">${inv.batch_number}</div>
+        <div style="color:var(--text3)">Boxes:</div><div style="font-family:var(--mono);font-weight:700">${totalBoxes}</div>
+        <div style="color:var(--text3)">Dispatch Record:</div><div style="font-family:var(--mono);font-size:11px">${recId}</div>
+      </div>
+      <div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 12px;font-size:12px;color:#0e7490;line-height:1.5">
+        Invoice now visible in the <strong>Generated Invoices</strong> ledger as <strong>Dispatched</strong>.
+      </div>
+    </div>`;
+  openModal('🎉 Dispatch Complete', `${inv.batch_number}`, body, [
+    { label: '📑 View in Invoice Register', cls: 'btn-primary', fn: `_v40_jumpToInvoiceRegister('${inv.sap_doc_num || ''}','${inv.id}')` },
+    { label: 'Done', cls: 'btn-secondary', fn: 'closeModal()' },
+  ]);
+}
+
+// v40 Phase 18.9: navigate to Generated Invoices tab pre-filtered to a specific invoice.
+function _v40_jumpToInvoiceRegister(docNum, invoiceId) {
+  closeModal();
+  // Switch to Reports area, then to the Generated Invoices sub-tab.
+  if (typeof showPage === 'function') {
+    try { showPage('reports'); } catch(e) {}
+  }
+  // Use a setTimeout so the page DOM mounts before we try to invoke its filters
+  setTimeout(() => {
+    // Pre-set filter: docNum search
+    if (typeof renderGeneratedInvoices === 'function') {
+      try {
+        window._v39_invoiceListLastFilters = { ...(window._v39_invoiceListLastFilters || {}), search: docNum || '' };
+      } catch (e) {}
+      // If a "Generated Invoices" sub-tab exists, click it
+      const tab = document.querySelector('[data-tab="generated-invoices"], #tab-generated-invoices');
+      if (tab && typeof tab.click === 'function') tab.click();
+      try { renderGeneratedInvoices(); } catch(e) {}
+      // Auto-open the detail modal for that specific invoice once list loads
+      if (invoiceId) {
+        setTimeout(() => {
+          try { _v39_showInvoiceDetail(invoiceId); } catch(e) {}
+        }, 300);
+      }
+    }
+  }, 100);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -4642,7 +5453,7 @@ function _v39_renderInvoiceTable() {
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead style="background:var(--surface2);position:sticky;top:0;z-index:5">
           <tr>
-            <th style="padding:8px;text-align:left;font-weight:700;font-size:11px">SAP DocNum</th>
+            <th style="padding:8px;text-align:left;font-weight:700;font-size:11px">Sales Order Number</th>
             <th style="padding:8px;text-align:left;font-weight:700;font-size:11px">DocEntry</th>
             <th style="padding:8px;text-align:left;font-weight:700;font-size:11px">Date</th>
             <th style="padding:8px;text-align:left;font-weight:700;font-size:11px">Customer</th>
@@ -4670,7 +5481,7 @@ function _v39_showInvoiceDetail(invoiceId) {
     <div style="font-size:12px;line-height:1.7">
       <div style="font-weight:700;color:#0e7490;margin-bottom:8px;font-size:13px">SAP Reference</div>
       <div style="background:var(--surface2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;gap:4px 12px">
-        <div style="color:var(--text3)">SAP DocNum:</div><div style="font-family:var(--mono);font-weight:700;color:#0891b2">${inv.sap_doc_num || '—'}</div>
+        <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:var(--mono);font-weight:700;color:#0891b2">${inv.sap_doc_num || '—'}</div>
         <div style="color:var(--text3)">DocEntry:</div><div style="font-family:var(--mono)">${inv.sap_doc_entry || '—'}</div>
         <div style="color:var(--text3)">Invoice Date:</div><div>${invDate}</div>
         <div style="color:var(--text3)">Source:</div><div>${inv.source === 'direct_sap' ? 'Direct SAP (no Sunloc request)' : 'Sunloc-triggered'}</div>
@@ -4718,6 +5529,12 @@ function _v39_showInvoiceDetail(invoiceId) {
     </div>`;
   // v39 Phase 16: assemble modal footer with conditional admin actions
   const footerButtons = [];
+  // v40 Phase 18.7: always offer Sales Register details (line-item view)
+  footerButtons.push({
+    label: '📋 View Sales Register Details',
+    cls: 'btn-secondary',
+    fn: `_v40_showSalesRegisterDetails('${inv.id}')`,
+  });
   if (currentDept === 'admin') {
     // Direct-SAP approval action (only if source='direct_sap' and not yet approved)
     if (inv.source === 'direct_sap' && !inv.admin_approved_at) {
@@ -4740,6 +5557,101 @@ function _v39_showInvoiceDetail(invoiceId) {
   openModal(`Invoice ${inv.sap_doc_num || inv.id}`, inv.customer || '', body, footerButtons);
 }
 
+// v40 Phase 18.7: Fetch and display structured Sales Register details for an invoice.
+// Powers (1) the inline detail view in the Generated Invoices tab,
+// (2) the Scan-Out matching pane in Phase 18.8 (compares scanned boxes to line items),
+// (3) the close-the-loop register link in Phase 18.9.
+// Cache parsed details so repeat opens are instant.
+window._v40_salesRegisterCache = window._v40_salesRegisterCache || {};
+async function _v40_fetchSalesRegisterDetails(invoiceId) {
+  if (_v40_salesRegisterCache[invoiceId]) return _v40_salesRegisterCache[invoiceId];
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  try {
+    const r = await fetch(serverUrl + '/api/invoice/' + encodeURIComponent(invoiceId) + '/details');
+    const j = await r.json();
+    if (j.ok) {
+      _v40_salesRegisterCache[invoiceId] = j;
+      return j;
+    }
+    return { ok: false, error: j.error || 'fetch failed' };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+async function _v40_showSalesRegisterDetails(invoiceId) {
+  // Show loading state while fetching
+  openModal('📋 Sales Register Details', 'Loading...', '<div style="padding:24px;text-align:center;color:var(--text3)">⏳ Fetching invoice line items from SAP cache...</div>', [
+    { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' },
+  ]);
+  const result = await _v40_fetchSalesRegisterDetails(invoiceId);
+  if (!result.ok) {
+    closeModal();
+    alert('Could not load Sales Register details: ' + (result.error || 'unknown error'));
+    return;
+  }
+  const h = result.header || {};
+  const lines = result.lines || [];
+  const fmtCurrency = v => '₹' + (parseFloat(v) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Build line-items table
+  const linesHtml = lines.length ? `
+    <table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:8px">
+      <thead style="background:var(--surface2);font-weight:700">
+        <tr>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Item Code (PC)</th>
+          <th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)">Description</th>
+          <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)">Qty</th>
+          <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)">Unit Price</th>
+          <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)">Line Total</th>
+          <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)">VAT %</th>
+          <th style="padding:6px 8px;text-align:right;border-bottom:1px solid var(--border)">VAT Amt</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${lines.map(l => `
+          <tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:5px 8px;font-family:var(--mono);color:#0891b2;font-weight:600">${l.item_code || '—'}</td>
+            <td style="padding:5px 8px">${l.item_description || '—'}</td>
+            <td style="padding:5px 8px;text-align:right;font-family:var(--mono)">${(l.quantity || 0).toFixed(2)}</td>
+            <td style="padding:5px 8px;text-align:right;font-family:var(--mono)">${fmtCurrency(l.unit_price)}</td>
+            <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-weight:600">${fmtCurrency(l.line_total)}</td>
+            <td style="padding:5px 8px;text-align:right;font-family:var(--mono)">${(l.vat_percent || 0).toFixed(1)}%</td>
+            <td style="padding:5px 8px;text-align:right;font-family:var(--mono)">${fmtCurrency(l.vat_amount)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>` : '<div style="padding:14px;text-align:center;color:var(--text3);font-size:12px">No line items in this invoice.</div>';
+  const body = `
+    <div style="font-size:12px;line-height:1.7;max-height:75vh;overflow-y:auto">
+      <div style="font-weight:700;color:#0e7490;margin-bottom:8px;font-size:13px">Invoice Header</div>
+      <div style="background:var(--surface2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;gap:4px 12px">
+        <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:var(--mono);font-weight:700;color:#0891b2">${h.sap_doc_num || '—'}</div>
+        <div style="color:var(--text3)">Date:</div><div>${h.invoice_date ? new Date(h.invoice_date).toLocaleDateString() : '—'}</div>
+        <div style="color:var(--text3)">Customer:</div><div style="font-weight:600">${h.customer || '—'}</div>
+        <div style="color:var(--text3)">Card Code:</div><div style="font-family:var(--mono)">${h.card_code || '—'}</div>
+        <div style="color:var(--text3)">PO Number:</div><div style="font-family:var(--mono)">${h.po_number || '—'}</div>
+        <div style="color:var(--text3)">Batch:</div><div style="font-family:var(--mono)">${h.batch_number || '—'}</div>
+      </div>
+      <div style="font-weight:700;color:#0e7490;margin-bottom:8px;font-size:13px">Addresses</div>
+      <div style="background:var(--surface2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;gap:4px 12px">
+        <div style="color:var(--text3)">Bill To:</div><div style="white-space:pre-wrap">${h.bill_to_address || '—'}</div>
+        <div style="color:var(--text3)">Ship To:</div><div style="white-space:pre-wrap">${h.ship_to_address || '—'}</div>
+      </div>
+      <div style="font-weight:700;color:#0e7490;margin-bottom:8px;font-size:13px">Line Items (${lines.length})</div>
+      ${linesHtml}
+      <div style="margin-top:12px;background:var(--surface2);border-radius:6px;padding:10px 14px;display:grid;grid-template-columns:140px 1fr;gap:4px 12px">
+        <div style="color:var(--text3)">Taxable Amount:</div><div style="font-family:var(--mono);font-weight:600">${fmtCurrency(h.taxable_amount)}</div>
+        <div style="color:var(--text3)">IGST/VAT:</div><div style="font-family:var(--mono)">${fmtCurrency(h.igst_amount)}</div>
+        <div style="color:var(--text3)">Total Amount:</div><div style="font-family:var(--mono);font-weight:700;font-size:14px;color:#0891b2">${fmtCurrency(h.total_amount)}</div>
+        <div style="color:var(--text3)">IRN:</div><div style="font-family:var(--mono);font-size:11px;word-break:break-all">${h.irn || '—'}</div>
+      </div>
+    </div>`;
+  openModal('📋 Sales Register — ' + (h.sap_doc_num || ''), h.customer || '', body, [
+    { label: '← Back to Invoice', cls: 'btn-secondary', fn: '_v39_showInvoiceDetail(\'' + invoiceId + '\')' },
+    { label: 'Close', cls: 'btn-secondary', fn: 'closeModal()' },
+  ]);
+}
+
 function _v39_exportInvoicesCsv() {
   const invoices = _v39_invoiceList || [];
   if (invoices.length === 0) {
@@ -4748,7 +5660,7 @@ function _v39_exportInvoicesCsv() {
   }
   // CSV column order — matches the table + adds detail fields
   const headers = [
-    'SAP DocNum','SAP DocEntry','Invoice Date','Source',
+    'Sales Order Number','Sales Order ID','Invoice Date','Source',
     'Customer','Card Code','PO Number','Batch','PC Code','Size','Colour',
     'Total Boxes','Total Qty (L)','Taxable Amount','IGST','Total Amount',
     'IRN','Dispatch Status','Scanned Boxes','Dispatched At','Dispatched By','Vehicle','LR No',
@@ -4849,7 +5761,7 @@ function _v39_renderDirectSapBanner() {
         <table style="width:100%;border-collapse:collapse;font-size:12px">
           <thead style="background:rgba(139,92,246,0.08)">
             <tr>
-              <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">SAP DocNum</th>
+              <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Sales Order Number</th>
               <th style="padding:6px 8px;text-align:left;font-weight:700;font-size:11px">Customer</th>
               <th style="padding:6px 8px;text-align:right;font-weight:700;font-size:11px">Boxes</th>
               <th style="padding:6px 8px;text-align:right;font-weight:700;font-size:11px">Amount</th>
@@ -4878,8 +5790,8 @@ function _v39_openDirectSapApproveModal(invoiceId) {
           <div style="font-size:12px;color:var(--text2)">This invoice was created directly in SAP without a corresponding Sunloc invoice request. Verify the details below and optionally attach a batch_number so it enters the dispatch flow.</div>
         </div>
         <div style="background:var(--surface2);border-radius:6px;padding:10px;margin-bottom:14px;display:grid;grid-template-columns:130px 1fr;gap:4px 12px;font-size:12px">
-          <div style="color:var(--text3)">SAP DocNum:</div><div style="font-family:var(--mono);font-weight:700">${inv.sap_doc_num || '—'}</div>
-          <div style="color:var(--text3)">SAP DocEntry:</div><div style="font-family:var(--mono)">${inv.sap_doc_entry || '—'}</div>
+          <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:var(--mono);font-weight:700">${inv.sap_doc_num || '—'}</div>
+          <div style="color:var(--text3)">Sales Order ID:</div><div style="font-family:var(--mono)">${inv.sap_doc_entry || '—'}</div>
           <div style="color:var(--text3)">Customer:</div><div>${inv.customer || '—'}</div>
           <div style="color:var(--text3)">PO Number:</div><div style="font-family:var(--mono)">${inv.po_number || '—'}</div>
           <div style="color:var(--text3)">Total Boxes:</div><div style="font-family:var(--mono);font-weight:700">${inv.total_boxes || 0}</div>
@@ -4953,7 +5865,7 @@ function _v39_openDeemedScanOutModal(invoiceId) {
           <div style="font-size:12px;color:var(--text2)">This will mark the invoice as <strong>dispatched without physical box scanning</strong>. A dispatch record will be created with "DEEMED: &lt;reason&gt;" in the remarks for audit. Use only for documentation-only dispatches or remote-warehouse handoffs where boxes never pass through Sunloc dispatch.</div>
         </div>
         <div style="background:var(--surface2);border-radius:6px;padding:10px;margin-bottom:14px;display:grid;grid-template-columns:130px 1fr;gap:4px 12px;font-size:12px">
-          <div style="color:var(--text3)">SAP DocNum:</div><div style="font-family:var(--mono);font-weight:700">${inv.sap_doc_num || '—'}</div>
+          <div style="color:var(--text3)">Sales Order Number:</div><div style="font-family:var(--mono);font-weight:700">${inv.sap_doc_num || '—'}</div>
           <div style="color:var(--text3)">Customer:</div><div>${inv.customer || '—'}</div>
           <div style="color:var(--text3)">Batch:</div><div style="font-family:var(--mono)">${inv.batch_number || '—'}</div>
           <div style="color:var(--text3)">Boxes:</div><div style="font-family:var(--mono);font-weight:700">${inv.total_boxes || 0}</div>
@@ -5161,11 +6073,8 @@ function renderBatchCard(batch){
   const ag=getBatchAGrade(batchNo,batch.isPrinted?'printed':'unprinted');
   const labels=getLabelsByBatch(batchNo);
   const totalBoxes=labels.length;
-  // v37E WIP-fix: gate dispatch count by scanSummary so old dispatches aren't dropped beyond LIMIT 2000
-  const localDispatchOut = state.scans.filter(sc=>sc.batchNumber===batchNo&&sc.dept==='dispatch'&&sc.type==='out'&&sc._local).length;
-  const dispatched = hasScanSummary()
-    ? (_ss(batchNo,'dispatch').out + localDispatchOut)
-    : state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='dispatch'&&s.type==='out').length;
+  // v40 Phase 18.14: combined-source dispatched count (legacy scans + Phase 18 records)
+  const dispatched = _v40_dispatchedBoxes(batchNo);
   const dispatchPct=totalBoxes>0?(dispatched/totalBoxes*100):0;
 
   // v37E WIP-fix: use scanSummary for packed count
@@ -5237,22 +6146,29 @@ function renderBatchDetail(batch){
   const labels=getLabelsByBatch(batchNo).sort((a,b)=>a.labelNumber-b.labelNumber);
   const flow=getBatchFlow(batch);
 
-  // Summary counts per stage
+  // v40 P18.14: Summary counts per stage, including new at_dispatch/dispatched buckets
   const stageSummary={};
   flow.forEach(dept=>{stageSummary[dept]={in:0,out:0};});
+  stageSummary.at_dispatch = { in: 0, out: 0 };
+  stageSummary.dispatched = { in: 0, out: 0 };
   labels.forEach(l=>{
     const stage=getBoxCurrentStage(l.id);
     if(stageSummary[stage]) stageSummary[stage].in++;
   });
 
+  // v40 P18.14: count tiles include 'at_dispatch' (amber) and 'dispatched' (green)
+  const atDispatchCount = labels.filter(l => getBoxCurrentStage(l.id) === 'at_dispatch').length;
+  const dispatchedCount = labels.filter(l => getBoxCurrentStage(l.id) === 'dispatched').length;
+
   return `<div class="divider"></div>
   <div class="card-title">Box-Level Detail — All ${labels.length} Labels</div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-    ${flow.map(dept=>{
+    ${flow.filter(d => d !== 'dispatch').map(dept=>{
       const atStage=labels.filter(l=>getBoxCurrentStage(l.id)===dept).length;
       return atStage>0?`<span style="background:var(--surface3);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:12px;font-family:var(--mono)">${DEPT_LABELS[dept]||dept}: <strong>${atStage}</strong></span>`:'';
     }).join('')}
-    ${(()=>{const dispatched=labels.filter(l=>getBoxCurrentStage(l.id)==='dispatch').length; return dispatched>0?`<span style="background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.3);border-radius:4px;padding:4px 10px;font-size:12px;font-family:var(--mono);color:var(--accent2)">Dispatched: <strong>${dispatched}</strong></span>`:'';})()}
+    ${atDispatchCount>0?`<span style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);border-radius:4px;padding:4px 10px;font-size:12px;font-family:var(--mono);color:#92400e" title="Packed-out, awaiting truck">At Dispatch: <strong>${atDispatchCount}</strong></span>`:''}
+    ${dispatchedCount>0?`<span style="background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.3);border-radius:4px;padding:4px 10px;font-size:12px;font-family:var(--mono);color:var(--accent2)" title="Physically shipped">Dispatched: <strong>${dispatchedCount}</strong></span>`:''}
   </div>
   <div class="tbl-wrap"><table>
     <thead><tr><th>Label #</th><th>Qty (L)</th><th>Status</th><th>Current Stage</th>
@@ -5265,15 +6181,19 @@ function renderBatchDetail(batch){
       const getStamp=(dept,type)=>{const s=scans.find(sc=>sc.dept===dept&&sc.type===type);return s?fmtDateTime(s.ts):null;};
       const boxAlerts=state.alerts.filter(a=>a.labelId===l.id);
       const isVoided=l.voided;
+      // v40 P18.14: status badge distinguishes At Dispatch (amber) from Dispatched (green)
       const statusBadge=isVoided?'<span class="badge badge-red">Voided</span>':
-        stage==='dispatch'?'<span class="badge badge-green">Dispatched</span>':
-        stage==='pending'?'<span class="badge badge-gray">Pending</span>':
+        stage==='dispatched'?'<span class="badge badge-green">Dispatched</span>':
+        stage==='at_dispatch'?'<span class="badge badge-amber">At Dispatch</span>':
+        stage==='production'?'<span class="badge badge-gray">In Production</span>':
         `<span class="badge badge-blue">In WIP</span>`;
+      // v40 P18.14: current stage cell uses matching color
+      const stageColor = stage==='dispatched'?'badge-green':stage==='at_dispatch'?'badge-amber':stage==='production'?'badge-gray':'badge-blue';
       return `<tr style="${isVoided?'opacity:0.5':''}">
         <td class="td-mono fw-bold" style="color:var(--accent)">${l.isExcess?`<span style="color:#C55A11">E-${l.excessNum||Math.abs(l.labelNumber)}</span>`:(l.labelNumber<0?`<span style="color:#C55A11">E-${Math.abs(l.labelNumber)}</span>`:`${l.labelNumber}`)}${l.isPartial?' <span class="badge badge-amber" style="font-size:8px">P</span>':''}${l.isReplacement?' <span class="badge badge-purple" style="font-size:8px">R</span>':''}</td>
         <td class="td-mono">${fmt(l.qty)}</td>
         <td>${statusBadge}</td>
-        <td><span class="badge ${stage==='dispatch'?'badge-green':stage==='pending'?'badge-gray':'badge-blue'}">${DEPT_LABELS[stage]||stage}</span></td>
+        <td><span class="badge ${stageColor}">${DEPT_LABELS[stage]||stage}</span></td>
         ${flow.map(dept=>{
           const inT=getStamp(dept,'in'); const outT=getStamp(dept,'out');
           if(outT) return `<td class="td-mono text-sm"><span class="badge badge-green" title="OUT: ${outT}">✓</span></td>`;
@@ -5389,7 +6309,7 @@ function renderReports(forceRebuild){
     <div class="card cursor-pointer" onclick="renderReportL()" style="border-left:4px solid #0e7490;grid-column:span 2">
       <div class="card-title" style="color:#0e7490">📋 Report L — SAP Invoice Ledger</div>
       <div class="fw-bold mb-4">Sequential Invoice Register with Dispatch Status</div>
-      <div class="text-sm text-muted">Chronological list of all SAP invoices received during the selected month. Columns: SAP DocNum/DocEntry, date, customer, batch, boxes, qty, taxable amount, IGST, total, IRN, dispatch status, vehicle, dispatched-at. Totals row at bottom. Print-friendly + CSV export. Use for GST audits and monthly reconciliation.</div>
+      <div class="text-sm text-muted">Chronological list of all SAP invoices received during the selected month. Columns: Sales Order Number, date, customer, batch, boxes, qty, taxable amount, IGST, total, IRN, dispatch status, vehicle, dispatched-at. Totals row at bottom. Print-friendly + CSV export. Use for GST audits and monthly reconciliation.</div>
       <button class="btn btn-sm mt-12" style="background:#0e7490;color:#fff">Generate Invoice Ledger →</button>
     </div>
   </div>
@@ -5405,7 +6325,21 @@ function renderReports(forceRebuild){
 function renderReportH(){ window._activeReport = renderReportH;
   _captureReportScroll();
   if(!document.getElementById('report-output')) renderReports();
-  const batches = getTrkMonthBatches().filter(b=>!b.deleted&&b.batchNumber).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||''));
+  // v40 Phase 18.14: scan-driven inclusion. Don't rely solely on getTrkMonthBatches() —
+  // include any batch that has scan activity (in scanSummary OR scans) so batches with
+  // mismatched metadata dates still surface their gaps. This fixes the reported issue
+  // of batches being absent from Report H despite having visible gaps.
+  const monthBatchSet = new Set(getTrkMonthBatches().filter(b=>!b.deleted&&b.batchNumber).map(b=>b.batchNumber));
+  const scanActiveBatchSet = new Set(Object.keys(state.scanSummary || {}));
+  // Also include batches that have Phase 18 dispatch records
+  for (const r of (state.dispatchRecs || [])) {
+    if (r.batchNumber) scanActiveBatchSet.add(r.batchNumber);
+  }
+  // Union: month-meta-matched + scan-active
+  const unionBatchNos = new Set([...monthBatchSet, ...scanActiveBatchSet]);
+  const batches = state.batches
+    .filter(b => !b.deleted && b.batchNumber && unionBatchNos.has(b.batchNumber))
+    .sort((a, b) => (a.batchNumber || '').localeCompare(b.batchNumber || ''));
   const getTransitions = (batch) => batch.isPrinted
     ? [['aim','printing'],['printing','pi'],['pi','packing'],['packing','dispatch']]
     : [['aim','packing'],['packing','dispatch']];
@@ -5415,13 +6349,23 @@ function renderReportH(){ window._activeReport = renderReportH;
 
   batches.forEach(b=>{
     getTransitions(b).forEach(([from,to])=>{
-      // Use scanSummary (full history) when available — fixes LIMIT 2000 gap issue
+      // Use scanSummary (full history) when available
       const fromOut = hasScanSummary()
         ? (_ss(b.batchNumber,from).out + state.scans.filter(sc=>sc.batchNumber===b.batchNumber&&sc.dept===from&&sc.type==='out'&&sc._local).length)
         : state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===from&&s.type==='out').length;
-      const toIn = hasScanSummary()
+      let toIn = hasScanSummary()
         ? (_ss(b.batchNumber,to).in + state.scans.filter(sc=>sc.batchNumber===b.batchNumber&&sc.dept===to&&sc.type==='in'&&sc._local).length)
         : state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===to&&s.type==='in').length;
+      // v40 Phase 18.14: for packing→dispatch transition, also count Phase 18 truck dispatches
+      // as "dispatched-in" — those boxes are shipped, no per-box dispatch-IN scan exists for them.
+      // v40 P18.14d: sum() — straddle batches have both legacy dispatch.in scans AND Phase 18 records
+      // for different physical movements; both count as boxes received at dispatch.
+      if (to === 'dispatch') {
+        const phase18Boxes = state.dispatchRecs
+          .filter(r => r.batchNumber === b.batchNumber)
+          .reduce((s, r) => s + (parseInt(r.boxes) || 0), 0);
+        toIn = toIn + phase18Boxes;
+      }
       const gap     = fromOut - toIn;
       if(gap > 0){
         totalGaps++;
@@ -5950,7 +6894,7 @@ function renderReportF(){ window._activeReport = renderReportF;
       <thead><tr>
         <th>Batch No.</th><th>Customer</th><th style="white-space:nowrap">Size</th>
         <th>DPR Qty (L)</th><th>DPR Boxes (Cumul.)</th>
-        <th>AIM Scans (Cumul.)</th><th>AIM Today</th><th>Packed Out (Cumul.)</th>
+        <th>AIM Scans (Cumul.)</th><th>AIM Today</th><th>Packed (Cumul.)</th>
         <th>Status</th>
       </tr></thead>
       <tbody>${rows}</tbody>
@@ -5969,7 +6913,7 @@ _scrollIntoReportIfFirstView('F');
 }
 
 function exportReportF(){
-  const rows = [['Batch No.','Customer','Size','DPR Qty (L)','DPR Boxes','AIM Scans Today','AIM Total','Packed Out Today','Status']];
+  const rows = [['Batch No.','Customer','Size','DPR Qty (L)','DPR Boxes','AIM Scans Today','AIM Total','Packed Today','Status']];
   const todayStr = today();
   const todayScans = state.scans.filter(s=>s.ts?.slice(0,10)===todayStr);
   const batchNos = [...new Set(todayScans.map(s=>s.batchNumber).concat(state.batches.filter(b=>b.actualQty>0).map(b=>b.batchNumber)))];
@@ -6267,7 +7211,8 @@ function renderReportA(){ window._activeReport = renderReportA;
     const wipDays=getBatchWIPDays(b.batchNumber);
     const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
     const labels=getLabelsByBatch(b.batchNumber);
-    const dispatched=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
+    // v40 Phase 18.14: combined-source dispatch (legacy scans + Phase 18 records)
+    const dispatched = _v40_dispatchedLakhs(b.batchNumber, b.size);
     // batchScans from state.scans — used ONLY for day-wise timestamps (limited but acceptable for date grouping)
     // Totals use _ss() (full history, no LIMIT)
     const batchScans=state.scans.filter(s=>s.batchNumber===b.batchNumber);
@@ -6285,14 +7230,31 @@ function renderReportA(){ window._activeReport = renderReportA;
           </tr></thead><tbody>
           ${scanDates.map(date=>{
             const dayScans=batchScans.filter(s=>s.ts?.slice(0,10)===date);
+            // v40 P18.14c: same-day Phase 18 dispatches count toward Dispatch column
+            const dayPhase18 = (state.dispatchRecs || [])
+              .filter(r => r.batchNumber === b.batchNumber && r.ts?.slice(0,10) === date)
+              .reduce((s, r) => s + (parseInt(r.boxes) || 0), 0);
             return `<tr style="border-bottom:1px solid var(--border)">
               <td style="padding:5px 10px;font-family:var(--mono);font-size:11px">${date}</td>
               ${getBatchFlow(b).map(dept=>{
                 const inn=dayScans.filter(s=>s.dept===dept&&s.type==='in').length;
                 const out=dayScans.filter(s=>s.dept===dept&&s.type==='out').length;
-                const hasActivity=inn>0||out>0;
+                // Apply uniform terminology
+                let cellContent;
+                if (dept === 'packing') {
+                  cellContent = inn > 0 ? `Packed: ${inn}` : '—';
+                } else if (dept === 'dispatch') {
+                  // v40 P18.14d: sum legacy scans + Phase 18 records (straddle: both for different shipments)
+                  const dispToday = out + dayPhase18;
+                  cellContent = dispToday > 0 ? `Dispatched: ${dispToday}` : '—';
+                } else if (dept === 'production') {
+                  cellContent = '—';
+                } else {
+                  cellContent = (inn>0||out>0) ? `IN:${inn} / OUT:${out}` : '—';
+                }
+                const hasActivity = cellContent !== '—';
                 return `<td style="padding:5px 10px;text-align:center;font-family:var(--mono);font-size:11px;${hasActivity?'color:var(--text)':'color:var(--text3)'}">
-                  ${hasActivity?`IN:${inn} / OUT:${out}`:'—'}
+                  ${cellContent}
                 </td>`;
               }).join('')}
             </tr>`;
@@ -6306,7 +7268,18 @@ function renderReportA(){ window._activeReport = renderReportA;
               const localOut = state.scans.filter(sc=>sc.batchNumber===b.batchNumber&&sc.dept===dept&&sc.type==='out'&&sc._local).length;
               const inn = hasScanSummary() ? (_ss(b.batchNumber,dept).in  + localIn)  : batchScans.filter(s=>s.dept===dept&&s.type==='in').length;
               const out = hasScanSummary() ? (_ss(b.batchNumber,dept).out + localOut) : batchScans.filter(s=>s.dept===dept&&s.type==='out').length;
-              return `<td style="padding:6px 10px;text-align:center;font-family:var(--mono);font-size:11px">IN:${inn} / OUT:${out}</td>`;
+              // v40 P18.14c: TOTAL row uses uniform terminology
+              let totalText;
+              if (dept === 'packing') {
+                totalText = `Packed: ${inn}`;
+              } else if (dept === 'dispatch') {
+                totalText = `Dispatched: ${_v40_dispatchedBoxes(b.batchNumber)}`;
+              } else if (dept === 'production') {
+                totalText = '—';
+              } else {
+                totalText = `IN:${inn} / OUT:${out}`;
+              }
+              return `<td style="padding:6px 10px;text-align:center;font-family:var(--mono);font-size:11px">${totalText}</td>`;
             }).join('')}
           </tr></tfoot>
         </table></div>
@@ -6343,9 +7316,24 @@ function renderBatchFlowSummary(batch){
     const inn = hasScanSummary() ? (_ss(batch.batchNumber,dept).in  + localIn)  : state.scans.filter(s=>s.batchNumber===batch.batchNumber&&s.dept===dept&&s.type==='in').length;
     const out = hasScanSummary() ? (_ss(batch.batchNumber,dept).out + localOut) : state.scans.filter(s=>s.batchNumber===batch.batchNumber&&s.dept===dept&&s.type==='out').length;
     const closed=isStageComplete(batch.batchNumber,dept);
+    // v40 P18.14c: Uniform terminology in flow summary cards.
+    // Packing → show only "Packed: N" (= packing.in). packing.out scans aren't in this workflow.
+    // Dispatch → show only "Dispatched: N" (= max(dispatch.out scans, Phase 18 records)).
+    // AIM/Printing/PI → keep IN/OUT (both flows meaningful for inspection stages with wastage).
+    let valueLine;
+    if (dept === 'packing') {
+      valueLine = `Packed: ${inn}`;
+    } else if (dept === 'dispatch') {
+      const dispatched = _v40_dispatchedBoxes(batch.batchNumber);
+      valueLine = `Dispatched: ${dispatched}`;
+    } else if (dept === 'production') {
+      valueLine = '—';   // production doesn't use scans (tracked via DPR)
+    } else {
+      valueLine = `IN:${inn} OUT:${out}`;
+    }
     return `<div style="background:${closed?'var(--accent2-light)':'var(--surface2)'};border:1px solid ${closed?'var(--accent2)':'var(--border)'};border-radius:6px;padding:6px 10px;text-align:center">
       <div class="text-sm fw-bold">${DEPT_LABELS[dept]}</div>
-      <div class="mono text-sm">IN:${inn} OUT:${out}</div>
+      <div class="mono text-sm">${valueLine}</div>
       <div class="text-sm ${closed?'green':''}">${closed?'✅ Done':'⏳ Open'}</div>
     </div>`;
   }).join('')}
@@ -6422,7 +7410,12 @@ function renderReportE(){ window._activeReport = renderReportE;
                                : scansForBatch.filter(s=>s.dept==='packing'&&s.type==='in').length;
     const packUnptd=!b.isPrinted?boxToLakh(packUnptd_c,b.size):0;
     const packPtd=b.isPrinted?boxToLakh(packUnptd_c,b.size):0;
-    const disp=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
+    // v40 Phase 18.14d: sum legacy + Phase 18 (straddle batches have both flows for different shipments)
+    const _legBoxes = useSS ? (_ss(b.batchNumber,'dispatch').out + localExtra('dispatch','out'))
+                            : scansForBatch.filter(s=>s.dept==='dispatch'&&s.type==='out').length;
+    const _legLakhs = boxToLakh(_legBoxes, b.size);
+    const _p18 = state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber&&(!filterDate||r.ts?.slice(0,10)===filterDate)).reduce((s,r)=>s+r.qty,0);
+    const disp = _legLakhs + _p18;
     rows.push({machine:mc,floor:floorKey,batchNo:b.batchNumber,customer:b.customer||'',pcCode:b.pcCode||'',colour:b.colour||'',size:b.size,
       isPrinted: b.isPrinted,  // v37H: used by table render to distinguish PTD vs UP for column display
       plannedQty:b.qty||0, _plannedQty:b.qty||0,
@@ -7004,7 +7997,7 @@ async function saveDispatchRecordEdit(id) {
 // targetId (optional): DOM id of the container to render into. Defaults to 'report-output'
 // so legacy direct calls still work; the Dispatch page passes 'dispatch-summary-container'.
 
-function renderReportI(targetId) {
+async function renderReportI(targetId) {
   const containerId = targetId || window._rptIContainer || 'report-output';
   // Remember the active container so filter onchange handlers re-render into the same place
   window._rptIContainer = containerId;
@@ -7019,8 +8012,34 @@ function renderReportI(targetId) {
   const fSize     = window._rptISize     || '';
   const fColour   = window._rptIColour   || '';
   const fVehicle  = window._rptIVehicle  || '';
+  const fSalesOrder = window._rptISalesOrder || '';     // v40 P18.13
+  const fPcCode   = window._rptIPcCode   || '';         // v40 P18.13
   const fFrom     = window._rptIFrom     || '';   // YYYY-MM-DD
   const fTo       = window._rptITo       || '';   // YYYY-MM-DD
+  const groupMode = window._rptIGroupMode || 'flat';    // v40 P18.13: 'flat' or 'truck'
+
+  // v40 Phase 18.13: lazy-load invoices_received once per Report I session so we
+  // can join in financial fields (Total Amount, IGST, etc) and Sales Order Number.
+  // Cached in window._rptIInvoiceCache and refreshed on Refresh-All button.
+  if (!window._rptIInvoiceCache) {
+    window._rptIInvoiceCache = { loaded: false, byDocNum: {}, byBatch: {} };
+    try {
+      const r = await fetch(serverUrl + '/api/invoice/received?limit=2000', { signal: AbortSignal.timeout(10000) });
+      const j = await r.json();
+      if (j.ok) {
+        const byDocNum = {}, byBatch = {};
+        for (const inv of (j.invoices || [])) {
+          if (inv.sap_doc_num) byDocNum[String(inv.sap_doc_num)] = inv;
+          if (inv.batch_number) byBatch[inv.batch_number] = inv;
+        }
+        window._rptIInvoiceCache = { loaded: true, byDocNum, byBatch };
+      }
+    } catch (e) {
+      console.warn('[v40 P18.13] invoice cache load failed:', e.message);
+    }
+  }
+  const invByDocNum = window._rptIInvoiceCache.byDocNum;
+  const invByBatch = window._rptIInvoiceCache.byBatch;
 
   // Build dispatch plan lookup by batch number for planned-date matching.
   // Variance is computed as date-only days (both planned and actual are normalized to midnight)
@@ -7046,7 +8065,8 @@ function renderReportI(targetId) {
     });
   });
 
-  // Build enriched dispatch records — pull customer/zone/size/colour from batch master
+  // Build enriched dispatch records — pull customer/zone/size/colour from batch master,
+  // and v40 Phase 18.13 financial fields from invoices_received cache.
   const records = (state.dispatchRecs||[]).map(r => {
     const b = getBatch(r.batchNumber) || {};
     const plan = planByBatch[r.batchNumber] || {};
@@ -7055,6 +8075,16 @@ function renderReportI(targetId) {
     const varianceDays = (planTs && actualTs)
       ? Math.round((actualTs - planTs) / 86400000)
       : null;
+    // v40 P18.13: lookup invoice for financial enrichment
+    const inv = (r.invoiceNo && invByDocNum[String(r.invoiceNo)]) || invByBatch[r.batchNumber] || null;
+    const totalAmount = inv ? (parseFloat(inv.total_amount) || 0) : 0;
+    const igstAmount = inv ? (parseFloat(inv.igst_amount) || 0) : 0;
+    // Prefer SAP's taxable_amount field directly (more accurate when multiple tax types apply);
+    // fall back to derived (total - igst) if missing.
+    const taxableAmount = inv && inv.taxable_amount != null
+      ? (parseFloat(inv.taxable_amount) || 0)
+      : (totalAmount - igstAmount);
+    const salesOrderNum = inv?.sap_doc_num || r.invoiceNo || '';  // for filter + display
     return {
       id: r.id,
       ts: r.ts,
@@ -7064,11 +8094,16 @@ function renderReportI(targetId) {
       zone: b.zone || '',
       size: b.size || '',
       colour: b.colour || '',
-      pcCode: b.pcCode || '',
+      pcCode: b.pcCode || inv?.pc_code || '',
       qty: r.qty || 0,
       boxes: r.boxes || 0,
       vehicleNo: r.vehicleNo || '',
       invoiceNo: r.invoiceNo || '',
+      salesOrderNum,                       // v40 P18.13
+      invoiceId: inv?.id || null,          // for drill-in to Sales Register modal
+      taxableAmount,                       // v40 P18.13
+      igstAmount,                          // v40 P18.13
+      totalAmount,                         // v40 P18.13
       remarks: r.remarks || '',
       plannedDate: plan.plannedDate ? plan.plannedDate.slice(0,10) : '',
       varianceDays,  // negative = early, positive = late, null = no plan to compare
@@ -7077,13 +8112,15 @@ function renderReportI(targetId) {
 
   // Apply filters
   let filtered = records;
-  if (fZone)     filtered = filtered.filter(r => r.zone === fZone);
-  if (fCustomer) filtered = filtered.filter(r => (r.customer||'').toLowerCase().includes(fCustomer.toLowerCase()));
-  if (fSize)     filtered = filtered.filter(r => r.size === fSize);
-  if (fColour)   filtered = filtered.filter(r => r.colour === fColour);
-  if (fVehicle)  filtered = filtered.filter(r => (r.vehicleNo||'').toLowerCase().includes(fVehicle.toLowerCase()));
-  if (fFrom)     filtered = filtered.filter(r => r.actualDate >= fFrom);
-  if (fTo)       filtered = filtered.filter(r => r.actualDate <= fTo);
+  if (fZone)        filtered = filtered.filter(r => r.zone === fZone);
+  if (fCustomer)    filtered = filtered.filter(r => (r.customer||'').toLowerCase().includes(fCustomer.toLowerCase()));
+  if (fSize)        filtered = filtered.filter(r => r.size === fSize);
+  if (fColour)      filtered = filtered.filter(r => r.colour === fColour);
+  if (fVehicle)     filtered = filtered.filter(r => (r.vehicleNo||'').toLowerCase().includes(fVehicle.toLowerCase()));
+  if (fSalesOrder)  filtered = filtered.filter(r => String(r.salesOrderNum||'').toLowerCase().includes(fSalesOrder.toLowerCase()));  // v40 P18.13
+  if (fPcCode)      filtered = filtered.filter(r => String(r.pcCode||'').toLowerCase().includes(fPcCode.toLowerCase()));              // v40 P18.13
+  if (fFrom)        filtered = filtered.filter(r => r.actualDate >= fFrom);
+  if (fTo)          filtered = filtered.filter(r => r.actualDate <= fTo);
 
   // KPI computations
   const totalQty    = filtered.reduce((s,r)=>s+(r.qty||0), 0);
@@ -7105,7 +8142,7 @@ function renderReportI(targetId) {
   const allZones     = [...new Set(records.map(r=>r.zone).filter(Boolean))].sort();
   const allSizes     = [...new Set(records.map(r=>r.size).filter(Boolean))].sort();
   const allColours   = [...new Set(records.map(r=>r.colour).filter(Boolean))].sort();
-  const anyFilter    = fZone||fCustomer||fSize||fColour||fVehicle||fFrom||fTo;
+  const anyFilter    = fZone||fCustomer||fSize||fColour||fVehicle||fSalesOrder||fPcCode||fFrom||fTo;
 
   // Sort filtered records by actual date desc
   filtered.sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
@@ -7175,11 +8212,28 @@ function renderReportI(targetId) {
         </select>
       </div>
     </div>
-    <div class="form-row cols-4 mb-12" style="gap:8px">
+    <div class="form-row cols-4 mb-8" style="gap:8px">
+      <div class="form-group">
+        <label style="font-size:10px;letter-spacing:.5px;color:var(--text3)">Sales Order Number</label>
+        <input type="text" placeholder="SAP DocNum…" value="${fSalesOrder.replace(/"/g,'&quot;')}" oninput="window._rptISalesOrder=this.value;clearTimeout(window._rptITimer);window._rptITimer=setTimeout(renderReportI,400)" class="form-control" style="font-family:var(--mono)">
+      </div>
+      <div class="form-group">
+        <label style="font-size:10px;letter-spacing:.5px;color:var(--text3)">PC Code</label>
+        <input type="text" placeholder="e.g. 01241" value="${fPcCode.replace(/"/g,'&quot;')}" oninput="window._rptIPcCode=this.value;clearTimeout(window._rptITimer);window._rptITimer=setTimeout(renderReportI,400)" class="form-control" style="font-family:var(--mono)">
+      </div>
       <div class="form-group">
         <label style="font-size:10px;letter-spacing:.5px;color:var(--text3)">Vehicle No.</label>
         <input type="text" placeholder="Vehicle…" value="${fVehicle.replace(/"/g,'&quot;')}" oninput="window._rptIVehicle=this.value;clearTimeout(window._rptITimer);window._rptITimer=setTimeout(renderReportI,400)" class="form-control">
       </div>
+      <div class="form-group">
+        <label style="font-size:10px;letter-spacing:.5px;color:var(--text3)">View</label>
+        <div style="display:flex;gap:4px">
+          <button class="btn btn-sm" style="flex:1;background:${groupMode==='flat'?'#0891b2':'var(--surface2)'};color:${groupMode==='flat'?'#fff':'var(--text)'};border:1px solid ${groupMode==='flat'?'#0891b2':'var(--border)'};font-size:11px" onclick="window._rptIGroupMode='flat';renderReportI()">📋 Flat</button>
+          <button class="btn btn-sm" style="flex:1;background:${groupMode==='truck'?'#0891b2':'var(--surface2)'};color:${groupMode==='truck'?'#fff':'var(--text)'};border:1px solid ${groupMode==='truck'?'#0891b2':'var(--border)'};font-size:11px" onclick="window._rptIGroupMode='truck';renderReportI()">🚚 By Truck</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-row cols-4 mb-12" style="gap:8px">
       <div class="form-group">
         <label style="font-size:10px;letter-spacing:.5px;color:var(--text3)">Actual Date From</label>
         <input type="date" value="${fFrom}" onchange="window._rptIFrom=this.value;renderReportI()" class="form-control">
@@ -7189,7 +8243,10 @@ function renderReportI(targetId) {
         <input type="date" value="${fTo}" onchange="window._rptITo=this.value;renderReportI()" class="form-control">
       </div>
       <div class="form-group" style="display:flex;align-items:flex-end;gap:6px">
-        ${anyFilter ? `<button class="btn btn-ghost btn-sm" onclick="window._rptIZone='';window._rptICustomer='';window._rptISize='';window._rptIColour='';window._rptIVehicle='';window._rptIFrom='';window._rptITo='';renderReportI()">✕ Clear All</button>` : ''}
+        ${anyFilter ? `<button class="btn btn-ghost btn-sm" onclick="window._rptIZone='';window._rptICustomer='';window._rptISize='';window._rptIColour='';window._rptIVehicle='';window._rptISalesOrder='';window._rptIPcCode='';window._rptIFrom='';window._rptITo='';renderReportI()">✕ Clear All</button>` : ''}
+      </div>
+      <div class="form-group" style="display:flex;align-items:flex-end;gap:6px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="window._rptIInvoiceCache=null;renderReportI()" title="Re-fetch invoice data from server">↻ Refresh Data</button>
         <button class="btn btn-secondary btn-sm" onclick="exportReportI()">📥 Export Excel</button>
       </div>
     </div>
@@ -7205,42 +8262,35 @@ function renderReportI(targetId) {
         <th>Zone</th>
         <th>Size</th>
         <th>Colour</th>
+        <th>PC Code</th>
         <th class="text-right">Qty (L)</th>
         <th class="text-right">Boxes</th>
         <th>Vehicle</th>
-        <th>Invoice</th>
+        <th>Sales Order Number</th>
+        <th class="text-right">Taxable ₹</th>
+        <th class="text-right">IGST ₹</th>
+        <th class="text-right">Total ₹</th>
       </tr></thead>
       <tbody>
-        ${filtered.length === 0
-          ? '<tr><td colspan="12" class="text-center text-muted">No dispatch records match the filters</td></tr>'
-          : filtered.map(r => `<tr>
-            <td class="td-mono text-sm">${fmtDate(r.ts)}</td>
-            <td class="td-mono text-sm">${r.plannedDate || '<span style="color:var(--text3)">—</span>'}</td>
-            <td class="text-sm">${fmtVar(r.varianceDays)}</td>
-            <td class="td-bold td-mono">${r.batchNumber}</td>
-            <td>${r.customer || '-'}</td>
-            <td class="td-mono text-sm">${r.zone || '-'}</td>
-            <td class="td-mono">${r.size || '-'}</td>
-            <td class="td-mono">${r.colour || '-'}</td>
-            <td class="td-mono text-right fw-bold">${fmt(r.qty)}</td>
-            <td class="td-mono text-right">${r.boxes}</td>
-            <td class="td-mono text-sm">${r.vehicleNo || '<span style="color:var(--text3)">—</span>'}</td>
-            <td class="td-mono text-sm">${r.invoiceNo || '<span style="color:var(--text3)">—</span>'}</td>
-          </tr>`).join('')
-        }
+        ${_v40_renderReportIBody(filtered, groupMode)}
       </tbody>
       ${filtered.length > 0 ? `<tfoot><tr style="background:var(--surface2);font-weight:700">
-        <td colspan="8" class="text-right">TOTAL (${filtered.length} dispatches)</td>
+        <td colspan="9" class="text-right">TOTAL (${filtered.length} dispatches)</td>
         <td class="td-mono text-right"><b>${fmt(totalQty)}L</b></td>
         <td class="td-mono text-right">${totalBoxes}</td>
         <td colspan="2" class="td-mono text-sm">${totalTrucks} truck${totalTrucks!==1?'s':''}</td>
+        <td class="td-mono text-right">${_v40_fmtINR(filtered.reduce((s,r)=>s+(r.taxableAmount||0),0))}</td>
+        <td class="td-mono text-right">${_v40_fmtINR(filtered.reduce((s,r)=>s+(r.igstAmount||0),0))}</td>
+        <td class="td-mono text-right"><b>${_v40_fmtINR(filtered.reduce((s,r)=>s+(r.totalAmount||0),0))}</b></td>
       </tr></tfoot>` : ''}
     </table></div>
 
     <div class="text-sm text-muted mt-12" style="font-size:11px;line-height:1.6">
       💡 <b>Variance</b>: actual − planned (negative = early, positive = late). "—" means dispatch plan not found for that batch.<br>
       <b>Trucks</b>: counted as unique vehicle × actual-date combinations.<br>
-      <b>On-time %</b>: planned dispatches where actual ≤ planned date.
+      <b>On-time %</b>: planned dispatches where actual ≤ planned date.<br>
+      <b>Financial columns</b>: pulled from received SAP invoices. "—" means invoice not yet received from SAP, or no link to dispatch record.<br>
+      <b>Click any Sales Order Number</b> to view the Sales Register details (line items, addresses, VAT breakdown).
     </div>
   </div>`;
 
@@ -7249,15 +8299,107 @@ function renderReportI(targetId) {
   _scrollIntoReportIfFirstView('I');
 }
 
-// v37F: Excel export for Dispatch Summary — applies the same filters as the on-screen view
+// v40 Phase 18.13: helper to format Indian Rupee amounts with thousand separators.
+// Returns "—" for zero/missing values so empty cells read cleanly.
+function _v40_fmtINR(amount) {
+  if (!amount || isNaN(amount)) return '<span style="color:var(--text3)">—</span>';
+  return '₹' + Number(amount).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+// v40 Phase 18.13: render Report I table body. Supports flat mode and grouped-by-truck mode.
+// In truck mode, rows are clustered by vehicle+date pair (= a "truck dispatch event"),
+// with group headers showing subtotals. Invoice DocNum is clickable → opens Sales Register
+// Details modal (Phase 18.7 _v40_showSalesRegisterDetails).
+function _v40_renderReportIBody(filtered, groupMode) {
+  if (filtered.length === 0) {
+    return '<tr><td colspan="16" class="text-center text-muted">No dispatch records match the filters</td></tr>';
+  }
+  const renderRow = (r) => {
+    const fmtVar = (v) => {
+      if (v == null) return '<span style="color:var(--text3)">—</span>';
+      if (v < 0) return `<span style="color:#16a34a;font-weight:600">${v}d</span>`;
+      if (v > 0) return `<span style="color:#dc2626;font-weight:600">+${v}d</span>`;
+      return '<span style="color:#0891b2;font-weight:600">0d</span>';
+    };
+    // Invoice DocNum is a clickable link if we have the invoiceId (drill-in to Sales Register).
+    const invoiceCell = r.salesOrderNum
+      ? (r.invoiceId
+          ? `<a href="javascript:void(0)" onclick="_v40_showSalesRegisterDetails('${r.invoiceId}')" style="font-family:var(--mono);color:#0891b2;font-weight:600;text-decoration:none;border-bottom:1px dashed #0891b2" title="Click to view Sales Register details">${r.salesOrderNum}</a>`
+          : `<span style="font-family:var(--mono)">${r.salesOrderNum}</span>`)
+      : '<span style="color:var(--text3)">—</span>';
+    return `<tr>
+      <td class="td-mono text-sm">${fmtDate(r.ts)}</td>
+      <td class="td-mono text-sm">${r.plannedDate || '<span style="color:var(--text3)">—</span>'}</td>
+      <td class="text-sm">${fmtVar(r.varianceDays)}</td>
+      <td class="td-bold td-mono">${r.batchNumber}</td>
+      <td>${r.customer || '-'}</td>
+      <td class="td-mono text-sm">${r.zone || '-'}</td>
+      <td class="td-mono">${r.size || '-'}</td>
+      <td class="td-mono">${r.colour || '-'}</td>
+      <td class="td-mono text-sm">${r.pcCode || '<span style="color:var(--text3)">—</span>'}</td>
+      <td class="td-mono text-right fw-bold">${fmt(r.qty)}</td>
+      <td class="td-mono text-right">${r.boxes}</td>
+      <td class="td-mono text-sm">${r.vehicleNo || '<span style="color:var(--text3)">—</span>'}</td>
+      <td>${invoiceCell}</td>
+      <td class="td-mono text-right">${_v40_fmtINR(r.taxableAmount)}</td>
+      <td class="td-mono text-right">${_v40_fmtINR(r.igstAmount)}</td>
+      <td class="td-mono text-right">${_v40_fmtINR(r.totalAmount)}</td>
+    </tr>`;
+  };
+  if (groupMode !== 'truck') {
+    return filtered.map(renderRow).join('');
+  }
+  // Group by vehicle+date pair — each unique combination is one "truck dispatch"
+  const groups = new Map();
+  for (const r of filtered) {
+    const key = (r.vehicleNo || '(no vehicle)') + '|' + (r.actualDate || '');
+    if (!groups.has(key)) groups.set(key, { vehicle: r.vehicleNo || '(no vehicle)', date: r.actualDate, rows: [] });
+    groups.get(key).rows.push(r);
+  }
+  // Sort groups by date desc, then vehicle
+  const sortedGroups = [...groups.values()].sort((a, b) => {
+    if (b.date !== a.date) return (b.date || '').localeCompare(a.date || '');
+    return (a.vehicle || '').localeCompare(b.vehicle || '');
+  });
+  return sortedGroups.map(g => {
+    const subQty = g.rows.reduce((s, r) => s + (r.qty || 0), 0);
+    const subBoxes = g.rows.reduce((s, r) => s + (r.boxes || 0), 0);
+    const subTaxable = g.rows.reduce((s, r) => s + (r.taxableAmount || 0), 0);
+    const subIgst = g.rows.reduce((s, r) => s + (r.igstAmount || 0), 0);
+    const subTotal = g.rows.reduce((s, r) => s + (r.totalAmount || 0), 0);
+    const header = `
+      <tr style="background:rgba(8,145,178,0.10)">
+        <td colspan="9" style="font-weight:700;color:#0e7490;padding:6px 8px">
+          🚚 ${g.vehicle} &middot; ${g.date} &middot; ${g.rows.length} batch${g.rows.length!==1?'es':''}
+        </td>
+        <td class="td-mono text-right" style="font-weight:700;color:#0e7490">${fmt(subQty)}L</td>
+        <td class="td-mono text-right" style="font-weight:700;color:#0e7490">${subBoxes}</td>
+        <td colspan="2"></td>
+        <td class="td-mono text-right" style="font-weight:700;color:#0e7490">${_v40_fmtINR(subTaxable)}</td>
+        <td class="td-mono text-right" style="font-weight:700;color:#0e7490">${_v40_fmtINR(subIgst)}</td>
+        <td class="td-mono text-right" style="font-weight:700;color:#0e7490">${_v40_fmtINR(subTotal)}</td>
+      </tr>`;
+    return header + g.rows.map(renderRow).join('');
+  }).join('');
+}
+
+// v37F + v40 P18.13: Excel export for Dispatch Summary — applies the same filters as the on-screen view
 function exportReportI() {
   const fZone     = window._rptIZone     || '';
   const fCustomer = window._rptICustomer || '';
   const fSize     = window._rptISize     || '';
   const fColour   = window._rptIColour   || '';
   const fVehicle  = window._rptIVehicle  || '';
+  const fSalesOrder = window._rptISalesOrder || '';   // v40 P18.13
+  const fPcCode   = window._rptIPcCode   || '';       // v40 P18.13
   const fFrom     = window._rptIFrom     || '';
   const fTo       = window._rptITo       || '';
+
+  // v40 P18.13: pull invoice cache for financial enrichment in export.
+  // Cache is populated by renderReportI; if user exports without rendering first
+  // (rare — export button is on the report itself), the financials will be missing.
+  const invByDocNum = window._rptIInvoiceCache?.byDocNum || {};
+  const invByBatch  = window._rptIInvoiceCache?.byBatch || {};
 
   const dateOnlyTs = (val) => {
     if (!val) return null;
@@ -7283,26 +8425,38 @@ function exportReportI() {
     const actualTs = dateOnlyTs(r.ts);
     const varianceDays = (plan.planTs && actualTs)
       ? Math.round((actualTs - plan.planTs) / 86400000) : null;
+    // v40 P18.13: invoice enrichment
+    const inv = (r.invoiceNo && invByDocNum[String(r.invoiceNo)]) || invByBatch[r.batchNumber] || null;
+    const totalAmount = inv ? (parseFloat(inv.total_amount) || 0) : 0;
+    const igstAmount = inv ? (parseFloat(inv.igst_amount) || 0) : 0;
+    const taxableAmount = inv && inv.taxable_amount != null
+      ? (parseFloat(inv.taxable_amount) || 0)
+      : (totalAmount - igstAmount);
+    const salesOrderNum = inv?.sap_doc_num || r.invoiceNo || '';
     return { ts:r.ts, actualDate: r.ts?r.ts.slice(0,10):'', batchNumber:r.batchNumber,
       customer: r.customer || b.customer || '', zone:b.zone||'', size:b.size||'',
-      colour:b.colour||'', pcCode:b.pcCode||'', qty:r.qty||0, boxes:r.boxes||0,
-      vehicleNo:r.vehicleNo||'', invoiceNo:r.invoiceNo||'', remarks:r.remarks||'',
+      colour:b.colour||'', pcCode: b.pcCode || inv?.pc_code || '', qty:r.qty||0, boxes:r.boxes||0,
+      vehicleNo:r.vehicleNo||'', invoiceNo:r.invoiceNo||'',
+      salesOrderNum, taxableAmount, igstAmount, totalAmount,
+      remarks:r.remarks||'',
       plannedDate: plan.plannedDate ? plan.plannedDate.slice(0,10) : '', varianceDays };
   });
 
   let filtered = records;
-  if (fZone)     filtered = filtered.filter(r => r.zone === fZone);
-  if (fCustomer) filtered = filtered.filter(r => (r.customer||'').toLowerCase().includes(fCustomer.toLowerCase()));
-  if (fSize)     filtered = filtered.filter(r => r.size === fSize);
-  if (fColour)   filtered = filtered.filter(r => r.colour === fColour);
-  if (fVehicle)  filtered = filtered.filter(r => (r.vehicleNo||'').toLowerCase().includes(fVehicle.toLowerCase()));
-  if (fFrom)     filtered = filtered.filter(r => r.actualDate >= fFrom);
-  if (fTo)       filtered = filtered.filter(r => r.actualDate <= fTo);
+  if (fZone)        filtered = filtered.filter(r => r.zone === fZone);
+  if (fCustomer)    filtered = filtered.filter(r => (r.customer||'').toLowerCase().includes(fCustomer.toLowerCase()));
+  if (fSize)        filtered = filtered.filter(r => r.size === fSize);
+  if (fColour)      filtered = filtered.filter(r => r.colour === fColour);
+  if (fVehicle)     filtered = filtered.filter(r => (r.vehicleNo||'').toLowerCase().includes(fVehicle.toLowerCase()));
+  if (fSalesOrder)  filtered = filtered.filter(r => String(r.salesOrderNum||'').toLowerCase().includes(fSalesOrder.toLowerCase()));
+  if (fPcCode)      filtered = filtered.filter(r => String(r.pcCode||'').toLowerCase().includes(fPcCode.toLowerCase()));
+  if (fFrom)        filtered = filtered.filter(r => r.actualDate >= fFrom);
+  if (fTo)          filtered = filtered.filter(r => r.actualDate <= fTo);
   filtered.sort((a,b) => (b.ts||'').localeCompare(a.ts||''));
 
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: Dispatch Summary (per record with planned vs actual)
+  // Sheet 1: Dispatch Summary (per record with planned vs actual + financials)
   const recRows = filtered.map(r => ({
     'Actual Date': r.actualDate,
     'Planned Date': r.plannedDate || '',
@@ -7317,7 +8471,10 @@ function exportReportI() {
     'Qty (Lakhs)': fmt(r.qty),
     'Boxes': r.boxes,
     'Vehicle No': r.vehicleNo,
-    'Invoice No': r.invoiceNo,
+    'Sales Order Number': r.salesOrderNum,                                    // v40 P18.13
+    'Taxable Amount (INR)': r.taxableAmount ? Math.round(r.taxableAmount) : '', // v40 P18.13
+    'IGST Amount (INR)': r.igstAmount ? Math.round(r.igstAmount) : '',          // v40 P18.13
+    'Total Amount (INR)': r.totalAmount ? Math.round(r.totalAmount) : '',       // v40 P18.13
     'Remarks': r.remarks
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(recRows), 'Dispatch Summary');
@@ -7691,9 +8848,22 @@ function exportReportJ() {
 //
 // targetId: DOM container to render into (passed from renderDispatch); defaults to creating its own.
 
+// v40 Phase 18.10: Report K REBUILT — per-batch Pack In → Dispatch Out summary
+// + drill-down detail mode. Replaces v37I daily-movement view.
+//
+// SUMMARY MODE (default): one row per batch
+//   - Pack In date, Pack In boxes/qty
+//   - Dispatch Out date, Dispatch Out boxes/qty
+//   - Days in inventory (Dispatch Out date − Pack In date)
+//   - Status: closed (Pack In = Dispatch Out), partial (some pack-in not yet dispatched),
+//             stale (Pack In done but no Dispatch Out >7d), in_progress
+//
+// DETAIL MODE (click batch): expanded panel showing every Pack In scan + every
+//   Dispatch Out scan with timestamps for that batch — date-wise movement.
 window._reportKDate = window._reportKDate || today();
-window._reportKDateRangeMode = window._reportKDateRangeMode || 'single'; // 'single' | '7d' | '15d' | '30d'
-window._reportKFilters = window._reportKFilters || {customer:'', batch:'', pcCode:''};
+window._reportKDateRangeMode = window._reportKDateRangeMode || '30d'; // 'single' | '7d' | '15d' | '30d' | 'all'
+window._reportKFilters = window._reportKFilters || {customer:'', batch:'', pcCode:'', status:''};
+window._reportKExpandedBatch = window._reportKExpandedBatch || null;  // drill-down target
 
 function renderReportK(targetId) {
   const containerId = targetId || 'report-k-container';
@@ -7704,89 +8874,174 @@ function renderReportK(targetId) {
   const dateMode = window._reportKDateRangeMode;
   const selectedDate = window._reportKDate;
 
-  // Determine date range
+  // Determine date range (applied to Dispatch Out date by default — "dispatched this period")
   let fromDate, toDate;
-  if (dateMode === 'single') {
+  if (dateMode === 'all') {
+    fromDate = '0000-00-00'; toDate = '9999-99-99';
+  } else if (dateMode === 'single') {
     fromDate = toDate = selectedDate;
   } else {
     const daysBack = dateMode === '7d' ? 7 : (dateMode === '15d' ? 15 : 30);
     toDate = today();
-    const d = new Date();
-    d.setDate(d.getDate() - daysBack + 1);
+    const d = new Date(); d.setDate(d.getDate() - daysBack + 1);
     fromDate = d.toISOString().slice(0,10);
   }
 
-  // Aggregate per (date, batch) from dispatch scans
-  // Note: state.scans is limited; for accurate counts on prior dates we'd need scan-summary,
-  // but scan-summary aggregates without date dimension. So we use state.scans for "recent"
-  // dates (recent 2000) AND warn user if showing older data may be incomplete.
-  const aggregated = {}; // key = `${date}|${batch}`
-  state.scans.filter(s => s.dept === 'dispatch' && (s.type === 'in' || s.type === 'out')).forEach(s => {
-    if (!s.ts) return;
-    const d = s.ts.slice(0,10);
-    if (d < fromDate || d > toDate) return;
-    const key = `${d}|${s.batchNumber}`;
-    if (!aggregated[key]) aggregated[key] = { date: d, batchNo: s.batchNumber, inBoxes: 0, outBoxes: 0 };
-    if (s.type === 'in') aggregated[key].inBoxes++;
-    else aggregated[key].outBoxes++;
+  // Aggregate Pack In scans (dept='packing', type='in') and Dispatch Out scans
+  // (dept='dispatch', type='out') per batch. Keep arrays of timestamps for drill-down.
+  // v40 Phase 18.14: scan timestamp arrays still come from state.scans (used only for
+  // drill-down + date detection). COUNTS used for status calc now come from scan-summary
+  // (no limit) + Phase 18 dispatch records — see below.
+  const byBatch = {};   // batchNo → { packInScans: [], dispatchOutScans: [] }
+  state.scans.forEach(s => {
+    if (!s.ts || !s.batchNumber) return;
+    const bn = s.batchNumber;
+    if (!byBatch[bn]) byBatch[bn] = { packInScans: [], dispatchOutScans: [] };
+    if (s.dept === 'packing' && s.type === 'in') {
+      byBatch[bn].packInScans.push(s);
+    } else if (s.dept === 'dispatch' && s.type === 'out') {
+      byBatch[bn].dispatchOutScans.push(s);
+    }
+  });
+  // v40 P18.14: Also include batches that have scan-summary OR dispatch records but
+  // weren't seen in state.scans (because their per-scan rows were dropped past the limit
+  // in the old days, OR because they were dispatched via Phase 18 without per-box scans).
+  Object.keys(state.scanSummary || {}).forEach(bn => {
+    if (!byBatch[bn]) byBatch[bn] = { packInScans: [], dispatchOutScans: [] };
+  });
+  (state.dispatchRecs || []).forEach(r => {
+    if (r.batchNumber && !byBatch[r.batchNumber]) {
+      byBatch[r.batchNumber] = { packInScans: [], dispatchOutScans: [] };
+    }
   });
 
-  // Build row data
-  let rows = Object.values(aggregated).map(a => {
-    const b = getBatch(a.batchNo);
+  // Build per-batch summary rows
+  let rows = Object.entries(byBatch).map(([bn, d]) => {
+    const b = getBatch(bn);
     const size = b?.size || '0';
-    const inQty = boxToLakh(a.inBoxes, size);
-    const outQty = boxToLakh(a.outBoxes, size);
+    // Sort scans by ts asc
+    d.packInScans.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+    d.dispatchOutScans.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+    const firstPackIn = d.packInScans[0]?.ts?.slice(0,10) || null;
+    const lastPackIn = d.packInScans[d.packInScans.length-1]?.ts?.slice(0,10) || null;
+    // v40 P18.14: include Phase 18 dispatch record timestamps too. lastDispOut should reflect
+    // the latest physical dispatch event, whether legacy scan-out OR Phase 18 truck dispatch.
+    const phase18TsList = (state.dispatchRecs || [])
+      .filter(r => r.batchNumber === bn)
+      .map(r => r.ts?.slice(0,10))
+      .filter(Boolean);
+    const allDispTs = [
+      ...d.dispatchOutScans.map(s => s.ts?.slice(0,10)).filter(Boolean),
+      ...phase18TsList
+    ].sort();
+    const firstDispOut = allDispTs[0] || null;
+    const lastDispOut = allDispTs[allDispTs.length - 1] || null;
+    // v40 P18.14: counts from scan-summary (no LIMIT) + combined-source helper for dispatch
+    const packInBoxes = hasScanSummary()
+      ? _ss(bn, 'packing').in + state.scans.filter(s=>s.batchNumber===bn&&s.dept==='packing'&&s.type==='in'&&s._local).length
+      : d.packInScans.length;
+    const dispOutBoxes = _v40_dispatchedBoxes(bn);
+    const packInQty = boxToLakh(packInBoxes, size);
+    const dispOutQty = boxToLakh(dispOutBoxes, size);
+    // Days in inventory: lastDispOut − firstPackIn (if both exist)
+    let daysInInv = null;
+    if (firstPackIn && lastDispOut) {
+      daysInInv = Math.max(0, Math.floor((new Date(lastDispOut) - new Date(firstPackIn)) / 86400000));
+    } else if (firstPackIn && !lastDispOut) {
+      // Still in inventory — days since first pack in
+      daysInInv = Math.max(0, Math.floor((new Date(today()) - new Date(firstPackIn)) / 86400000));
+    }
+    // Status
+    let status, statusColor;
+    if (packInBoxes === 0 && dispOutBoxes === 0) {
+      status = 'no_activity'; statusColor = 'var(--text3)';
+    } else if (dispOutBoxes >= packInBoxes && packInBoxes > 0) {
+      status = 'closed'; statusColor = '#10b981';
+    } else if (dispOutBoxes > 0 && dispOutBoxes < packInBoxes) {
+      status = 'partial'; statusColor = '#f59e0b';
+    } else if (packInBoxes > 0 && dispOutBoxes === 0 && daysInInv > 15) {
+      status = 'stale_15d'; statusColor = '#dc2626';
+    } else if (packInBoxes > 0 && dispOutBoxes === 0 && daysInInv > 7) {
+      status = 'stale_7d'; statusColor = '#f59e0b';
+    } else {
+      status = 'in_progress'; statusColor = '#0891b2';
+    }
     return {
-      date: a.date,
-      batchNo: a.batchNo,
+      batchNo: bn,
       customer: b?.customer || '-',
       pcCode: b?.pcCode || '-',
       size: size,
       colour: b?.colour || '-',
-      inBoxes: a.inBoxes,
-      inQty: inQty,
-      outBoxes: a.outBoxes,
-      outQty: outQty,
-      balanceQty: inQty - outQty  // positive = held in dispatch (received more than sent out)
+      firstPackIn, lastPackIn,
+      firstDispOut, lastDispOut,
+      packInBoxes, packInQty,
+      dispOutBoxes, dispOutQty,
+      daysInInv,
+      balanceQty: packInQty - dispOutQty,
+      status, statusColor,
+      _detail: d,  // retained for drill-down
     };
   });
 
-  // Apply filters
+  // Apply date filter to Dispatch Out date (so "dispatched this period")
+  // For 'all' mode, no date filter; for batches with no dispatch yet, include if Pack In falls in range
+  if (dateMode !== 'all') {
+    rows = rows.filter(r => {
+      if (r.lastDispOut) return r.lastDispOut >= fromDate && r.lastDispOut <= toDate;
+      if (r.firstPackIn) return r.firstPackIn >= fromDate && r.firstPackIn <= toDate;
+      return false;
+    });
+  }
+  // Other filters
   if (filters.customer) rows = rows.filter(r => (r.customer||'').toLowerCase().includes(filters.customer.toLowerCase()));
   if (filters.batch) rows = rows.filter(r => (r.batchNo||'').toLowerCase().includes(filters.batch.toLowerCase()));
   if (filters.pcCode) rows = rows.filter(r => (r.pcCode||'').toLowerCase().includes(filters.pcCode.toLowerCase()));
+  if (filters.status) rows = rows.filter(r => r.status === filters.status);
 
-  // Sort by date desc, then batch
-  rows.sort((a,b) => {
-    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-    return (a.batchNo||'').localeCompare(b.batchNo||'', undefined, {numeric:true});
+  // Sort by last activity desc (lastDispOut or lastPackIn)
+  rows.sort((a, b) => {
+    const ka = (a.lastDispOut || a.lastPackIn || '');
+    const kb = (b.lastDispOut || b.lastPackIn || '');
+    return kb.localeCompare(ka);
   });
 
-  // Totals
-  let totalInBoxes = 0, totalInQty = 0, totalOutBoxes = 0, totalOutQty = 0;
+  // Totals (summary only)
+  let totalPackInBoxes = 0, totalPackInQty = 0, totalDispOutBoxes = 0, totalDispOutQty = 0;
   rows.forEach(r => {
-    totalInBoxes += r.inBoxes; totalInQty += r.inQty;
-    totalOutBoxes += r.outBoxes; totalOutQty += r.outQty;
+    totalPackInBoxes += r.packInBoxes; totalPackInQty += r.packInQty;
+    totalDispOutBoxes += r.dispOutBoxes; totalDispOutQty += r.dispOutQty;
   });
-  const totalBalance = totalInQty - totalOutQty;
 
   // Date selector + quick filters
   const quickBtn = (mode, label) =>
-    `<button class="btn btn-sm" style="background:${dateMode===mode?'#0891b2':'var(--surface2)'};color:${dateMode===mode?'#fff':'var(--text)'};font-weight:600;font-size:11px;padding:4px 10px" onclick="window._reportKDateRangeMode='${mode}';renderReportK('${containerId}')">${label}</button>`;
+    `<button class="btn btn-sm" style="background:${dateMode===mode?'#0891b2':'var(--surface2)'};color:${dateMode===mode?'#fff':'var(--text)'};font-weight:600;font-size:11px;padding:4px 10px" onclick="window._reportKDateRangeMode='${mode}';window._reportKExpandedBatch=null;renderReportK('${containerId}')">${label}</button>`;
+
+  // Status filter pills
+  const statusPill = (val, label, color) =>
+    `<button class="btn btn-sm" style="background:${filters.status===val?color:'var(--surface2)'};color:${filters.status===val?'#fff':'var(--text)'};font-weight:600;font-size:10px;padding:3px 8px;border:1px solid ${color}" onclick="window._reportKFilters.status='${filters.status===val?'':val}';renderReportK('${containerId}')">${label}</button>`;
 
   el.innerHTML = `
     <div class="card mb-16" style="border-top:4px solid #0891b2">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
-        <div class="card-title" style="margin-bottom:0">📅 Report K — Daily Dispatch Movement (Per-day Scan In/Out)</div>
+        <div class="card-title" style="margin-bottom:0">📅 Report K — Per-Batch Pack In → Dispatch Out Summary</div>
         <button class="btn btn-secondary btn-sm" onclick="exportReportK()">📥 Export Excel</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+        <span style="font-size:11px;color:var(--text-muted);margin-right:4px">Period:</span>
+        ${quickBtn('7d', 'Last 7d')}
+        ${quickBtn('15d', 'Last 15d')}
+        ${quickBtn('30d', 'Last 30d')}
+        ${quickBtn('all', 'All time')}
         ${quickBtn('single', 'Specific Date')}
-        ${quickBtn('7d', 'Last 7 Days')}
-        ${quickBtn('15d', 'Last 15 Days')}
-        ${quickBtn('30d', 'Last 30 Days')}
-        ${dateMode === 'single' ? `<input type="date" value="${selectedDate}" max="${today()}" onchange="window._reportKDate=this.value;renderReportK('${containerId}')" style="border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:12px;margin-left:8px">` : `<span style="font-size:11px;color:var(--text-muted);margin-left:8px">Range: ${fromDate} → ${toDate}</span>`}
+        ${dateMode === 'single' ? `<input type="date" value="${selectedDate}" max="${today()}" onchange="window._reportKDate=this.value;renderReportK('${containerId}')" style="border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:12px;margin-left:8px">` : (dateMode !== 'all' ? `<span style="font-size:11px;color:var(--text-muted);margin-left:8px">${fromDate} → ${toDate}</span>` : '')}
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+        <span style="font-size:11px;color:var(--text-muted);margin-right:4px">Status:</span>
+        ${statusPill('closed', '✓ Closed', '#10b981')}
+        ${statusPill('partial', '⏳ Partial', '#f59e0b')}
+        ${statusPill('in_progress', '🔄 In Progress', '#0891b2')}
+        ${statusPill('stale_7d', '⚠ Stale 7d+', '#f59e0b')}
+        ${statusPill('stale_15d', '🚨 Stale 15d+', '#dc2626')}
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:8px;background:var(--surface2);border-radius:4px">
         <input type="text" placeholder="🔍 Customer" value="${filters.customer||''}"
@@ -7798,98 +9053,199 @@ function renderReportK(targetId) {
         <input type="text" placeholder="🔍 PC Code" value="${filters.pcCode||''}"
                oninput="window._reportKFilters.pcCode=this.value;renderReportK('${containerId}')"
                style="padding:5px 10px;border:1px solid var(--border);border-radius:4px;min-width:120px;font-size:12px">
-        <button class="btn btn-ghost btn-sm" onclick="window._reportKFilters={customer:'',batch:'',pcCode:''};renderReportK('${containerId}')">✕ Clear</button>
-        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);align-self:center">${rows.length} row(s)</span>
+        <button class="btn btn-ghost btn-sm" onclick="window._reportKFilters={customer:'',batch:'',pcCode:'',status:''};renderReportK('${containerId}')">✕ Clear all filters</button>
+        <span style="margin-left:auto;font-size:11px;color:var(--text-muted);align-self:center">${rows.length} batch${rows.length!==1?'es':''}</span>
       </div>
-      <div class="tbl-wrap" style="max-height:500px;overflow-y:auto"><table>
+      <div class="tbl-wrap" style="max-height:600px;overflow-y:auto"><table>
         <thead><tr>
-          <th>Date</th><th>Customer</th><th>Batch</th><th>PC Code</th><th>Size</th><th>Colour</th>
-          <th class="text-right">Scan-In (Boxes)</th><th class="text-right">Scan-In (L)</th>
-          <th class="text-right">Scan-Out (Boxes)</th><th class="text-right">Scan-Out (L)</th>
+          <th style="width:30px"></th>
+          <th>Batch</th><th>Customer</th><th>PC Code</th><th>Size</th>
+          <th>Pack In Date</th>
+          <th class="text-right">Pack In</th>
+          <th>Dispatch Out Date</th>
+          <th class="text-right">Disp Out</th>
+          <th class="text-right">Days In Inv</th>
           <th class="text-right">Balance (L)</th>
+          <th class="text-center">Status</th>
         </tr></thead>
         <tbody>
           ${rows.length === 0
-            ? `<tr><td colspan="11" class="text-center text-muted" style="padding:30px">No dispatch activity in the selected period</td></tr>`
-            : rows.map(r => `<tr>
-                <td class="td-mono text-sm">${r.date}</td>
-                <td class="text-sm">${r.customer}</td>
-                <td class="td-bold td-mono">${r.batchNo}</td>
-                <td class="td-mono">${r.pcCode}</td>
-                <td class="td-mono">${r.size}</td>
-                <td class="td-mono">${r.colour}</td>
-                <td class="td-mono text-right">${r.inBoxes}</td>
-                <td class="td-mono text-right">${fmt(r.inQty)}</td>
-                <td class="td-mono text-right green">${r.outBoxes}</td>
-                <td class="td-mono text-right green">${fmt(r.outQty)}</td>
-                <td class="td-mono text-right fw-bold ${r.balanceQty>0?'amber':(r.balanceQty<0?'red':'')}">${fmt(r.balanceQty)}</td>
-              </tr>`).join('')}
+            ? `<tr><td colspan="12" class="text-center text-muted" style="padding:30px">No batch activity in the selected period</td></tr>`
+            : rows.map(r => {
+                const isExpanded = window._reportKExpandedBatch === r.batchNo;
+                const statusLabel = r.status.replace('_', ' ').replace('stale', 'STALE');
+                return `
+                <tr style="cursor:pointer" onclick="window._reportKExpandedBatch=(window._reportKExpandedBatch==='${r.batchNo}'?null:'${r.batchNo}');renderReportK('${containerId}')">
+                  <td style="text-align:center;color:var(--text3);font-size:14px">${isExpanded ? '▼' : '▶'}</td>
+                  <td class="td-bold td-mono" style="color:#0891b2">${r.batchNo}</td>
+                  <td class="text-sm">${r.customer}</td>
+                  <td class="td-mono">${r.pcCode}</td>
+                  <td class="td-mono">${r.size}</td>
+                  <td class="td-mono text-sm">${r.firstPackIn || '—'}${r.firstPackIn !== r.lastPackIn ? ' → '+r.lastPackIn : ''}</td>
+                  <td class="td-mono text-right">${r.packInBoxes} bx<br><span style="font-size:10px;color:var(--text3)">${fmt(r.packInQty)} L</span></td>
+                  <td class="td-mono text-sm">${r.lastDispOut || '—'}${r.firstDispOut && r.firstDispOut !== r.lastDispOut ? ' (from '+r.firstDispOut+')' : ''}</td>
+                  <td class="td-mono text-right green">${r.dispOutBoxes} bx<br><span style="font-size:10px;color:var(--text3)">${fmt(r.dispOutQty)} L</span></td>
+                  <td class="td-mono text-right">${r.daysInInv == null ? '—' : r.daysInInv + 'd'}</td>
+                  <td class="td-mono text-right fw-bold ${r.balanceQty>0?'amber':(r.balanceQty<0?'red':'')}">${fmt(r.balanceQty)}</td>
+                  <td class="text-center"><span style="background:${r.statusColor};color:white;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase">${statusLabel}</span></td>
+                </tr>
+                ${isExpanded ? `
+                <tr>
+                  <td colspan="12" style="background:var(--surface2);padding:12px 18px">
+                    ${_v40_renderReportKDetail(r)}
+                  </td>
+                </tr>` : ''}`;
+              }).join('')}
         </tbody>
         ${rows.length > 0 ? `<tfoot><tr style="background:var(--surface2);font-weight:700">
-          <td colspan="6" class="text-right">TOTAL</td>
-          <td class="td-mono text-right">${totalInBoxes}</td>
-          <td class="td-mono text-right"><b>${fmt(totalInQty)}</b></td>
-          <td class="td-mono text-right green">${totalOutBoxes}</td>
-          <td class="td-mono text-right green"><b>${fmt(totalOutQty)}</b></td>
-          <td class="td-mono text-right ${totalBalance>0?'amber':(totalBalance<0?'red':'')}"><b>${fmt(totalBalance)}</b></td>
+          <td colspan="6" class="text-right">TOTAL (${rows.length} batches)</td>
+          <td class="td-mono text-right">${totalPackInBoxes} bx<br><span style="font-size:10px">${fmt(totalPackInQty)} L</span></td>
+          <td></td>
+          <td class="td-mono text-right green">${totalDispOutBoxes} bx<br><span style="font-size:10px">${fmt(totalDispOutQty)} L</span></td>
+          <td></td>
+          <td class="td-mono text-right"><b>${fmt(totalPackInQty - totalDispOutQty)}</b></td>
+          <td></td>
         </tr></tfoot>` : ''}
       </table></div>
-      <div class="text-sm text-muted mt-8" style="font-size:11px">💡 Balance = Scan-In − Scan-Out (positive value indicates boxes held in dispatch holding; negative is a data anomaly worth investigating). For dates older than the in-app scan buffer, totals may be partial — use Excel export from server data for historical full audits.</div>
+      <div class="text-sm text-muted mt-8" style="font-size:11px">💡 Click a batch row to drill down to date-wise scan-by-scan movement.  Status: Closed = Pack In ≤ Dispatch Out · Partial = some packed-in not yet dispatched · In Progress = pack-in active · Stale = packed but not dispatched after 7/15 days (matches Report J alert thresholds).</div>
+    </div>`;
+}
+
+// v40 Phase 18.10: render the drill-down panel for a single batch
+function _v40_renderReportKDetail(r) {
+  const d = r._detail;
+  if (!d) return '<div style="font-size:12px;color:var(--text3)">No detail data.</div>';
+  const fmtTs = (ts) => {
+    if (!ts) return '—';
+    try { return new Date(ts).toLocaleString(); } catch (e) { return ts; }
+  };
+  const packInRows = d.packInScans.length === 0
+    ? '<tr><td colspan="3" class="text-center text-muted" style="padding:8px">No Pack In scans</td></tr>'
+    : d.packInScans.map((s, i) => `
+      <tr style="border-bottom:1px dotted var(--border)">
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:11px;color:var(--text3)">${i+1}</td>
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:11px">${s.boxNumber||s.labelId||'—'}</td>
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:11px">${fmtTs(s.ts)}</td>
+      </tr>`).join('');
+  const dispOutRows = d.dispatchOutScans.length === 0
+    ? '<tr><td colspan="3" class="text-center text-muted" style="padding:8px">No Dispatch Out scans yet</td></tr>'
+    : d.dispatchOutScans.map((s, i) => `
+      <tr style="border-bottom:1px dotted var(--border)">
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:11px;color:var(--text3)">${i+1}</td>
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:11px">${s.boxNumber||s.labelId||'—'}</td>
+        <td style="padding:4px 8px;font-family:var(--mono);font-size:11px">${fmtTs(s.ts)}</td>
+      </tr>`).join('');
+  return `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#0e7490;margin-bottom:6px">📥 Pack In Scans (${d.packInScans.length})</div>
+        <table style="width:100%;border:1px solid var(--border);border-radius:4px;font-size:11px">
+          <thead style="background:var(--surface3)">
+            <tr><th style="padding:4px 8px;text-align:left">#</th><th style="padding:4px 8px;text-align:left">Box / Label</th><th style="padding:4px 8px;text-align:left">Timestamp</th></tr>
+          </thead>
+          <tbody>${packInRows}</tbody>
+        </table>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;color:#10b981;margin-bottom:6px">📤 Dispatch Out Scans (${d.dispatchOutScans.length})</div>
+        <table style="width:100%;border:1px solid var(--border);border-radius:4px;font-size:11px">
+          <thead style="background:var(--surface3)">
+            <tr><th style="padding:4px 8px;text-align:left">#</th><th style="padding:4px 8px;text-align:left">Box / Label</th><th style="padding:4px 8px;text-align:left">Timestamp</th></tr>
+          </thead>
+          <tbody>${dispOutRows}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 
 function exportReportK() {
+  // v40 Phase 18.10: Export the rebuilt per-batch summary + drill-down detail to Excel.
+  // Two sheets: "Batch Summary" (one row per batch) + "Scan Detail" (every scan event).
   const filters = window._reportKFilters;
   const dateMode = window._reportKDateRangeMode;
   const selectedDate = window._reportKDate;
   let fromDate, toDate;
-  if (dateMode === 'single') { fromDate = toDate = selectedDate; }
+  if (dateMode === 'all') { fromDate = '0000-00-00'; toDate = '9999-99-99'; }
+  else if (dateMode === 'single') { fromDate = toDate = selectedDate; }
   else {
     const daysBack = dateMode === '7d' ? 7 : (dateMode === '15d' ? 15 : 30);
     toDate = today();
     const d = new Date(); d.setDate(d.getDate() - daysBack + 1);
     fromDate = d.toISOString().slice(0,10);
   }
-  const aggregated = {};
-  state.scans.filter(s => s.dept === 'dispatch' && (s.type === 'in' || s.type === 'out')).forEach(s => {
-    if (!s.ts) return;
-    const d = s.ts.slice(0,10);
-    if (d < fromDate || d > toDate) return;
-    const key = `${d}|${s.batchNumber}`;
-    if (!aggregated[key]) aggregated[key] = { date: d, batchNo: s.batchNumber, inBoxes: 0, outBoxes: 0 };
-    if (s.type === 'in') aggregated[key].inBoxes++;
-    else aggregated[key].outBoxes++;
+  // Aggregate same as renderReportK
+  const byBatch = {};
+  state.scans.forEach(s => {
+    if (!s.ts || !s.batchNumber) return;
+    const bn = s.batchNumber;
+    if (!byBatch[bn]) byBatch[bn] = { packInScans: [], dispatchOutScans: [] };
+    if (s.dept === 'packing' && s.type === 'in') byBatch[bn].packInScans.push(s);
+    else if (s.dept === 'dispatch' && s.type === 'out') byBatch[bn].dispatchOutScans.push(s);
   });
-  let rows = Object.values(aggregated).map(a => {
-    const b = getBatch(a.batchNo);
+  const summary = []; const detail = [];
+  Object.entries(byBatch).forEach(([bn, d]) => {
+    const b = getBatch(bn);
     const size = b?.size || '0';
-    const inQty = boxToLakh(a.inBoxes, size);
-    const outQty = boxToLakh(a.outBoxes, size);
-    return {
-      'Date': a.date,
+    d.packInScans.sort((a, b) => (a.ts||'').localeCompare(b.ts||''));
+    d.dispatchOutScans.sort((a, b) => (a.ts||'').localeCompare(b.ts||''));
+    const firstPackIn = d.packInScans[0]?.ts?.slice(0,10) || '';
+    const lastDispOut = d.dispatchOutScans[d.dispatchOutScans.length-1]?.ts?.slice(0,10) || '';
+    const packInBoxes = d.packInScans.length;
+    const dispOutBoxes = d.dispatchOutScans.length;
+    const packInQty = boxToLakh(packInBoxes, size);
+    const dispOutQty = boxToLakh(dispOutBoxes, size);
+    // date range filter
+    const dateRef = lastDispOut || firstPackIn;
+    if (dateMode !== 'all' && (dateRef < fromDate || dateRef > toDate)) return;
+    // other filters
+    if (filters.customer && !(b?.customer||'').toLowerCase().includes(filters.customer.toLowerCase())) return;
+    if (filters.batch && !bn.toLowerCase().includes(filters.batch.toLowerCase())) return;
+    if (filters.pcCode && !(b?.pcCode||'').toLowerCase().includes(filters.pcCode.toLowerCase())) return;
+    let daysInInv = null;
+    if (firstPackIn && lastDispOut) daysInInv = Math.max(0, Math.floor((new Date(lastDispOut) - new Date(firstPackIn)) / 86400000));
+    else if (firstPackIn) daysInInv = Math.max(0, Math.floor((new Date(today()) - new Date(firstPackIn)) / 86400000));
+    let status = 'in_progress';
+    if (dispOutBoxes >= packInBoxes && packInBoxes > 0) status = 'closed';
+    else if (dispOutBoxes > 0 && dispOutBoxes < packInBoxes) status = 'partial';
+    else if (packInBoxes > 0 && dispOutBoxes === 0 && daysInInv > 15) status = 'stale_15d';
+    else if (packInBoxes > 0 && dispOutBoxes === 0 && daysInInv > 7) status = 'stale_7d';
+    summary.push({
+      'Batch': bn,
       'Customer': b?.customer || '',
-      'Batch': a.batchNo,
       'PC Code': b?.pcCode || '',
       'Size': size,
       'Colour': b?.colour || '',
-      'Scan-In Boxes': a.inBoxes,
-      'Scan-In (L)': fmt(inQty),
-      'Scan-Out Boxes': a.outBoxes,
-      'Scan-Out (L)': fmt(outQty),
-      'Balance (L)': fmt(inQty - outQty)
-    };
+      'Pack In Date': firstPackIn,
+      'Pack In Boxes': packInBoxes,
+      'Pack In (L)': fmt(packInQty),
+      'Dispatch Out Date': lastDispOut || '',
+      'Dispatch Out Boxes': dispOutBoxes,
+      'Dispatch Out (L)': fmt(dispOutQty),
+      'Days In Inventory': daysInInv == null ? '' : daysInInv,
+      'Balance (L)': fmt(packInQty - dispOutQty),
+      'Status': status,
+    });
+    d.packInScans.forEach(s => detail.push({
+      'Batch': bn,
+      'Customer': b?.customer || '',
+      'Event': 'Pack In',
+      'Box/Label': s.boxNumber || s.labelId || '',
+      'Timestamp': s.ts || '',
+    }));
+    d.dispatchOutScans.forEach(s => detail.push({
+      'Batch': bn,
+      'Customer': b?.customer || '',
+      'Event': 'Dispatch Out',
+      'Box/Label': s.boxNumber || s.labelId || '',
+      'Timestamp': s.ts || '',
+    }));
   });
-  if (filters.customer) rows = rows.filter(r => (r.Customer||'').toLowerCase().includes(filters.customer.toLowerCase()));
-  if (filters.batch) rows = rows.filter(r => (r.Batch||'').toLowerCase().includes(filters.batch.toLowerCase()));
-  if (filters.pcCode) rows = rows.filter(r => (r['PC Code']||'').toLowerCase().includes(filters.pcCode.toLowerCase()));
-  rows.sort((a,b) => {
-    if (a.Date !== b.Date) return a.Date < b.Date ? 1 : -1;
-    return (a.Batch||'').localeCompare(b.Batch||'', undefined, {numeric:true});
-  });
+  summary.sort((a, b) => (b['Dispatch Out Date'] || b['Pack In Date'] || '').localeCompare(a['Dispatch Out Date'] || a['Pack In Date'] || ''));
   const wb = XLSX.utils.book_new();
-  if (rows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Daily Movement');
-  else XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['No dispatch activity in selected period']]), 'Empty');
-  XLSX.writeFile(wb, `Sunloc_Report_K_Daily_Movement_${fromDate}_to_${toDate}.xlsx`);
+  if (summary.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Batch Summary');
+  else XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['No batch activity in selected period']]), 'Empty');
+  if (detail.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detail), 'Scan Detail');
+  XLSX.writeFile(wb, `Sunloc_Report_K_Per_Batch_${fromDate}_to_${toDate}.xlsx`);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -8072,8 +9428,8 @@ function exportReportL() {
     const qtyLakhs = parseFloat(inv.total_qty_lakhs) || (parseInt(inv.total_boxes)||0)/100;
     return {
       'Sr.': idx + 1,
-      'SAP DocNum': inv.sap_doc_num || '',
-      'SAP DocEntry': inv.sap_doc_entry || '',
+      'Sales Order Number': inv.sap_doc_num || '',
+      'Sales Order ID': inv.sap_doc_entry || '',
       'Invoice Date': inv.invoice_date || '',
       'Customer': inv.customer || '',
       'Card Code': inv.card_code || '',
@@ -8148,18 +9504,30 @@ function exportDispatch() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(recRows), 'Dispatch Records');
 
   // Sheet 2: Packed Ledger (current state)
-  const packedOut = state.scans.filter(s=>s.dept==='packing'&&s.type==='in');
-  const dispatchedIn = state.scans.filter(s=>s.dept==='dispatch'&&s.type==='in');
-  const dispatchedOut = state.scans.filter(s=>s.dept==='dispatch'&&s.type==='out');
+  // v40 P18.14b/c: Use scan-summary for packed count (no LIMIT) + combined-source dispatch.
+  // Uniform terminology: packed = packing.in scans, dispatched = max(dispatch.out, Phase 18 records).
+  // Removed "Inward" column (legacy dispatch.in concept — not part of unified flow).
   const ledger = {};
-  packedOut.forEach(s=>{
-    if(!ledger[s.batchNumber]) ledger[s.batchNumber] = { packed:0, dispIn:0, dispOut:0, size:'0', colour:'-' };
-    ledger[s.batchNumber].packed++;
-    const b = getBatch(s.batchNumber);
-    if (b) { ledger[s.batchNumber].size = b.size; ledger[s.batchNumber].colour = b.colour||'-'; }
+  // Build set of all batches that ever had packing-in OR Phase 18 dispatch activity
+  const candidateBatches = new Set();
+  if (hasScanSummary()) {
+    Object.entries(state.scanSummary || {}).forEach(([bn, depts]) => {
+      if ((depts.packing?.in || 0) > 0) candidateBatches.add(bn);
+    });
+  } else {
+    state.scans.filter(s => s.dept === 'packing' && s.type === 'in').forEach(s => candidateBatches.add(s.batchNumber));
+  }
+  (state.dispatchRecs || []).forEach(r => { if (r.batchNumber) candidateBatches.add(r.batchNumber); });
+  candidateBatches.forEach(bn => {
+    const b = getBatch(bn);
+    const size = b?.size || '0';
+    const colour = b?.colour || '-';
+    const packed = hasScanSummary()
+      ? _ss(bn, 'packing').in + state.scans.filter(s => s.batchNumber === bn && s.dept === 'packing' && s.type === 'in' && s._local).length
+      : state.scans.filter(s => s.batchNumber === bn && s.dept === 'packing' && s.type === 'in').length;
+    const dispOut = _v40_dispatchedBoxes(bn);   // combined-source: legacy scan.out + Phase 18
+    ledger[bn] = { packed, dispOut, size, colour };
   });
-  dispatchedIn.forEach(s=>{ if(ledger[s.batchNumber]) ledger[s.batchNumber].dispIn++; });
-  dispatchedOut.forEach(s=>{ if(ledger[s.batchNumber]) ledger[s.batchNumber].dispOut++; });
   const ledgerRows = Object.entries(ledger).map(([batchNo, s])=>{
     const b = getBatch(batchNo);
     const pending = Math.max(0, s.packed - s.dispOut);
@@ -8171,10 +9539,8 @@ function exportDispatch() {
       'PC Code': b?.pcCode || '',
       'Packed Boxes': s.packed,
       'Packed Qty (L)': fmt(boxToLakh(s.packed, s.size)),
-      'Inward Boxes': s.dispIn,
-      'Inward Qty (L)': fmt(boxToLakh(s.dispIn, s.size)),
-      'Outward Boxes': s.dispOut,
-      'Outward Qty (L)': fmt(boxToLakh(s.dispOut, s.size)),
+      'Dispatched Boxes': s.dispOut,
+      'Dispatched Qty (L)': fmt(boxToLakh(s.dispOut, s.size)),
       'Pending Boxes': pending,
       'Pending Qty (L)': fmt(boxToLakh(pending, s.size))
     };
@@ -8182,27 +9548,25 @@ function exportDispatch() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ledgerRows), 'Packed Ledger');
 
   // Sheet 3: Colour-wise summary
+  // v40 P18.14c: removed Inward columns (legacy dispatch.in concept). Now 4-column rollup.
   const colourSum = {};
   Object.values(ledger).forEach(s=>{
     const c = s.colour || '-';
-    if (!colourSum[c]) colourSum[c] = { packedBoxes:0, inwardBoxes:0, outwardBoxes:0, pendingBoxes:0,
-                                         packedQty:0, inwardQty:0, outwardQty:0, pendingQty:0 };
+    if (!colourSum[c]) colourSum[c] = { packedBoxes:0, dispatchedBoxes:0, pendingBoxes:0,
+                                         packedQty:0, dispatchedQty:0, pendingQty:0 };
     const pending = Math.max(0, s.packed - s.dispOut);
-    colourSum[c].packedBoxes  += s.packed;
-    colourSum[c].inwardBoxes  += s.dispIn;
-    colourSum[c].outwardBoxes += s.dispOut;
-    colourSum[c].pendingBoxes += pending;
-    colourSum[c].packedQty    += boxToLakh(s.packed, s.size);
-    colourSum[c].inwardQty    += boxToLakh(s.dispIn, s.size);
-    colourSum[c].outwardQty   += boxToLakh(s.dispOut, s.size);
-    colourSum[c].pendingQty   += boxToLakh(pending, s.size);
+    colourSum[c].packedBoxes     += s.packed;
+    colourSum[c].dispatchedBoxes += s.dispOut;
+    colourSum[c].pendingBoxes    += pending;
+    colourSum[c].packedQty       += boxToLakh(s.packed, s.size);
+    colourSum[c].dispatchedQty   += boxToLakh(s.dispOut, s.size);
+    colourSum[c].pendingQty      += boxToLakh(pending, s.size);
   });
   const colourRows = Object.entries(colourSum).sort().map(([c, r])=>({
     'Colour': c,
-    'Packed Boxes': r.packedBoxes,    'Packed Qty (L)': fmt(r.packedQty),
-    'Inward Boxes': r.inwardBoxes,    'Inward Qty (L)': fmt(r.inwardQty),
-    'Outward Boxes': r.outwardBoxes,  'Outward Qty (L)': fmt(r.outwardQty),
-    'Pending Boxes': r.pendingBoxes,  'Pending Qty (L)': fmt(r.pendingQty)
+    'Packed Boxes': r.packedBoxes,        'Packed Qty (L)': fmt(r.packedQty),
+    'Dispatched Boxes': r.dispatchedBoxes, 'Dispatched Qty (L)': fmt(r.dispatchedQty),
+    'Pending Boxes': r.pendingBoxes,      'Pending Qty (L)': fmt(r.pendingQty)
   }));
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(colourRows), 'Colour Summary');
 
@@ -8213,7 +9577,8 @@ function exportReportA(){
   const rows=getTrkMonthBatches().filter(b=>!b.deleted).map(b=>{
     const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
     const wipDays=getBatchWIPDays(b.batchNumber);
-    const dispatched=state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0);
+    // v40 Phase 18.14: combined-source dispatch
+    const dispatched = _v40_dispatchedLakhs(b.batchNumber, b.size);
     const flow=getBatchFlow(b);
     const scanTotals={};
     flow.forEach(dept=>{
@@ -8221,8 +9586,19 @@ function exportReportA(){
       const localOut = state.scans.filter(sc=>sc.batchNumber===b.batchNumber&&sc.dept===dept&&sc.type==='out'&&sc._local).length;
       const inn = hasScanSummary() ? (_ss(b.batchNumber,dept).in  + localIn)  : state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='in').length;
       const out = hasScanSummary() ? (_ss(b.batchNumber,dept).out + localOut) : state.scans.filter(s=>s.batchNumber===b.batchNumber&&s.dept===dept&&s.type==='out').length;
-      scanTotals['Scan IN - '+(DEPT_LABELS[dept]||dept)]=inn;
-      scanTotals['Scan OUT - '+(DEPT_LABELS[dept]||dept)]=out;
+      // v40 P18.14c: uniform Excel column naming. AIM/Printing/PI keep IN/OUT.
+      // Packing → single "Packed" column. Dispatch → single "Dispatched" column.
+      // Production → skipped (tracked via DPR, not scans).
+      if (dept === 'packing') {
+        scanTotals['Packed (Boxes)'] = inn;
+      } else if (dept === 'dispatch') {
+        scanTotals['Dispatched (Boxes)'] = _v40_dispatchedBoxes(b.batchNumber);
+      } else if (dept === 'production') {
+        // skipped
+      } else {
+        scanTotals['Scan IN - '+(DEPT_LABELS[dept]||dept)]=inn;
+        scanTotals['Scan OUT - '+(DEPT_LABELS[dept]||dept)]=out;
+      }
     });
     return {
       'Batch':b.batchNumber,'Customer':b.customer||'','Machine':b.machineId||'','Size':b.size,
@@ -8399,7 +9775,7 @@ function exportReportE(){
           'PI A-GRADE %': b.isPrinted ? fmt(piAGradePctEx,2) : '—',
           'PACKING UNPTD (lac)':fmt(!b.isPrinted?packQty:0),
           'PACKING PTD (lac)':fmt(b.isPrinted?packQty:0),
-          'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))});
+          'DISPATCH (lac)':fmt(_v40_dispatchedLakhs(b.batchNumber, b.size))});
       });
     });
   });
@@ -8447,7 +9823,7 @@ function exportReportE(){
           'PI SAL/REM (lac)': b.isPrinted ? fmt(piW.salvage + piW.remelt) : '—',
           'PI A-GRADE %': (piAGradePctEx != null) ? fmt(piAGradePctEx, 2) : '—',
           'PACKING (lac)': fmt(packOutLac),
-          'DISPATCH (lac)':fmt(state.dispatchRecs.filter(r=>r.batchNumber===b.batchNumber).reduce((s,r)=>s+r.qty,0))};
+          'DISPATCH (lac)':fmt(_v40_dispatchedLakhs(b.batchNumber, b.size))};
       });
       XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(mcRows),mc.replace('.','').slice(0,31));
     });
@@ -8989,6 +10365,24 @@ setInterval(()=>{
   checkAlerts();
   buildSidebar();
 },5*60*1000);
+
+// v40 Phase 18.14: Box-stages refresh every 5 minutes — keeps per-label stages
+// fresh in long-running tracking sessions so dispatched batches transition without hard refresh.
+setInterval(async () => {
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/tracking/box-stages', { signal: AbortSignal.timeout(20000) });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.ok) {
+        window._v40_boxStagesMap = j.stages || {};
+        window._v40_boxStagesLoadedAt = Date.now();
+        window._v40_dispatchedByBatch = j.dispatchedByBatch || {};
+        window._v40_boxCountsByBatch = j.boxCounts || {};
+      }
+    }
+  } catch (e) { /* silent — next interval will retry */ }
+}, 5 * 60 * 1000);
 
 // ── Real-time scan sync — every 15 seconds across all devices ──
 let _lastScanTs = 0;

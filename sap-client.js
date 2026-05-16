@@ -285,7 +285,7 @@ class SapClient {
           if (this.pgPool) {
             await this.pgPool.query(
               `UPDATE sap_config SET session_cookie=$1, session_route_id=$2, session_expires_at=$3,
-                 last_login_at=NOW()::TEXT, last_login_success=TRUE, last_login_error=NULL WHERE id=1`,
+                 last_login_at=NOW()::TEXT, last_login_success=1, last_login_error=NULL WHERE id=1`,
               [b1session, routeId, expiresAt]
             );
           } else {
@@ -310,7 +310,7 @@ class SapClient {
           } catch {}
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -331,7 +331,7 @@ class SapClient {
         try {
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -481,7 +481,7 @@ class SapClient {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
     // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge datetime'YYYY-MM-DDT00:00:00'
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge datetime'${dateStr}T00:00:00'`;
+    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
     const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}&$top=200` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
@@ -527,9 +527,6 @@ class SapClient {
       DocDueDate: today,
       DocumentLines: documentLines,
       Comments: `Sunloc batch ${batchNumber || ''} PO ${poNumber || ''} ${remarks || ''}`.trim(),
-      // Custom fields for Sunloc reference (UDFs must exist in SAP B1 for these to land)
-      U_SunlocBatch: batchNumber || '',
-      U_SunlocPO: poNumber || '',
     };
     // v40 P18.2: POST to DeliveryNotes endpoint (not Invoices)
     const r = await this.call({ method: 'POST', path: 'DeliveryNotes', body: payload });
@@ -571,7 +568,7 @@ class SapClient {
   async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    const filter = `$filter=DocDate ge datetime'${dateStr}T00:00:00'`;
+    const filter = `$filter=DocDate ge '${dateStr}'`;
     // v40 P18.7: Pull richer line-item fields and addresses for Scan-Out matching.
     // Replaces previously-planned PDF download with structured Sales Register data.
     // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total

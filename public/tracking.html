@@ -4306,7 +4306,7 @@ function _v39_renderInvoiceQueuePanel() {
   if (!panel) return;
   const invoices = _v39_pendingInvoices || [];
   // Restrict visibility to dispatch / admin / planning roles (others won't see this panel)
-  const roleAllowed = currentUser && ['admin','planning','dispatch'].includes(currentUser.role);
+  const roleAllowed = (window.currentUser || state.currentUser) && ['admin','planning','dispatch'].includes((window.currentUser || state.currentUser)?.role);
   if (!roleAllowed) {
     panel.innerHTML = '';
     return;

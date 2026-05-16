@@ -10717,8 +10717,8 @@ async function doLogout() {
 
 async function auditLog(action, details) {
   if (!currentUser) return;
-  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
-  if (!serverUrl || !currentUser.token) return;
+  let serverUrl = ''; try { serverUrl = SYNC._url || localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl || !currentUser?.token) return;
   try {
     await fetch(serverUrl + '/api/audit/log', {
       method:'POST', headers:{'Content-Type':'application/json'},

@@ -4534,7 +4534,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: 'User not found' });
     if (user.pin_hash !== hashPin(pin)) return res.status(401).json({ ok: false, error: 'Invalid PIN' });
     const token = generateToken();
-    const expires = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
     if (pgPool) {
       await pgPool.query('INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(token) DO NOTHING',
         [token, user.id, user.username, user.role, appName, expires]);
@@ -5822,7 +5822,7 @@ app.post('/api/auth/login', async (req, res) => {
     if (!user) return res.status(401).json({ ok: false, error: 'User not found' });
     if (user.pin_hash !== hashPin(pin)) return res.status(401).json({ ok: false, error: 'Invalid PIN' });
     const token = generateToken();
-    const expires = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
     if (pgPool) {
       await pgPool.query('INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(token) DO NOTHING',
         [token, user.id, user.username, user.role, appName, expires]);

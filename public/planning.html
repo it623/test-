@@ -9879,11 +9879,11 @@ async function renderReconciliation() {
         fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)})
       ]);
       const j1 = await r1.json(); if(j1.ok) tempBatches = j1.batches;
-      if(r2){ const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; }
-      const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20);
+      if(r2){ if(r2.status===401||r2.status===403){ _handleSessionExpired(); } else { const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; } }
+      if(r3.status!==401&&r3.status!==403){ const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20); }
       let woPendingRequests = [], woHistory = [];
-      if(r4){ const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; }
-      if(r5){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
+      if(r4){ if(r4.status===401||r4.status===403){ _handleSessionExpired(); } else { const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; } }
+      if(r5&&r5.status!==401&&r5.status!==403){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
     } catch(e) { content.innerHTML = `<div class="alert alert-warn">⚠️ Could not load data: ${e.message}</div>`; return; }
   }
 
@@ -10716,16 +10716,35 @@ async function doLogout() {
 }
 
 async function auditLog(action, details) {
-  if (!currentUser) return;
+  if (!currentUser || !currentUser.token) return;
   let serverUrl = ''; try { serverUrl = SYNC._url || localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
-  if (!serverUrl || !currentUser?.token) return;
+  if (!serverUrl) return;
   try {
-    await fetch(serverUrl + '/api/audit/log', {
+    const resp = await fetch(serverUrl + '/api/audit/log', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ token: currentUser.token, action, details }),
       signal: AbortSignal.timeout(3000)
     });
-  } catch(e) {}
+    // If session expired on server (after redeploy), silently clear and prompt re-login
+    if (resp.status === 401) { _handleSessionExpired(); }
+  } catch(e) { /* network error — ignore silently */ }
+}
+
+// Called when server returns 401 — session expired (e.g. after Railway redeploy)
+let _sessionExpiredShown = false;
+function _handleSessionExpired() {
+  if (_sessionExpiredShown) return;
+  _sessionExpiredShown = true;
+  // Clear stale session
+  try { sessionStorage.removeItem('plan_session'); } catch(e) {}
+  currentUser = null;
+  // Show non-blocking toast — don't force reload
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#e53e3e;color:#fff;padding:12px 24px;border-radius:8px;z-index:99999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer';
+  toast.textContent = '⚠️ Session expired — click here to re-login';
+  toast.onclick = () => { _sessionExpiredShown = false; document.getElementById('auth-overlay').classList.remove('hidden'); toast.remove(); };
+  document.body.appendChild(toast);
+  setTimeout(() => { _sessionExpiredShown = false; document.getElementById('auth-overlay').classList.remove('hidden'); toast.remove(); }, 8000);
 }
 
 // Audit log page

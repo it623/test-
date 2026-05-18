@@ -2597,8 +2597,8 @@ app.post('/api/invoice/request', async (req, res) => {
     } catch (e) {
       // Mark as failed so it doesn't stay stuck as pending
       try {
-        if (pgPool) { await pgPool.query(`UPDATE invoice_requests SET status='failed', error_message=$1 WHERE id=$2 AND status='pending'`, ['SAP/DB error: ' + e.message, id]); }
-        else { db.prepare(`UPDATE invoice_requests SET status='failed', error_message=? WHERE id=? AND status='pending'`).run('SAP/DB error: ' + e.message, id); }
+        if (pgPool) { await pgPool.query(`UPDATE invoice_requests SET status='failed', sap_error_message=$1 WHERE id=$2 AND status='pending'`, ['SAP/DB error: ' + e.message, id]); }
+        else { db.prepare(`UPDATE invoice_requests SET status='failed', sap_error_message=? WHERE id=? AND status='pending'`).run('SAP/DB error: ' + e.message, id); }
       } catch(_) {}
       return res.status(500).json({ ok: false, error: 'SAP completed but DB update failed: ' + e.message, request_id: id });
     }
@@ -2717,11 +2717,11 @@ app.post('/api/invoice/request-batch', async (req, res) => {
           const errMsg = sapResult.error || 'SAP rejected';
           if (pgPool) {
             await pgPool.query(`
-              UPDATE invoice_requests SET status='failed', error_message=$1, updated_at=NOW()::TEXT WHERE id=$2
+              UPDATE invoice_requests SET status='failed', sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2
             `, [errMsg, id]);
           } else {
             db.prepare(`
-              UPDATE invoice_requests SET status='failed', error_message=?, updated_at=datetime('now') WHERE id=?
+              UPDATE invoice_requests SET status='failed', sap_error_message=?, updated_at=datetime('now') WHERE id=?
             `).run(errMsg, id);
           }
           batchRes.error = errMsg;
@@ -2734,9 +2734,9 @@ app.post('/api/invoice/request-batch', async (req, res) => {
         try {
           const errMsg2 = 'server error: ' + e.message;
           if (pgPool) {
-            await pgPool.query(`UPDATE invoice_requests SET status='failed', error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [errMsg2, id]);
+            await pgPool.query(`UPDATE invoice_requests SET status='failed', sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [errMsg2, id]);
           } else {
-            db.prepare(`UPDATE invoice_requests SET status='failed', error_message=?, updated_at=datetime('now') WHERE id=?`).run(errMsg2, id);
+            db.prepare(`UPDATE invoice_requests SET status='failed', sap_error_message=?, updated_at=datetime('now') WHERE id=?`).run(errMsg2, id);
           }
         } catch (dbErr) { console.warn('[invoice] failed to update failed status:', dbErr.message); }
       }
@@ -2791,9 +2791,9 @@ app.post('/api/invoice/request/:id/cancel', async (req, res) => {
       return res.status(400).json({ ok: false, error: `Cannot cancel request in status: ${row.status}` });
     }
     if (pgPool) {
-      await pgPool.query(`UPDATE invoice_requests SET status='cancelled', error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [reason, id]);
+      await pgPool.query(`UPDATE invoice_requests SET status='cancelled', sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [reason, id]);
     } else {
-      db.prepare(`UPDATE invoice_requests SET status='cancelled', error_message=?, updated_at=datetime('now') WHERE id=?`).run(reason, id);
+      db.prepare(`UPDATE invoice_requests SET status='cancelled', sap_error_message=?, updated_at=datetime('now') WHERE id=?`).run(reason, id);
     }
     res.json({ ok: true, cancelled: id });
   } catch (err) {

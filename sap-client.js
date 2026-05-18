@@ -518,7 +518,6 @@ class SapClient {
     const payload = {
       DocDate: today,
       DocDueDate: today,
-      Series: 14,                           // GR-26 series (row 14 in SAP series setup)
       Comments: 'Auto Generated for DN',   // Remarks column in SAP B1 Goods Receipt
       DocumentLines: documentLines,
       ...(currency ? { DocCurrency: currency } : {}),

@@ -619,7 +619,7 @@ class SapClient {
     // Step 2: Create Delivery Note (stock OUT) — based on Sales Order
     // Note: SAP must have "Allow Negative Inventory" enabled, or stock must exist.
     // Auto Goods Receipt is handled manually or via SAP production receipts.
-    const deliveryWarehouse = (isPrinted || false) ? 'FG-HF-PR' : 'FG-HF-UP';
+    const deliveryWarehouse = grResult.warehouse; // same warehouse GR put stock into
     const documentLines = soLines.map((l) => ({
       BaseType: 17,             // Sales Order
       BaseEntry: baseDocEntry,

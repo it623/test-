@@ -506,6 +506,13 @@ class SapClient {
   async createGoodsReceipt({ baseDocEntry, lines, batchNumber, isPrinted, currency }) {
     const today = new Date().toISOString().slice(0, 10);
     const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
+    const mfgDate = new Date();
+    mfgDate.setDate(1); // First day of current month
+    const mfgDateStr = mfgDate.toISOString().slice(0, 10);
+    const expDate = new Date(mfgDate);
+    expDate.setFullYear(expDate.getFullYear() + 5);
+    const expDateStr = expDate.toISOString().slice(0, 10);
+
     const documentLines = (lines || []).map((l) => ({
       ItemCode: l.itemCode,
       Quantity: l.quantity,
@@ -513,7 +520,13 @@ class SapClient {
       AccountCode: '141103',
       ...(l.price ? { UnitPrice: l.price } : {}),
       ...(currency ? { Currency: currency } : {}),
-      // Items are NOT batch managed — no BatchNumbers needed
+      BatchNumbers: [{
+        BatchNumber: batchNumber,
+        Quantity: l.quantity,
+        ManufacturingDate: mfgDateStr,
+        ExpiryDate: expDateStr,
+        AdmissionDate: today,
+      }],
     }));
     const payload = {
       DocDate: today,
@@ -603,24 +616,9 @@ class SapClient {
       console.warn(`[SAP-GR] Could not fetch SO ${baseDocEntry}:`, e.message);
     }
 
-    // Step 2: Create Goods Receipt (stock IN) — auto before Delivery
-    const grResult = await this.createGoodsReceipt({
-      baseDocEntry,
-      lines: soLines,
-      batchNumber,
-      isPrinted: isPrinted || false,
-      currency,
-    });
-    if (!grResult.ok) {
-      return {
-        ok: false,
-        error: `Goods Receipt failed: ${grResult.error}`,
-        degraded: grResult.degraded,
-        grFailed: true,
-      };
-    }
-
-    // Step 3: Create Delivery Note (stock OUT) — based on Sales Order
+    // Step 2: Create Delivery Note (stock OUT) — based on Sales Order
+    // Note: SAP must have "Allow Negative Inventory" enabled, or stock must exist.
+    // Auto Goods Receipt is handled manually or via SAP production receipts.
     const deliveryWarehouse = (isPrinted || false) ? 'FG-HF-PR' : 'FG-HF-UP';
     const documentLines = soLines.map((l) => ({
       BaseType: 17,             // Sales Order

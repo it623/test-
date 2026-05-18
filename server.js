@@ -2132,7 +2132,7 @@ async function _doRefreshSapInvoices() {
         }
       }
     } catch (e) { console.warn('[SAP] invoice match error:', e.message); }
-    const totalBoxes = (inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0);
+    const totalBoxes = Math.round((inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0));
     const docTotal = parseFloat(inv.DocTotal) || 0;
     const vatSum = parseFloat(inv.VatSum) || 0;
     const taxable = docTotal - vatSum;
@@ -2692,6 +2692,7 @@ app.post('/api/invoice/request-batch', async (req, res) => {
           batchNumber: b.batchNumber,
           poNumber: b.poNumber || '',
           remarks: body.remarks || `Sunloc consolidated dispatch — ${b.boxes} boxes`,
+          isPrinted: b.isPrinted || false,
         });
         // Update row with result
         if (sapResult.ok) {

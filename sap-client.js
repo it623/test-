@@ -510,7 +510,6 @@ class SapClient {
     const mfgDate = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-01`;
     const expiryDate = `${_now.getFullYear()+5}-${String(_now.getMonth()+1).padStart(2,'0')}-01`;
     const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
-    const today = new Date().toISOString().slice(0, 10);
     const documentLines = (lines || []).map((l) => ({
       ItemCode: l.itemCode,
       Quantity: l.quantity,

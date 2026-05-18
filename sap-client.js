@@ -505,10 +505,6 @@ class SapClient {
    */
   async createGoodsReceipt({ baseDocEntry, lines, batchNumber, isPrinted, currency }) {
     const today = new Date().toISOString().slice(0, 10);
-    // MFG date = first day of current month, Expiry = 5 years later (matches label)
-    const _now = new Date();
-    const mfgDate = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-01`;
-    const expiryDate = `${_now.getFullYear()+5}-${String(_now.getMonth()+1).padStart(2,'0')}-01`;
     const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
     const documentLines = (lines || []).map((l) => ({
       ItemCode: l.itemCode,
@@ -517,15 +513,7 @@ class SapClient {
       AccountCode: '141103',
       ...(l.price ? { UnitPrice: l.price } : {}),
       ...(currency ? { Currency: currency } : {}),
-      // BatchNumbers — SAP B1 Service Layer format for batch-managed items
-      ...(batchNumber ? { BatchNumbers: [{
-        BatchNumber: batchNumber,
-        Quantity: l.quantity,
-        ManufacturingDate: mfgDate,
-        ExpiryDate: expiryDate,
-        AdmissionDate: today,
-        Status: 'bdsStatus_Released',
-      }] } : {}),
+      // Items are NOT batch managed — no BatchNumbers needed
     }));
     const payload = {
       DocDate: today,
@@ -656,6 +644,7 @@ class SapClient {
       DocumentLines: documentLines,
       ...(currency ? { DocCurrency: currency } : {}),
     };
+    console.log(`[SAP-DLV] Creating Delivery for batch ${batchNumber}, warehouse ${deliveryWarehouse}, qty ${soLines.map(l=>l.quantity).join('+')}`);
     // POST to DeliveryNotes endpoint
     const r = await this.call({ method: 'POST', path: 'DeliveryNotes', body: payload });
     if (!r.ok) {
@@ -671,8 +660,8 @@ class SapClient {
       cardName: dlv.CardName,
       docTotal: dlv.DocTotal,
       objectType: 'Delivery',
-      grDocEntry: grResult.docEntry,   // Goods Receipt DocEntry for reference
-      grDocNum: grResult.docNum,       // Goods Receipt DocNum for reference
+      grDocEntry: grResult.docEntry,
+      grDocNum: grResult.docNum,
       grWarehouse: grResult.warehouse,
       raw: dlv,
     };

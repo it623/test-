@@ -2595,6 +2595,11 @@ app.post('/api/invoice/request', async (req, res) => {
         });
       }
     } catch (e) {
+      // Mark as failed so it doesn't stay stuck as pending
+      try {
+        if (pgPool) { await pgPool.query(`UPDATE invoice_requests SET status='failed', error_message=$1 WHERE id=$2 AND status='pending'`, ['SAP/DB error: ' + e.message, id]); }
+        else { db.prepare(`UPDATE invoice_requests SET status='failed', error_message=? WHERE id=? AND status='pending'`).run('SAP/DB error: ' + e.message, id); }
+      } catch(_) {}
       return res.status(500).json({ ok: false, error: 'SAP completed but DB update failed: ' + e.message, request_id: id });
     }
   } catch (err) {
@@ -2725,6 +2730,15 @@ app.post('/api/invoice/request-batch', async (req, res) => {
         }
       } catch (e) {
         batchRes.error = 'server error: ' + e.message;
+        // CRITICAL: update DB row to failed so it doesn't stay stuck as 'pending'
+        try {
+          const errMsg2 = 'server error: ' + e.message;
+          if (pgPool) {
+            await pgPool.query(`UPDATE invoice_requests SET status='failed', error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [errMsg2, id]);
+          } else {
+            db.prepare(`UPDATE invoice_requests SET status='failed', error_message=?, updated_at=datetime('now') WHERE id=?`).run(errMsg2, id);
+          }
+        } catch (dbErr) { console.warn('[invoice] failed to update failed status:', dbErr.message); }
       }
       results.push(batchRes);
     }
@@ -2755,6 +2769,33 @@ app.get('/api/invoice/requests', async (req, res) => {
       rows = db.prepare(`SELECT * FROM invoice_requests ${whereSql} ORDER BY created_at DESC LIMIT ${limit}`).all(...args);
     }
     res.json({ ok: true, count: rows.length, requests: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/invoice/request/:id/cancel — cancel a pending/failed invoice request
+app.post('/api/invoice/request/:id/cancel', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const reason = (req.body || {}).reason || 'manual cancel';
+    let row;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT id, status FROM invoice_requests WHERE id=$1`, [id]);
+      row = r.rows[0];
+    } else {
+      row = db.prepare(`SELECT id, status FROM invoice_requests WHERE id=?`).get(id);
+    }
+    if (!row) return res.status(404).json({ ok: false, error: 'Invoice request not found' });
+    if (['sent_to_sap','invoice_received','delivered'].includes(row.status)) {
+      return res.status(400).json({ ok: false, error: `Cannot cancel request in status: ${row.status}` });
+    }
+    if (pgPool) {
+      await pgPool.query(`UPDATE invoice_requests SET status='cancelled', error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [reason, id]);
+    } else {
+      db.prepare(`UPDATE invoice_requests SET status='cancelled', error_message=?, updated_at=datetime('now') WHERE id=?`).run(reason, id);
+    }
+    res.json({ ok: true, cancelled: id });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

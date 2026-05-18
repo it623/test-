@@ -490,45 +490,161 @@ class SapClient {
   }
 
   /**
+   * v40 Phase 18.3: Create a Goods Receipt in SAP before Delivery.
+   * Called automatically by createDelivery() — do not call directly.
+   *
+   * Warehouse logic (based on print status):
+   *   Printed batches  → FG-A-PR (received into printed FG warehouse)
+   *   Unprinted batches → FG-A-UP (received into unprinted FG warehouse)
+   *
+   * G/L Account: 141103
+   * Series: GR-26
+   * Remarks/Customer Ref No.: "Auto Generated for DN"
+   * Currency: copied from the Sales Order
+   * UoM: LAC
+   */
+  async createGoodsReceipt({ baseDocEntry, lines, batchNumber, isPrinted, currency }) {
+    const today = new Date().toISOString().slice(0, 10);
+    const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
+    const documentLines = (lines || []).map((l) => ({
+      ItemCode: l.itemCode,
+      Quantity: l.quantity,
+      UoMCode: 'LAC',
+      WarehouseCode: warehouse,
+      AccountCode: '141103',
+      ...(l.price ? { UnitPrice: l.price } : {}),
+      ...(currency ? { Currency: currency } : {}),
+    }));
+    const payload = {
+      DocDate: today,
+      DocDueDate: today,
+      Comments: 'Auto Generated for DN',   // Comments field
+      Remarks: 'Auto Generated for DN',     // Remarks column in SAP B1 Goods Receipt
+      Series: 'GR-26',
+      DocumentLines: documentLines,
+      ...(currency ? { DocCurrency: currency } : {}),
+    };
+    console.log(`[SAP-GR] Creating Goods Receipt for batch ${batchNumber}, warehouse ${warehouse}, qty ${(lines||[]).map(l=>l.quantity).join('+')}`);
+    const r = await this.call({ method: 'POST', path: 'InventoryGenEntries', body: payload });
+    if (!r.ok) {
+      console.warn(`[SAP-GR] Goods Receipt failed for batch ${batchNumber}:`, r.error);
+      return { ok: false, error: r.error, degraded: r.degraded };
+    }
+    const gr = r.data || {};
+    console.log(`[SAP-GR] Goods Receipt created: DocEntry=${gr.DocEntry}, DocNum=${gr.DocNum}`);
+    return {
+      ok: true,
+      docEntry: gr.DocEntry,
+      docNum: gr.DocNum,
+      warehouse,
+    };
+  }
+
+  /**
    * v40 Phase 18.2: Push a Delivery creation trigger to SAP.
+   * Now automatically creates a Goods Receipt first to ensure stock availability.
    *
-   * IMPORTANT ARCHITECTURE CHANGE FROM v39:
-   *   v39 posted to /b1s/v1/Invoices (created A/R Invoice directly).
-   *   v40 posts to /b1s/v1/DeliveryNotes — Sunloc creates the Delivery; SAP user
-   *   manually converts Delivery → A/R Invoice in SAP via Copy-To.
-   *   This matches Sunil Healthcare's actual SAP workflow (Delivery form → Invoice).
+   * Flow:
+   *   1. Fetch Sales Order from SAP to get ItemCodes, currency, line details
+   *   2. Create Goods Receipt (stock IN) — warehouse based on print status
+   *   3. Create Delivery Note (stock OUT) — based on Sales Order
    *
-   * The Sunloc 5-minute poller picks up the resulting Invoice once SAP user
-   * completes the conversion, and routes it to the Tracking → Invoice Queue.
+   * Delivery Note settings:
+   *   Printed warehouse:   FG-HF-PR
+   *   Unprinted warehouse: FG-HF-UP
+   *   G/L Account: 411101, COGS Account: 511101
+   *   Customer Ref. No. (NumAtCard): remarks from Sunloc modal
+   *   Currency: from Sales Order
    *
    * @param {object} args
-   * @param {string} args.cardCode - SAP customer code from the SO
-   * @param {number} args.baseDocEntry - the SAP Sales Order DocEntry (mandatory link)
-   * @param {Array<{lineNum, quantity, itemCode?}>} args.lines - which SO lines and quantities to deliver
-   * @param {string} args.batchNumber - Sunloc batch reference (stored as UDF)
+   * @param {string} args.cardCode - SAP customer code
+   * @param {number} args.baseDocEntry - SAP Sales Order DocEntry
+   * @param {Array<{lineNum, quantity, itemCode?}>} args.lines
+   * @param {string} args.batchNumber - Sunloc batch reference
    * @param {string} args.poNumber - customer PO ref
-   * @param {string} args.remarks
+   * @param {string} args.remarks - goes into Customer Ref. No. on Delivery
+   * @param {boolean} args.isPrinted - true if batch has been printed (determines warehouse)
    */
-  async createDelivery({ cardCode, baseDocEntry, lines, batchNumber, poNumber, remarks }) {
-    // Build OData payload for Delivery based on Sales Order
-    // SAP's "BaseType" 17 = Sales Order. Each line references the SO line via BaseLine.
+  async createDelivery({ cardCode, baseDocEntry, lines, batchNumber, poNumber, remarks, isPrinted }) {
+    // Step 1: Fetch Sales Order to get ItemCodes, currency and line details
     const today = new Date().toISOString().slice(0, 10);
-    const documentLines = (lines || []).map((l, i) => ({
+    let soLines = lines || [];
+    let currency = null;
+    try {
+      const soRes = await this.call({
+        method: 'GET',
+        path: 'Orders',
+        query: `$filter=DocEntry eq ${baseDocEntry}&$select=DocEntry,DocNum,DocCurrency,DocDate,DocumentLines`
+      });
+      if (soRes.ok && soRes.data?.value?.[0]) {
+        const so = soRes.data.value[0];
+        currency = so.DocCurrency || null;
+        // Enrich lines with ItemCode and price from SO if not already provided
+        if (so.DocumentLines && so.DocumentLines.length > 0) {
+          soLines = (lines || []).map((l, i) => {
+            const soLine = so.DocumentLines.find(sl => sl.LineNum === l.lineNum) || so.DocumentLines[i] || {};
+            return {
+              ...l,
+              itemCode: l.itemCode || soLine.ItemCode || null,
+              lineNum: l.lineNum !== undefined ? l.lineNum : (soLine.LineNum || 0),
+              price: soLine.UnitPrice || null,
+            };
+          });
+          // If lines not provided, use all SO lines
+          if (!lines || lines.length === 0) {
+            soLines = so.DocumentLines.map(sl => ({
+              lineNum: sl.LineNum,
+              quantity: parseFloat(sl.Quantity) || 0,
+              itemCode: sl.ItemCode || null,
+              price: sl.UnitPrice || null,
+            }));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[SAP-GR] Could not fetch SO ${baseDocEntry}:`, e.message);
+    }
+
+    // Step 2: Create Goods Receipt (stock IN) — auto before Delivery
+    const grResult = await this.createGoodsReceipt({
+      baseDocEntry,
+      lines: soLines,
+      batchNumber,
+      isPrinted: isPrinted || false,
+      currency,
+    });
+    if (!grResult.ok) {
+      return {
+        ok: false,
+        error: `Goods Receipt failed: ${grResult.error}`,
+        degraded: grResult.degraded,
+        grFailed: true,
+      };
+    }
+
+    // Step 3: Create Delivery Note (stock OUT) — based on Sales Order
+    const deliveryWarehouse = (isPrinted || false) ? 'FG-HF-PR' : 'FG-HF-UP';
+    const documentLines = soLines.map((l) => ({
       BaseType: 17,             // Sales Order
       BaseEntry: baseDocEntry,
       BaseLine: l.lineNum,
       Quantity: l.quantity,
-      // Item code optional — SAP infers from base ref. Pass if we have it.
+      WarehouseCode: deliveryWarehouse,
+      AccountCode: '411101',
+      COGSAccountCode: '511101',
       ...(l.itemCode ? { ItemCode: l.itemCode } : {}),
+      ...(currency ? { Currency: currency } : {}),
     }));
     const payload = {
       CardCode: cardCode,
       DocDate: today,
       DocDueDate: today,
+      NumAtCard: remarks || batchNumber || '',   // Customer Ref. No. = Sunloc remarks
+      Comments: `Sunloc batch ${batchNumber || ''} PO ${poNumber || ''}`.trim(),
       DocumentLines: documentLines,
-      Comments: `Sunloc batch ${batchNumber || ''} PO ${poNumber || ''} ${remarks || ''}`.trim(),
+      ...(currency ? { DocCurrency: currency } : {}),
     };
-    // v40 P18.2: POST to DeliveryNotes endpoint (not Invoices)
+    // POST to DeliveryNotes endpoint
     const r = await this.call({ method: 'POST', path: 'DeliveryNotes', body: payload });
     if (!r.ok) {
       return { ok: false, error: r.error, degraded: r.degraded, status: r.status };
@@ -536,13 +652,16 @@ class SapClient {
     const dlv = r.data || {};
     return {
       ok: true,
-      docEntry: dlv.DocEntry,        // Delivery DocEntry — used by poller to match returning Invoice
-      docNum: dlv.DocNum,            // Delivery DocNum (NOT Invoice DocNum — that comes later)
+      docEntry: dlv.DocEntry,
+      docNum: dlv.DocNum,
       docDate: dlv.DocDate,
       cardCode: dlv.CardCode,
       cardName: dlv.CardName,
       docTotal: dlv.DocTotal,
-      objectType: 'Delivery',        // marker so the consumer knows what kind of doc came back
+      objectType: 'Delivery',
+      grDocEntry: grResult.docEntry,   // Goods Receipt DocEntry for reference
+      grDocNum: grResult.docNum,       // Goods Receipt DocNum for reference
+      grWarehouse: grResult.warehouse,
       raw: dlv,
     };
   }

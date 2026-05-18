@@ -513,18 +513,18 @@ class SapClient {
     const documentLines = (lines || []).map((l) => ({
       ItemCode: l.itemCode,
       Quantity: l.quantity,
-      UoMCode: 'LAC',
       WarehouseCode: warehouse,
       AccountCode: '141103',
       ...(l.price ? { UnitPrice: l.price } : {}),
       ...(currency ? { Currency: currency } : {}),
-      // BatchNumbers required for batch-managed items in SAP B1
+      // BatchNumbers — SAP B1 Service Layer format for batch-managed items
       ...(batchNumber ? { BatchNumbers: [{
         BatchNumber: batchNumber,
         Quantity: l.quantity,
         ManufacturingDate: mfgDate,
         ExpiryDate: expiryDate,
         AdmissionDate: today,
+        Status: 'bdsStatus_Released',
       }] } : {}),
     }));
     const payload = {

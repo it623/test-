@@ -505,7 +505,12 @@ class SapClient {
    */
   async createGoodsReceipt({ baseDocEntry, lines, batchNumber, isPrinted, currency }) {
     const today = new Date().toISOString().slice(0, 10);
+    // MFG date = first day of current month, Expiry = 5 years later (matches label)
+    const _now = new Date();
+    const mfgDate = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-01`;
+    const expiryDate = `${_now.getFullYear()+5}-${String(_now.getMonth()+1).padStart(2,'0')}-01`;
     const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
+    const today = new Date().toISOString().slice(0, 10);
     const documentLines = (lines || []).map((l) => ({
       ItemCode: l.itemCode,
       Quantity: l.quantity,
@@ -514,6 +519,14 @@ class SapClient {
       AccountCode: '141103',
       ...(l.price ? { UnitPrice: l.price } : {}),
       ...(currency ? { Currency: currency } : {}),
+      // BatchNumbers required for batch-managed items in SAP B1
+      ...(batchNumber ? { BatchNumbers: [{
+        BatchNumber: batchNumber,
+        Quantity: l.quantity,
+        ManufacturingDate: mfgDate,
+        ExpiryDate: expiryDate,
+        AdmissionDate: today,
+      }] } : {}),
     }));
     const payload = {
       DocDate: today,

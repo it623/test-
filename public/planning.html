@@ -4796,14 +4796,7 @@ function _v40_openConsolidatedApprovalModal() {
       pcCode: plan.pcCode || ord.pcCode,
       itemCode: ord.itemCode || plan.pcCode || '',
       boxes: plan.boxes || 0,
-      qtyLakhs: (() => {
-        let q = plan.packedQty || plan.packInQty || 0;
-        if (!q && window._liveAGrade) {
-          const bns = (plan.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean);
-          bns.forEach(bn => { const bd = window._liveAGrade[bn]; if (bd?.packing?.inQty) q += parseFloat(bd.packing.inQty||0); });
-        }
-        return q;
-      })(),
+      qtyLakhs: (() => { let q = plan.packedQty || plan.packInQty || 0; if (!q && window._liveAGrade) { const bns=(plan.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean); bns.forEach(bn=>{const bd=window._liveAGrade[bn];if(bd?.packing?.inQty)q+=parseFloat(bd.packing.inQty||0);}); } return q; })(),
       truckNumber: plan.truckNumber || null,
     });
   }
@@ -6842,15 +6835,11 @@ function renderDispatchRow(p) {
   // Lot badge for split dispatches
   const lotBadge = (p.lotTotal > 1)
     ? `<span style="background:rgba(255,171,0,0.12);color:#ffab00;border:1px solid rgba(255,171,0,0.25);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">Lot ${p.lotNo}/${p.lotTotal}</span>` : '';
-  // Packing data from tracking (packed out qty)
-  // Use live agrade cache as fallback if dp.packedQty not yet populated (e.g. auto-generated plan)
+  // Packing data from tracking — use _liveAGrade cache as fallback for auto-generated plans
   let packedOut = p.packedQty || 0;
   if (!packedOut && window._liveAGrade) {
     const bns = (p.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean);
-    bns.forEach(bn => {
-      const bd = window._liveAGrade[bn];
-      if (bd?.packing?.inQty) packedOut += parseFloat(bd.packing.inQty || 0);
-    });
+    bns.forEach(bn => { const bd = window._liveAGrade[bn]; if (bd?.packing?.inQty) packedOut += parseFloat(bd.packing.inQty||0); });
   }
   const packPct = p.qty > 0 ? Math.min(100, (packedOut/p.qty*100)).toFixed(0) : 0;
   const packCell = packedOut > 0
@@ -6905,15 +6894,10 @@ function renderDispatchRow(p) {
 // Returns { eligible: bool, reason: string|null, alreadyInvoiced: bool, state: string }
 function _v40_isInvoiceEligible(p, ord) {
   if (!p) return { eligible: false, reason: 'No plan data', alreadyInvoiced: false, state: 'no_plan' };
-  // Use packedQty on plan, or fall back to live agrade cache (for auto-generated plans)
   let packedOut = p.packedQty || p.packedBoxes || p.packInQty || 0;
   if (!packedOut && window._liveAGrade) {
     const bns = (p.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean);
-    bns.forEach(bn => {
-      const bd = window._liveAGrade[bn];
-      if (bd?.packing?.inQty) packedOut += parseFloat(bd.packing.inQty || 0);
-      else if (bd?.packing?.in) packedOut += parseInt(bd.packing.in || 0, 10);
-    });
+    bns.forEach(bn => { const bd = window._liveAGrade[bn]; if (bd?.packing?.inQty) packedOut += parseFloat(bd.packing.inQty||0); else if (bd?.packing?.in) packedOut += parseInt(bd.packing.in||0,10); });
   }
   if (packedOut <= 0) return { eligible: false, reason: 'No packed boxes yet', alreadyInvoiced: false, state: 'not_packed' };
   const batch = p.batchNumber || '';
@@ -10491,10 +10475,20 @@ function clearAllData() {
 // =============================
 // MODAL HELPERS
 // =============================
-function openModal(title, body, buttons) {
+function openModal(title, subtitleOrBody, bodyOrButtons, buttons) {
+  // Support both 3-param (title, body, buttons) and 4-param (title, subtitle, body, buttons) calls
+  let body, btns;
+  if (buttons !== undefined) {
+    // 4-param call: subtitle + body combined
+    body = subtitleOrBody + bodyOrButtons;
+    btns = buttons;
+  } else {
+    body = subtitleOrBody;
+    btns = bodyOrButtons;
+  }
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = body;
-  document.getElementById('modal-footer').innerHTML = (buttons||[]).map(b=>`<button class="btn ${b.cls}" onclick="${b.fn}">${b.label}</button>`).join('');
+  document.getElementById('modal-footer').innerHTML = (btns||[]).map(b=>`<button class="btn ${b.cls}" onclick="${b.fn}">${b.label}</button>`).join('');
   document.getElementById('modal-overlay').style.display='flex';
 }
 

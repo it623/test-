@@ -506,13 +506,6 @@ class SapClient {
   async createGoodsReceipt({ baseDocEntry, lines, batchNumber, isPrinted, currency }) {
     const today = new Date().toISOString().slice(0, 10);
     const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
-    const mfgDate = new Date();
-    mfgDate.setDate(1); // First day of current month
-    const mfgDateStr = mfgDate.toISOString().slice(0, 10);
-    const expDate = new Date(mfgDate);
-    expDate.setFullYear(expDate.getFullYear() + 5);
-    const expDateStr = expDate.toISOString().slice(0, 10);
-
     const documentLines = (lines || []).map((l) => ({
       ItemCode: l.itemCode,
       Quantity: l.quantity,
@@ -523,9 +516,6 @@ class SapClient {
       BatchNumbers: [{
         BatchNumber: batchNumber,
         Quantity: l.quantity,
-        ManufacturingDate: mfgDateStr,
-        ExpiryDate: expDateStr,
-        AdmissionDate: today,
       }],
     }));
     const payload = {

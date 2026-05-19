@@ -516,7 +516,13 @@ class SapClient {
       BatchNumbers: [{
         BatchNumber: batchNumber,
         Quantity: l.quantity,
-        BinLocation: warehouse === 'FG-A-UP' ? 'FG-A-UPB1R1' : 'FG-A-PRB1R1',
+      }],
+      BinAllocations: [{
+        BinActionType: 'batToWarehouse',
+        Quantity: l.quantity,
+        BinCode: warehouse === 'FG-A-UP' ? 'FG-A-UPB1R1' : 'FG-A-PRB1R1',
+        AllowNegativeQuantity: 'tNO',
+        SerialAndBatchNumbersBaseLine: 0,
       }],
     }));
     const payload = {

@@ -2059,7 +2059,7 @@ async function _doRefreshSapIndents() {
   const indents = r.indents || [];
   let upserted = 0;
   for (const ind of indents) {
-    const totalQty = (ind.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0));
+    const totalQty = (ind.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0);
     const totalLines = (ind.DocumentLines || []).length;
     const payload = JSON.stringify(ind);
     try {

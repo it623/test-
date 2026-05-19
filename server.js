@@ -2132,7 +2132,7 @@ async function _doRefreshSapInvoices() {
         }
       }
     } catch (e) { console.warn('[SAP] invoice match error:', e.message); }
-    const totalBoxes = (inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0);
+    const totalBoxes = Math.round((inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0));
     const docTotal = parseFloat(inv.DocTotal) || 0;
     const vatSum = parseFloat(inv.VatSum) || 0;
     const taxable = docTotal - vatSum;
@@ -2500,7 +2500,7 @@ app.post('/api/invoice/request', async (req, res) => {
     if (!body.sapDocEntry) {
       return res.status(400).json({ ok: false, error: 'sapDocEntry required — cannot trigger SAP invoice without source SO reference' });
     }
-    let id = 'invreq_' + crypto.randomBytes(8).toString('hex'); // let so catch block can access
+    let id = 'invreq_' + crypto.randomBytes(8).toString('hex');
     const selectedLabelsJson = JSON.stringify(body.selectedLabels || []);
     // 1. Insert pending row
     try {
@@ -2655,7 +2655,7 @@ app.post('/api/invoice/request-batch', async (req, res) => {
           results.push(batchRes); continue;
         }
         // Insert pending row
-        const id = 'invreq_' + crypto.randomBytes(8).toString('hex');
+        let id = 'invreq_' + crypto.randomBytes(8).toString('hex');
         const selectedLabelsJson = JSON.stringify(b.selectedLabels || []);
         if (pgPool) {
           await pgPool.query(`

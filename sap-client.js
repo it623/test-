@@ -607,9 +607,19 @@ class SapClient {
       console.warn(`[SAP-GR] Could not fetch SO ${baseDocEntry}:`, e.message);
     }
 
-    // Step 2: Create Delivery Note (stock OUT) — based on Sales Order
-    // Note: SAP must have "Allow Negative Inventory" enabled, or stock must exist.
-    // Auto Goods Receipt is handled manually or via SAP production receipts.
+    // Step 2: Create Goods Receipt (GR) first — stock IN
+    const grResult = await this.createGoodsReceipt({
+      baseDocEntry,
+      lines: soLines,
+      batchNumber,
+      isPrinted: isPrinted || false,
+      currency,
+    });
+    if (!grResult.ok) {
+      return { ok: false, error: `Goods Receipt failed: ${grResult.error}` };
+    }
+
+    // Step 3: Create Delivery Note (stock OUT) — from same warehouse as GR
     const deliveryWarehouse = grResult.warehouse; // same warehouse GR put stock into
     const documentLines = soLines.map((l) => ({
       BaseType: 17,             // Sales Order

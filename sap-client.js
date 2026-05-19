@@ -516,7 +516,7 @@ class SapClient {
       BatchNumbers: [{
         BatchNumber: batchNumber,
         Quantity: l.quantity,
-        BinLocationCode: warehouse === 'FG-A-UP' ? 'FG-A-UPB1R1' : 'FG-A-PRB1R1',
+        BinLocation: warehouse === 'FG-A-UP' ? 'FG-A-UPB1R1' : 'FG-A-PRB1R1',
       }],
     }));
     const payload = {

@@ -93,8 +93,12 @@ thead th { background:#1a3a2e; color:#f0c060; padding:11px 12px; text-align:left
 tbody td { padding:10px 12px; border-bottom:1px solid var(--border); color:var(--text); font-weight:600; vertical-align:middle; }
 tbody tr:last-child td { border-bottom:none; }
 tbody tr:hover td { background:#fdf5e8; }
-tbody tr.closed td { opacity:0.5; }
+/* v41 P19.1 Fix 1C: closed-row dimming uses solid background + colour, not opacity.
+   Opacity made cells translucent — when scrolling right, freeze columns underneath
+   showed through, visually merging with customer-name column. */
+tbody tr.closed td { background:#f1efe9; color:#9aa0a6; }
 tbody tr.closed td:first-child { text-decoration:line-through; }
+tbody tr.closed:hover td { background:#ebe6dc; }
 
 /* v37G: Dispatch Order View — sticky header + frozen left columns (Customer through Zone, 1-8) */
 .dispatch-order-view-wrap { position:relative; }
@@ -513,7 +517,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v40</p>
+      <p>Planning Suite v3.0 · build v41</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -542,6 +546,8 @@ input[type="file"] { display:none; }
     <div class="nav-item" id="nav-reconciliation" onclick="navigate('reconciliation')"><span class="icon">🔄</span> Reconciliation</div>
     <div class="nav-item" id="nav-sap-config" style="display:none" onclick="navigate('sap-config')"><span class="icon">🔌</span> SAP Configuration</div>
     <div class="nav-item" id="nav-audit-log" style="display:none" onclick="navigate('audit-log')"><span class="icon">📋</span> Audit Log</div>
+    <div class="nav-item" id="nav-admin-users" style="display:none" onclick="navigate('admin-users')"><span class="icon">👥</span> Admin · Users</div>
+    <div class="nav-item" id="nav-data-integrity" style="display:none" onclick="navigate('data-integrity')"><span class="icon">🩺</span> Data Integrity</div>
     <div class="nav-item" onclick="navigate('settings')"><span class="icon">⚙️</span> Settings</div>
   </div>
 
@@ -566,6 +572,16 @@ input[type="file"] { display:none; }
         </span>
         <div id="topbar-actions" class="topbar-actions"></div>
         <div id="user-badge-wrap"></div>
+      </div>
+    </div>
+    <!-- v40 P18.17: Operator task banner — hidden by default, populated by _v40_taskBannerTick() -->
+    <div id="v40-task-banner" style="display:none;background:linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08));border-bottom:2px solid rgba(245,158,11,0.5);padding:8px 16px;font-size:13px;color:#92400e;display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px">🩺</span>
+        <span id="v40-task-banner-text"><strong>0 tasks</strong> assigned to you</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(245,158,11,0.25);color:#92400e;border:1px solid rgba(245,158,11,0.5)" onclick="_v40_showMyTasks()">Show details</button>
       </div>
     </div>
     <div id="content"></div>
@@ -1874,16 +1890,22 @@ function calcEndDate(startDate, daysNeeded) {
 // Auto batch number generation: YY + MachineAlpha + SerialNo
 // MC14 → N (14th letter), MC32 → AF (32nd: Z=26, AF=27+5=32? No: A=1..Z=26, AA=27..AZ=52)
 // Per spec example: 26N50 = year 26, machine 14 (N=14th letter), serial 50
+// v41 P19.1 Fix 6F: batch nomenclature per Sunloc spec.
+// Machines 1-26 → single letters A-Z (e.g. MC14 → N)
+// Machines 27-52 → "Z" + offset letter (e.g. MC33 → ZG, since 33-26=7 → G)
+// Machines 53+   → not supported; spec confirmed cap at MC52.
+// Previous v40 code used base-26 spreadsheet convention (33 → "AG") which was wrong.
 function machineToAlpha(mcId) {
-  const num = parseInt(mcId.replace(/[^0-9]/g,''))||1;
-  let result = '';
-  let n = num;
-  while (n > 0) {
-    n--;
-    result = String.fromCharCode(65 + (n % 26)) + result;
-    n = Math.floor(n / 26);
+  const num = parseInt(String(mcId).replace(/[^0-9]/g,'')) || 1;
+  if (num >= 1 && num <= 26) {
+    return String.fromCharCode(64 + num); // A=65, so 1→A, 26→Z
   }
-  return result;
+  if (num >= 27 && num <= 52) {
+    return 'Z' + String.fromCharCode(64 + (num - 26)); // 27→ZA, 33→ZG, 52→ZZ
+  }
+  // Beyond MC52 — spec doesn't define. Throw a clear error so any future expansion gets attention.
+  console.error(`[v41 P19.1 Fix 6F] Batch nomenclature not defined for MC${num}. Spec caps at MC52. Contact admin to extend.`);
+  throw new Error(`Batch nomenclature not defined for MC${num}. Spec caps at MC52.`);
 }
 
 function autoGenBatchNumber(machineId) {
@@ -1893,11 +1915,14 @@ function autoGenBatchNumber(machineId) {
   const existing = state.orders
     .filter(o => o.machineId === machineId && o.batchNumber && !o.deleted)
     .map(o => {
+      // v41 P19.2 Fix 6D: accept both 2-digit (legacy) and 3-digit serials in regex
       const m = o.batchNumber.match(/^\d{2}[A-Z]+([0-9]+)$/);
       return m ? parseInt(m[1]) : 0;
     });
   const nextSerial = existing.length > 0 ? Math.max(...existing) + 1 : 1;
-  return yy + alpha + nextSerial;
+  // v41 P19.2 Fix 6D: pad serial to 3 digits (26Y42 → 26Y042). Existing 2-digit batches
+  // are NOT renamed (would break label/RFID traceability) — only NEW batch numbers are padded.
+  return yy + alpha + String(nextSerial).padStart(3, '0');
 }
 
 function getMachineOrders(machineId) {
@@ -1940,7 +1965,10 @@ function recalcMachineScheduleQuiet(machineId) {
       }
       continue;
     }
-    // If order already has both startDate AND endDate — never touch dates, just recalc qty
+    // v41 P19.1 Fix 1A: auto-roll stale dates for running orders.
+    // Trigger: status='running', not manually flagged, endDate is in the past, gross remaining > 0.
+    // Behaviour: recompute endDate from today + remainingDays. Cascade to subsequent orders.
+    // User-edited dates (manualStartDate/manualEndDate flags) are preserved — user intent wins.
     if (ord.startDate && ord.endDate) {
       const sc = calcOrderSchedule(ord, mc);
       ord.grossQty   = sc.grossQty;
@@ -1948,8 +1976,25 @@ function recalcMachineScheduleQuiet(machineId) {
       ord.printOut   = sc.printOut;
       ord.piOut      = sc.piOut;
       ord.daysNeeded = sc.daysNeeded;
-      const endD = new Date(ord.endDate);
-      if (!isNaN(endD) && (!cursor || endD > cursor)) cursor = endD;
+      const todayD = new Date(today());
+      const endD   = new Date(ord.endDate);
+      const isStale = (ord.status === 'running')
+        && !ord.manualStartDate && !ord.manualEndDate
+        && !isNaN(endD) && endD < todayD
+        && sc.daysNeeded != null && sc.daysNeeded > 0
+        && (sc.grossQty - (ord.actualProd || ord.actualQty || 0)) > 0.01;
+      if (isStale) {
+        // Order is still running past its planned endDate. Push endDate to today + remainingDays.
+        const remainingGross = Math.max(0, sc.grossQty - (ord.actualProd || ord.actualQty || 0));
+        const remainingDays  = sc.effectiveCap ? (remainingGross / sc.effectiveCap) : 0;
+        const newEnd = new Date(todayD);
+        newEnd.setDate(newEnd.getDate() + Math.ceil(remainingDays));
+        ord.endDate = newEnd;
+        // Note: do NOT touch startDate — production already happened from that date.
+        if (!cursor || newEnd > cursor) cursor = newEnd;
+      } else {
+        if (!isNaN(endD) && (!cursor || endD > cursor)) cursor = endD;
+      }
       continue;
     }
     if (!cursor) {
@@ -2004,7 +2049,7 @@ function recalcMachineSchedule(machineId) {
       }
       continue;
     }
-    // If order already has both startDate AND endDate (or manual flags) — never touch dates, just recalc qty
+    // v41 P19.1 Fix 1A: auto-roll stale dates for running orders (same logic as recalcMachineScheduleQuiet)
     if ((ord.startDate && ord.endDate) || ord.manualStartDate || ord.manualEndDate) {
       const sc = calcOrderSchedule(ord, mc);
       ord.grossQty   = sc.grossQty;
@@ -2012,8 +2057,23 @@ function recalcMachineSchedule(machineId) {
       ord.printOut   = sc.printOut;
       ord.piOut      = sc.piOut;
       ord.daysNeeded = sc.daysNeeded;
-      const endD = new Date(ord.endDate);
-      if (!isNaN(endD) && (!cursor || endD > cursor)) cursor = endD;
+      const todayD = new Date(today());
+      const endD   = new Date(ord.endDate);
+      const isStale = (ord.status === 'running')
+        && !ord.manualStartDate && !ord.manualEndDate
+        && !isNaN(endD) && endD < todayD
+        && sc.daysNeeded != null && sc.daysNeeded > 0
+        && (sc.grossQty - (ord.actualProd || ord.actualQty || 0)) > 0.01;
+      if (isStale) {
+        const remainingGross = Math.max(0, sc.grossQty - (ord.actualProd || ord.actualQty || 0));
+        const remainingDays  = sc.effectiveCap ? (remainingGross / sc.effectiveCap) : 0;
+        const newEnd = new Date(todayD);
+        newEnd.setDate(newEnd.getDate() + Math.ceil(remainingDays));
+        ord.endDate = newEnd;
+        if (!cursor || newEnd > cursor) cursor = newEnd;
+      } else {
+        if (!isNaN(endD) && (!cursor || endD > cursor)) cursor = endD;
+      }
       continue;
     }
     if (!cursor) {
@@ -2337,6 +2397,8 @@ function checkAndConsolidateExportContainer(ord) {
 // NAVIGATION
 // =============================
 function navigate(page) {
+  // v40 Phase 18.14h: Save current page's view state before we leave so it'll restore on return
+  try { _v40_saveViewState(state.currentPage); } catch(e) {}
   state.currentPage = page;
   closePlanSidebar();
   document.querySelectorAll('.nav-item').forEach(el => {
@@ -2353,6 +2415,101 @@ function navigate(page) {
 
 
 // --- Cursor/focus preservation helper ---
+// v40 Phase 18.14h: View-state preservation across renders + browser refresh.
+// Each page gets its own slot in sessionStorage keyed by `_v40_viewState_<page>`.
+// Stored: scroll position, active size tab, filter strings, expanded states.
+// Restored: after every _renderImmediate() and on page load.
+//
+// Why sessionStorage (not localStorage): tab-local — closing the tab clears it,
+// which matches user expectation. F5 refresh persists. Cross-tab independence.
+const _VIEW_STATE_KEY_PREFIX = '_v40_viewState_';
+
+function _v40_saveViewState(pageOverride) {
+  try {
+    const page = pageOverride || (state && state.currentPage) || 'unknown';
+    const key = _VIEW_STATE_KEY_PREFIX + page;
+    const content = document.getElementById('content');
+    const vs = {
+      scroll: content ? content.scrollTop : (window.scrollY || 0),
+      sizeTab: document.querySelector('#size-tabs .tab.active')?.textContent || null,
+      // Capture any text inputs marked data-viewstate-key="<name>"
+      filters: {},
+      savedAt: Date.now(),
+    };
+    document.querySelectorAll('[data-viewstate-key]').forEach(el => {
+      vs.filters[el.dataset.viewstateKey] = el.value || '';
+    });
+    sessionStorage.setItem(key, JSON.stringify(vs));
+  } catch(e) { /* silent */ }
+}
+
+function _v40_restoreViewState(pageOverride) {
+  try {
+    const page = pageOverride || (state && state.currentPage) || 'unknown';
+    const key = _VIEW_STATE_KEY_PREFIX + page;
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch(e) { return null; }
+}
+
+function _v40_applyViewState(vs) {
+  if (!vs) return;
+  // 1. Active size tab — only if the tab still exists
+  if (vs.sizeTab) {
+    const tabs = document.querySelectorAll('#size-tabs .tab');
+    let matched = false;
+    tabs.forEach(t => {
+      if (t.textContent === vs.sizeTab) {
+        t.click();   // re-triggers switchSizeTab(this, ...) which hides/shows panels
+        matched = true;
+      }
+    });
+    if (!matched && tabs.length > 0) {
+      // Fall back to 'All' tab if the previously active one no longer exists
+      tabs[0].click();
+    }
+  }
+  // 2. Restore text filter inputs
+  if (vs.filters) {
+    Object.entries(vs.filters).forEach(([key, val]) => {
+      const el = document.querySelector(`[data-viewstate-key="${CSS.escape(key)}"]`);
+      if (el) {
+        el.value = val;
+        // Fire input event so any onInput handlers re-apply
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  }
+  // 3. Restore scroll — async so layout settles first
+  if (vs.scroll != null && vs.scroll > 0) {
+    requestAnimationFrame(() => {
+      const content = document.getElementById('content');
+      if (content && content.scrollTop !== undefined) content.scrollTop = vs.scroll;
+      else window.scrollTo(0, vs.scroll);
+    });
+  }
+}
+
+// Auto-save view state on scroll (debounced) + on tab clicks + on visibility change
+let _vsScrollTimer = null;
+document.addEventListener('scroll', (e) => {
+  // Only react to scrolls inside #content
+  if (e.target && e.target.id === 'content') {
+    clearTimeout(_vsScrollTimer);
+    _vsScrollTimer = setTimeout(() => _v40_saveViewState(), 400);
+  }
+}, true);
+document.addEventListener('click', (e) => {
+  // Tab clicks + filter input changes — save view state after a tick
+  if (e.target && (e.target.classList?.contains('tab') || e.target.hasAttribute('data-viewstate-key'))) {
+    setTimeout(() => _v40_saveViewState(), 100);
+  }
+}, true);
+// Save view state when navigating away from the tab (browser refresh, close, etc.)
+window.addEventListener('beforeunload', () => { try { _v40_saveViewState(); } catch(e) {} });
+window.addEventListener('pagehide',     () => { try { _v40_saveViewState(); } catch(e) {} });
+
 function _saveFocus(){
   const el=document.activeElement;
   if(!el||el===document.body)return null;
@@ -2403,6 +2560,8 @@ function _renderImmediate() {
     'reconciliation': renderReconciliation,
     'sap-config': () => { if(typeof renderSapConfig==='function') renderSapConfig(); },  // v39 Phase 14
     'audit-log': () => { if(typeof renderAuditLog==='function') renderAuditLog(); },
+    'admin-users': () => { if(typeof renderAdminUsers==='function') renderAdminUsers(); },  // v40 P18.16
+    'data-integrity': () => { if(typeof renderDataIntegrity==='function') renderDataIntegrity(); },  // v40 P18.17
     'settings': renderSettings,
   };
   const titles = {
@@ -2423,6 +2582,8 @@ function _renderImmediate() {
     'search':'Search',
     'reconciliation':'TEMP Batch Reconciliation',
     'sap-config':'SAP Configuration (Admin)',
+    'admin-users':'Admin · User Management',
+    'data-integrity':'Data Integrity Dashboard',
     'settings':'Settings',
   };
   document.getElementById('page-title').textContent = titles[state.currentPage] || '';
@@ -2438,6 +2599,13 @@ function _renderImmediate() {
     else window.scrollTo(0, _scrollTop);
   }, 0);
   if(_f)setTimeout(()=>_restoreFocus(_f),0);
+  // v40 Phase 18.14h: Apply persisted view state (size tab, filters, scroll).
+  // sessionStorage version survives across browser refresh; the local scroll save above
+  // covers same-session re-renders. If both apply, view-state wins (more specific).
+  try {
+    const vs = _v40_restoreViewState();
+    if (vs) _v40_applyViewState(vs);
+  } catch(e) { /* silent */ }
   // v40 Phase 18.1: keep the floating multi-select bar in sync after render
   try { if (typeof _v40_renderInvoiceFloatingBar === 'function') _v40_renderInvoiceFloatingBar(); } catch (e) {}
 }
@@ -2480,7 +2648,36 @@ function renderProduction() {
       </div>`
     : '';
 
-  const overLimitBanner = ''; // banner removed per user request
+  // v37J → v39 → v40 P18.14f/i Fix 3: Max-2 In-Production banner with drill-down.
+  // Visible to admin + planning roles. Hard-block on save remains; this banner catches
+  // historical over-limit data (e.g. orders set to 'running' before the limit was enforced,
+  // via reconciliation flow, or via the now-removed silent server auto-promote).
+  // Banner has "Show details" button that opens a modal with each over-limit batch,
+  // customer name, actuals, and startDate — non-mutating; planning manager picks who closes.
+  const _overLimitMachines = {};
+  const _overLimitDetail = {};   // machineId → array of full order refs for the modal
+  state.orders.forEach(o => {
+    if (o.status === 'running' && !o.deleted && o.machineId) {
+      _overLimitMachines[o.machineId] = (_overLimitMachines[o.machineId] || 0) + 1;
+      if (!_overLimitDetail[o.machineId]) _overLimitDetail[o.machineId] = [];
+      _overLimitDetail[o.machineId].push(o);
+    }
+  });
+  const _overLimitList = Object.entries(_overLimitMachines).filter(([,n]) => n > 2);
+  // Stash for the modal opener
+  window._v40_overLimitDetail = {};
+  _overLimitList.forEach(([m]) => { window._v40_overLimitDetail[m] = _overLimitDetail[m]; });
+  const _userCanSeeBanner = currentUser && ['admin','planning'].includes(currentUser.role);
+  const overLimitBanner = (_overLimitList.length > 0 && _userCanSeeBanner)
+    ? `<div style="background:rgba(239,68,68,0.10);border:1px solid rgba(239,68,68,0.40);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#dc2626;display:flex;align-items:flex-start;gap:10px">
+        <span style="font-size:16px;line-height:1">⚠️</span>
+        <div style="flex:1">
+          <strong>Max 2 In-Production limit exceeded</strong> — please review and close extras:
+          ${_overLimitList.map(([m,n]) => `<div style="margin-top:4px">• Machine <b>${m}</b>: ${n} orders In Production <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px;margin-left:6px" onclick="_v40_showOverLimitDetails('${m}')">Show details</button></div>`).join('')}
+          <div style="margin-top:6px;font-size:11px;color:#7c2d2d">New orders are hard-blocked at the limit. To resolve: close one of the running orders on the affected machine(s) via the row's status dropdown or the Close action.</div>
+        </div>
+      </div>`
+    : '';
 
   // v39 Phase 17.1: SAP Linking prompt. Visible to all planner roles.
   // Lists every active order that needs a SAP reference but doesn't have one.
@@ -2847,7 +3044,8 @@ function renderOrderRow(ord, idx, mc) {
     <td style="white-space:nowrap">
       ${canClose?`<button class="btn btn-success btn-sm" onclick="closeOrder('${ord.id}','${mc.id}')">✓ Close</button> `:''}
       ${!isClosed&&!dprClosed&&ord.actualProd>0?`<span style="font-size:10px;color:var(--text3)">Close in DPR first</span>`:''}
-      ${isWO?`<button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${ord.id}')">🔶 Assign Customer</button> `:''}
+      ${isWO?`<button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${ord.id}')">🔶 Split & Assign</button> `:''}
+      ${ord.status==='pending'?`<button class="btn btn-ghost btn-sm" title="Pre-empt — move this order earlier in the queue; cascade-renames the displaced batches" onclick="preemptOrderInQueue('${ord.id}','${mc.id}')">⤴️</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="editOrder('${ord.id}')">✏️</button>
       <button class="btn btn-danger btn-sm" style="padding:5px 7px" onclick="deleteOrder('${ord.id}','${mc.id}')">✕</button>
     </td>
@@ -2872,23 +3070,9 @@ function updateActualProd(ordId, val, machineId) {
   const ord = state.orders.find(o=>o.id===ordId);
   if (ord) {
     ord.actualProd = parseFloat(val)||0;
-    // Auto-promote pending → running only if within 2-order limit and not a SAP-imported order
-    if (ord.actualProd > 0 && ord.status === 'pending' && !ord._noAutoPromote) {
-      const runningCount = state.orders.filter(o =>
-        o.machineId === machineId &&
-        o.status === 'running' &&
-        o.id !== ordId &&
-        !o.deleted
-      ).length;
-      if (runningCount >= 2) {
-        alert('⚠️ Maximum 2 orders can be In Production on this machine.\n\nPlease close one before starting a new one.');
-        ord.actualProd = 0;
-        const inp = document.querySelector(`input[onchange*="${ordId}"]`);
-        if (inp) inp.value = 0;
-        return;
-      }
-      ord.status = 'running';
-    }
+    // v40 P18.14i Fix 2: REMOVED silent auto-promote pending→running on actualProd change.
+    // Status transitions are now user-controlled via the status dropdown. DPR can only
+    // write actuals to orders already in 'running' status (server gate at /api/dpr/save).
     // v37E PL1: protect this local change from being overwritten by next server sync
     _localOrderChanges[ordId] = Date.now();
     recalcMachineSchedule(machineId);
@@ -2925,6 +3109,7 @@ function changeOrderStatus(ordId, machineId, newStatus) {
     }
   }
   ord.status = newStatus;
+  ord._localEditedAt = Date.now();   // v40 P18.14i: timestamp for server merge tie-break
   if (newStatus === 'closed') {
     ord.closedDate = new Date();
     if (isExportZone(ord.zone)) checkAndConsolidateExportContainer(ord);
@@ -2973,6 +3158,7 @@ function closeOrder(ordId, machineId) {
   }
   ord.status = 'closed';
   ord.closedDate = new Date();
+  ord._localEditedAt = Date.now();   // v40 P18.14i: timestamp for server merge tie-break
   // v37E PL1: protect this local change from being overwritten by next server sync
   _localOrderChanges[ordId] = Date.now();
   saveState();
@@ -3001,6 +3187,218 @@ function deleteOrder(ordId, machineId) {
   saveState();
   recalcMachineSchedule(machineId);
   render();
+}
+
+// v40 Phase 18.14g: Pre-empt a pending order to an earlier slot. Cascade-renumbers
+// the displaced pending orders so the queue stays serially contiguous.
+// Example: queue is 26ZC10 (running), 26ZC11, 26ZC12, 26ZC13, 26ZC14, 26ZC15 (all pending).
+// User wants to move 26ZC15 → position 11. Result: 26ZC10 stays, then 26ZC15-content
+// becomes 26ZC11, what was 26ZC11 becomes 26ZC12, ... 26ZC14 becomes 26ZC15.
+// v40 P18.14i Fix 3: Detailed over-limit modal. Triggered by "Show details" button on the
+// max-2 banner. Lists each running order on the over-limit machine with the info the
+// planning manager needs to pick who to close: customer, actuals so far, startDate, etc.
+// Each row has a quick "Close this order" button that triggers the regular close flow.
+function _v40_showOverLimitDetails(machineId) {
+  const list = (window._v40_overLimitDetail || {})[machineId] || [];
+  if (list.length === 0) {
+    alert(`No detail available for ${machineId}. Try refreshing the page.`);
+    return;
+  }
+  // Sort by startDate ASC so oldest is first (typical close candidate)
+  const sorted = [...list].sort((a,b) => String(a.startDate||'').localeCompare(String(b.startDate||'')));
+  const fmtN = (n) => (parseFloat(n)||0).toFixed(2);
+  const rowsHtml = sorted.map((o,i) => {
+    const actual = o.actualProd || o.actualQty || 0;
+    const gross  = o.grossQty || o.qty || 0;
+    const pct    = gross > 0 ? Math.min(100, Math.round(actual/gross*100)) : 0;
+    const sd     = o.startDate ? new Date(o.startDate).toISOString().slice(0,10) : '?';
+    const closeable = actual > 0;
+    const actionCell = closeable
+      ? '<button class="btn btn-sm" style="background:rgba(239,68,68,0.12);color:#dc2626;border:1px solid rgba(239,68,68,0.3);padding:3px 10px;font-size:11px" onclick="closeModal();closeOrder(\'' + o.id + '\',\'' + machineId + '\')">Close this</button>'
+      : '<span style="color:var(--text3);font-size:11px">No actuals — close via row dropdown</span>';
+    const colorVal = pct>=99 ? 'var(--green)' : (pct>=50 ? 'var(--accent3)' : 'var(--text3)');
+    return `<tr>
+      <td style="padding:6px 8px;font-family:var(--mono);color:var(--accent)">${i+1}</td>
+      <td style="padding:6px 8px;font-family:var(--mono)">${o.batchNumber || '?'}</td>
+      <td style="padding:6px 8px">${o.customer || '?'}</td>
+      <td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${sd}</td>
+      <td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${fmtN(actual)}L</td>
+      <td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${fmtN(gross)}L</td>
+      <td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:${colorVal}">${pct}%</td>
+      <td style="padding:6px 8px">${actionCell}</td>
+    </tr>`;
+  }).join('');
+  const body = `
+    <div style="font-size:13px;margin-bottom:10px;color:var(--text2)">
+      Machine <b style="color:var(--accent)">${machineId}</b> currently has <b>${sorted.length}</b> orders In Production (limit is 2).
+      Pick which ones to close. Closing requires the order to have some actual production data — orders without actuals must be reverted to Pending via the status dropdown on their row.
+    </div>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead style="background:var(--surface3)">
+          <tr>
+            <th style="padding:6px 8px;text-align:left">#</th>
+            <th style="padding:6px 8px;text-align:left">Batch</th>
+            <th style="padding:6px 8px;text-align:left">Customer</th>
+            <th style="padding:6px 8px;text-align:right">Start</th>
+            <th style="padding:6px 8px;text-align:right">Actual</th>
+            <th style="padding:6px 8px;text-align:right">Gross</th>
+            <th style="padding:6px 8px;text-align:right">%</th>
+            <th style="padding:6px 8px;text-align:left">Action</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    </div>
+  `;
+  openModal(`Over-limit machine: ${machineId} (${sorted.length} running)`, body, [
+    { label: 'Done', cls: 'btn-secondary', fn: 'closeModal()' },
+  ]);
+}
+
+async function preemptOrderInQueue(ordId, machineId) {
+  const ord = state.orders.find(o => o.id === ordId);
+  if (!ord) { toast('Order not found', 'var(--red)'); return; }
+  if (ord.status !== 'pending') {
+    alert(`⚠️ Only pending orders can be pre-empted.\n\nThis order is "${ord.status}". Production has already started or completed — its batch number is fixed.`);
+    return;
+  }
+  // Parse current batch number to extract prefix + serial
+  const m = (ord.batchNumber || '').match(/^(\d{2}[A-Z]+)(\d+)$/);
+  if (!m) {
+    alert(`⚠️ Cannot pre-empt — batch number "${ord.batchNumber || '(none)'}" doesn't match the YY+alpha+serial format.\n\nPlease set a proper batch number on this order first.`);
+    return;
+  }
+  const prefix = m[1];
+  const currentSerial = parseInt(m[2]);
+
+  // Get all orders on this machine sharing the same prefix (pending or running)
+  const allOnMc = state.orders
+    .filter(o => o.machineId === machineId && !o.deleted && o.batchNumber && o.batchNumber.startsWith(prefix))
+    .map(o => {
+      const mm = o.batchNumber.match(/^(\d{2}[A-Z]+)(\d+)$/);
+      return { order: o, serial: mm ? parseInt(mm[2]) : null };
+    })
+    .filter(x => x.serial !== null)
+    .sort((a, b) => a.serial - b.serial);
+
+  // Identify the LOWEST serial that is still pending — this is the earliest slot
+  // the planning manager could move into (anything below is running/closed and locked).
+  const lowestPendingSerial = allOnMc.find(x => x.order.status === 'pending')?.serial;
+  if (lowestPendingSerial == null) {
+    alert('⚠️ No pending orders on this machine to rearrange.');
+    return;
+  }
+  // Highest serial = the current top (what would be the last in queue)
+  const highestSerial = allOnMc[allOnMc.length - 1].serial;
+
+  if (currentSerial === lowestPendingSerial) {
+    alert(`This order is already at the earliest pending slot (${ord.batchNumber}). Nothing to move.`);
+    return;
+  }
+
+  const promptMsg =
+    `Move ${ord.batchNumber} to which earlier slot?\n\n` +
+    `Earliest pending slot: ${prefix}${lowestPendingSerial}\n` +
+    `Current slot: ${ord.batchNumber}\n\n` +
+    `Enter the target batch number (e.g. ${prefix}${lowestPendingSerial}) or just the serial number (e.g. ${lowestPendingSerial}):`;
+
+  let raw = prompt(promptMsg, `${prefix}${lowestPendingSerial}`);
+  if (raw == null) return;
+  raw = (raw || '').trim();
+  if (!raw) return;
+
+  // Allow user to type either the full batch number or just the numeric serial
+  let targetSerial;
+  if (/^\d+$/.test(raw)) {
+    targetSerial = parseInt(raw);
+  } else {
+    const mm = raw.match(/^(\d{2}[A-Z]+)(\d+)$/);
+    if (!mm || mm[1] !== prefix) {
+      alert(`⚠️ Target must use the same prefix "${prefix}".\n\nYou entered: ${raw}`);
+      return;
+    }
+    targetSerial = parseInt(mm[2]);
+  }
+  if (isNaN(targetSerial) || targetSerial <= 0) {
+    alert('⚠️ Invalid serial number.');
+    return;
+  }
+  if (targetSerial < lowestPendingSerial) {
+    alert(`⚠️ Cannot move before the earliest pending slot (${prefix}${lowestPendingSerial}).\n\nSerial ${targetSerial} is currently held by a running/closed order that cannot be rebatched.`);
+    return;
+  }
+  if (targetSerial > highestSerial) {
+    alert(`⚠️ Target serial ${targetSerial} is past the current end of the queue (${prefix}${highestSerial}).\n\nUse the regular edit flow to add new orders at the end.`);
+    return;
+  }
+  if (targetSerial === currentSerial) {
+    alert('Already at this position. Nothing to do.');
+    return;
+  }
+  if (targetSerial > currentSerial) {
+    alert(`⚠️ This action pre-empts a queue position — it only moves orders EARLIER (lower serial).\n\nTo move ${ord.batchNumber} to a later position, edit one of the orders ahead and pre-empt IT instead.`);
+    return;
+  }
+
+  // Build cascade rename plan.
+  // The order being moved gets the targetSerial.
+  // Every PENDING order whose current serial is in [targetSerial, currentSerial-1] gets bumped by +1.
+  const renames = [];
+  for (const x of allOnMc) {
+    if (x.order.id === ordId) {
+      renames.push({ orderId: ordId, newBatchNumber: `${prefix}${targetSerial}` });
+    } else if (x.order.status === 'pending' && x.serial >= targetSerial && x.serial < currentSerial) {
+      renames.push({ orderId: x.order.id, newBatchNumber: `${prefix}${x.serial + 1}` });
+    }
+  }
+  if (renames.length === 0) {
+    alert('No renames computed. Nothing to do.');
+    return;
+  }
+
+  // Confirmation summary
+  const summary = renames.map(r => {
+    const oldBn = (state.orders.find(o => o.id === r.orderId)?.batchNumber) || '?';
+    return `  ${oldBn}  →  ${r.newBatchNumber}`;
+  }).join('\n');
+  if (!confirm(`Confirm rebatch on Machine ${machineId}:\n\n${summary}\n\nThis will renumber ${renames.length} pending order(s). Continue?`)) return;
+
+  // Send to server
+  try {
+    const r = await fetch(SYNC._url + '/api/planning/rebatch-machine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ machineId, renames }),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      if (j.conflicts && j.conflicts.length > 0) {
+        const detail = j.conflicts.map(c => `  • ${c.batchNumber || c.orderId}: ${c.reason}`).join('\n');
+        alert(`⚠️ Rebatch blocked:\n\n${detail}\n\nResolve these conflicts before retrying.`);
+      } else {
+        alert(`⚠️ Rebatch failed: ${j.error || 'unknown error'}`);
+      }
+      return;
+    }
+    // Apply the renames locally so the UI reflects immediately (server sync will reconcile)
+    for (const r of renames) {
+      const o = state.orders.find(x => x.id === r.orderId);
+      if (o) {
+        o.batchNumber = r.newBatchNumber;
+        _localOrderChanges[r.orderId] = Date.now();
+      }
+      // Also rename in any linked print order
+      const po = state.printOrders.find(p => p.productionOrderId === r.orderId);
+      if (po) po.batchNumber = r.newBatchNumber;
+    }
+    saveState();
+    recalcMachineSchedule(machineId);
+    render();
+    toast(`✅ Rebatched ${renames.length} order(s)`, 'var(--green)', 3000);
+  } catch (e) {
+    alert(`⚠️ Rebatch network error: ${e.message}`);
+  }
 }
 
 function editOrder(ordId) {
@@ -3967,23 +4365,50 @@ function _v39_reconcileSapIndents(indents) {
     const cardName = ind.card_name || '';
     const dueDate  = ind.doc_due_date || '';
     const lines    = ind.DocumentLines || [];
+    // v41 P19.2 Fix 6E: detect export indent by customer zone lookup.
+    // If customer is in export zone, SAP UoM is "thousand" — divide qty by 100 to convert to lakh.
+    // Customer→zone lookup uses customer_master if populated, falling back to a heuristic
+    // on cardName (export customers often have "INTERNATIONAL", "EXPORT", or country names).
+    let custZone = '';
+    if (state.customerMaster) {
+      const cm = (state.customerMaster || []).find(c =>
+        (c.cardCode && c.cardCode === cardCode) ||
+        (c.name && cardName && c.name.toLowerCase() === cardName.toLowerCase())
+      );
+      if (cm && cm.zone) custZone = cm.zone;
+    }
+    const isExportIndent = custZone ? isExportZone(custZone)
+      : /\b(EXPORT|INTERNATIONAL|LTD\.?$|LIMITED$|PTY|GMBH|S\.A\.|BV|INC\.?$)\b/i.test(cardName);
+    const uomScale = isExportIndent ? 0.01 : 1; // 1000s → lakhs
+
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      const lineQty = parseFloat(line.Quantity) || 0;
+      // v41 P19.2 Fix 6A: use RemainingOpenQuantity (open qty after partial dispatches).
+      // SAP returns this per line for partially-delivered Sales Orders.
+      // Fallback to Quantity if RemainingOpenQuantity is null/undefined (e.g. brand new SO with no delivery yet).
+      const rawOpenQty = (line.RemainingOpenQuantity != null)
+        ? parseFloat(line.RemainingOpenQuantity) || 0
+        : parseFloat(line.Quantity) || 0;
+      const lineQty = rawOpenQty * uomScale;
       if (lineQty <= 0) continue;
       // v40 Phase 18.2: Lookup ItemCode against Sunloc's PC Code master to derive
       // Size + Colour. SAP UDFs (U_Size, U_Colour, U_PCCode) are NOT populated in
       // Sunil Healthcare's SAP — ItemCode IS the PC Code. Search all size buckets
       // for the matching code; first match wins.
       const itemCode = String(line.ItemCode || '');
-      let size = '', colour = '', pcCode = '';
+      let size = '', colour = '', pcCode = '', printMatter = '';
       if (itemCode && state.pcCodes) {
         for (const sz of Object.keys(state.pcCodes)) {
           const found = (state.pcCodes[sz] || []).find(p => String(p.c) === itemCode);
           if (found) {
             size = sz;
-            colour = found.colour || found.col || '';
+            // v41 P19.2 Fix 6B (corrected): PC master stores colour name under field `n`.
+            // The schema is {c: <pcCode>, n: <colour name>} — there is no `colour`/`col` field.
+            // Without this, colour silently came back empty and the indent UI showed dashes.
+            colour = found.n || '';
             pcCode = itemCode;
+            // Note: PC master does NOT contain printMatter. printMatter is sourced
+            // exclusively from SAP UDF U_PrintMatter (handled in fallback below).
             break;
           }
         }
@@ -3992,6 +4417,9 @@ function _v39_reconcileSapIndents(indents) {
       if (!size) size = line.U_Size || line.ItemDescription?.match(/\bSize\s+([0-4]|00)\b/i)?.[1] || '';
       if (!colour) colour = line.U_Colour || '';
       if (!pcCode) pcCode = line.U_PCCode || itemCode || '';
+      // printMatter comes only from SAP UDF (not in PC master). If blank, isPrinted will
+      // correctly evaluate to false in Fix 6C downstream.
+      printMatter = line.U_PrintMatter || '';
       // Find matching planned orders
       const planned = (state.orders || []).filter(o =>
         !o.deleted &&
@@ -4006,11 +4434,12 @@ function _v39_reconcileSapIndents(indents) {
         out.push({
           docEntry, docNum, cardCode, cardName, dueDate,
           lineNum: line.LineNum != null ? line.LineNum : li,
-          itemCode, size, colour, pcCode,
+          itemCode, size, colour, pcCode, printMatter,
           totalIndentQty: parseFloat(lineQty.toFixed(3)),
           plannedQty: parseFloat(plannedQty.toFixed(3)),
           unplannedQty: parseFloat(unplannedQty.toFixed(3)),
           isPartial: plannedQty > 0,
+          isExport: isExportIndent, // v41 P19.2 Fix 6E: surface flag so UI can show "Export" badge
         });
       }
     }
@@ -4031,11 +4460,21 @@ async function renderUnplannedOrders() {
   topActions.innerHTML = `
     <button class="btn btn-ghost btn-sm" onclick="_v39_triggerSapRefreshIndents()">🔄 Force Refresh from SAP</button>
     <button class="btn btn-ghost btn-sm" onclick="_v39_renderUnplannedRefresh()">↻ Reload page</button>
+    ${currentUser?.role === 'admin' ? `<button class="btn btn-ghost btn-sm" onclick="_v41_openDismissedPanel()">🗑️ Dismissed (<span id="v41-dismissed-count">…</span>)</button>` : ''}
     <span id="v39-sap-status-pill" style="font-size:11px;color:var(--text3);padding:4px 8px"></span>
   `;
   content.innerHTML = `<div style="padding:24px;color:var(--text3);font-size:13px">⏳ Loading SAP indents from cache…</div>`;
   await _v39_fetchSapIndents();
-  const unplanned = _v39_reconcileSapIndents(_v39_sapIndents);
+  // v41 P19.2 Fix 6G: fetch dismissed indents and filter from display
+  await _v41_fetchDismissedIndents();
+  const dismissedKeys = new Set((window._v41_dismissedIndents || []).map(d =>
+    `${d.sap_doc_entry}|${d.line_num}`
+  ));
+  const allUnplanned = _v39_reconcileSapIndents(_v39_sapIndents);
+  const unplanned = allUnplanned.filter(u => !dismissedKeys.has(`${u.docEntry}|${u.lineNum}`));
+  const dismissedHidden = allUnplanned.length - unplanned.length;
+  const dCountEl = document.getElementById('v41-dismissed-count');
+  if (dCountEl) dCountEl.textContent = (window._v41_dismissedIndents || []).length;
   const lastPollStr = _v39_sapLastPollAt
     ? `Last SAP sync: ${_v39_fmtDate(_v39_sapLastPollAt)} ${new Date(_v39_sapLastPollAt).toTimeString().slice(0,5)}`
     : 'No SAP sync yet';
@@ -4086,15 +4525,19 @@ async function renderUnplannedOrders() {
       <td style="text-align:right;font-family:monospace;font-weight:700;color:${u.isPartial?'#f59e0b':'#dc2626'}">
         ${(u.unplannedQty).toFixed(3)}
         ${u.isPartial ? '<div style="font-size:9px;font-weight:600;text-transform:uppercase">Partial</div>' : '<div style="font-size:9px;font-weight:600;text-transform:uppercase">Unplanned</div>'}
+        ${u.isExport ? '<div style="font-size:9px;font-weight:600;text-transform:uppercase;color:#7c3aed">🌍 Export</div>' : ''}
       </td>
       <td style="text-align:center;font-family:monospace;font-size:11px" ${dueClass}>${_v39_fmtDate(u.dueDate)}</td>
-      <td style="text-align:center"><button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="_v39_openAssignModal(${i})">+ Assign</button></td>
+      <td style="text-align:center;white-space:nowrap">
+        <button class="btn btn-primary" style="padding:4px 12px;font-size:11px" onclick="_v39_openAssignModal(${i})">+ Assign</button>
+        ${currentUser?.role === 'admin' ? `<button class="btn btn-ghost" style="padding:4px 8px;font-size:10px;margin-left:4px;color:#dc2626;border-color:rgba(220,38,38,0.3)" onclick="_v41_dismissIndentLine(${i})" title="Hide this line from the unplanned list (admin only)">Dismiss</button>` : ''}
+      </td>
     </tr>`;
   }).join('');
   content.innerHTML = `
     <div style="background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div>
-        <div style="font-size:14px;font-weight:800;color:#d97706">📥 ${unplanned.length} unplanned indent line${unplanned.length!==1?'s':''} from SAP</div>
+        <div style="font-size:14px;font-weight:800;color:#d97706">📥 ${unplanned.length} unplanned indent line${unplanned.length!==1?'s':''} from SAP${dismissedHidden > 0 ? ` <span style="font-size:11px;font-weight:600;color:var(--text3);margin-left:8px">(${dismissedHidden} dismissed hidden)</span>` : ''}</div>
         <div style="font-size:11px;color:#92400e;margin-top:3px">${_v39_sapIndents.length} total open SAP indent${_v39_sapIndents.length!==1?'s':''} loaded · ${lastPollStr}</div>
       </div>
     </div>
@@ -4130,6 +4573,108 @@ async function renderUnplannedOrders() {
 function _v39_pollIntervalMinutesFromCache() {
   // Best-effort — falls back to 5 if config unknown
   return window._v39_indentPollMin || 5;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v41 P19.2 Fix 6G: Dismiss/un-dismiss SAP indent lines
+// ═══════════════════════════════════════════════════════════════
+
+window._v41_dismissedIndents = [];
+
+async function _v41_fetchDismissedIndents() {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/sap/dismissed-indents', {
+      headers:{'x-session-token': currentUser?.token||''},
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) window._v41_dismissedIndents = j.dismissed || [];
+  } catch(e) { /* tolerate — empty array fallback */ }
+}
+
+async function _v41_dismissIndentLine(idx) {
+  const u = window._v39_unplannedCache?.[idx];
+  if (!u) return;
+  if (currentUser?.role !== 'admin') { alert('Admin only.'); return; }
+  const reason = prompt(`Dismiss SAP indent line for "${u.cardName||u.cardCode}" / ${u.docNum} (item ${u.itemCode})?\n\nReason (for audit log):`, '');
+  if (reason === null) return; // cancelled
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/sap/dismiss-indent-line', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({
+        sapDocEntry: u.docEntry, lineNum: u.lineNum,
+        sapDocNum: u.docNum, cardCode: u.cardCode, cardName: u.cardName,
+        itemCode: u.itemCode, reason: reason || ''
+      }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      renderUnplannedOrders();
+    } else {
+      alert('Error: ' + (j.error || 'failed'));
+    }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v41_undismissIndentLine(docEntry, lineNum) {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/sap/undismiss-indent-line', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ sapDocEntry: docEntry, lineNum: lineNum }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      renderUnplannedOrders();
+    } else {
+      alert('Error: ' + (j.error || 'failed'));
+    }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v41_openDismissedPanel() {
+  if (currentUser?.role !== 'admin') return;
+  await _v41_fetchDismissedIndents();
+  const items = window._v41_dismissedIndents || [];
+  const rowsHtml = items.length === 0
+    ? '<div style="padding:24px;text-align:center;color:var(--text3)">No dismissed indents.</div>'
+    : `<div style="overflow-x:auto"><table class="summary-table" style="font-size:12px;width:100%">
+        <thead><tr>
+          <th>SAP Doc#</th><th>Line</th><th>Customer</th><th>Item</th>
+          <th>Dismissed By</th><th>When</th><th>Reason</th><th>Action</th>
+        </tr></thead>
+        <tbody>${items.map(d => `<tr>
+          <td class="text-mono">${d.sap_doc_num||'—'}</td>
+          <td class="text-mono">${d.line_num}</td>
+          <td>${d.card_name||d.card_code||'—'}</td>
+          <td class="text-mono">${d.item_code||'—'}</td>
+          <td>${d.dismissed_by}</td>
+          <td class="text-mono" style="font-size:11px">${d.dismissed_at||''}</td>
+          <td style="font-size:11px;font-style:italic">${d.reason||'—'}</td>
+          <td><button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(34,197,94,0.15);color:#15803d" onclick="_v41_undismissIndentLine(${d.sap_doc_entry}, ${d.line_num})">Restore</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  openModal('🗑️ Dismissed SAP Indents', `
+    <div style="padding:8px 0">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.5">
+        Dismissed indents are hidden from the Unplanned Orders list. They remain in SAP and will reappear if you un-dismiss. Useful for legacy stock or cancelled orders that SAP has not yet closed.
+      </div>
+      ${rowsHtml}
+    </div>
+  `, [{ label: 'Close', cls: 'btn-secondary', fn: 'closeModal()' }]);
 }
 
 async function _v39_renderUnplannedRefresh() {
@@ -4187,7 +4732,7 @@ function _v39_openAssignModal(idx) {
   // Build modal
   const html = `
     <div style="background:var(--surface2);border-radius:6px;padding:12px 14px;margin-bottom:14px;font-size:12px;line-height:1.6">
-      <div style="font-weight:700;color:var(--text);margin-bottom:6px">SAP Indent reference</div>
+      <div style="font-weight:700;color:var(--text);margin-bottom:6px">SAP Indent reference${u.isExport ? ' <span style="background:rgba(139,92,246,0.15);color:#7c3aed;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:600;margin-left:6px">🌍 EXPORT</span>' : ''}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 16px;color:var(--text2)">
         <div><span style="color:var(--text3)">Sales Order Number:</span> <strong style="font-family:monospace;color:var(--accent2)">${u.docNum||'—'}</strong></div>
         <div><span style="color:var(--text3)">DocEntry:</span> <strong style="font-family:monospace">${u.docEntry}</strong></div>
@@ -4196,7 +4741,8 @@ function _v39_openAssignModal(idx) {
         <div><span style="color:var(--text3)">Size:</span> <strong>${u.size||'—'}</strong></div>
         <div><span style="color:var(--text3)">PC Code:</span> <strong style="font-family:monospace">${u.pcCode||'—'}</strong></div>
         <div><span style="color:var(--text3)">Colour:</span> <strong>${u.colour||'—'}</strong></div>
-        <div><span style="color:var(--text3)">Unplanned Qty:</span> <strong style="color:#f59e0b">${u.unplannedQty.toFixed(3)} L</strong></div>
+        <div><span style="color:var(--text3)">Print Matter:</span> <strong>${u.printMatter || '<em style="color:var(--text3)">— (unprinted)</em>'}</strong></div>
+        <div style="grid-column:1/-1"><span style="color:var(--text3)">Open / Unplanned Qty:</span> <strong style="color:#f59e0b">${u.unplannedQty.toFixed(3)} L</strong>${u.isExport ? ' <span style="font-size:10px;color:var(--text3)">(SAP UoM converted from ×1000 → lakhs)</span>' : ''}</div>
       </div>
     </div>
     <div class="form-group"><label>Assign to Machine *</label>
@@ -4275,8 +4821,11 @@ async function _v39_confirmAssign() {
     size: machineSize,
     pcCode: u.pcCode || '',
     colour: u.colour || '',
-    isPrinted: !!u.pcCode,
-    printMatter: '',
+    // v41 P19.2 Fix 6C: isPrinted means "has print matter to print" — NOT "has PC code".
+    // Previous v40 code set isPrinted=true whenever pcCode existed, causing unprinted
+    // orders (Vivek, Maruti) to show PTD badge incorrectly. Now derive from printMatter.
+    isPrinted: !!(u.printMatter && u.printMatter.trim()),
+    printMatter: u.printMatter || '',
     inkCap: '',
     inkBody: '',
     qty,
@@ -4796,7 +5345,7 @@ function _v40_openConsolidatedApprovalModal() {
       pcCode: plan.pcCode || ord.pcCode,
       itemCode: ord.itemCode || plan.pcCode || '',
       boxes: plan.boxes || 0,
-      qtyLakhs: (() => { let q = plan.packedQty || plan.packInQty || 0; if (!q && window._liveAGrade) { const bns=(plan.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean); bns.forEach(bn=>{const bd=window._liveAGrade[bn];if(bd?.packing?.inQty)q+=parseFloat(bd.packing.inQty||0);}); } return q; })(),
+      qtyLakhs: plan.packedQty || 0,
       truckNumber: plan.truckNumber || null,
     });
   }
@@ -5083,7 +5632,9 @@ function renderProdSummary() {
   if (mcTbody) {
     const WORKING_DAYS = 26;
     mcTbody.innerHTML = state.machineMaster.map(mc => {
-      const planned = orders.filter(o => o.machineId === mc.id && o.status !== 'closed').reduce((s, o) => s + o.qty, 0);
+      // v41 P19.1 Fix 2A: "Planned" = sum of ALL order_qty for this machine in this month,
+      // regardless of status (per spec confirmation). Previously excluded closed orders.
+      const planned = orders.filter(o => o.machineId === mc.id).reduce((s, o) => s + (parseFloat(o.qty)||0), 0);
       const monthlyCap = mc.cap * WORKING_DAYS;
       const avail = Math.max(0, monthlyCap - planned);
       const pct = monthlyCap > 0 ? Math.min(120, (planned / monthlyCap * 100)).toFixed(0) : 0;
@@ -5124,6 +5675,40 @@ function renderPrinting() {
       else if (po.printedToDate > 0) po.status = 'running';
     }
   });
+
+  // v41 P19.1 Fix 3B: sanity-recalc qtyToPrint for non-completed print orders.
+  // The bug surfaced in v37K screenshots showed orders where qtyToPrint == orderQty
+  // (no wastage factor applied) or wildly off (e.g. 64L for a 5.25L order).
+  // Triggers for recalc: order is NOT completed, NOT part of multi-OPM split (those use user-defined splits),
+  // and qtyToPrint either equals orderQty exactly or differs from expected by > 5%.
+  // Uses the OPM-aware adaptive formula (calcPrintQtyAndStart) so live A-Grade % feeds in.
+  let _v41_qtpFixed = 0;
+  (state.printOrders || []).forEach(po => {
+    if (po.deleted) return;
+    if (po.status === 'completed') return;
+    if (po.multiOpmGroupId) return; // multi-OPM split — user-defined per-OPM qty, don't touch
+    if (po.qtyToPrintManual) return; // user explicitly edited — respect their value
+    const orderQty = parseFloat(po.orderQty) || 0;
+    const currentQtp = parseFloat(po.qtyToPrint) || 0;
+    if (orderQty <= 0) return;
+    const expected = orderQty * (1 + STD_PRINT_WASTE) * (1 + STD_PI_WASTE);
+    const looksSuspect = (Math.abs(currentQtp - orderQty) < 0.01) // exactly equal — no factor applied
+                      || (Math.abs(currentQtp - expected) / Math.max(expected, 0.01) > 0.05); // off by > 5%
+    if (looksSuspect) {
+      // Use adaptive formula — picks up live OPM A-Grade if available
+      const fakeOrder = { qty: orderQty, batchNumber: po.batchNumber };
+      try {
+        const { qtyToPrint } = calcPrintQtyAndStart(fakeOrder, po.machineId);
+        if (qtyToPrint > 0 && Math.abs(qtyToPrint - currentQtp) > 0.01) {
+          po.qtyToPrint = parseFloat(qtyToPrint.toFixed(3));
+          _v41_qtpFixed++;
+        }
+      } catch(e) { /* tolerate — keep existing value */ }
+    }
+  });
+  if (_v41_qtpFixed > 0) {
+    console.log(`[v41 P19.1] Re-derived qtyToPrint for ${_v41_qtpFixed} print order(s) with suspect values`);
+  }
 
   const topActions = document.getElementById('topbar-actions');
   topActions.innerHTML = `
@@ -5289,6 +5874,16 @@ function closePrintOrder(id) {
   if (!p) return;
   const planned = p.qtyToPrint || 0;
   const actual = p.printedToDate || 0;
+  // v41 P19.1 Fix 3D: also compare against live Print Scan Out — at close time,
+  // Printed-to-Date must be >= Print Scan Out (scan-out is downstream of PTD).
+  const liveKey = (p.batchNumber || '').trim().toUpperCase();
+  const live = window._liveAGrade?.[liveKey] || window._liveAGrade?.[p.batchNumber] || {};
+  const printScanOut = parseFloat(live?.printing?.outQty || 0);
+  if (printScanOut > 0 && actual < printScanOut - 0.01) {
+    const gap = printScanOut - actual;
+    const msg = `⚠️ Printed to Date (${fmt(actual)}L) is LESS than Print Scan Out (${fmt(printScanOut)}L) by ${fmt(gap)}L.\n\nAt close time, Printed to Date must equal or exceed Print Scan Out. Please reconcile the Printed to Date entry first, or click OK to close as-is (mismatch will be flagged in Data Integrity).`;
+    if (!confirm(msg)) return;
+  }
   if (actual === 0) {
     if (!confirm(`No printing recorded for this order (Planned: ${fmt(planned)}L).\n\nClose anyway?`)) return;
   } else if (actual !== planned) {
@@ -5675,7 +6270,7 @@ async function savePrintModal(existingId) {
       colour: document.getElementById('fp-colour')?.value,
       printMatter: document.getElementById('fp-ptdmatter')?.value,
       printType: document.getElementById('fp-printtype')?.value,
-      qtyToPrint: qty, orderQty: qty,
+      qtyToPrint: qty, orderQty: qty, qtyToPrintManual: true, // v41 P19.1 Fix 3B: user-entered qty stays as entered
       startDate, endDate,
       status: document.getElementById('fp-status')?.value,
       zone: document.getElementById('fp-zone')?.value || '',
@@ -6327,7 +6922,15 @@ function buildTruckPlans(zone) {
     truck.etd = dates.length > 0 ? new Date(Math.max(...dates.map(d => d.getTime()))) : null;
     truck.isFull = truck.totalBoxes >= cap;
     truck.cap = cap;
-    truck.packedBoxes = truck.orders.reduce((s, p) => s + (parseInt(p.packedBoxes||0, 10)), 0);
+    truck.packedBoxes = truck.orders.reduce((s, p) => {
+      // v41 P19.1 Fix 4A: cap each order's contribution at the boxes allocated to THIS truck.
+      // Without this cap, an order with 30 packed boxes but only 11 allocated to this truck
+      // contributed all 30, inflating the truck's Packed count above its 130-box capacity.
+      // The remainder of packed boxes naturally appears in whichever next truck they're allocated to.
+      const allocated = parseInt(p.boxes || 0, 10);
+      const packed    = parseInt(p.packedBoxes || 0, 10);
+      return s + Math.min(allocated, packed);
+    }, 0);
     truck.pendingBoxes = Math.max(0, truck.totalBoxes - truck.packedBoxes); // never negative
     // Identify the bottleneck order (the one driving ETD)
     truck.bottleneckOrderId = truck.orders.reduce((worst, p) => {
@@ -6835,12 +7438,8 @@ function renderDispatchRow(p) {
   // Lot badge for split dispatches
   const lotBadge = (p.lotTotal > 1)
     ? `<span style="background:rgba(255,171,0,0.12);color:#ffab00;border:1px solid rgba(255,171,0,0.25);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;margin-left:4px">Lot ${p.lotNo}/${p.lotTotal}</span>` : '';
-  // Packing data from tracking — use _liveAGrade cache as fallback for auto-generated plans
-  let packedOut = p.packedQty || 0;
-  if (!packedOut && window._liveAGrade) {
-    const bns = (p.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean);
-    bns.forEach(bn => { const bd = window._liveAGrade[bn]; if (bd?.packing?.inQty) packedOut += parseFloat(bd.packing.inQty||0); });
-  }
+  // Packing data from tracking (packed out qty)
+  const packedOut = p.packedQty || 0;
   const packPct = p.qty > 0 ? Math.min(100, (packedOut/p.qty*100)).toFixed(0) : 0;
   const packCell = packedOut > 0
     ? `<span style="color:${packedOut>=p.qty*0.99?'var(--accent3)':'var(--accent2)'};">${fmt(packedOut)}L</span><span style="color:var(--text3);font-size:10px"> (${packPct}%)</span>`
@@ -6894,11 +7493,7 @@ function renderDispatchRow(p) {
 // Returns { eligible: bool, reason: string|null, alreadyInvoiced: bool, state: string }
 function _v40_isInvoiceEligible(p, ord) {
   if (!p) return { eligible: false, reason: 'No plan data', alreadyInvoiced: false, state: 'no_plan' };
-  let packedOut = p.packedQty || p.packedBoxes || p.packInQty || 0;
-  if (!packedOut && window._liveAGrade) {
-    const bns = (p.batchNumber||'').split(',').map(b=>b.trim().toUpperCase()).filter(Boolean);
-    bns.forEach(bn => { const bd = window._liveAGrade[bn]; if (bd?.packing?.inQty) packedOut += parseFloat(bd.packing.inQty||0); else if (bd?.packing?.in) packedOut += parseInt(bd.packing.in||0,10); });
-  }
+  const packedOut = p.packedQty || 0;
   if (packedOut <= 0) return { eligible: false, reason: 'No packed boxes yet', alreadyInvoiced: false, state: 'not_packed' };
   const batch = p.batchNumber || '';
   const invState = (window._v39_invoiceState || {})[batch];
@@ -9766,67 +10361,292 @@ function deletePcCode(size, code) {
 // =============================
 // W/O ASSIGN CUSTOMER MODAL
 // =============================
+// v40 P18.15: Multi-customer WO Split modal — replaces the old 1:1 Assign Customer flow.
+// Same trigger button (🔶 Split & Assign / Split & Assign) opens this; user adds 1..N rows
+// for each customer. Submits to /api/wo/split/propose. Admin approves via the Reconciliation page.
+// The 1:1 case is just N=1.
 function openAssignCustomerModal(orderId) {
   const ord = state.orders.find(o => o.id === orderId);
   if (!ord) return;
-  openModal('🔶 Assign Customer to W/O Order', `
+  // Box count: prefer label-count if known, else order's totalBoxes, else derive from qty
+  const labelBoxes = parseInt(ord.totalBoxes) || null;
+  const totalBoxes = labelBoxes || Math.max(1, Math.round((ord.qty||0) / Math.max(0.01, (ord.qty||1)/Math.max(1,parseInt(ord.totalBoxes)||1))));
+
+  // Initialise a single empty line to start
+  window._v40_woSplitLines = [{ customer: '', billTo: '', poNumber: '', zone: '', boxes: '', suffix: 'A', sapDocEntry: '', sapDocNum: '' }];
+
+  const renderLinesHtml = () => {
+    const lines = window._v40_woSplitLines || [];
+    const totalAssigned = lines.reduce((s,L) => s + (parseInt(L.boxes)||0), 0);
+    const remaining = totalBoxes - totalAssigned;
+    const remainingColor = remaining < 0 ? 'var(--red)' : remaining === 0 ? 'var(--green)' : 'var(--accent3)';
+    const remainingLabel = remaining < 0 ? `OVER by ${Math.abs(remaining)}` : remaining === 0 ? 'Fully assigned ✓' : `${remaining} box(es) → residual stays as W/O`;
+    const linesHtml = lines.map((L,i) => `
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;background:var(--surface2);position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong style="color:var(--accent2);font-size:13px">Customer ${i+1}  ·  Suffix: <input id="woc-suffix-${i}" value="${L.suffix||String.fromCharCode(65+i)}" maxlength="3" style="width:40px;font-family:var(--mono);text-transform:uppercase;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:2px 4px;color:var(--accent2);font-weight:700;text-align:center" oninput="_v40_woSplitUpdate(${i},'suffix',this.value)"></strong>
+          ${lines.length > 1 ? `<button class="btn btn-sm btn-danger" style="padding:2px 8px;font-size:11px" onclick="_v40_woSplitRemoveLine(${i})">✕ Remove</button>` : '<span style="font-size:11px;color:var(--text3)">Add more customers below</span>'}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:11px;color:var(--text3)">Ship To (Customer) <span style="color:var(--red)">*</span></label>
+            <input id="woc-customer-${i}" value="${L.customer||''}" placeholder="e.g. ACME PHARMA" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'customer',this.value)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3)">Boxes <span style="color:var(--red)">*</span></label>
+            <input id="woc-boxes-${i}" type="number" min="1" value="${L.boxes||''}" placeholder="e.g. 20" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'boxes',this.value);_v40_woSplitRefreshTotals()">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3)">Bill To <span style="font-size:10px;color:var(--text3)">(if different)</span></label>
+            <input id="woc-billto-${i}" value="${L.billTo||''}" placeholder="Leave blank if same" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'billTo',this.value)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3)">Zone</label>
+            <select id="woc-zone-${i}" class="form-control" style="padding:5px 8px;font-size:12px" onchange="_v40_woSplitUpdate(${i},'zone',this.value)">
+              <option value="">Select Zone</option>
+              ${ZONES.map(z => `<option value="${z}" ${L.zone===z?'selected':''}>${z}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3)">PO / Reference</label>
+            <input id="woc-ponum-${i}" value="${L.poNumber||''}" placeholder="e.g. PO-2026-445" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'poNumber',this.value)">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--text3)">Sales Order ID <span style="font-size:10px;color:var(--text3)">(optional)</span></label>
+            <input id="woc-sape-${i}" type="number" value="${L.sapDocEntry||''}" placeholder="SAP DocEntry" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'sapDocEntry',this.value)">
+          </div>
+          <div style="grid-column:1/-1">
+            <label style="font-size:11px;color:var(--text3)">Sales Order Number <span style="font-size:10px;color:var(--text3)">(optional — fill both Sales Order ID + Number, or neither)</span></label>
+            <input id="woc-sapn-${i}" value="${L.sapDocNum||''}" placeholder="e.g. SO-26-1234" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'sapDocNum',this.value)">
+          </div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3);font-family:var(--mono)">
+          → Child batch: <strong style="color:var(--accent2)">${ord.batchNumber}-${(L.suffix||String.fromCharCode(65+i)).toUpperCase()}</strong>
+        </div>
+      </div>
+    `).join('');
+    return `
+      <div id="wo-split-summary" style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span><strong>Total in batch:</strong> ${totalBoxes} boxes</span>
+          <span><strong>Assigned so far:</strong> ${totalAssigned}</span>
+          <span style="color:${remainingColor}"><strong>Remaining:</strong> ${remainingLabel}</span>
+        </div>
+      </div>
+      <div id="wo-split-lines">${linesHtml}</div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn btn-sm" style="background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3)" onclick="_v40_woSplitAddLine()">+ Add Customer</button>
+      </div>
+    `;
+  };
+
+  openModal('🔶 Split W/O & Assign to Customers', `
     <div style="padding:8px 0">
-      <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px">
-        <strong>Batch:</strong> ${ord.batchNumber||ord.id} &nbsp;|&nbsp;
-        <strong>Size:</strong> ${ord.size} &nbsp;|&nbsp;
-        <strong>Colour:</strong> ${ord.colour||'—'} &nbsp;|&nbsp;
-        <strong>PC Code:</strong> ${ord.pcCode||'—'} &nbsp;|&nbsp;
-        <strong>Qty:</strong> ${fmt(ord.qty)}L
+      <div style="background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+        <strong>Source W/O batch:</strong> ${ord.batchNumber||ord.id}
+        &nbsp;|&nbsp; <strong>Size:</strong> ${ord.size}
+        &nbsp;|&nbsp; <strong>Colour:</strong> ${ord.colour||'—'}
+        &nbsp;|&nbsp; <strong>Qty:</strong> ${fmt(ord.qty)}L
+        &nbsp;|&nbsp; <strong>Boxes:</strong> ${totalBoxes}
       </div>
-      <div class="form-grid">
-        <div class="form-group">
-          <label>Ship To (Customer Name) <span style="color:var(--accent4)">*</span></label>
-          <input class="form-control" id="woc-customer" placeholder="e.g. M/S ACME LIFETECH LLP">
-        </div>
-        <div class="form-group">
-          <label>Bill To <span style="font-size:11px;color:var(--text3);font-weight:400">(if different from Ship To)</span></label>
-          <input class="form-control" id="woc-billto" placeholder="Leave blank if same as Ship To">
-        </div>
-        <div class="form-group">
-          <label>PO / Reference Number</label>
-          <input class="form-control" id="woc-ponum" placeholder="e.g. PO-2026-445">
-        </div>
-        <div class="form-group">
-          <label>Zone</label>
-          <select class="form-control" id="woc-zone">
-            <option value="">Select Zone</option>
-            ${ZONES.map(z => `<option value="${z}">${z}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Confirmed Qty (Lakhs) — leave blank to keep original</label>
-          <input class="form-control" type="number" id="woc-qty" placeholder="${ord.qty}">
-        </div>
-        <!-- v39 Phase 9c: optional SAP refs at reconciliation time -->
-        <div class="form-group">
-          <label>Sales Order ID <span style="font-size:11px;color:var(--text3);font-weight:400">(optional)</span></label>
-          <input class="form-control" id="woc-sap-docentry" type="number" placeholder="e.g. 12345">
-          <div style="font-size:10px;color:var(--text3);margin-top:3px">From the SAP Sales Order — leave blank if SAP indent not yet received.</div>
-        </div>
-        <div class="form-group">
-          <label>Sales Order Number <span style="font-size:11px;color:var(--text3);font-weight:400">(optional)</span></label>
-          <input class="form-control" id="woc-sap-docnum" placeholder="e.g. SO-26-1234">
-          <div style="font-size:10px;color:var(--text3);margin-top:3px">Sales Order Number to attach. Required only if you're invoicing this order.</div>
-        </div>
+      <div style="background:rgba(8,145,178,0.06);border-radius:4px;padding:8px 12px;margin-bottom:14px;font-size:12px;color:var(--text2);line-height:1.5">
+        💡 Add one row per real customer order. Boxes are assigned <strong>by position</strong> — first row gets boxes 1..N, second gets the next M, and so on. Single customer? Just one row. Partial split? Sum the rows to less than ${totalBoxes} and the remainder stays as W/O. Once Admin approves, fresh labels are generated for each child batch (parent ${ord.batchNumber} + suffix A/B/C…) to be physically replaced on the boxes before dispatch.
       </div>
-      <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.25);border-radius:6px;padding:8px 12px;margin-top:10px;font-size:11px;color:#0e7490;line-height:1.5">
-        💡 If the SAP indent for this W/O hasn't arrived yet, leave SAP fields blank — the order will be marked "Awaiting SAP Link" and you can backfill via the Production Plan order edit later.
-      </div>
-      <div style="font-size:12px;color:var(--text3);margin-top:8px">
-        This will propose a reconciliation request for Admin approval. Once approved, all labels for batch <strong>${ord.batchNumber}</strong> will be updated with the real customer name.
-      </div>
+      <div id="wo-split-body" data-batch-number="${ord.batchNumber||''}">${renderLinesHtml()}</div>
     </div>
   `, [
-    { label: 'Propose Reconciliation', cls: 'btn-primary', fn: `proposeWOReconciliation('${orderId}')` },
+    { label: 'Propose Split for Approval', cls: 'btn-primary', fn: `_v40_submitWoSplitProposal('${orderId}', ${totalBoxes})` },
     { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' }
   ]);
 }
 
+function _v40_woSplitAddLine() {
+  const lines = window._v40_woSplitLines || [];
+  if (lines.length >= 26) { alert('Maximum 26 customer lines (A-Z) per split.'); return; }
+  // Save current input values before re-render
+  _v40_woSplitCaptureInputs();
+  const nextSuffix = String.fromCharCode(65 + lines.length);
+  lines.push({ customer: '', billTo: '', poNumber: '', zone: '', boxes: '', suffix: nextSuffix, sapDocEntry: '', sapDocNum: '' });
+  _v40_woSplitRerender();
+}
+
+function _v40_woSplitRemoveLine(i) {
+  _v40_woSplitCaptureInputs();
+  const lines = window._v40_woSplitLines || [];
+  if (lines.length <= 1) return;
+  lines.splice(i, 1);
+  _v40_woSplitRerender();
+}
+
+function _v40_woSplitUpdate(i, field, val) {
+  const lines = window._v40_woSplitLines || [];
+  if (!lines[i]) return;
+  lines[i][field] = val;
+}
+
+function _v40_woSplitCaptureInputs() {
+  const lines = window._v40_woSplitLines || [];
+  for (let i = 0; i < lines.length; i++) {
+    const get = (k) => document.getElementById(`woc-${k}-${i}`)?.value || '';
+    lines[i].customer = get('customer');
+    lines[i].billTo   = get('billto');
+    lines[i].boxes    = get('boxes');
+    lines[i].zone     = get('zone');
+    lines[i].poNumber = get('ponum');
+    lines[i].suffix   = (get('suffix') || lines[i].suffix || '').toUpperCase();
+    lines[i].sapDocEntry = get('sape');
+    lines[i].sapDocNum   = get('sapn');
+  }
+}
+
+function _v40_woSplitRefreshTotals() {
+  _v40_woSplitCaptureInputs();
+  const lines = window._v40_woSplitLines || [];
+  const summary = document.getElementById('wo-split-summary');
+  if (!summary) return;
+  // Find totalBoxes from the data-* on the summary or re-derive from text
+  const totalText = summary.querySelector('span:first-child strong')?.parentElement?.textContent || '';
+  const m = totalText.match(/(\d+)/);
+  if (!m) return;
+  const totalBoxes = parseInt(m[1]);
+  const totalAssigned = lines.reduce((s,L) => s + (parseInt(L.boxes)||0), 0);
+  const remaining = totalBoxes - totalAssigned;
+  const remainingColor = remaining < 0 ? 'var(--red)' : remaining === 0 ? 'var(--green)' : 'var(--accent3)';
+  const remainingLabel = remaining < 0 ? `OVER by ${Math.abs(remaining)}` : remaining === 0 ? 'Fully assigned ✓' : `${remaining} box(es) → residual stays as W/O`;
+  summary.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span><strong>Total in batch:</strong> ${totalBoxes} boxes</span>
+      <span><strong>Assigned so far:</strong> ${totalAssigned}</span>
+      <span style="color:${remainingColor}"><strong>Remaining:</strong> ${remainingLabel}</span>
+    </div>`;
+}
+
+function _v40_woSplitRerender() {
+  // Re-render the whole modal body. Find the batch from the title's source order, redraw lines.
+  // Easier approach: call openAssignCustomerModal again but preserve state via window._v40_woSplitLines.
+  // The modal infra closes & reopens — but window state survives.
+  // We do a partial rebuild: replace #wo-split-body only.
+  const body = document.getElementById('wo-split-body');
+  if (!body) return;
+  // Find source order ID by reading any element with woc-customer-0 (its container has the batch info)
+  // Actually we need totalBoxes — easier to pull from summary text.
+  const totalText = document.querySelector('#wo-split-summary span:first-child strong')?.parentElement?.textContent || '';
+  const m = totalText.match(/(\d+)\s+boxes/);
+  const totalBoxes = m ? parseInt(m[1]) : 0;
+  // Re-render lines using same template as initial open.
+  const lines = window._v40_woSplitLines || [];
+  const totalAssigned = lines.reduce((s,L) => s + (parseInt(L.boxes)||0), 0);
+  const remaining = totalBoxes - totalAssigned;
+  const remainingColor = remaining < 0 ? 'var(--red)' : remaining === 0 ? 'var(--green)' : 'var(--accent3)';
+  const remainingLabel = remaining < 0 ? `OVER by ${Math.abs(remaining)}` : remaining === 0 ? 'Fully assigned ✓' : `${remaining} box(es) → residual stays as W/O`;
+  // We need the source batchNumber for the "Child batch:" preview. Stash on the body element.
+  const batchNumber = body.dataset.batchNumber || '';
+  const linesHtml = lines.map((L,i) => {
+    const suffix = (L.suffix || String.fromCharCode(65+i)).toUpperCase();
+    return `
+      <div style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;background:var(--surface2);position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong style="color:var(--accent2);font-size:13px">Customer ${i+1}  ·  Suffix: <input id="woc-suffix-${i}" value="${suffix}" maxlength="3" style="width:40px;font-family:var(--mono);text-transform:uppercase;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:2px 4px;color:var(--accent2);font-weight:700;text-align:center" oninput="_v40_woSplitUpdate(${i},'suffix',this.value)"></strong>
+          ${lines.length > 1 ? `<button class="btn btn-sm btn-danger" style="padding:2px 8px;font-size:11px" onclick="_v40_woSplitRemoveLine(${i})">✕ Remove</button>` : '<span style="font-size:11px;color:var(--text3)">Add more customers below</span>'}
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><label style="font-size:11px;color:var(--text3)">Ship To (Customer) <span style="color:var(--red)">*</span></label>
+            <input id="woc-customer-${i}" value="${L.customer||''}" placeholder="e.g. ACME PHARMA" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'customer',this.value)"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Boxes <span style="color:var(--red)">*</span></label>
+            <input id="woc-boxes-${i}" type="number" min="1" value="${L.boxes||''}" placeholder="e.g. 20" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'boxes',this.value);_v40_woSplitRefreshTotals()"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Bill To</label>
+            <input id="woc-billto-${i}" value="${L.billTo||''}" placeholder="Leave blank if same" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'billTo',this.value)"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Zone</label>
+            <select id="woc-zone-${i}" class="form-control" style="padding:5px 8px;font-size:12px" onchange="_v40_woSplitUpdate(${i},'zone',this.value)">
+              <option value="">Select Zone</option>${ZONES.map(z => `<option value="${z}" ${L.zone===z?'selected':''}>${z}</option>`).join('')}
+            </select></div>
+          <div><label style="font-size:11px;color:var(--text3)">PO / Reference</label>
+            <input id="woc-ponum-${i}" value="${L.poNumber||''}" placeholder="e.g. PO-2026-445" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'poNumber',this.value)"></div>
+          <div><label style="font-size:11px;color:var(--text3)">Sales Order ID <span style="font-size:10px;color:var(--text3)">(optional)</span></label>
+            <input id="woc-sape-${i}" type="number" value="${L.sapDocEntry||''}" placeholder="SAP DocEntry" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'sapDocEntry',this.value)"></div>
+          <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text3)">Sales Order Number <span style="font-size:10px;color:var(--text3)">(optional)</span></label>
+            <input id="woc-sapn-${i}" value="${L.sapDocNum||''}" placeholder="e.g. SO-26-1234" class="form-control" style="padding:5px 8px;font-size:12px" oninput="_v40_woSplitUpdate(${i},'sapDocNum',this.value)"></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--text3);font-family:var(--mono)">→ Child batch: <strong style="color:var(--accent2)">${batchNumber}-${suffix}</strong></div>
+      </div>`;
+  }).join('');
+  body.innerHTML = `
+    <div id="wo-split-summary" style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span><strong>Total in batch:</strong> ${totalBoxes} boxes</span>
+        <span><strong>Assigned so far:</strong> ${totalAssigned}</span>
+        <span style="color:${remainingColor}"><strong>Remaining:</strong> ${remainingLabel}</span>
+      </div>
+    </div>
+    <div id="wo-split-lines">${linesHtml}</div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn btn-sm" style="background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3)" onclick="_v40_woSplitAddLine()">+ Add Customer</button>
+    </div>
+  `;
+}
+
+async function _v40_submitWoSplitProposal(orderId, totalBoxes) {
+  _v40_woSplitCaptureInputs();
+  const lines = (window._v40_woSplitLines || []).map(L => ({
+    customer:    String(L.customer||'').trim(),
+    billTo:      String(L.billTo||'').trim(),
+    boxes:       parseInt(L.boxes)||0,
+    zone:        String(L.zone||'').trim(),
+    poNumber:    String(L.poNumber||'').trim(),
+    suffix:      String(L.suffix||'').trim().toUpperCase(),
+    sapDocEntry: L.sapDocEntry ? parseInt(L.sapDocEntry) : null,
+    sapDocNum:   String(L.sapDocNum||'').trim(),
+  }));
+  if (lines.length === 0) { alert('Add at least one customer line.'); return; }
+  // Client-side validation: each line needs customer + boxes, totals don't exceed totalBoxes
+  for (let i = 0; i < lines.length; i++) {
+    const L = lines[i];
+    if (!L.customer) { alert(`Customer ${i+1}: Ship To is required.`); return; }
+    if (!L.boxes || L.boxes <= 0) { alert(`Customer ${i+1}: Boxes must be > 0.`); return; }
+    if (!/^[A-Z0-9]+$/.test(L.suffix)) { alert(`Customer ${i+1}: Suffix must be alphanumeric (A-Z, 0-9).`); return; }
+    if ((L.sapDocEntry && !L.sapDocNum) || (!L.sapDocEntry && L.sapDocNum)) {
+      alert(`Customer ${i+1}: Fill both Sales Order ID and Sales Order Number, or leave both blank.`); return;
+    }
+  }
+  const totalAssigned = lines.reduce((s,L) => s + L.boxes, 0);
+  if (totalAssigned > totalBoxes) {
+    alert(`Total assigned boxes (${totalAssigned}) exceeds boxes in batch (${totalBoxes}).`); return;
+  }
+  // Confirmation summary
+  const summary = lines.map(L => `  • Customer ${L.customer} — ${L.boxes} box(es) — Child batch ${state.orders.find(o=>o.id===orderId)?.batchNumber}-${L.suffix}`).join('\n');
+  const residual = totalBoxes - totalAssigned;
+  const residualMsg = residual > 0 ? `\n\n${residual} box(es) will remain as W/O for future split.` : '';
+  if (!confirm(`Propose this split for Admin approval?\n\n${summary}${residualMsg}\n\nOn approval, ${lines.length} child order(s) will be created with fresh labels.`)) return;
+
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/wo/split/propose', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-Token': currentUser?.token||'' },
+      body: JSON.stringify({ sourceOrderId: orderId, lines, token: currentUser?.token||'' }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      alert(`✅ Split proposal submitted for Admin approval.\n\nRequest ID: ${j.requestId}\n\nOnce Admin approves, ${lines.length} child order(s) will be created and fresh labels will be ready for printing.\n\nYou can track this in Reconciliation → My Pending Proposals.`);
+      auditLog('WO_SPLIT_PROPOSED', `Proposed split of ${orderId} into ${lines.length} customer(s)`);
+      // Refresh planning view to clear any stale state
+      if (typeof renderReconciliation === 'function' && state.currentPage === 'reconciliation') renderReconciliation();
+    } else {
+      const detail = j.conflicts ? '\n\n' + j.conflicts.map(c => `  • Line ${c.lineIndex+1}${c.customer?` (${c.customer})`:''}: ${c.reason}`).join('\n') : '';
+      alert('⚠️ Error: ' + (j.error || 'Unknown') + detail);
+    }
+  } catch(e) {
+    alert('Server error: ' + e.message);
+  }
+}
+
+// (Legacy) — original 1-customer reconciliation proposer, retained but no longer used by the
+// Assign Customer button. Kept for backward compatibility with the older endpoint
+// /api/wo/propose-reconciliation in case any external script still calls it.
 async function proposeWOReconciliation(orderId) {
   const customer = document.getElementById('woc-customer')?.value?.trim();
   if (!customer) { alert('Ship To name is required'); return; }
@@ -9834,13 +10654,11 @@ async function proposeWOReconciliation(orderId) {
   const poNumber = document.getElementById('woc-ponum')?.value?.trim();
   const zone = document.getElementById('woc-zone')?.value;
   const qtyConfirmed = parseFloat(document.getElementById('woc-qty')?.value) || null;
-  // v39 Phase 9c: optional SAP refs
   const sapDocEntryRaw = document.getElementById('woc-sap-docentry')?.value?.trim();
   const sapDocEntry = sapDocEntryRaw ? parseInt(sapDocEntryRaw, 10) : null;
   const sapDocNum = document.getElementById('woc-sap-docnum')?.value?.trim() || '';
-  // Partial-link guard
   if ((sapDocEntry && !sapDocNum) || (!sapDocEntry && sapDocNum)) {
-    alert('⚠️ Please fill BOTH Sales Order ID and Sales Order Number, or leave BOTH blank.\n\nA partial SAP reference is not useful for invoicing.');
+    alert('⚠️ Please fill BOTH Sales Order ID and Sales Order Number, or leave BOTH blank.');
     return;
   }
   let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
@@ -9877,21 +10695,29 @@ async function renderReconciliation() {
   content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3)">Loading TEMP batches...</div>';
 
   let tempBatches = [], pendingRequests = [], history = [];
+  // v40 P18.15: hoist these to outer scope so they're visible to the render template (fixes pre-existing scoping bug)
+  let woPendingRequests = [], woHistory = [];
+  // v40 P18.15: also load wo-split pending + history
+  let woSplitPending = [], woSplitHistory = [];
   if (serverUrl) {
     try {
-      const [r1, r2, r3, r4, r5] = await Promise.all([
+      const [r1, r2, r3, r4, r5, rSp, rSh] = await Promise.all([
         fetch(serverUrl+'/api/temp-batches/active', {signal:AbortSignal.timeout(5000)}),
         currentUser?.role==='admin' ? fetch(serverUrl+'/api/reconciliation/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
         fetch(serverUrl+'/api/reconciliation/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
         currentUser?.role==='admin' ? fetch(serverUrl+'/api/wo/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
-        fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)})
+        fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
+        // v40 P18.15: pending splits — admin sees all, planner sees their own
+        fetch(serverUrl+'/api/wo/split/pending', {headers:{'x-session-token':currentUser?.token||''}, signal:AbortSignal.timeout(5000)}).catch(()=>null),
+        fetch(serverUrl+'/api/wo/split/history', {headers:{'x-session-token':currentUser?.token||''}, signal:AbortSignal.timeout(5000)}).catch(()=>null)
       ]);
       const j1 = await r1.json(); if(j1.ok) tempBatches = j1.batches;
-      if(r2){ if(r2.status===401||r2.status===403){ _handleSessionExpired(); } else { const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; } }
-      if(r3.status!==401&&r3.status!==403){ const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20); }
-      let woPendingRequests = [], woHistory = [];
-      if(r4){ if(r4.status===401||r4.status===403){ _handleSessionExpired(); } else { const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; } }
-      if(r5&&r5.status!==401&&r5.status!==403){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
+      if(r2){ const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; }
+      const j3 = await r3.json(); if(j3.ok) history = j3.requests.slice(0,20);
+      if(r4){ const j4 = await r4.json(); if(j4.ok) woPendingRequests = j4.requests; }
+      if(r5){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
+      if(rSp){ try { const jSp = await rSp.json(); if(jSp?.ok) woSplitPending = jSp.requests; } catch(e){} }
+      if(rSh){ try { const jSh = await rSh.json(); if(jSh?.ok) woSplitHistory = jSh.requests.slice(0,20); } catch(e){} }
     } catch(e) { content.innerHTML = `<div class="alert alert-warn">⚠️ Could not load data: ${e.message}</div>`; return; }
   }
 
@@ -9998,8 +10824,8 @@ async function renderReconciliation() {
 
     ${woOrders.length > 0 && isPlanManager ? `
     <div class="card mb-4">
-      <div class="card-title" style="color:var(--accent3)">🔶 Section B — W/O Orders Awaiting Customer Assignment</div>
-      <div style="font-size:12px;color:var(--text3);margin-bottom:16px">These orders were planned without a customer. Once customer order is received, click "Assign Customer" to propose reconciliation.</div>
+      <div class="card-title" style="color:var(--accent3)">🔶 Section B — W/O Orders Awaiting Customer Split</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:16px">These orders were planned without a customer. Once one or more customer orders are received, click "Split & Assign" to break the WO into customer orders for approval.</div>
       <div style="overflow-x:auto">
         <table class="summary-table">
           <thead><tr><th>Batch</th><th>Size</th><th>Colour</th><th>PC Code</th><th>Qty (L)</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead>
@@ -10012,7 +10838,7 @@ async function renderReconciliation() {
               <td class="text-mono">${fmt(o.qty)}</td>
               <td class="text-mono" style="font-size:11px">${fmtDate(o.startDate)}</td>
               <td><span class="badge" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.4);font-size:10px">🔶 W/O</span></td>
-              <td><button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${o.id}')">🔶 Assign Customer</button></td>
+              <td><button class="btn btn-sm" style="background:rgba(255,171,0,0.15);color:#C55A11;border:1px solid rgba(255,171,0,0.3)" onclick="openAssignCustomerModal('${o.id}')">🔶 Split & Assign</button></td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -10044,6 +10870,56 @@ async function renderReconciliation() {
       `).join('')}
     </div>
     ` : ''}
+
+    ${woSplitPending.length > 0 ? `
+    <div class="card mb-4">
+      <div class="card-title" style="color:var(--accent3)">
+        ${isAdmin ? '🔔 W/O Split — Pending Approval' : '⏳ My Pending Split Proposals (awaiting Admin approval)'}
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+        ${isAdmin ? 'Review each proposed split below. Approving creates the child orders and rebatches labels/scans atomically.' : 'These are your proposals awaiting Admin approval. You will see them disappear once approved or rejected.'}
+      </div>
+      ${woSplitPending.map(req=>{
+        const linesHtml = (req.lines||[]).map(L=>`
+          <tr>
+            <td class="text-mono">${L.child_batch_suffix}</td>
+            <td><strong>${L.customer||'—'}</strong>${L.bill_to?`<br><small style="color:var(--text3)">Bill to: ${L.bill_to}</small>`:''}</td>
+            <td class="text-mono" style="text-align:right">${L.boxes}</td>
+            <td class="text-mono" style="text-align:right">${(parseFloat(L.qty_lakhs)||0).toFixed(2)} L</td>
+            <td class="text-mono" style="font-size:11px">${L.box_start}–${L.box_end}</td>
+            <td class="text-mono text-accent">${L.child_batch_number}</td>
+            <td>${L.zone||'—'}</td>
+            <td>${L.po_number||'—'}</td>
+            <td class="text-mono" style="font-size:11px">${L.sap_doc_num||'—'}</td>
+          </tr>`).join('');
+        return `
+        <div style="background:var(--surface3);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid rgba(255,171,0,0.5)">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div>
+              <span class="text-mono fw-bold" style="color:var(--accent3)">${req.id}</span>
+              <span style="font-size:12px;color:var(--text3);margin-left:10px">Source: <strong style="color:var(--accent2)">${req.source_batch_number||req.source_order_id}</strong> · Proposed by ${req.proposed_by} on ${(req.proposed_at||'').slice(0,16)}</span>
+            </div>
+            ${isAdmin ? `<div style="display:flex;gap:8px">
+              <button class="btn btn-success btn-sm" onclick="approveWoSplit('${req.id}')">✅ Approve</button>
+              <button class="btn btn-danger btn-sm" onclick="rejectWoSplit('${req.id}')">✗ Reject</button>
+            </div>` : '<span style="font-size:11px;color:var(--text3);font-style:italic">Read-only — awaiting Admin</span>'}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;font-size:12px;margin-bottom:10px">
+            <div><span style="color:var(--text3)">Customers:</span> <strong>${(req.lines||[]).length}</strong></div>
+            <div><span style="color:var(--text3)">Total Boxes Split:</span> <strong>${req.total_boxes_split}</strong></div>
+            <div><span style="color:var(--text3)">Residual (stays as W/O):</span> <strong style="color:${req.residual_boxes>0?'var(--accent3)':'var(--green)'}">${req.residual_boxes||0}</strong></div>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="summary-table" style="font-size:12px">
+              <thead><tr><th>Suffix</th><th>Customer</th><th>Boxes</th><th>Qty</th><th>Box Range</th><th>Child Batch</th><th>Zone</th><th>PO</th><th>Sales Order #</th></tr></thead>
+              <tbody>${linesHtml}</tbody>
+            </table>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    ` : ''}
+
     ${history.length > 0 ? `
     <div class="card">
       <div class="card-title">📋 Reconciliation History</div>
@@ -10195,6 +11071,49 @@ async function rejectWOReconciliation(reqId) {
     });
     const j = await r.json();
     if (j.ok) { alert('W/O request rejected.'); renderReconciliation(); }
+    else alert('Error: '+j.error);
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+// v40 P18.15: Admin approves a WO split — server creates child orders + rebatches labels atomically
+async function approveWoSplit(reqId) {
+  if (!confirm(`Approve WO split ${reqId}?\n\nThis will:\n• Create one child production order per customer line\n• Rebatch labels and scan history by box position (parent → child batch numbers)\n• Mark parent WO as 'wo-split' (or 'wo-split-partial' if residual remains)\n\nThis cannot be undone.`)) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/wo/split/approve/'+reqId, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(15000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(`✅ Split approved!\n\n${j.childOrdersCreated} child order(s) created.\n${j.labelsRebatched} label(s) rebatched.\n\n${j.message}`);
+      auditLog('WO_SPLIT_APPROVED', `Approved split ${reqId} — ${j.childOrdersCreated} children, ${j.labelsRebatched} labels rebatched`);
+      // Refresh planning state from server so the new child orders show up
+      if (typeof SYNC !== 'undefined' && SYNC.loadFromServer) await SYNC.loadFromServer().catch(()=>{});
+      renderReconciliation();
+    } else {
+      const detail = j.conflicts ? '\n\n' + j.conflicts.map(c => `  • ${c.batchNumber||c.orderId||'?'}: ${c.reason}`).join('\n') : '';
+      alert('⚠️ Error approving split: ' + (j.error||'Unknown') + detail);
+    }
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+// v40 P18.15: Admin rejects a WO split — request marked rejected with reason
+async function rejectWoSplit(reqId) {
+  const reason = prompt('Reason for rejecting this split (required):');
+  if (!reason) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/wo/split/reject/'+reqId, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
+      body: JSON.stringify({reason}),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) { alert('Split request rejected.'); renderReconciliation(); }
     else alert('Error: '+j.error);
   } catch(e) { alert('Server error: '+e.message); }
 }
@@ -10475,20 +11394,10 @@ function clearAllData() {
 // =============================
 // MODAL HELPERS
 // =============================
-function openModal(title, subtitleOrBody, bodyOrButtons, buttons) {
-  // Support both 3-param (title, body, buttons) and 4-param (title, subtitle, body, buttons) calls
-  let body, btns;
-  if (buttons !== undefined) {
-    // 4-param call: subtitle + body combined
-    body = subtitleOrBody + bodyOrButtons;
-    btns = buttons;
-  } else {
-    body = subtitleOrBody;
-    btns = bodyOrButtons;
-  }
+function openModal(title, body, buttons) {
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-body').innerHTML = body;
-  document.getElementById('modal-footer').innerHTML = (btns||[]).map(b=>`<button class="btn ${b.cls}" onclick="${b.fn}">${b.label}</button>`).join('');
+  document.getElementById('modal-footer').innerHTML = (buttons||[]).map(b=>`<button class="btn ${b.cls}" onclick="${b.fn}">${b.label}</button>`).join('');
   document.getElementById('modal-overlay').style.display='flex';
 }
 
@@ -10518,6 +11427,29 @@ async function _planningAutoSync(){
   if(!document.hidden && !_userIsActive()){ await SYNC.loadFromServer(); }
 }
 _planningAutoSyncTimer = setInterval(_planningAutoSync, 30000);
+
+// v40 P18.14i Fix 3: Background poll of over-limit-machines endpoint every 5 min.
+// Result is logged to console + stashed on window._v40_overLimitFromServer so the next
+// render() picks it up. We don't trigger a render here (renders are user-disturbing);
+// the next time the user interacts, the banner reflects the latest server scan.
+async function _v40_pollOverlimit(){
+  const url = SYNC._url || localStorage.getItem('sunloc_server_url')||'';
+  if(!url) return;
+  if(document.hidden) return;
+  try{
+    const r = await fetch(url+'/api/planning/overlimit-machines', {signal:AbortSignal.timeout(5000)});
+    const j = await r.json();
+    if(j && j.ok){
+      window._v40_overLimitFromServer = j.machines || [];
+      if((j.machines||[]).length > 0){
+        console.warn('[v40 P18.14i Fix 3] Over-limit machines from server:', j.machines.map(m=>`${m.machineId} (${m.runningCount})`).join(', '));
+      }
+    }
+  }catch(e){ /* silent */ }
+}
+setTimeout(_v40_pollOverlimit, 3000);
+setInterval(_v40_pollOverlimit, 5*60*1000);
+
 
 // Check TEMP batch alerts every 5 minutes
 setInterval(checkPlanningTempAlerts, 5*60*1000);
@@ -10636,6 +11568,12 @@ function applyRoleRestrictions() {
   // v39 Phase 14: Show SAP Config nav only for admin
   const sapNav = document.getElementById('nav-sap-config');
   if (sapNav) sapNav.style.display = currentUser.role === 'admin' ? '' : 'none';
+  // v40 P18.16: Show Admin · Users nav only for admin
+  const usersNav = document.getElementById('nav-admin-users');
+  if (usersNav) usersNav.style.display = currentUser.role === 'admin' ? '' : 'none';
+  // v40 P18.17: Show Data Integrity nav only for admin
+  const integrityNav = document.getElementById('nav-data-integrity');
+  if (integrityNav) integrityNav.style.display = currentUser.role === 'admin' ? '' : 'none';
   if (!allowed) {
     // Admin or unrecognised role — show all nav items
     document.querySelectorAll('.nav-item').forEach(el => el.style.display = '');
@@ -10654,6 +11592,8 @@ function applyRoleRestrictions() {
   } else if (!state.currentPage) {
     state.currentPage = allowed[0];
   }
+  // v40 P18.17: start polling for assigned integrity tasks (only for non-admin)
+  if (typeof _v40_startTaskBannerPolling === 'function') _v40_startTaskBannerPolling();
 }
 
 function updateUserBadge() {
@@ -10681,20 +11621,27 @@ function showUserMenu() {
     <div style="padding:8px 0">
       <div style="font-size:13px;color:var(--text3);margin-bottom:16px">Role: <strong style="color:var(--accent)">${currentUser?.role}</strong></div>
       ${isAdmin ? `<button class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:8px" onclick="closeModal();navigate('audit-log')">📋 View Audit Log</button>
-      <button class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:8px" onclick="closeModal();showChangePinModal()">🔑 Change PIN</button>` : ''}
+      <button class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:8px" onclick="closeModal();navigate('admin-users')">👥 Manage Users · All Apps</button>` : `
+      <button class="btn btn-secondary btn-sm" style="width:100%;margin-bottom:8px" onclick="closeModal();showChangePinModal()">🔑 Change My PIN</button>`}
       <button class="btn btn-danger btn-sm" style="width:100%" onclick="doLogout()">🚪 Log Out</button>
     </div>
   `, [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
 }
 
 function showChangePinModal() {
-  openModal('🔑 Change PIN', `
-    <div class="form-group"><label>Username</label>
-      <select class="form-control" id="cp-user">
-        ${['Planning_Manager','Printing_Manager','Dispatch_Manager','Plan_Admin'].map(u=>`<option value="${u}">${u}</option>`).join('')}
-      </select></div>
-    <div class="form-group"><label>New PIN</label>
-      <input class="form-control" type="password" id="cp-newpin" placeholder="New PIN (4-8 digits)"></div>
+  // v40 P18.16: For non-admin users, this only lets them change their own PIN.
+  // Admin users go to Admin · Users page instead (linked from the user menu).
+  openModal('🔑 Change My PIN', `
+    <div style="padding:8px 0">
+      <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+        <strong>User:</strong> ${currentUser?.username} &nbsp;·&nbsp; <strong>App:</strong> ${currentUser?.app||'planning'}
+      </div>
+      <div class="form-group"><label>New PIN <span style="color:var(--red)">*</span></label>
+        <input class="form-control" type="password" id="cp-newpin" placeholder="At least 4 characters" autocomplete="new-password"></div>
+      <div class="form-group"><label>Confirm New PIN <span style="color:var(--red)">*</span></label>
+        <input class="form-control" type="password" id="cp-confirm" placeholder="Re-enter to confirm" autocomplete="new-password"></div>
+      <input type="hidden" id="cp-user" value="${currentUser?.username||''}">
+    </div>
   `, [
     {label:'Save', cls:'btn-primary', fn:'saveNewPin()'},
     {label:'Cancel', cls:'btn-secondary', fn:'closeModal()'}
@@ -10704,7 +11651,9 @@ function showChangePinModal() {
 async function saveNewPin() {
   const username = document.getElementById('cp-user').value;
   const newPin = document.getElementById('cp-newpin').value;
-  if (!newPin || newPin.length < 4) { alert('PIN must be at least 4 digits'); return; }
+  const confirm1 = document.getElementById('cp-confirm')?.value || '';
+  if (!newPin || newPin.length < 4) { alert('PIN must be at least 4 characters'); return; }
+  if (newPin !== confirm1) { alert('PINs do not match'); return; }
   let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
   if (!serverUrl) { alert('Server not connected'); return; }
   try {
@@ -10714,7 +11663,7 @@ async function saveNewPin() {
       signal: AbortSignal.timeout(5000)
     });
     const j = await r.json();
-    if (j.ok) { closeModal(); alert(`✅ PIN updated for ${username}`); }
+    if (j.ok) { closeModal(); alert(`✅ PIN updated for ${username}`); auditLog('CHANGE_PIN', `Changed own PIN`); }
     else alert('Error: ' + (j.error || 'Failed'));
   } catch(e) { alert('Cannot reach server'); }
 }
@@ -10734,35 +11683,16 @@ async function doLogout() {
 }
 
 async function auditLog(action, details) {
-  if (!currentUser || !currentUser.token) return;
-  let serverUrl = ''; try { serverUrl = SYNC._url || localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
-  if (!serverUrl) return;
+  if (!currentUser) return;
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {} if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl || !currentUser.token) return;
   try {
-    const resp = await fetch(serverUrl + '/api/audit/log', {
+    await fetch(serverUrl + '/api/audit/log', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ token: currentUser.token, action, details }),
       signal: AbortSignal.timeout(3000)
     });
-    // If session expired on server (after redeploy), silently clear and prompt re-login
-    if (resp.status === 401) { _handleSessionExpired(); }
-  } catch(e) { /* network error — ignore silently */ }
-}
-
-// Called when server returns 401 — session expired (e.g. after Railway redeploy)
-let _sessionExpiredShown = false;
-function _handleSessionExpired() {
-  if (_sessionExpiredShown) return;
-  _sessionExpiredShown = true;
-  // Clear stale session
-  try { sessionStorage.removeItem('plan_session'); } catch(e) {}
-  currentUser = null;
-  // Show non-blocking toast — don't force reload
-  const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#e53e3e;color:#fff;padding:12px 24px;border-radius:8px;z-index:99999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);cursor:pointer';
-  toast.textContent = '⚠️ Session expired — click here to re-login';
-  toast.onclick = () => { _sessionExpiredShown = false; document.getElementById('auth-overlay').classList.remove('hidden'); toast.remove(); };
-  document.body.appendChild(toast);
-  setTimeout(() => { _sessionExpiredShown = false; document.getElementById('auth-overlay').classList.remove('hidden'); toast.remove(); }, 8000);
+  } catch(e) {}
 }
 
 // Audit log page
@@ -10805,6 +11735,765 @@ async function loadAuditLog() {
     if (el) el.innerHTML = `<div style="color:var(--accent4)">Error loading audit log: ${e.message}</div>`;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────
+// v40 Phase 18.16: ADMIN USERS PAGE
+// Centralized user management across all 3 apps (dpr, planning, tracking).
+// Admin-only. Reachable via sidebar nav Admin · Users.
+// Operations: Change PIN, Disable/Enable account, Add new user.
+// ─────────────────────────────────────────────────────────────────
+
+const _v40_ROLES_BY_APP = {
+  dpr: ['gf','ff','admin'],
+  planning: ['planning_manager','printing_manager','dispatch_manager','admin'],
+  tracking: ['tracking_planning','tracking_labels','tracking_aim','tracking_printing','tracking_pi','tracking_packing','tracking_dispatch','admin'],
+};
+
+async function renderAdminUsers() {
+  if (currentUser?.role !== 'admin') { navigate('production'); return; }
+  document.getElementById('topbar-actions').innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="_v40_loadAdminUsers()">🔄 Refresh</button>
+    <button class="btn btn-primary btn-sm" onclick="_v40_openAddUserModal()">➕ Add User</button>`;
+  document.getElementById('content').innerHTML = `
+    <div class="card mb-4">
+      <div class="card-title">👥 User Management — All Apps</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:14px">
+        Manage user accounts across DPR, Planning, and Tracking apps.
+        Change PINs, enable/disable accounts, or add new users. All actions are audited.
+      </div>
+      <div style="background:rgba(8,145,178,0.06);border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text2);line-height:1.5">
+        💡 <strong>Tracking dept defaults (change ASAP):</strong> Track_Planning=1111, Track_Labels=2222, Track_AIM=3333, Track_Printing=4444, Track_PI=5555, Track_Packing=6666, Track_Dispatch=7777, Track_Admin=9999. These were seeded for zero-disruption deploy — rotate them to strong PINs from this page.
+      </div>
+      <div id="admin-users-content"><div style="color:var(--text3);padding:20px">Loading users...</div></div>
+    </div>`;
+  _v40_loadAdminUsers();
+}
+
+async function _v40_loadAdminUsers() {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { document.getElementById('admin-users-content').innerHTML = '<div style="color:var(--accent4)">Server not connected</div>'; return; }
+  try {
+    const r = await fetch(serverUrl + '/api/admin/users', {
+      headers:{'x-session-token': currentUser?.token||''},
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Failed to load');
+    const el = document.getElementById('admin-users-content');
+    if (!el) return;
+    // Group by app
+    const byApp = { dpr: [], planning: [], tracking: [] };
+    for (const u of (j.users||[])) {
+      if (byApp[u.app]) byApp[u.app].push(u);
+    }
+    const appColors = {dpr:'#16a34a', planning:'#2563eb', tracking:'#d97706'};
+    const appLabels = {dpr:'DPR', planning:'Planning', tracking:'Tracking'};
+    const renderAppBlock = (app) => {
+      const users = byApp[app] || [];
+      if (users.length === 0) return '';
+      const rows = users.map(u => {
+        const isActive = u.is_active !== 0 && u.is_active !== false;
+        const lastLogin = u.last_login ? new Date(u.last_login).toISOString().slice(0,16).replace('T',' ') : '<span style="color:var(--text3)">Never</span>';
+        const isSelf = (u.username === currentUser.username && u.app === currentUser.app);
+        return `<tr style="${isActive?'':'opacity:0.55'}">
+          <td class="text-mono fw-bold">${u.username}${isSelf?' <span style="font-size:10px;color:var(--accent3)">(you)</span>':''}</td>
+          <td><span class="badge" style="background:rgba(8,145,178,0.15);color:#0e7490;font-size:11px;padding:2px 8px">${u.role}</span></td>
+          <td>${isActive ? '<span style="color:var(--green);font-weight:600">● Active</span>' : '<span style="color:var(--text3)">○ Disabled</span>'}</td>
+          <td class="text-mono" style="font-size:11px;color:var(--text3)">${lastLogin}</td>
+          <td>
+            <button class="btn btn-sm" style="background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3);padding:3px 10px;font-size:11px" onclick="_v40_openChangePinFor('${u.username}','${u.app}')">🔑 Change PIN</button>
+            ${isSelf ? '' : (isActive
+              ? `<button class="btn btn-sm" style="background:rgba(239,68,68,0.12);color:#dc2626;border:1px solid rgba(239,68,68,0.3);padding:3px 10px;font-size:11px;margin-left:4px" onclick="_v40_toggleUserActive('${u.username}','${u.app}',false)">⏸ Disable</button>`
+              : `<button class="btn btn-sm" style="background:rgba(34,197,94,0.12);color:#16a34a;border:1px solid rgba(34,197,94,0.3);padding:3px 10px;font-size:11px;margin-left:4px" onclick="_v40_toggleUserActive('${u.username}','${u.app}',true)">▶ Enable</button>`)}
+          </td>
+        </tr>`;
+      }).join('');
+      return `<div style="margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="background:${appColors[app]};color:white;padding:3px 10px;border-radius:4px;font-size:12px;font-weight:700">${appLabels[app]}</span>
+          <span style="font-size:12px;color:var(--text3)">${users.length} user(s)</span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="summary-table" style="font-size:12px">
+            <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Last Login</th><th>Actions</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    };
+    el.innerHTML = renderAppBlock('dpr') + renderAppBlock('planning') + renderAppBlock('tracking');
+    if ((j.users||[]).length === 0) el.innerHTML = '<div style="color:var(--text3);padding:20px">No users found.</div>';
+  } catch(e) {
+    const el = document.getElementById('admin-users-content');
+    if (el) el.innerHTML = `<div style="color:var(--accent4)">Error: ${e.message}</div>`;
+  }
+}
+
+function _v40_openChangePinFor(username, app) {
+  openModal(`🔑 Change PIN for ${username}`, `
+    <div style="padding:8px 0">
+      <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:13px">
+        <strong>User:</strong> ${username} &nbsp;·&nbsp; <strong>App:</strong> ${app}
+      </div>
+      <div class="form-group">
+        <label>New PIN <span style="color:var(--red)">*</span></label>
+        <input class="form-control" type="password" id="v40-cp-newpin" placeholder="At least 4 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Confirm New PIN <span style="color:var(--red)">*</span></label>
+        <input class="form-control" type="password" id="v40-cp-confirm" placeholder="Re-enter to confirm" autocomplete="new-password">
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px">
+        The user will need to use the new PIN on their next login. Existing active sessions are not invalidated.
+      </div>
+    </div>
+  `, [
+    { label: 'Save New PIN', cls: 'btn-primary', fn: `_v40_saveAdminPinChange('${username}','${app}')` },
+    { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' }
+  ]);
+}
+
+async function _v40_saveAdminPinChange(username, app) {
+  const newPin = document.getElementById('v40-cp-newpin')?.value || '';
+  const confirm1 = document.getElementById('v40-cp-confirm')?.value || '';
+  if (!newPin || newPin.length < 4) { alert('PIN must be at least 4 characters'); return; }
+  if (newPin !== confirm1) { alert('PINs do not match'); return; }
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/auth/change-pin', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ token: currentUser?.token||'', username, newPin, targetApp: app }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      alert(`✅ PIN updated for ${username} (${app}).`);
+      auditLog('CHANGE_PIN', `Changed PIN for ${username} (${app})`);
+    } else {
+      alert('Error: ' + (j.error || 'Failed'));
+    }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+function _v40_openAddUserModal() {
+  openModal('➕ Add New User', `
+    <div style="padding:8px 0">
+      <div class="form-group">
+        <label>App <span style="color:var(--red)">*</span></label>
+        <select class="form-control" id="v40-au-app" onchange="_v40_addUserAppChanged()">
+          <option value="">— Select App —</option>
+          <option value="dpr">DPR</option>
+          <option value="planning">Planning</option>
+          <option value="tracking">Tracking</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Username <span style="color:var(--red)">*</span></label>
+        <input class="form-control" id="v40-au-username" placeholder="e.g. AIM_Operator_2" autocomplete="off">
+        <div style="font-size:10px;color:var(--text3);margin-top:3px">Must be unique across all apps. Use letters, digits, and underscores only.</div>
+      </div>
+      <div class="form-group">
+        <label>Role <span style="color:var(--red)">*</span></label>
+        <select class="form-control" id="v40-au-role">
+          <option value="">— Select App first —</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Initial PIN <span style="color:var(--red)">*</span></label>
+        <input class="form-control" type="password" id="v40-au-pin" placeholder="At least 4 characters" autocomplete="new-password">
+      </div>
+    </div>
+  `, [
+    { label: 'Create User', cls: 'btn-primary', fn: '_v40_submitAddUser()' },
+    { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' }
+  ]);
+}
+
+function _v40_addUserAppChanged() {
+  const app = document.getElementById('v40-au-app')?.value;
+  const roleSel = document.getElementById('v40-au-role');
+  if (!roleSel) return;
+  const roles = _v40_ROLES_BY_APP[app] || [];
+  roleSel.innerHTML = roles.length === 0
+    ? '<option value="">— Select App first —</option>'
+    : '<option value="">— Select Role —</option>' + roles.map(r=>`<option value="${r}">${r}</option>`).join('');
+}
+
+async function _v40_submitAddUser() {
+  const app = document.getElementById('v40-au-app')?.value;
+  const username = (document.getElementById('v40-au-username')?.value || '').trim();
+  const role = document.getElementById('v40-au-role')?.value;
+  const pin = document.getElementById('v40-au-pin')?.value || '';
+  if (!app) { alert('Please select an app'); return; }
+  if (!username) { alert('Please enter a username'); return; }
+  if (!/^[A-Za-z0-9_]+$/.test(username)) { alert('Username may only contain letters, digits, and underscores'); return; }
+  if (!role) { alert('Please select a role'); return; }
+  if (!pin || pin.length < 4) { alert('PIN must be at least 4 characters'); return; }
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/admin/users/create', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ username, role, app, pin }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      alert(`✅ User ${username} created.`);
+      auditLog('USER_CREATED', `Created ${username} (${role}/${app})`);
+      _v40_loadAdminUsers();
+    } else {
+      alert('Error: ' + (j.error || 'Failed'));
+    }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_toggleUserActive(username, app, makeActive) {
+  const verb = makeActive ? 'enable' : 'disable';
+  if (!confirm(`Are you sure you want to ${verb} user "${username}" (${app})?\n\n${makeActive ? 'They will be able to log in again immediately.' : 'They will be unable to log in until re-enabled. Existing sessions are not invalidated.'}`)) return;
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/admin/users/toggle-active', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ username, app, isActive: !!makeActive }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      auditLog(makeActive ? 'USER_ENABLED' : 'USER_DISABLED', `${makeActive?'Enabled':'Disabled'} ${username} (${app})`);
+      _v40_loadAdminUsers();
+    } else {
+      alert('Error: ' + (j.error || 'Failed'));
+    }
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+// ─── end v40 P18.16: Admin Users page ───────────────────────────
+
+// ═══════════════════════════════════════════════════════════════
+// v40 Phase 18.17: OPERATOR TASK BANNER
+// Polls /api/integrity/my-tasks every 60s; shows banner when current user has
+// pending/seen tasks assigned by admin. Banner is suppressed for admins to avoid
+// noise (they're the assigners, not the recipients).
+// ═══════════════════════════════════════════════════════════════
+
+let _v40_myTasks = [];
+let _v40_myTasksTimer = null;
+
+async function _v40_taskBannerTick() {
+  if (!currentUser) return;
+  // Admins don't see the banner — they assign tasks via the dashboard, they don't receive
+  if (currentUser.role === 'admin') {
+    const banner = document.getElementById('v40-task-banner');
+    if (banner) banner.style.display = 'none';
+    return;
+  }
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/my-tasks', {
+      headers:{'x-session-token': currentUser?.token||''},
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (!j.ok) return;
+    _v40_myTasks = j.tasks || [];
+    const banner = document.getElementById('v40-task-banner');
+    const textEl = document.getElementById('v40-task-banner-text');
+    if (!banner || !textEl) return;
+    if (_v40_myTasks.length === 0) {
+      banner.style.display = 'none';
+      return;
+    }
+    const critCount = _v40_myTasks.filter(t => t.severity === 'critical').length;
+    const summary = critCount > 0
+      ? `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you — including <strong style="color:#dc2626">${critCount} critical</strong>`
+      : `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you by Admin`;
+    textEl.innerHTML = summary;
+    banner.style.display = 'flex';
+  } catch(e) { /* silent — banner just stays as-is */ }
+}
+
+function _v40_showMyTasks() {
+  if (_v40_myTasks.length === 0) { alert('No tasks pending.'); return; }
+  const rowsHtml = _v40_myTasks.map(t => {
+    const sevBadge = ({
+      critical: '<span style="background:rgba(239,68,68,0.15);color:#dc2626;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔴 CRITICAL</span>',
+      warning:  '<span style="background:rgba(245,158,11,0.15);color:#b45309;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🟡 WARNING</span>',
+      info:     '<span style="background:rgba(59,130,246,0.15);color:#1d4ed8;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔵 INFO</span>',
+    })[t.severity] || '';
+    const desc = _v40_esc(t.description || '(No finding details — free-form task)');
+    const action = t.suggested_action ? `
+      <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:4px;padding:8px 12px;margin-top:8px;font-size:12px;line-height:1.5">
+        <strong style="color:var(--green)">What to do:</strong> ${_v40_esc(t.suggested_action)}
+        ${t.suggested_app ? `<div style="font-size:11px;color:var(--text3);margin-top:4px">Where: <strong>${_v40_esc(t.suggested_app)}</strong> app → <strong>${_v40_esc(t.suggested_page||'?')}</strong> page</div>` : ''}
+      </div>` : '';
+    const noteHtml = t.note ? `<div style="font-size:11px;color:var(--text2);margin-top:6px;font-style:italic">Note from ${_v40_esc(t.assigned_by)}: ${_v40_esc(t.note)}</div>` : '';
+    const seenBtn = t.status === 'seen'
+      ? '<span style="font-size:11px;color:var(--text3);font-style:italic">✓ Marked seen</span>'
+      : `<button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490" onclick="_v40_markTaskSeen('${_v40_esc(t.id)}')">Mark seen</button>`;
+    return `<div style="border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px;background:var(--surface2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          ${sevBadge}
+          ${t.batch_number ? `<span class="text-mono" style="font-size:11px;color:var(--accent2)">${_v40_esc(t.batch_number)}</span>` : ''}
+          ${t.machine_id ? `<span class="text-mono" style="font-size:11px;color:var(--text3)">${_v40_esc(t.machine_id)}</span>` : ''}
+        </div>
+        ${seenBtn}
+      </div>
+      <div style="font-size:12px;line-height:1.5">${desc}</div>
+      ${action}
+      ${noteHtml}
+    </div>`;
+  }).join('');
+  openModal('🩺 Your Integrity Tasks', `
+    <div style="padding:8px 0">
+      <div style="font-size:11px;color:var(--text3);margin-bottom:12px;line-height:1.5">
+        Admin has flagged the following data integrity issues that need your attention. Fix them via the suggested app/page; the next scan (within 60 min) will auto-clear tasks whose underlying issue is resolved. Mark a task as seen to acknowledge you are aware.
+      </div>
+      ${rowsHtml}
+    </div>
+  `, [{ label: 'Close', cls: 'btn-secondary', fn: 'closeModal()' }]);
+}
+
+async function _v40_markTaskSeen(taskId) {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/task/' + encodeURIComponent(taskId) + '/seen', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      _v40_taskBannerTick();
+    }
+  } catch(e) { /* silent */ }
+}
+
+// Start task banner polling for non-admin users. Initial check after 5s
+// (so currentUser is set), then every 60s.
+function _v40_startTaskBannerPolling() {
+  if (_v40_myTasksTimer) clearInterval(_v40_myTasksTimer);
+  setTimeout(_v40_taskBannerTick, 5000);
+  _v40_myTasksTimer = setInterval(_v40_taskBannerTick, 60000);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v40 Phase 18.17: DATA INTEGRITY DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+
+let _v40_integrityAutoRefreshTimer = null;
+let _v40_integrityFindings = [];
+let _v40_integritySummary = { critical: 0, warning: 0, info: 0 };
+let _v40_integrityFilter = 'all';
+
+// v40 P18.17: HTML-escape helper local to integrity dashboard (no global _v40_esc() in planning.html).
+function _v40_esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+const _v40_CHECK_TYPE_LABELS = {
+  qty_mismatch_plan_dpr:       'Plan vs DPR mismatch',
+  qty_mismatch_dpr_aim:        'DPR vs AIM mismatch',
+  qty_mismatch_aim_packed:     'AIM vs Packed loss',
+  upstream_missing_scan:       'Missing upstream scan',
+  upstream_timestamp_inversion:'Timestamp inversion',
+  wastage_exceeds_input:       'Wastage exceeds input',
+  dpr_missing_day:             'DPR day missing',
+  tracking_idle_running_batch: 'Idle running batch',
+  tracking_stage_stalled:      'Stage stalled',
+  closed_batch_unreconciled:   'Closed batch unreconciled',
+  over_production:             'Over-production',
+  wo_unsplit_overdue:          'W/O overdue (unsplit)',
+  temp_batch_overdue:          'TEMP batch overdue',
+  orphan_tracking_scan:        'Orphan scan',
+  invoice_no_dispatch:         'Invoice awaiting dispatch',
+  labels_not_printed:          'Labels not printed',
+  overlimit_running:           '>2 In Production',
+  wo_split_child_missing:      'WO split child missing',
+};
+
+async function renderDataIntegrity() {
+  if (currentUser?.role !== 'admin') { navigate('production'); return; }
+  document.getElementById('topbar-actions').innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="_v40_runIntegrityScanNow()">🔄 Run Scan Now</button>`;
+  document.getElementById('content').innerHTML = `
+    <div id="integrity-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px"></div>
+
+    <div class="card mb-4">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+        <div class="card-title" style="margin-bottom:0">🩺 Findings <span id="integrity-meta" style="font-size:11px;color:var(--text3);font-weight:400;margin-left:8px"></span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-sm" style="padding:3px 12px;font-size:11px" onclick="_v40_setIntegrityFilter('all')" id="ifilt-all">All</button>
+          <button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(239,68,68,0.15);color:#dc2626" onclick="_v40_setIntegrityFilter('critical')" id="ifilt-critical">🔴 Critical</button>
+          <button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(245,158,11,0.15);color:#b45309" onclick="_v40_setIntegrityFilter('warning')" id="ifilt-warning">🟡 Warning</button>
+          <button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(59,130,246,0.15);color:#1d4ed8" onclick="_v40_setIntegrityFilter('info')" id="ifilt-info">🔵 Info</button>
+          <button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(148,163,184,0.15);color:#475569;margin-left:8px" onclick="_v40_openBulkAck()">✓ Bulk Ack</button>
+          <button class="btn btn-sm" style="padding:3px 12px;font-size:11px;background:rgba(148,163,184,0.15);color:#475569" onclick="_v40_openMutesPanel()">🔕 Manage Mutes</button>
+        </div>
+      </div>
+      <div style="background:rgba(8,145,178,0.06);border-radius:4px;padding:8px 12px;margin-bottom:12px;font-size:11px;color:var(--text2);line-height:1.5">
+        💡 <strong>How this works:</strong> Server runs all 12 integrity checks every 60 minutes. Critical findings need individual review. Warning/Info can be bulk-acked. Ack expires after 24h so issues resurface — meaning ack is for triage, not "fixed". Assign tasks to operators to direct fixes. Findings auto-resolve when the next scan no longer detects them.
+      </div>
+      <div id="integrity-findings-table"><div style="color:var(--text3);padding:20px">Loading findings...</div></div>
+    </div>`;
+  _v40_loadIntegrityFindings();
+  // Start 30-second auto-refresh
+  if (_v40_integrityAutoRefreshTimer) clearInterval(_v40_integrityAutoRefreshTimer);
+  _v40_integrityAutoRefreshTimer = setInterval(() => {
+    if (state.currentPage === 'data-integrity' && !document.hidden) {
+      _v40_loadIntegrityFindings();
+    }
+  }, 30000);
+}
+
+function _v40_setIntegrityFilter(sev) {
+  _v40_integrityFilter = sev;
+  _v40_renderIntegrityFindings();
+  // Update button styling
+  ['all','critical','warning','info'].forEach(s => {
+    const b = document.getElementById('ifilt-'+s);
+    if (b) b.style.opacity = (s === sev ? '1' : '0.5');
+  });
+}
+
+async function _v40_loadIntegrityFindings() {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/findings', {
+      headers:{'x-session-token': currentUser?.token||''},
+      signal: AbortSignal.timeout(10000)
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Failed');
+    _v40_integrityFindings = j.findings || [];
+    _v40_integritySummary = j.summary || { critical: 0, warning: 0, info: 0 };
+    _v40_renderIntegritySummary(j.lastRunAt, j.isRunning);
+    _v40_renderIntegrityFindings();
+  } catch(e) {
+    const el = document.getElementById('integrity-findings-table');
+    if (el) el.innerHTML = `<div style="color:var(--accent4);padding:20px">Error loading findings: ${e.message}</div>`;
+  }
+}
+
+function _v40_renderIntegritySummary(lastRunAt, isRunning) {
+  const lastRunStr = lastRunAt ? new Date(lastRunAt).toISOString().slice(0,16).replace('T',' ') : 'never';
+  const card = (label, n, color, bg) => `
+    <div style="background:${bg};border:1px solid ${color};border-radius:8px;padding:14px 18px">
+      <div style="font-size:11px;color:${color};text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:4px">${label}</div>
+      <div style="font-size:32px;font-weight:800;color:${color};line-height:1">${n}</div>
+    </div>`;
+  document.getElementById('integrity-summary').innerHTML =
+    card('🔴 Critical', _v40_integritySummary.critical, '#dc2626', 'rgba(239,68,68,0.08)') +
+    card('🟡 Warning',  _v40_integritySummary.warning,  '#b45309', 'rgba(245,158,11,0.08)') +
+    card('🔵 Info',     _v40_integritySummary.info,     '#1d4ed8', 'rgba(59,130,246,0.08)') +
+    `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px 18px">
+      <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:4px">Last Scan</div>
+      <div style="font-size:13px;color:var(--text2);font-family:var(--mono)">${lastRunStr}</div>
+      <div style="font-size:11px;color:${isRunning?'var(--green)':'var(--text3)'};margin-top:4px">${isRunning?'⏳ Running…':'Idle · auto-refresh every 60min'}</div>
+    </div>`;
+  const meta = document.getElementById('integrity-meta');
+  if (meta) meta.textContent = `${_v40_integrityFindings.length} active · last scan ${lastRunStr}`;
+}
+
+function _v40_renderIntegrityFindings() {
+  const filtered = _v40_integrityFilter === 'all'
+    ? _v40_integrityFindings
+    : _v40_integrityFindings.filter(f => f.severity === _v40_integrityFilter);
+  const el = document.getElementById('integrity-findings-table');
+  if (!el) return;
+  if (filtered.length === 0) {
+    el.innerHTML = `<div style="color:var(--green);padding:30px;text-align:center;font-size:14px">
+      ✅ No active ${_v40_integrityFilter === 'all' ? '' : _v40_integrityFilter + ' '}findings.
+    </div>`;
+    return;
+  }
+  const sevBadge = (s) => {
+    const map = {
+      critical: { color: '#dc2626', bg: 'rgba(239,68,68,0.15)', icon: '🔴' },
+      warning:  { color: '#b45309', bg: 'rgba(245,158,11,0.15)', icon: '🟡' },
+      info:     { color: '#1d4ed8', bg: 'rgba(59,130,246,0.15)', icon: '🔵' },
+    };
+    const c = map[s] || map.info;
+    return `<span style="background:${c.bg};color:${c.color};padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">${c.icon} ${s.toUpperCase()}</span>`;
+  };
+  const rowsHtml = filtered.map(f => {
+    const lastSeen = f.last_seen ? new Date(f.last_seen).toISOString().slice(0,16).replace('T',' ') : '?';
+    const label = _v40_CHECK_TYPE_LABELS[f.check_type] || f.check_type;
+    return `<tr>
+      <td style="vertical-align:top;padding:8px">${sevBadge(f.severity)}</td>
+      <td style="vertical-align:top;padding:8px;font-size:11px;color:var(--text3)">${label}</td>
+      <td style="vertical-align:top;padding:8px;font-size:12px;line-height:1.5">${_v40_esc(f.description||'')}</td>
+      <td style="vertical-align:top;padding:8px;font-size:10px;color:var(--text3);font-family:var(--mono)">${lastSeen}</td>
+      <td style="vertical-align:top;padding:8px;white-space:nowrap">
+        <button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490" onclick="_v40_openFindingDetail('${f.id}')">Investigate</button>
+        <button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(148,163,184,0.15);color:#475569;margin-left:4px" onclick="_v40_ackFinding('${f.id}')">Ack 24h</button>
+      </td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<div style="overflow-x:auto">
+    <table class="summary-table" style="font-size:12px">
+      <thead><tr><th style="width:90px">Severity</th><th style="width:170px">Check</th><th>Description</th><th style="width:120px">Last Seen</th><th style="width:200px">Actions</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </div>`;
+}
+
+function _v40_openFindingDetail(findingId) {
+  const f = _v40_integrityFindings.find(x => x.id === findingId);
+  if (!f) return;
+  const label = _v40_CHECK_TYPE_LABELS[f.check_type] || f.check_type;
+  const rawHtml = f.raw_data
+    ? `<pre style="background:var(--surface2);padding:10px;border-radius:4px;font-size:11px;overflow-x:auto;max-height:200px">${_v40_esc(JSON.stringify(f.raw_data, null, 2))}</pre>`
+    : '<span style="color:var(--text3);font-style:italic">No additional data</span>';
+  const fixHtml = f.suggested_action
+    ? `<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:6px;padding:10px 14px;margin-top:10px">
+        <div style="font-size:11px;color:var(--green);font-weight:700;text-transform:uppercase;margin-bottom:4px">Suggested Fix</div>
+        <div style="font-size:12px;line-height:1.5">${_v40_esc(f.suggested_action)}</div>
+        ${f.suggested_app ? `<div style="font-size:11px;color:var(--text3);margin-top:6px">Where: <strong>${_v40_esc(f.suggested_app)}</strong> app → <strong>${_v40_esc(f.suggested_page||'?')}</strong> page</div>` : ''}
+        ${f.suggested_role ? `<div style="font-size:11px;color:var(--text3);margin-top:2px">Suggested assignees: <strong>${_v40_esc(f.suggested_role)}</strong></div>` : ''}
+      </div>`
+    : '';
+  openModal(`Finding · ${label}`, `
+    <div style="padding:8px 0">
+      <div style="font-size:13px;margin-bottom:14px">${_v40_esc(f.description||'')}</div>
+      <div style="display:grid;grid-template-columns:120px 1fr;gap:4px 12px;font-size:12px;margin-bottom:14px">
+        <div style="color:var(--text3)">Severity</div><div><strong>${_v40_esc(f.severity)}</strong></div>
+        ${f.batch_number ? `<div style="color:var(--text3)">Batch</div><div class="text-mono">${_v40_esc(f.batch_number)}</div>` : ''}
+        ${f.order_id ? `<div style="color:var(--text3)">Order ID</div><div class="text-mono">${_v40_esc(f.order_id)}</div>` : ''}
+        ${f.machine_id ? `<div style="color:var(--text3)">Machine</div><div class="text-mono">${_v40_esc(f.machine_id)}</div>` : ''}
+        ${f.day ? `<div style="color:var(--text3)">Day</div><div class="text-mono">${_v40_esc(f.day)}</div>` : ''}
+        <div style="color:var(--text3)">First seen</div><div class="text-mono" style="font-size:11px">${_v40_esc(f.first_seen||'')}</div>
+        <div style="color:var(--text3)">Last seen</div><div class="text-mono" style="font-size:11px">${_v40_esc(f.last_seen||'')}</div>
+      </div>
+      ${fixHtml}
+      <details style="margin-top:14px">
+        <summary style="font-size:11px;color:var(--text3);cursor:pointer">Raw data</summary>
+        <div style="margin-top:8px">${rawHtml}</div>
+      </details>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:700;margin-bottom:8px">Direct an operator to fix this:</div>
+        <div class="form-group" style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text3)">Assign to</label>
+          <input class="form-control" id="if-assign-to" placeholder="username (e.g. Track_AIM) or role:tracking_aim" style="font-size:12px">
+        </div>
+        <div class="form-group" style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text3)">App</label>
+          <select class="form-control" id="if-assign-app" style="font-size:12px">
+            <option value="">— Auto from finding —</option>
+            <option value="dpr" ${f.suggested_app==='dpr'?'selected':''}>DPR</option>
+            <option value="planning" ${f.suggested_app==='planning'?'selected':''}>Planning</option>
+            <option value="tracking" ${f.suggested_app==='tracking'?'selected':''}>Tracking</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:8px">
+          <label style="font-size:11px;color:var(--text3)">Note (optional)</label>
+          <textarea class="form-control" id="if-assign-note" rows="2" placeholder="Free-form context for the operator" style="font-size:12px"></textarea>
+        </div>
+      </div>
+    </div>
+  `, [
+    { label: 'Acknowledge 24h', cls: 'btn-secondary', fn: `_v40_ackFinding('${f.id}', true)` },
+    { label: 'Mute this check_type', cls: 'btn-secondary', fn: `_v40_muteCheckType('${f.check_type}')` },
+    { label: 'Assign Task', cls: 'btn-primary', fn: `_v40_assignFindingTask('${f.id}', '${f.suggested_app||''}')` },
+    { label: 'Close', cls: 'btn-secondary', fn: 'closeModal()' }
+  ]);
+}
+
+async function _v40_ackFinding(findingId, closeAfter) {
+  const reason = prompt('Reason for acknowledging (optional — for audit log):', '') || 'No reason given';
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/ack/' + findingId, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ reason, hours: 24 }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      if (closeAfter) closeModal();
+      auditLog('INTEGRITY_ACK', `Ack ${findingId}: ${reason}`);
+      _v40_loadIntegrityFindings();
+    } else alert('Error: ' + (j.error || 'Failed'));
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_assignFindingTask(findingId, defaultApp) {
+  const assignTo = document.getElementById('if-assign-to')?.value?.trim();
+  const app = document.getElementById('if-assign-app')?.value || defaultApp || '';
+  const note = document.getElementById('if-assign-note')?.value?.trim() || '';
+  if (!assignTo) { alert('Please enter a username or role'); return; }
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/assign-task', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ findingId, assignedTo: assignTo, app, note }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      alert(`✅ Task assigned to ${assignTo}. They will see it as a banner in their app on next login.`);
+      auditLog('INTEGRITY_TASK_ASSIGNED', `Assigned ${findingId} to ${assignTo}`);
+    } else alert('Error: ' + (j.error || 'Failed'));
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_muteCheckType(checkType) {
+  const label = _v40_CHECK_TYPE_LABELS[checkType] || checkType;
+  const reason = prompt(`Mute all "${label}" findings going forward? Reason for audit log:`);
+  if (!reason) return;
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/mute', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ checkType, mute: true, reason }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      alert(`✅ Check "${label}" muted. Findings of this type will no longer surface until you unmute via Manage Mutes.`);
+      auditLog('INTEGRITY_MUTE', `Muted ${checkType}`);
+      _v40_loadIntegrityFindings();
+    } else alert('Error: ' + (j.error || 'Failed'));
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_openMutesPanel() {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/mutes', { headers:{'x-session-token': currentUser?.token||''} });
+    const j = await r.json();
+    const rows = (j.mutes || []).map(m => {
+      const label = _v40_CHECK_TYPE_LABELS[m.check_type] || m.check_type;
+      return `<tr>
+        <td>${_v40_esc(label)}</td>
+        <td class="text-mono" style="font-size:11px">${_v40_esc(m.check_type)}</td>
+        <td style="font-size:11px">${_v40_esc(m.muted_by)}</td>
+        <td class="text-mono" style="font-size:11px">${_v40_esc(m.muted_at||'')}</td>
+        <td style="font-size:11px">${_v40_esc(m.reason||'—')}</td>
+        <td><button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(34,197,94,0.15);color:var(--green)" onclick="_v40_unmuteCheckType('${_v40_esc(m.check_type)}')">Unmute</button></td>
+      </tr>`;
+    }).join('');
+    openModal('🔕 Muted Check Types', `
+      <div style="padding:8px 0">
+        ${(j.mutes||[]).length === 0
+          ? '<div style="color:var(--text3);padding:20px;text-align:center">No check types are muted.</div>'
+          : `<div style="overflow-x:auto"><table class="summary-table" style="font-size:12px">
+              <thead><tr><th>Check</th><th>Type Code</th><th>Muted By</th><th>Muted At</th><th>Reason</th><th>Action</th></tr></thead>
+              <tbody>${rows}</tbody></table></div>`}
+      </div>
+    `, [{ label: 'Close', cls: 'btn-secondary', fn: 'closeModal()' }]);
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_unmuteCheckType(checkType) {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/mute', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ checkType, mute: false }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      closeModal();
+      auditLog('INTEGRITY_UNMUTE', `Unmuted ${checkType}`);
+      _v40_loadIntegrityFindings();
+    } else alert('Error: ' + (j.error || 'Failed'));
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_openBulkAck() {
+  if (!confirm(`Bulk-acknowledge all ${_v40_integritySummary.warning + _v40_integritySummary.info} warning/info findings for 7 days?\n\nCritical findings are NOT bulk-acked — they always require individual review.\n\nUse this on first deploy to triage the historical backlog. New findings will surface normally going forward.`)) return;
+  const reason = prompt('Reason for bulk ack (for audit log):', 'Historical backfill — bulk acknowledged for triage');
+  if (!reason) return;
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/ack-bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ reason, hours: 7 * 24 }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(`✅ Bulk acknowledged ${j.count} finding(s) for 7 days.`);
+      auditLog('INTEGRITY_ACK_BULK', `Bulk ack ${j.count}: ${reason}`);
+      _v40_loadIntegrityFindings();
+    } else alert('Error: ' + (j.error || 'Failed'));
+  } catch(e) { alert('Server error: ' + e.message); }
+}
+
+async function _v40_runIntegrityScanNow() {
+  let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if(!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+  if (!serverUrl) { alert('Server not connected'); return; }
+  try {
+    const btn = document.querySelector('[onclick="_v40_runIntegrityScanNow()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Scanning...'; }
+    const r = await fetch(serverUrl + '/api/integrity/run-now', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': currentUser?.token||''},
+      body: JSON.stringify({ lookbackDays: 30 }),
+      signal: AbortSignal.timeout(60000)
+    });
+    const j = await r.json();
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Run Scan Now'; }
+    if (j.ok) {
+      if (j.skipped) { alert(`Scan already in progress — wait a moment then refresh.`); return; }
+      alert(`✅ Scan complete: ${j.findingsFound} findings (${j.upserted} upserted, ${j.resolved} resolved) in ${(j.durationMs/1000).toFixed(1)}s.`);
+      _v40_loadIntegrityFindings();
+    } else {
+      alert('Error: ' + (j.error || 'Failed'));
+    }
+  } catch(e) {
+    const btn = document.querySelector('[onclick="_v40_runIntegrityScanNow()"]');
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Run Scan Now'; }
+    alert('Server error: ' + e.message);
+  }
+}
+
+// ─── end v40 P18.17: Data Integrity Dashboard ───────────────────
 
 // Add audit-log to router
 const _origRender = render;

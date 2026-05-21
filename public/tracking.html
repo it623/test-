@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v40</title>
+<title>Sunloc Tracking Suite v1.0 · build v41</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -560,7 +560,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v40</p>
+      <p>Tracking Suite v1.0 · build v41</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -591,7 +591,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v40</p>
+      <p>Tracking Suite v1.0 · build v41</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -630,6 +630,16 @@ input[type=number]{font-family:var(--mono)}
           <span class="v39-sap-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#9ca3af"></span>SAP
         </span>
         <div class="tb-actions" id="tb-actions"></div>
+      </div>
+    </div>
+    <!-- v40 P18.17: Operator task banner — hidden by default -->
+    <div id="v40-task-banner" style="display:none;background:linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08));border-bottom:2px solid rgba(245,158,11,0.5);padding:8px 16px;font-size:13px;color:#92400e;align-items:center;justify-content:space-between;gap:8px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:18px">🩺</span>
+        <span id="v40-task-banner-text"><strong>0 tasks</strong> assigned to you</span>
+      </div>
+      <div style="display:flex;gap:6px">
+        <button style="padding:3px 12px;font-size:11px;background:rgba(245,158,11,0.25);color:#92400e;border:1px solid rgba(245,158,11,0.5);border-radius:4px;cursor:pointer" onclick="_v40_showMyTasks()">Show details</button>
       </div>
     </div>
     <div id="content">
@@ -738,8 +748,10 @@ const NAV_ITEMS = [
 ];
 
 const DEPT_PINS = {
-  admin:'000000', planning:'1111', labels:'2222',
-  aim:'3333', printing:'4444', pi:'5555', packing:'6666', dispatch:'7777'
+  // v40 P18.16: PINs removed from client source code.
+  // Authentication now flows through POST /api/auth/login (see doLogin() below).
+  // Default PINs are seeded server-side in app_users; admin manages them via the
+  // Planning app's Admin → Users page.
 };
 
 const ALERT_HOURS = 48;
@@ -1174,31 +1186,56 @@ function selectDept(dept){
 
 function doLogin(){
   const pin = document.getElementById('login-pin').value;
-  const expected = DEPT_PINS[selectedDeptForLogin];
-  if(pin===expected){
-    currentDept = selectedDeptForLogin;
-    sessionStorage.setItem('trk_dept', currentDept);
-    document.getElementById('login-page').style.display='none';
-    document.getElementById('app').style.display='flex';
-    initApp();
-    // Audit: log login after successful PIN match
-    if(serverUrl) {
-      fetch(serverUrl + '/api/auth/login', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ username: 'Track_Admin', pin, app: 'tracking' }),
-        signal: AbortSignal.timeout(3000)
-      }).then(r=>r.json()).then(j=>{
-        if(j.ok) {
-          sessionStorage.setItem('trk_token', j.token);
-          trkAuditLog('LOGIN', `Logged into Tracking as: ${currentDept}`);
-        }
-      }).catch(()=>{});
-    }
-  } else {
+  if (!pin || !selectedDeptForLogin) return;
+  // v40 P18.16: Tracking auth now goes through real server auth (no more client-side DEPT_PINS).
+  // Each dept maps to a server user account: admin→Track_Admin, aim→Track_AIM, etc.
+  // The role check in DEPT_INFO drives the post-login page access for the UI.
+  const DEPT_TO_USERNAME = {
+    admin:    'Track_Admin',
+    planning: 'Track_Planning',
+    labels:   'Track_Labels',
+    aim:      'Track_AIM',
+    printing: 'Track_Printing',
+    pi:       'Track_PI',
+    packing:  'Track_Packing',
+    dispatch: 'Track_Dispatch',
+  };
+  const username = DEPT_TO_USERNAME[selectedDeptForLogin];
+  if (!username) {
+    document.getElementById('login-err').textContent = 'Unknown department';
     document.getElementById('login-err').classList.remove('hidden');
-    document.getElementById('login-pin').value='';
-    document.getElementById('login-pin').focus();
+    return;
   }
+  if (!serverUrl) {
+    document.getElementById('login-err').textContent = 'Server not connected. Configure server URL in Settings.';
+    document.getElementById('login-err').classList.remove('hidden');
+    return;
+  }
+  fetch(serverUrl + '/api/auth/login', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ username, pin, app: 'tracking' }),
+    signal: AbortSignal.timeout(8000)
+  }).then(r=>r.json()).then(j=>{
+    if (j.ok) {
+      currentDept = selectedDeptForLogin;
+      sessionStorage.setItem('trk_dept', currentDept);
+      sessionStorage.setItem('trk_token', j.token);
+      sessionStorage.setItem('trk_username', j.username);
+      sessionStorage.setItem('trk_role', j.role);
+      document.getElementById('login-page').style.display='none';
+      document.getElementById('app').style.display='flex';
+      initApp();
+      trkAuditLog('LOGIN', `Logged into Tracking as: ${currentDept} (${j.username})`);
+    } else {
+      document.getElementById('login-err').textContent = j.error || 'Invalid PIN';
+      document.getElementById('login-err').classList.remove('hidden');
+      document.getElementById('login-pin').value='';
+      document.getElementById('login-pin').focus();
+    }
+  }).catch(e=>{
+    document.getElementById('login-err').textContent = 'Cannot reach server: ' + e.message;
+    document.getElementById('login-err').classList.remove('hidden');
+  });
 }
 
 document.getElementById('login-pin').addEventListener('keydown',e=>{ if(e.key==='Enter') doLogin(); });
@@ -1236,6 +1273,105 @@ function initApp(){
   navigate(startPage);
   checkServer();
   initMobileNav();
+  // v40 P18.17: Start polling for assigned integrity tasks (non-admin only)
+  if (typeof _v40_startTaskBannerPolling === 'function') _v40_startTaskBannerPolling();
+}
+
+// ═══════════════════════════════════════════════════════
+// v40 Phase 18.17: OPERATOR TASK BANNER (Tracking app)
+// ═══════════════════════════════════════════════════════
+
+let _v40_myTasks = [];
+let _v40_myTasksTimer = null;
+
+function _v40_esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function _v40_taskBannerTick() {
+  // Tracking admin = currentDept 'admin'; suppress banner for admins
+  if (!currentDept) return;
+  if (currentDept === 'admin') {
+    const banner = document.getElementById('v40-task-banner');
+    if (banner) banner.style.display = 'none';
+    return;
+  }
+  if (!serverUrl) return;
+  const token = sessionStorage.getItem('trk_token') || '';
+  if (!token) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/my-tasks', {
+      headers:{'x-session-token': token},
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (!j.ok) return;
+    _v40_myTasks = j.tasks || [];
+    const banner = document.getElementById('v40-task-banner');
+    const textEl = document.getElementById('v40-task-banner-text');
+    if (!banner || !textEl) return;
+    if (_v40_myTasks.length === 0) { banner.style.display = 'none'; return; }
+    const critCount = _v40_myTasks.filter(t => t.severity === 'critical').length;
+    textEl.innerHTML = critCount > 0
+      ? `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you — including <strong style="color:#dc2626">${critCount} critical</strong>`
+      : `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you by Admin`;
+    banner.style.display = 'flex';
+  } catch(e) {}
+}
+
+function _v40_showMyTasks() {
+  if (_v40_myTasks.length === 0) { alert('No tasks pending.'); return; }
+  const rowsHtml = _v40_myTasks.map(t => {
+    const sevBadge = ({
+      critical: '<span style="background:rgba(239,68,68,0.15);color:#dc2626;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔴 CRITICAL</span>',
+      warning:  '<span style="background:rgba(245,158,11,0.15);color:#b45309;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🟡 WARNING</span>',
+      info:     '<span style="background:rgba(59,130,246,0.15);color:#1d4ed8;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔵 INFO</span>',
+    })[t.severity] || '';
+    const desc = _v40_esc(t.description || '(No finding details — free-form task)');
+    const action = t.suggested_action ? `<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:4px;padding:8px 12px;margin-top:8px;font-size:12px;line-height:1.5"><strong style="color:#15803d">What to do:</strong> ${_v40_esc(t.suggested_action)}${t.suggested_app ? `<div style="font-size:11px;color:#9ca3af;margin-top:4px">Where: <strong>${_v40_esc(t.suggested_app)}</strong> app → <strong>${_v40_esc(t.suggested_page||'?')}</strong> page</div>` : ''}</div>` : '';
+    const noteHtml = t.note ? `<div style="font-size:11px;color:#9ca3af;margin-top:6px;font-style:italic">Note from ${_v40_esc(t.assigned_by)}: ${_v40_esc(t.note)}</div>` : '';
+    const seenBtn = t.status === 'seen'
+      ? '<span style="font-size:11px;color:#9ca3af;font-style:italic">✓ Marked seen</span>'
+      : `<button style="padding:3px 12px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3);border-radius:3px;cursor:pointer" onclick="_v40_markTaskSeen('${_v40_esc(t.id)}')">Mark seen</button>`;
+    return `<div style="border:1px solid #e5e7eb;border-radius:6px;padding:12px;margin-bottom:10px;background:#fafafa">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">${sevBadge}${t.batch_number ? `<span style="font-family:monospace;font-size:11px;color:#0e7490">${_v40_esc(t.batch_number)}</span>` : ''}${t.machine_id ? `<span style="font-family:monospace;font-size:11px;color:#9ca3af">${_v40_esc(t.machine_id)}</span>` : ''}</div>
+        ${seenBtn}
+      </div>
+      <div style="font-size:12px;line-height:1.5">${desc}</div>
+      ${action}${noteHtml}
+    </div>`;
+  }).join('');
+  openModal('🩺 Your Integrity Tasks', 'Tasks assigned by Admin',
+    `<div style="padding:8px 0">
+      <div style="font-size:11px;color:#9ca3af;margin-bottom:12px;line-height:1.5">Admin has flagged the following data integrity issues that need your attention. Fix them via the suggested app/page; the next scan (within 60 min) will auto-clear tasks whose underlying issue is resolved.</div>
+      ${rowsHtml}
+    </div>`,
+    [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
+}
+
+async function _v40_markTaskSeen(taskId) {
+  if (!serverUrl) return;
+  const token = sessionStorage.getItem('trk_token') || '';
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/task/' + encodeURIComponent(taskId) + '/seen', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': token},
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) { closeModal(); _v40_taskBannerTick(); }
+  } catch(e) {}
+}
+
+function _v40_startTaskBannerPolling() {
+  if (_v40_myTasksTimer) clearInterval(_v40_myTasksTimer);
+  setTimeout(_v40_taskBannerTick, 5000);
+  _v40_myTasksTimer = setInterval(_v40_taskBannerTick, 60000);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1262,6 +1398,9 @@ function buildSidebar(){
 }
 
 function navigate(page){
+  // v40 Phase 18.14h: Snapshot the current page's view state BEFORE switching, so when the
+  // user comes back (or browser refresh), they land on the same scroll/tab/filter state.
+  try { if (typeof currentPage !== 'undefined' && currentPage && currentPage !== page) _v40_saveTrackViewState(currentPage); } catch(e) {}
   if(page !== 'reports') window._activeReport = null; // clear report tracker when leaving reports
   currentPage=page;
   // Persist page in URL hash so browser refresh restores position
@@ -2456,6 +2595,73 @@ function _restoreFocus(s){
   if(!el)return;
   try{el.focus({preventScroll:true});if(s.sel!=null&&el.setSelectionRange)el.setSelectionRange(s.sel,s.selE);}catch(e){}
 }
+
+// v40 Phase 18.14h: View-state preservation across renders + browser refresh.
+// Saves scroll, active tabs, filter strings per page in sessionStorage so the user
+// returns to the same view after F5 / re-render / navigating away and back.
+const _TRACK_VS_PREFIX = '_v40_trackView_';
+function _v40_saveTrackViewState(pageOverride) {
+  try {
+    const page = pageOverride || (typeof currentPage !== 'undefined' ? currentPage : 'unknown');
+    const key = _TRACK_VS_PREFIX + page;
+    const content = document.getElementById('content');
+    const vs = {
+      scroll: content ? content.scrollTop : (window.scrollY || 0),
+      filters: {},
+      savedAt: Date.now(),
+    };
+    // Capture text inputs marked data-viewstate-key
+    document.querySelectorAll('[data-viewstate-key]').forEach(el => {
+      vs.filters[el.dataset.viewstateKey] = el.value || '';
+    });
+    // Capture active sub-tabs (e.g. Report A vs B vs C)
+    const activeReportTab = document.querySelector('.report-tab.active')?.dataset?.tabId || null;
+    if (activeReportTab) vs.reportTab = activeReportTab;
+    sessionStorage.setItem(key, JSON.stringify(vs));
+  } catch(e) { /* silent */ }
+}
+function _v40_restoreTrackViewState(pageOverride) {
+  try {
+    const page = pageOverride || (typeof currentPage !== 'undefined' ? currentPage : 'unknown');
+    const raw = sessionStorage.getItem(_TRACK_VS_PREFIX + page);
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+function _v40_applyTrackViewState(vs) {
+  if (!vs) return;
+  // Filters
+  if (vs.filters) {
+    Object.entries(vs.filters).forEach(([key, val]) => {
+      const el = document.querySelector(`[data-viewstate-key="${CSS.escape(key)}"]`);
+      if (el) {
+        el.value = val;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  }
+  // Report sub-tabs
+  if (vs.reportTab) {
+    const tab = document.querySelector(`.report-tab[data-tab-id="${CSS.escape(vs.reportTab)}"]`);
+    if (tab && !tab.classList.contains('active')) tab.click();
+  }
+  // Scroll — async so layout settles
+  if (vs.scroll != null && vs.scroll > 0) {
+    requestAnimationFrame(() => {
+      const content = document.getElementById('content');
+      if (content && content.scrollTop !== undefined) content.scrollTop = vs.scroll;
+      else window.scrollTo(0, vs.scroll);
+    });
+  }
+}
+let _v40_trackVsScrollTimer = null;
+document.addEventListener('scroll', (e) => {
+  if (e.target && e.target.id === 'content') {
+    clearTimeout(_v40_trackVsScrollTimer);
+    _v40_trackVsScrollTimer = setTimeout(() => _v40_saveTrackViewState(), 400);
+  }
+}, true);
+window.addEventListener('beforeunload', () => { try { _v40_saveTrackViewState(); } catch(e) {} });
+window.addEventListener('pagehide',     () => { try { _v40_saveTrackViewState(); } catch(e) {} });
 // Returns true if user is actively typing
 function _userIsFocused(){
   const el=document.activeElement;
@@ -2471,6 +2677,9 @@ document.addEventListener('touchstart',_markUserActive, true);
 function renderPage(page){
   // FIX 2: Never auto-rebuild reports — user is reading it, background refresh must not close it
   if(page === 'reports' && currentPage === 'reports') return;
+  // v40 Phase 18.14h: Save the OLD page's view state before we re-render (handles repeated calls
+  // to renderPage that don't change page — useful when re-rendering after a background sync.)
+  try { if (typeof currentPage !== 'undefined' && currentPage && currentPage !== page) _v40_saveTrackViewState(currentPage); } catch(e) {}
   const _f=_saveFocus();
   // FIX 1: Save scroll position before rebuild — prevents jumping to top
   const _content = document.getElementById('content');
@@ -2496,6 +2705,11 @@ function renderPage(page){
   if(_f)setTimeout(()=>_restoreFocus(_f),0);
   // FIX 1: Restore scroll after rebuild
   if(_content && _scrollTop > 0) setTimeout(()=>{ _content.scrollTop = _scrollTop; }, 0);
+  // v40 Phase 18.14h: After render, apply persisted view state (filters + sub-tabs + scroll-from-session)
+  try {
+    const vs = _v40_restoreTrackViewState(page);
+    if (vs) _v40_applyTrackViewState(vs);
+  } catch(e) {}
 }
 
 // Force render — used when user explicitly clicks navigation (reports always rebuild)
@@ -2520,6 +2734,11 @@ function renderPageForce(page){
     case 'settings': renderSettings(); break;
   }
   if(_f)setTimeout(()=>_restoreFocus(_f),0);
+  // v40 Phase 18.14h: Apply persisted view state
+  try {
+    const vs = _v40_restoreTrackViewState(page);
+    if (vs) _v40_applyTrackViewState(vs);
+  } catch(e) {}
 }
 
 function renderDashboard(){
@@ -4306,11 +4525,13 @@ function _v39_renderInvoiceQueuePanel() {
   if (!panel) return;
   const invoices = _v39_pendingInvoices || [];
   // Restrict visibility to dispatch / admin / planning roles (others won't see this panel)
-  const roleAllowed = (window.currentUser || state.currentUser) && ['admin','planning','dispatch'].includes((window.currentUser || state.currentUser)?.role);
+  const roleAllowed = currentUser && ['admin','planning','dispatch'].includes(currentUser.role);
   if (!roleAllowed) {
     panel.innerHTML = '';
     return;
   }
+  // v41 P19.3: kick off pending-reconciliation count fetch (non-blocking, populates badge)
+  _v41_fetchPendingReconciliationCount();
   if (invoices.length === 0) {
     panel.innerHTML = `
       <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:6px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -4318,7 +4539,11 @@ function _v39_renderInvoiceQueuePanel() {
           <strong>✅ No invoices waiting for Scan Out.</strong>
           <span style="color:#065f46;margin-left:6px">All received SAP invoices are dispatched, or none have arrived yet.</span>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="_v39_loadAndRenderInvoiceQueue()" style="font-size:11px">↻ Refresh</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="_v41_openPendingReconciliationModal()" style="font-size:11px">⏳ Pending Reconciliation <span id="v41-pending-count-badge" style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:4px;display:none">0</span></button>
+          <button class="btn btn-ghost btn-sm" onclick="_v41_openSoLedgerModal()" style="font-size:11px">📊 SO Ledger</button>
+          <button class="btn btn-ghost btn-sm" onclick="_v39_loadAndRenderInvoiceQueue()" style="font-size:11px">↻ Refresh</button>
+        </div>
       </div>`;
     return;
   }
@@ -4346,7 +4571,9 @@ function _v39_renderInvoiceQueuePanel() {
           ${toggleBtn('flat', '📋 Flat')}
           ${toggleBtn('truck', '🚚 By Truck')}
           ${toggleBtn('customer', '👥 By Customer')}
-          <button class="btn btn-ghost btn-sm" onclick="_v39_loadAndRenderInvoiceQueue()" style="font-size:11px;margin-left:6px">↻ Refresh</button>
+          <button class="btn btn-ghost btn-sm" onclick="_v41_openPendingReconciliationModal()" style="font-size:11px;margin-left:6px">⏳ Pending <span id="v41-pending-count-badge" style="background:#f59e0b;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:2px;display:none">0</span></button>
+          <button class="btn btn-ghost btn-sm" onclick="_v41_openSoLedgerModal()" style="font-size:11px">📊 SO Ledger</button>
+          <button class="btn btn-ghost btn-sm" onclick="_v39_loadAndRenderInvoiceQueue()" style="font-size:11px;margin-left:2px">↻ Refresh</button>
         </div>
       </div>
       <!-- v40 Phase 18.11: Fallback entry — scan any box to auto-open its truck modal -->
@@ -4381,6 +4608,201 @@ function _v40_quickScanFromQueue(raw) {
     return;
   }
   _v40_openTruckScanOutModal(truckNumber);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v41 P19.3: Pending Reconciliation queue + SO Ledger UI
+// ═══════════════════════════════════════════════════════════════
+
+window._v41_pendingReconciliation = [];
+window._v41_soLedger = [];
+
+async function _v41_fetchPendingReconciliationCount() {
+  // Non-blocking — updates the badge if present
+  try {
+    const baseUrl = (typeof SYNC !== 'undefined' && SYNC._url) || localStorage.getItem('sunloc_server_url') || '';
+    if (!baseUrl) return;
+    const r = await fetch(baseUrl + '/api/invoice/pending-reconciliation', {
+      headers: { 'x-session-token': currentUser?.token || '' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      window._v41_pendingReconciliation = j.requests || [];
+      const badge = document.getElementById('v41-pending-count-badge');
+      if (badge) {
+        badge.textContent = j.count;
+        badge.style.display = j.count > 0 ? 'inline-block' : 'none';
+      }
+    }
+  } catch (e) { /* tolerate */ }
+}
+
+async function _v41_openPendingReconciliationModal() {
+  await _v41_fetchPendingReconciliationCount();
+  const items = window._v41_pendingReconciliation || [];
+  const rowsHtml = items.length === 0
+    ? '<div style="padding:24px;text-align:center;color:var(--text3)">✅ No invoice requests waiting for SAP reconciliation.</div>'
+    : `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:var(--surface2);position:sticky;top:0">
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="text-align:left;padding:8px">Batch</th>
+            <th style="text-align:left;padding:8px">Customer</th>
+            <th style="text-align:left;padding:8px">SO Number</th>
+            <th style="text-align:right;padding:8px">Qty (L)</th>
+            <th style="text-align:right;padding:8px">Boxes</th>
+            <th style="text-align:center;padding:8px">Created</th>
+            <th style="text-align:center;padding:8px">Status</th>
+          </tr></thead>
+        <tbody>${items.map(it => `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:8px;font-family:var(--mono);font-weight:600">${it.batch_number||'—'}</td>
+          <td style="padding:8px">${it.customer||'—'}</td>
+          <td style="padding:8px;font-family:var(--mono)">${it.po_number||it.sap_doc_entry||'—'}</td>
+          <td style="padding:8px;text-align:right;font-family:var(--mono)">${parseFloat(it.qty_lakhs||0).toFixed(3)}</td>
+          <td style="padding:8px;text-align:right;font-family:var(--mono)">${it.boxes||0}</td>
+          <td style="padding:8px;text-align:center;font-size:11px;color:var(--text3)">${(it.created_at||'').slice(0,16)}</td>
+          <td style="padding:8px;text-align:center">${it.is_overdispatch_approved ? '<span style="background:rgba(245,158,11,0.15);color:#d97706;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600">⚠️ Over 115%</span>' : '<span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600">⏳ Awaiting SAP</span>'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  openTrackingModal('⏳ Invoices Pending SAP Reconciliation', `
+    <div style="padding:8px 0">
+      <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:11px;line-height:1.6;color:var(--text2)">
+        These invoice requests have been registered in Sunloc but the corresponding A/R invoice has not yet appeared in SAP.
+        <strong>Action:</strong> SAP user must manually create the invoice in SAP. Sunloc's 5-minute poller will reconcile automatically once the invoice arrives. After reconciliation, these will appear in the main Invoice Queue for scan-out.
+      </div>
+      ${rowsHtml}
+    </div>
+  `);
+}
+
+async function _v41_openSoLedgerModal() {
+  let baseUrl = ''; try { baseUrl = (typeof SYNC !== 'undefined' && SYNC._url) || localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!baseUrl) { alert('Server not connected'); return; }
+  let ledger = [];
+  try {
+    const r = await fetch(baseUrl + '/api/invoice/so-consumption', {
+      headers: { 'x-session-token': currentUser?.token || '' },
+      signal: AbortSignal.timeout(8000)
+    });
+    const j = await r.json();
+    if (j.ok) ledger = j.ledger || [];
+  } catch(e) {
+    alert('Failed to load SO ledger: ' + e.message);
+    return;
+  }
+  const rowsHtml = ledger.length === 0
+    ? '<div style="padding:24px;text-align:center;color:var(--text3)">No SO consumption recorded yet.</div>'
+    : `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:var(--surface2);position:sticky;top:0">
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="text-align:left;padding:8px">SO Number</th>
+            <th style="text-align:left;padding:8px">Customer</th>
+            <th style="text-align:right;padding:8px">Original (L)</th>
+            <th style="text-align:right;padding:8px">Dispatched (L)</th>
+            <th style="text-align:right;padding:8px">Remaining (L)</th>
+            <th style="text-align:right;padding:8px">% Dispatched</th>
+            <th style="text-align:right;padding:8px">Invoices</th>
+            <th style="text-align:right;padding:8px">Value (₹)</th>
+          </tr></thead>
+        <tbody>${ledger.map(r => {
+          const statusBadge = r.isAtTolerance
+            ? '<span style="background:rgba(220,38,38,0.15);color:#dc2626;padding:1px 6px;border-radius:3px;font-size:10px">@ 115%</span>'
+            : r.isOverDispatched
+              ? '<span style="background:rgba(245,158,11,0.15);color:#d97706;padding:1px 6px;border-radius:3px;font-size:10px">Over 100%</span>'
+              : r.isExhausted
+                ? '<span style="background:rgba(99,102,241,0.15);color:#4f46e5;padding:1px 6px;border-radius:3px;font-size:10px">Exhausted</span>'
+                : '';
+          return `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:8px;font-family:var(--mono);font-weight:600">${r.sap_doc_num||r.sap_doc_entry||'—'}</td>
+            <td style="padding:8px">${r.card_name||r.card_code||'—'}</td>
+            <td style="padding:8px;text-align:right;font-family:var(--mono)">${parseFloat(r.original_qty_lakhs).toFixed(3)}</td>
+            <td style="padding:8px;text-align:right;font-family:var(--mono)">${parseFloat(r.dispatched_qty_lakhs).toFixed(3)}</td>
+            <td style="padding:8px;text-align:right;font-family:var(--mono);color:${r.remainingQty<=0?'#dc2626':'inherit'}">${r.remainingQty.toFixed(3)}</td>
+            <td style="padding:8px;text-align:right;font-family:var(--mono)">${r.pctDispatched.toFixed(1)}% ${statusBadge}</td>
+            <td style="padding:8px;text-align:right;font-family:var(--mono)">${r.invoice_count}</td>
+            <td style="padding:8px;text-align:right;font-family:var(--mono)">${parseFloat(r.dispatched_value_inr||0).toLocaleString('en-IN', {maximumFractionDigits:0})}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+  openTrackingModal('📊 Sales Order Consumption Ledger', `
+    <div style="padding:8px 0">
+      <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:11px;line-height:1.6;color:var(--text2)">
+        Cumulative dispatch vs original Sales Order quantity across all reconciled invoices. The 115% tolerance is the hard ceiling — beyond that, admin override is required to create new invoice requests.
+      </div>
+      ${rowsHtml}
+    </div>
+  `);
+}
+
+// v41 P19.3: Gate scan-out by reconciliation status. Called before any scan-out activity
+// to confirm the invoice is reconciled with SAP. Returns true if scan-out can proceed.
+async function _v41_checkScanOutEligibility(invoiceRequestId) {
+  let baseUrl = ''; try { baseUrl = (typeof SYNC !== 'undefined' && SYNC._url) || localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!baseUrl) { return { eligible: false, reason: 'Server not connected' }; }
+  try {
+    const r = await fetch(baseUrl + '/api/invoice/scan-out-eligible/' + encodeURIComponent(invoiceRequestId), {
+      method: 'POST',
+      headers: { 'x-session-token': currentUser?.token || '' },
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    return j;
+  } catch (e) {
+    return { eligible: false, reason: 'Server error: ' + e.message };
+  }
+}
+
+// v41 P19.3: Close an invoice as "legacy" (no matching Sunloc Sales Order).
+// Used for invoices that came in from SAP for old/return stock that Sunloc didn't plan.
+async function _v41_closeInvoiceAsLegacy(invoiceId) {
+  let baseUrl = ''; try { baseUrl = (typeof SYNC !== 'undefined' && SYNC._url) || localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+  if (!baseUrl) { alert('Server not connected'); return; }
+  const reason = prompt('Close this invoice as legacy (no matching Sales Order in Sunloc)?\n\nReason (for audit):', 'Legacy stock — no SO in Sunloc');
+  if (reason === null) return;
+  try {
+    const r = await fetch(baseUrl + '/api/invoice/close-legacy/' + encodeURIComponent(invoiceId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-token': currentUser?.token || '' },
+      body: JSON.stringify({ reason: reason || 'Legacy stock' }),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert('✓ Invoice marked as legacy-closed.');
+      _v39_loadAndRenderInvoiceQueue();
+    } else {
+      alert('Failed: ' + (j.error || 'unknown'));
+    }
+  } catch (e) {
+    alert('Server error: ' + e.message);
+  }
+}
+
+// Shim for the modal — fallback to a generic open-modal if a tracking-specific one isn't defined
+function openTrackingModal(title, html) {
+  if (typeof openModal === 'function') {
+    return openModal(title, html);
+  }
+  // Tracking has its own simple modal pattern
+  const modalEl = document.getElementById('v40-modal');
+  if (modalEl) {
+    document.getElementById('v40-modal-title').textContent = title;
+    document.getElementById('v40-modal-body').innerHTML = html;
+    modalEl.style.display = 'flex';
+    return;
+  }
+  // Last resort — render in-place
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.innerHTML = `<div style="background:#fff;border-radius:8px;max-width:90vw;max-height:85vh;overflow:auto;padding:20px;box-shadow:0 10px 40px rgba(0,0,0,0.2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e5e7eb;padding-bottom:10px;margin-bottom:12px">
+      <h3 style="margin:0;font-size:15px;font-weight:700">${title}</h3>
+      <button onclick="this.closest('[style*=fixed]').remove()" style="border:0;background:transparent;font-size:20px;cursor:pointer;color:#6b7280">×</button>
+    </div>
+    ${html}
+  </div>`;
+  document.body.appendChild(overlay);
 }
 
 // v40 Phase 18.6: Group invoices by truck or customer (or no-grouping flat list).
@@ -4453,6 +4875,9 @@ function _v40_renderInvoiceGroup(group, mode) {
         <td style="padding:6px 8px;text-align:center">
           <button class="btn btn-sm" style="background:#0891b2;color:white;border:none;font-size:11px;padding:4px 10px"
                   onclick="_v39_openScanOutModal('${inv.id}')">🔍 Scan Out</button>
+          ${inv.source === 'direct_sap' && !inv.is_legacy_closed && ['admin','dispatch','planning'].includes(currentUser?.role) ? `
+          <button class="btn btn-sm" style="background:transparent;color:#7c3aed;border:1px solid rgba(139,92,246,0.4);font-size:10px;padding:3px 8px;margin-left:4px"
+                  onclick="_v41_closeInvoiceAsLegacy('${inv.id}')" title="No matching Sales Order in Sunloc — close as legacy stock">🗂️ Legacy</button>` : ''}
         </td>
       </tr>`;
   }).join('');
@@ -4478,6 +4903,11 @@ function _v40_renderInvoiceGroup(group, mode) {
 function _v39_openScanOutModal(invoiceId) {
   const inv = _v39_pendingInvoices.find(i => i.id === invoiceId);
   if (!inv) { toast('Invoice not found', 'var(--red)'); return; }
+  // v41 P19.3: block scan-out for legacy-closed invoices
+  if (inv.is_legacy_closed) {
+    alert('🗂️ This invoice is marked as Legacy Closed and cannot be scanned out.\n\nIf this is incorrect, an admin can un-mark it from the invoice detail view.');
+    return;
+  }
   if (!inv.batch_number) {
     alert('⚠️ This invoice has no batch_number attached. An admin must approve and attach a batch from the Generated Invoices admin page before dispatch-out.');
     return;
@@ -4894,6 +5324,8 @@ async function _v40_openTruckScanOutModal(truckNumber) {
     lastSaveAt: 0,
     saveInFlight: false,
   };
+  // v40 P18.14e: reset per-modal "missing boxes" panel expansion state
+  window._v40_missingExpanded = new Set();
   // Pre-fetch line expectations for each invoice (best-effort — strict mode requires this)
   for (const inv of invoices) {
     try {
@@ -5021,6 +5453,63 @@ function _v40_setTruckMismatchMsg(html) {
   }
 }
 
+// v40 Phase 18.14e: per-modal expansion state for "missing boxes" panel.
+// Toggled via _v40_toggleMissingBoxes(invoiceId). Reset when modal opens.
+window._v40_missingExpanded = window._v40_missingExpanded || new Set();
+
+// v40 Phase 18.14e: Compute the set of box numbers still expected for an invoice.
+// Returns sorted array of box numbers (e.g. [12, 45, 67, ...]) that:
+//   - belong to this invoice's batch
+//   - are currently at stage 'at_dispatch' OR 'packing' (FG ready but not yet dispatched)
+//   - are NOT yet scanned in the current truck session
+// Excludes voided labels and labels already dispatched on prior trucks.
+function _v40_getMissingBoxesForInvoice(inv) {
+  if (!inv || !inv.batch_number) return [];
+  const st = window._v40_truckScanState;
+  if (!st) return [];
+  // Build set of label IDs already scanned for THIS invoice in current session
+  const scannedLabelIds = new Set();
+  const scannedBoxNums  = new Set();
+  st.scanned.filter(s => s.invoiceId === inv.id).forEach(s => {
+    if (s.labelId) scannedLabelIds.add(s.labelId);
+    if (s.boxNumber) scannedBoxNums.add(parseInt(s.boxNumber));
+  });
+  // Get all labels for this batch
+  const labels = (state.labels || []).filter(l => l.batchNumber === inv.batch_number && !l.voided);
+  // Filter to those that are at_dispatch or packing (FG state, ready/about to ship)
+  // AND not yet scanned in this session
+  const missing = [];
+  for (const l of labels) {
+    const stage = (window._v40_boxStagesMap && l.id in window._v40_boxStagesMap)
+      ? window._v40_boxStagesMap[l.id]
+      : null;
+    // We want boxes that are physically ready to dispatch (at_dispatch/packing) and not yet scanned
+    // Skip if already scanned this session OR already dispatched OR not yet packed
+    if (scannedLabelIds.has(l.id)) continue;
+    if (l.labelNumber && scannedBoxNums.has(parseInt(l.labelNumber))) continue;
+    // Stage filter: include 'at_dispatch' and 'packing' (FG ready). Skip 'dispatched' (already shipped).
+    // If stage unknown (server map not loaded), include anyway — better to show possibly-shipped than to hide.
+    if (stage === 'dispatched') continue;
+    if (stage && stage !== 'at_dispatch' && stage !== 'packing') continue;
+    missing.push(parseInt(l.labelNumber) || l.id);
+  }
+  return missing.sort((a, b) => {
+    const na = parseInt(a), nb = parseInt(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a).localeCompare(String(b));
+  });
+}
+
+// v40 Phase 18.14e: toggle missing-boxes panel for one invoice
+function _v40_toggleMissingBoxes(invoiceId) {
+  if (window._v40_missingExpanded.has(invoiceId)) {
+    window._v40_missingExpanded.delete(invoiceId);
+  } else {
+    window._v40_missingExpanded.add(invoiceId);
+  }
+  _v40_refreshTruckScanProgress();
+}
+
 function _v40_refreshTruckScanProgress() {
   const st = window._v40_truckScanState;
   if (!st) return;
@@ -5030,20 +5519,50 @@ function _v40_refreshTruckScanProgress() {
     const scannedCount = st.scanned.filter(s => s.invoiceId === inv.id).length;
     const expected = parseInt(inv.total_boxes) || 0;
     const pct = expected > 0 ? Math.min(100, scannedCount / expected * 100) : 0;
+    const missingCount = Math.max(0, expected - scannedCount);
     let icon, bgColor;
     if (scannedCount === 0)          { icon = '⏳'; bgColor = 'rgba(0,0,0,0.04)'; }
     else if (scannedCount < expected){ icon = '🔍'; bgColor = 'rgba(245,158,11,0.10)'; }
     else                              { icon = '✅'; bgColor = 'rgba(16,185,129,0.12)'; }
+    // v40 P18.14e: "Show missing" link visible when batch is incomplete (>0 scans, <expected).
+    // Auto-expand when ≥70% scanned (helps workers see remaining boxes at the home stretch).
+    const isExpanded = window._v40_missingExpanded.has(inv.id);
+    const showMissingLink = (scannedCount > 0 && scannedCount < expected)
+      ? `<a href="javascript:void(0)" onclick="_v40_toggleMissingBoxes('${inv.id.replace(/'/g, "\\'")}')" style="display:inline-block;margin-top:4px;font-size:11px;color:#0e7490;text-decoration:underline;cursor:pointer">${isExpanded ? '▼ Hide' : '▸ Show'} ${missingCount} missing box${missingCount === 1 ? '' : 'es'}</a>`
+      : '';
+    // Compute missing boxes panel if expanded
+    let missingPanel = '';
+    if (isExpanded && missingCount > 0) {
+      const missing = _v40_getMissingBoxesForInvoice(inv);
+      if (missing.length > 0) {
+        const chips = missing.map(boxNum =>
+          `<span style="display:inline-block;background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.30);color:#991b1b;padding:2px 8px;margin:2px;font-size:11px;font-family:var(--mono);border-radius:3px;font-weight:600">${inv.batch_number}-${boxNum}</span>`
+        ).join('');
+        missingPanel = `
+          <div style="margin-top:6px;padding:8px 10px;background:rgba(220,38,38,0.04);border:1px dashed rgba(220,38,38,0.25);border-radius:4px;grid-column:1/-1">
+            <div style="font-size:11px;color:#991b1b;font-weight:700;margin-bottom:4px">📍 Locate these ${missing.length} box${missing.length === 1 ? '' : 'es'} and scan:</div>
+            <div>${chips}</div>
+          </div>`;
+      } else {
+        // Edge case: scannedCount < expected but no labels found at FG state
+        // — could happen if box-stages map not yet loaded
+        missingPanel = `
+          <div style="margin-top:6px;padding:8px 10px;background:rgba(245,158,11,0.06);border:1px dashed rgba(245,158,11,0.35);border-radius:4px;grid-column:1/-1;font-size:11px;color:#92400e">
+            ⚠️ Cannot determine box numbers — label data not yet loaded. Try again in a few seconds, or check the Batch Tracker for box list.
+          </div>`;
+      }
+    }
     return `
       <div style="display:grid;grid-template-columns:30px 100px 1fr 80px;gap:8px;align-items:center;padding:6px 8px;background:${bgColor};border-radius:4px;font-size:12px">
         <div style="font-size:14px">${icon}</div>
-        <div style="font-family:var(--mono);font-weight:700">${inv.batch_number}</div>
+        <div style="font-family:var(--mono);font-weight:700">${inv.batch_number}${showMissingLink ? '<br>' + showMissingLink : ''}</div>
         <div>
           <div style="height:8px;background:var(--surface3);border-radius:4px;overflow:hidden">
             <div style="height:100%;width:${pct}%;background:${scannedCount >= expected ? '#10b981' : '#f59e0b'};transition:width 0.2s"></div>
           </div>
         </div>
         <div style="text-align:right;font-family:var(--mono);font-weight:700">${scannedCount} / ${expected}</div>
+        ${missingPanel}
       </div>`;
   }).join('');
   board.innerHTML = rows;
@@ -5477,7 +5996,14 @@ function _v39_showInvoiceDetail(invoiceId) {
   const fetchedAt = inv.fetched_at ? new Date(inv.fetched_at).toLocaleString() : '—';
   const dispatchedAt = inv.dispatched_at ? new Date(inv.dispatched_at).toLocaleString() : '—';
   const qtyLakhs = parseFloat(inv.total_qty_lakhs) || (parseInt(inv.total_boxes)||0)/100;
+  // v41 P19.3: surface legacy-closed banner at top of detail
+  const legacyBanner = inv.is_legacy_closed ? `
+    <div style="background:rgba(245,158,11,0.10);border:1px solid rgba(245,158,11,0.35);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#92400e;line-height:1.5">
+      <strong>🗂️ Legacy Closed</strong> — this invoice was marked as legacy by <strong>${inv.legacy_closed_by||'admin'}</strong> on <strong>${(inv.legacy_closed_at||'').slice(0,16)}</strong>.<br>
+      <span style="font-style:italic">Reason: ${inv.legacy_close_reason || '(none)'}</span>
+    </div>` : '';
   const body = `
+    ${legacyBanner}
     <div style="font-size:12px;line-height:1.7">
       <div style="font-weight:700;color:#0e7490;margin-bottom:8px;font-size:13px">SAP Reference</div>
       <div style="background:var(--surface2);border-radius:6px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:140px 1fr;gap:4px 12px">
@@ -5550,6 +6076,16 @@ function _v39_showInvoiceDetail(invoiceId) {
         label: '⚠️ Deemed Scan-Out',
         cls: 'btn-secondary',
         fn: `_v39_openDeemedScanOutModal('${inv.id}')`,
+      });
+    }
+    // v41 P19.3: Mark as Legacy Closed — for direct_sap invoices that don't match
+    // any planned Sales Order in Sunloc (return stock, legacy inventory, etc.).
+    // Available for any not-yet-dispatched, not-yet-legacy-closed invoice.
+    if (!inv.is_legacy_closed && inv.dispatch_status !== 'dispatched') {
+      footerButtons.push({
+        label: '🗂️ Mark as Legacy Closed',
+        cls: 'btn-warning',
+        fn: `_v41_closeInvoiceAsLegacy('${inv.id}')`,
       });
     }
   }

@@ -460,7 +460,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v40</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v41</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -492,6 +492,17 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
     <button class="nbtn" onclick="document.getElementById('imp').click()" title="Import data" style="padding:5px 7px">↑</button>
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importData(this)">
     <button class="nbtn primary" id="saveBtn" onclick="saveDay()" style="padding:5px 14px;font-size:12px">💾 Save</button>
+  </div>
+</div>
+
+<!-- v40 P18.17: Operator task banner — hidden by default, populated by _v40_taskBannerTick() -->
+<div id="v40-task-banner" style="display:none;background:linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08));border-bottom:2px solid rgba(245,158,11,0.5);padding:8px 16px;font-size:13px;color:#92400e;align-items:center;justify-content:space-between;gap:8px">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span style="font-size:18px">🩺</span>
+    <span id="v40-task-banner-text"><strong>0 tasks</strong> assigned to you</span>
+  </div>
+  <div style="display:flex;gap:6px">
+    <button style="padding:3px 12px;font-size:11px;background:rgba(245,158,11,0.25);color:#92400e;border:1px solid rgba(245,158,11,0.5);border-radius:4px;cursor:pointer" onclick="_v40_showMyTasks()">Show details</button>
   </div>
 </div>
 
@@ -1579,10 +1590,21 @@ async function _dprPushRaw(fl,d,data){
     });
   });
   try{
+    // v40 P18.14i Fix 2c: Detect any admin force-entry flag set on dropdowns this session,
+    // so server gate allows writing to non-running orders. Audit log records each row.
+    const _forceEntryAny = (dprUser?.role === 'admin') &&
+      Array.from(document.querySelectorAll('select[id^="run-ord-"]'))
+        .some(s => s.dataset.forceEntry === '1');
     const r=await fetch(serverUrl+'/api/dpr/save',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({floor:fl,date:d,data,actuals}),
+      headers:{'Content-Type':'application/json','X-User-Role':(dprUser?.role||'')},
+      body:JSON.stringify({
+        floor:fl,date:d,data,actuals,
+        // v40 P18.14i Fix 2: send user context for gate check + audit log
+        userRole: dprUser?.role || '',
+        userName: dprUser?.username || dprUser?.name || '',
+        forceEntry: _forceEntryAny,
+      }),
       signal:AbortSignal.timeout(15000)
     });
     if(r.ok){
@@ -1597,6 +1619,18 @@ async function _dprPushRaw(fl,d,data){
             saved._savedAt=new Date(j.savedAt).getTime();
             localStorage.setItem(skey(fl,d),JSON.stringify(saved));
           }
+        }
+        // v40 P18.14i Fix 2: Surface gate rejections to the operator. Server returns
+        // the list of rows it refused to write (typically because the target order
+        // was no longer In Production). Without this, the operator would think their
+        // entry saved but the cache would silently drop it.
+        if (j.rejectedCount > 0 && Array.isArray(j.rejected)) {
+          const reasons = j.rejected.slice(0, 5).map(rr =>
+            `• ${rr.batchNumber||rr.orderId||'(no batch)'} on ${rr.machineId} ${rr.shift} — ${rr.reason}`
+          ).join('\n');
+          const more = j.rejected.length > 5 ? `\n…and ${j.rejected.length - 5} more` : '';
+          // Use alert so the user has to acknowledge — these are silent data loss otherwise
+          alert(`⚠️ ${j.rejectedCount} DPR ${j.rejectedCount===1?'entry was':'entries were'} not saved:\n\n${reasons}${more}\n\nThese batches are not currently In Production. Ask Planning to set them to "In Production" before re-entering.`);
         }
       }catch(_){}
       setSyncBadge('synced'); return true;
@@ -1703,13 +1737,21 @@ async function fetchActiveOrders(){
     return;
   }
   try{
-    const r=await fetch(serverUrl+'/api/orders/active',{signal:AbortSignal.timeout(5000)});
+    // v40 P18.14i Fix 2c: admins request includeAll=1 so they see pending/closed orders too
+    // (visually marked + force-entry confirmation in dropdown handler). Non-admins still
+    // get only In Production orders capped at 2 per machine, server-enforced.
+    const isDprAdmin = dprUser?.role === 'admin';
+    const url = serverUrl + '/api/orders/active' + (isDprAdmin ? '?includeAll=1' : '');
+    const r=await fetch(url,{
+      headers: isDprAdmin ? {'X-User-Role':'admin'} : {},
+      signal:AbortSignal.timeout(5000)
+    });
     if(!r.ok) return;
     const j=await r.json();
     if(j.ok && j.orders){
-      // Build map by machineId — admin sees all orders, others only see In Production
+      // Build map by machineId — admin sees all orders (status preserved for UI marking),
+      // non-admins only see In Production (already filtered by server).
       activeOrders={};
-      const isDprAdmin = dprUser?.role === 'admin';
       j.orders.filter(o => o.machineId && (isDprAdmin || o.status === 'running')).forEach(o=>{
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
@@ -2250,7 +2292,16 @@ function renderShifts(){
         if(run.batchNumber && !matchedOrder && serverUrl){
           setTimeout(()=>{ fetchActiveOrders().then(()=>{ if(!unsaved&&!_userIsFocused()) renderShifts(); }); }, 500);
         }
-        const ordOpts=`<option value="">— Order —</option>`+orphanOpt+orders.map(o=>`<option value="${esc(o.id)}" ${effectiveOrderId===o.id?'selected':''}>${o.isTemp?'⚠️ TEMP: ':''}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
+        // v40 P18.14i Fix 2c: Visually mark non-running orders in admin DPR dropdowns
+        // so admin can see which ones will trigger a force-entry confirmation.
+        // TEMP batches show ⚠️ (existing behavior). Pending shows ⏸, Closed shows ✓.
+        const _statusMark = (o) => {
+          if (o.isTemp) return '⚠️ TEMP: ';
+          if (o.status === 'pending') return '⏸ [PENDING] ';
+          if (o.status === 'closed')  return '✓ [CLOSED] ';
+          return '';
+        };
+        const ordOpts=`<option value="">— Order —</option>`+orphanOpt+orders.map(o=>`<option value="${esc(o.id)}" data-status="${esc(o.status||'')}" ${effectiveOrderId===o.id?'selected':''}>${_statusMark(o)}${esc(o.batchNumber||o.poNumber||'No Batch')} | ${esc(o.customer)} | Sz${o.size}${o.isTemp?' ['+o.labelCount+' labels]':''}</option>`).join('');
         const runColour = run.colour || matchedOrder?.colour || '';
         const isMult=runs.length>1;
         runsHtml+=`
@@ -2412,6 +2463,32 @@ function onRunOrderChange(sh, mcId, ri){
   const batchInp=document.getElementById(`run-batch-${sh}-${mcId}-${ri}`);
   const colourEl=document.getElementById(`run-colour-${sh}-${mcId}-${ri}`);
   const ordId=sel?.value;
+  // v40 P18.14i Fix 2c: Admin force-entry confirmation. When admin selects a non-running
+  // order, prompt before allowing data entry. Without confirmation, revert dropdown.
+  const isDprAdmin = dprUser?.role === 'admin';
+  if (isDprAdmin && ordId && activeOrders[mcId]) {
+    const ord = activeOrders[mcId].find(o => o.id === ordId);
+    if (ord && ord.status && ord.status !== 'running' && !ord.isTemp) {
+      const proceed = confirm(
+        `⚠️ Force-entry warning\n\n` +
+        `Order "${ord.batchNumber||ord.poNumber||'(no batch)'}" is "${ord.status}" — not In Production.\n` +
+        `Customer: ${ord.customer || '?'}\n\n` +
+        `Operationally, DPR entries should only be made against orders that Planning has set to "In Production".\n\n` +
+        `If you proceed, this entry will be AUDITED as an admin force-entry.\n\n` +
+        `OK to continue, Cancel to pick a different order.`
+      );
+      if (!proceed) {
+        // Revert dropdown to previous value
+        sel.value = sel.dataset.orderid || '';
+        if (batchInp) batchInp.value = sel.dataset.batchnumber || '';
+        return;
+      }
+      // Mark this run as a force-entry; collectForm() picks this up to send forceEntry=true on save
+      sel.dataset.forceEntry = '1';
+    } else if (sel) {
+      sel.dataset.forceEntry = '';
+    }
+  }
   if(ordId && activeOrders[mcId]){
     const ord=activeOrders[mcId].find(o=>o.id===ordId);
     if(ord){
@@ -4440,7 +4517,102 @@ async function doDprLogin() {
     go('entry');
     postAuthServerInit();
     dprAuditLog('LOGIN', 'Logged in to DPR');
+    // v40 P18.17: Start polling for assigned integrity tasks (non-admin only)
+    if (typeof _v40_startTaskBannerPolling === 'function') _v40_startTaskBannerPolling();
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// v40 Phase 18.17: OPERATOR TASK BANNER (DPR app)
+// ═══════════════════════════════════════════════════════════════
+
+let _v40_myTasks = [];
+let _v40_myTasksTimer = null;
+
+function _v40_esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+async function _v40_taskBannerTick() {
+  if (!dprUser) return;
+  if (dprUser.role === 'admin') {
+    const banner = document.getElementById('v40-task-banner');
+    if (banner) banner.style.display = 'none';
+    return;
+  }
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/my-tasks', {
+      headers:{'x-session-token': dprUser?.token||''},
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (!j.ok) return;
+    _v40_myTasks = j.tasks || [];
+    const banner = document.getElementById('v40-task-banner');
+    const textEl = document.getElementById('v40-task-banner-text');
+    if (!banner || !textEl) return;
+    if (_v40_myTasks.length === 0) { banner.style.display = 'none'; return; }
+    const critCount = _v40_myTasks.filter(t => t.severity === 'critical').length;
+    textEl.innerHTML = critCount > 0
+      ? `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you — including <strong style="color:#dc2626">${critCount} critical</strong>`
+      : `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you by Admin`;
+    banner.style.display = 'flex';
+  } catch(e) {}
+}
+
+function _v40_showMyTasks() {
+  if (_v40_myTasks.length === 0) { alert('No tasks pending.'); return; }
+  const rowsHtml = _v40_myTasks.map(t => {
+    const sevBadge = ({
+      critical: '<span style="background:rgba(239,68,68,0.15);color:#dc2626;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔴 CRITICAL</span>',
+      warning:  '<span style="background:rgba(245,158,11,0.15);color:#b45309;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🟡 WARNING</span>',
+      info:     '<span style="background:rgba(59,130,246,0.15);color:#1d4ed8;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔵 INFO</span>',
+    })[t.severity] || '';
+    const desc = _v40_esc(t.description || '(No finding details — free-form task)');
+    const action = t.suggested_action ? `<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:4px;padding:8px 12px;margin-top:8px;font-size:12px;line-height:1.5"><strong style="color:#15803d">What to do:</strong> ${_v40_esc(t.suggested_action)}${t.suggested_app ? `<div style="font-size:11px;color:var(--t3);margin-top:4px">Where: <strong>${_v40_esc(t.suggested_app)}</strong> app → <strong>${_v40_esc(t.suggested_page||'?')}</strong> page</div>` : ''}</div>` : '';
+    const noteHtml = t.note ? `<div style="font-size:11px;color:var(--t2);margin-top:6px;font-style:italic">Note from ${_v40_esc(t.assigned_by)}: ${_v40_esc(t.note)}</div>` : '';
+    const seenBtn = t.status === 'seen'
+      ? '<span style="font-size:11px;color:var(--t3);font-style:italic">✓ Marked seen</span>'
+      : `<button style="padding:3px 12px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3);border-radius:3px;cursor:pointer" onclick="_v40_markTaskSeen('${_v40_esc(t.id)}')">Mark seen</button>`;
+    return `<div style="border:1px solid var(--b);border-radius:6px;padding:12px;margin-bottom:10px;background:var(--s2)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">${sevBadge}${t.batch_number ? `<span style="font-family:var(--fm);font-size:11px;color:var(--ac2)">${_v40_esc(t.batch_number)}</span>` : ''}${t.machine_id ? `<span style="font-family:var(--fm);font-size:11px;color:var(--t3)">${_v40_esc(t.machine_id)}</span>` : ''}</div>
+        ${seenBtn}
+      </div>
+      <div style="font-size:12px;line-height:1.5">${desc}</div>
+      ${action}${noteHtml}
+    </div>`;
+  }).join('');
+  openModal('🩺 Your Integrity Tasks',
+    `<div style="padding:8px 0">
+      <div style="font-size:11px;color:var(--t3);margin-bottom:12px;line-height:1.5">Admin has flagged the following data integrity issues that need your attention. Fix them via the suggested app/page; the next scan (within 60 min) will auto-clear tasks whose underlying issue is resolved.</div>
+      ${rowsHtml}
+    </div>`,
+    [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
+}
+
+async function _v40_markTaskSeen(taskId) {
+  if (!serverUrl) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/task/' + encodeURIComponent(taskId) + '/seen', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token': dprUser?.token||''},
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) { closeModal(); _v40_taskBannerTick(); }
+  } catch(e) {}
+}
+
+function _v40_startTaskBannerPolling() {
+  if (_v40_myTasksTimer) clearInterval(_v40_myTasksTimer);
+  setTimeout(_v40_taskBannerTick, 5000);
+  _v40_myTasksTimer = setInterval(_v40_taskBannerTick, 60000);
 }
 
 function applyDprRoleRestrictions() {
@@ -4648,6 +4820,8 @@ function showDprAuditPage() {
       renderEntry();
       go('entry');
       postAuthServerInit();
+      // v40 P18.17: Start polling for assigned integrity tasks (non-admin only)
+      if (typeof _v40_startTaskBannerPolling === 'function') _v40_startTaskBannerPolling();
       return;
     } catch(e) {}
   }

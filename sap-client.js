@@ -285,7 +285,7 @@ class SapClient {
           if (this.pgPool) {
             await this.pgPool.query(
               `UPDATE sap_config SET session_cookie=$1, session_route_id=$2, session_expires_at=$3,
-                 last_login_at=NOW()::TEXT, last_login_success=1, last_login_error=NULL WHERE id=1`,
+                 last_login_at=NOW()::TEXT, last_login_success=TRUE, last_login_error=NULL WHERE id=1`,
               [b1session, routeId, expiresAt]
             );
           } else {
@@ -310,7 +310,7 @@ class SapClient {
           } catch {}
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -331,7 +331,7 @@ class SapClient {
         try {
           if (this.pgPool) {
             await this.pgPool.query(
-              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=0, last_login_error=$1 WHERE id=1`,
+              `UPDATE sap_config SET last_login_at=NOW()::TEXT, last_login_success=FALSE, last_login_error=$1 WHERE id=1`,
               [errMsg]
             );
           } else {
@@ -481,7 +481,11 @@ class SapClient {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
     // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge datetime'YYYY-MM-DDT00:00:00'
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
+    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge datetime'${dateStr}T00:00:00'`;
+    // v41 P19.2 Fix 6A: include RemainingOpenQuantity in DocumentLines. SAP returns this per line
+    // for partially-delivered Sales Orders. Sunloc should plan only NOT-YET-DELIVERED qty.
+    // Note: $select on a navigation property (DocumentLines) returns all line fields; the field
+    // RemainingOpenQuantity is part of the standard DocumentLine entity in SAP B1 Service Layer.
     const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}&$top=200` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
@@ -490,165 +494,48 @@ class SapClient {
   }
 
   /**
-   * v40 Phase 18.3: Create a Goods Receipt in SAP before Delivery.
-   * Called automatically by createDelivery() — do not call directly.
-   *
-   * Warehouse logic (based on print status):
-   *   Printed batches  → FG-A-PR (received into printed FG warehouse)
-   *   Unprinted batches → FG-A-UP (received into unprinted FG warehouse)
-   *
-   * G/L Account: 141103
-   * Series: GR-26
-   * Remarks/Customer Ref No.: "Auto Generated for DN"
-   * Currency: copied from the Sales Order
-   * UoM: LAC
-   */
-  async createGoodsReceipt({ baseDocEntry, lines, batchNumber, isPrinted, currency }) {
-    const today = new Date().toISOString().slice(0, 10);
-    const warehouse = isPrinted ? 'FG-A-PR' : 'FG-A-UP';
-    const documentLines = (lines || []).map((l) => ({
-      ItemCode: l.itemCode,
-      Quantity: l.quantity,
-      WarehouseCode: warehouse,
-      AccountCode: '141103',
-      ...(l.price ? { UnitPrice: l.price } : {}),
-      ...(currency ? { Currency: currency } : {}),
-      BatchNumbers: [{
-        BatchNumber: batchNumber,
-        Quantity: l.quantity,
-      }],
-      BinAllocations: [{
-        BinActionType: 'batToWarehouse',
-        Quantity: l.quantity,
-        BinCode: warehouse === 'FG-A-UP' ? 'FG-A-UPB1R1' : 'FG-A-PRB1R1',
-        AllowNegativeQuantity: 'tNO',
-        SerialAndBatchNumbersBaseLine: 0,
-      }],
-    }));
-    const payload = {
-      DocDate: today,
-      DocDueDate: today,
-      Comments: 'Auto Generated for DN',   // Remarks column in SAP B1 Goods Receipt
-      DocumentLines: documentLines,
-      ...(currency ? { DocCurrency: currency } : {}),
-    };
-    console.log(`[SAP-GR] Creating Goods Receipt for batch ${batchNumber}, warehouse ${warehouse}, qty ${(lines||[]).map(l=>l.quantity).join('+')}`);
-    const r = await this.call({ method: 'POST', path: 'InventoryGenEntries', body: payload });
-    if (!r.ok) {
-      console.warn(`[SAP-GR] Goods Receipt failed for batch ${batchNumber}:`, r.error);
-      return { ok: false, error: r.error, degraded: r.degraded };
-    }
-    const gr = r.data || {};
-    console.log(`[SAP-GR] Goods Receipt created: DocEntry=${gr.DocEntry}, DocNum=${gr.DocNum}`);
-    return {
-      ok: true,
-      docEntry: gr.DocEntry,
-      docNum: gr.DocNum,
-      warehouse,
-    };
-  }
-
-  /**
    * v40 Phase 18.2: Push a Delivery creation trigger to SAP.
-   * Now automatically creates a Goods Receipt first to ensure stock availability.
    *
-   * Flow:
-   *   1. Fetch Sales Order from SAP to get ItemCodes, currency, line details
-   *   2. Create Goods Receipt (stock IN) — warehouse based on print status
-   *   3. Create Delivery Note (stock OUT) — based on Sales Order
+   * IMPORTANT ARCHITECTURE CHANGE FROM v39:
+   *   v39 posted to /b1s/v1/Invoices (created A/R Invoice directly).
+   *   v40 posts to /b1s/v1/DeliveryNotes — Sunloc creates the Delivery; SAP user
+   *   manually converts Delivery → A/R Invoice in SAP via Copy-To.
+   *   This matches Sunil Healthcare's actual SAP workflow (Delivery form → Invoice).
    *
-   * Delivery Note settings:
-   *   Printed warehouse:   FG-HF-PR
-   *   Unprinted warehouse: FG-HF-UP
-   *   G/L Account: 411101, COGS Account: 511101
-   *   Customer Ref. No. (NumAtCard): remarks from Sunloc modal
-   *   Currency: from Sales Order
+   * The Sunloc 5-minute poller picks up the resulting Invoice once SAP user
+   * completes the conversion, and routes it to the Tracking → Invoice Queue.
    *
    * @param {object} args
-   * @param {string} args.cardCode - SAP customer code
-   * @param {number} args.baseDocEntry - SAP Sales Order DocEntry
-   * @param {Array<{lineNum, quantity, itemCode?}>} args.lines
-   * @param {string} args.batchNumber - Sunloc batch reference
+   * @param {string} args.cardCode - SAP customer code from the SO
+   * @param {number} args.baseDocEntry - the SAP Sales Order DocEntry (mandatory link)
+   * @param {Array<{lineNum, quantity, itemCode?}>} args.lines - which SO lines and quantities to deliver
+   * @param {string} args.batchNumber - Sunloc batch reference (stored as UDF)
    * @param {string} args.poNumber - customer PO ref
-   * @param {string} args.remarks - goes into Customer Ref. No. on Delivery
-   * @param {boolean} args.isPrinted - true if batch has been printed (determines warehouse)
+   * @param {string} args.remarks
    */
-  async createDelivery({ cardCode, baseDocEntry, lines, batchNumber, poNumber, remarks, isPrinted }) {
-    // Step 1: Fetch Sales Order to get ItemCodes, currency and line details
+  async createDelivery({ cardCode, baseDocEntry, lines, batchNumber, poNumber, remarks }) {
+    // Build OData payload for Delivery based on Sales Order
+    // SAP's "BaseType" 17 = Sales Order. Each line references the SO line via BaseLine.
     const today = new Date().toISOString().slice(0, 10);
-    let soLines = lines || [];
-    let currency = null;
-    try {
-      const soRes = await this.call({
-        method: 'GET',
-        path: 'Orders',
-        query: `$filter=DocEntry eq ${baseDocEntry}&$select=DocEntry,DocNum,DocCurrency,DocDate,DocumentLines`
-      });
-      if (soRes.ok && soRes.data?.value?.[0]) {
-        const so = soRes.data.value[0];
-        currency = so.DocCurrency || null;
-        // Enrich lines with ItemCode and price from SO if not already provided
-        if (so.DocumentLines && so.DocumentLines.length > 0) {
-          soLines = (lines || []).map((l, i) => {
-            const soLine = so.DocumentLines.find(sl => sl.LineNum === l.lineNum) || so.DocumentLines[i] || {};
-            return {
-              ...l,
-              itemCode: l.itemCode || soLine.ItemCode || null,
-              lineNum: l.lineNum !== undefined ? l.lineNum : (soLine.LineNum || 0),
-              price: soLine.UnitPrice || null,
-            };
-          });
-          // If lines not provided, use all SO lines
-          if (!lines || lines.length === 0) {
-            soLines = so.DocumentLines.map(sl => ({
-              lineNum: sl.LineNum,
-              quantity: parseFloat(sl.Quantity) || 0,
-              itemCode: sl.ItemCode || null,
-              price: sl.UnitPrice || null,
-            }));
-          }
-        }
-      }
-    } catch (e) {
-      console.warn(`[SAP-GR] Could not fetch SO ${baseDocEntry}:`, e.message);
-    }
-
-    // Step 2: Create Goods Receipt (GR) first — stock IN
-    const grResult = await this.createGoodsReceipt({
-      baseDocEntry,
-      lines: soLines,
-      batchNumber,
-      isPrinted: isPrinted || false,
-      currency,
-    });
-    if (!grResult.ok) {
-      return { ok: false, error: `Goods Receipt failed: ${grResult.error}` };
-    }
-
-    // Step 3: Create Delivery Note (stock OUT) — from same warehouse as GR
-    const deliveryWarehouse = grResult.warehouse; // same warehouse GR put stock into
-    const documentLines = soLines.map((l) => ({
+    const documentLines = (lines || []).map((l, i) => ({
       BaseType: 17,             // Sales Order
       BaseEntry: baseDocEntry,
       BaseLine: l.lineNum,
       Quantity: l.quantity,
-      WarehouseCode: deliveryWarehouse,
-      AccountCode: '411101',
-      COGSAccountCode: '511101',
+      // Item code optional — SAP infers from base ref. Pass if we have it.
       ...(l.itemCode ? { ItemCode: l.itemCode } : {}),
-      ...(currency ? { Currency: currency } : {}),
     }));
     const payload = {
       CardCode: cardCode,
       DocDate: today,
       DocDueDate: today,
-      NumAtCard: remarks || batchNumber || '',   // Customer Ref. No. = Sunloc remarks
-      Comments: `Sunloc batch ${batchNumber || ''} PO ${poNumber || ''}`.trim(),
       DocumentLines: documentLines,
-      ...(currency ? { DocCurrency: currency } : {}),
+      Comments: `Sunloc batch ${batchNumber || ''} PO ${poNumber || ''} ${remarks || ''}`.trim(),
+      // Custom fields for Sunloc reference (UDFs must exist in SAP B1 for these to land)
+      U_SunlocBatch: batchNumber || '',
+      U_SunlocPO: poNumber || '',
     };
-    console.log(`[SAP-DLV] Creating Delivery for batch ${batchNumber}, warehouse ${deliveryWarehouse}, qty ${soLines.map(l=>l.quantity).join('+')}`);
-    // POST to DeliveryNotes endpoint
+    // v40 P18.2: POST to DeliveryNotes endpoint (not Invoices)
     const r = await this.call({ method: 'POST', path: 'DeliveryNotes', body: payload });
     if (!r.ok) {
       return { ok: false, error: r.error, degraded: r.degraded, status: r.status };
@@ -656,16 +543,13 @@ class SapClient {
     const dlv = r.data || {};
     return {
       ok: true,
-      docEntry: dlv.DocEntry,
-      docNum: dlv.DocNum,
+      docEntry: dlv.DocEntry,        // Delivery DocEntry — used by poller to match returning Invoice
+      docNum: dlv.DocNum,            // Delivery DocNum (NOT Invoice DocNum — that comes later)
       docDate: dlv.DocDate,
       cardCode: dlv.CardCode,
       cardName: dlv.CardName,
       docTotal: dlv.DocTotal,
-      objectType: 'Delivery',
-      grDocEntry: grResult.docEntry,
-      grDocNum: grResult.docNum,
-      grWarehouse: grResult.warehouse,
+      objectType: 'Delivery',        // marker so the consumer knows what kind of doc came back
       raw: dlv,
     };
   }
@@ -691,12 +575,12 @@ class SapClient {
   async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    const filter = `$filter=DocDate ge '${dateStr}'`;
+    const filter = `$filter=DocDate ge datetime'${dateStr}T00:00:00'`;
     // v40 P18.7: Pull richer line-item fields and addresses for Scan-Out matching.
     // Replaces previously-planned PDF download with structured Sales Register data.
     // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total
     // Lines: ItemCode (=PC Code), ItemDescription, Quantity, UnitPrice, LineTotal, VAT%, VAT amount
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,Comments,DocumentLines`;
+    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&${select}&$top=500&$orderby=DocEntry desc` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
     return { ok: true, invoices: r.data?.value || [] };

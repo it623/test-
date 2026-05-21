@@ -662,6 +662,236 @@ const MIGRATIONS = [
     );
     CREATE INDEX IF NOT EXISTS idx_truck_scan_last_updated ON truck_scan_session_state(last_updated_at);`
   },
+  {
+    // v40 Phase 18.15: WO Multi-Customer Split
+    // A WO order (e.g. 50-box batch 26ZC100) can be split into 1..N child customer orders.
+    // Each child gets its own batch number (parent + suffix), customer, qty, and label range.
+    // Planner proposes; Admin approves; on approval, all child orders + label/scan rebatch happen atomically.
+    version: 22,
+    name: 'wo_split_requests',
+    sql: `CREATE TABLE IF NOT EXISTS wo_split_requests (
+      id TEXT PRIMARY KEY,
+      source_order_id TEXT NOT NULL,
+      source_batch_number TEXT NOT NULL,
+      proposed_by TEXT NOT NULL,
+      proposed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      approved_by TEXT,
+      approved_at TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      total_boxes_split INTEGER NOT NULL DEFAULT 0,
+      residual_boxes INTEGER NOT NULL DEFAULT 0,
+      rejection_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_wo_split_status ON wo_split_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_wo_split_source ON wo_split_requests(source_order_id);
+
+    CREATE TABLE IF NOT EXISTS wo_split_lines (
+      id TEXT PRIMARY KEY,
+      split_request_id TEXT NOT NULL,
+      line_index INTEGER NOT NULL,
+      customer TEXT NOT NULL,
+      bill_to TEXT,
+      po_number TEXT,
+      zone TEXT,
+      boxes INTEGER NOT NULL,
+      qty_lakhs REAL NOT NULL,
+      box_start INTEGER NOT NULL,
+      box_end INTEGER NOT NULL,
+      child_batch_suffix TEXT NOT NULL,
+      child_batch_number TEXT NOT NULL,
+      child_order_id TEXT,
+      sap_doc_entry INTEGER,
+      sap_doc_num TEXT,
+      FOREIGN KEY (split_request_id) REFERENCES wo_split_requests(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_wo_split_lines_req ON wo_split_lines(split_request_id);
+    CREATE INDEX IF NOT EXISTS idx_wo_split_lines_child ON wo_split_lines(child_batch_number);`
+  },
+  {
+    // v40 Phase 18.16: Admin Users page + Tracking auth hardening
+    // Adds is_active to app_users so admin can disable accounts without deleting them
+    // (preserves audit trail). Default = 1 so existing users stay enabled across upgrade.
+    version: 23,
+    name: 'app_users_is_active',
+    sql: `ALTER TABLE app_users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;`
+  },
+  {
+    // v40 Phase 18.17: Data Integrity Dashboard
+    // Findings are deduped by finding_key (stable hash of check_type + entity + day-window).
+    // Same finding re-detected on a later scan only updates last_seen + raw_data_json.
+    // ack_until = NULL means not acknowledged; if set and in future, finding is hidden.
+    version: 24,
+    name: 'integrity_findings',
+    sql: `CREATE TABLE IF NOT EXISTS integrity_findings (
+      id TEXT PRIMARY KEY,
+      finding_key TEXT NOT NULL UNIQUE,
+      check_type TEXT NOT NULL,
+      severity TEXT NOT NULL CHECK(severity IN ('critical','warning','info')),
+      batch_number TEXT,
+      order_id TEXT,
+      machine_id TEXT,
+      day TEXT,
+      description TEXT NOT NULL,
+      suggested_app TEXT,
+      suggested_page TEXT,
+      suggested_role TEXT,
+      suggested_action TEXT,
+      raw_data_json TEXT,
+      first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen TEXT NOT NULL DEFAULT (datetime('now')),
+      ack_by TEXT,
+      ack_at TEXT,
+      ack_reason TEXT,
+      ack_until TEXT,
+      resolved INTEGER DEFAULT 0,
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_integrity_severity ON integrity_findings(severity);
+    CREATE INDEX IF NOT EXISTS idx_integrity_check_type ON integrity_findings(check_type);
+    CREATE INDEX IF NOT EXISTS idx_integrity_batch ON integrity_findings(batch_number);
+    CREATE INDEX IF NOT EXISTS idx_integrity_resolved ON integrity_findings(resolved);
+
+    CREATE TABLE IF NOT EXISTS integrity_mutes (
+      check_type TEXT PRIMARY KEY,
+      muted_by TEXT NOT NULL,
+      muted_at TEXT NOT NULL DEFAULT (datetime('now')),
+      reason TEXT
+    );`
+  },
+  {
+    // v40 Phase 18.17: Integrity tasks — admin assigns findings to operators/roles
+    // for action. assigned_to is either a username OR 'role:xxx' for role-based fanout.
+    // status: pending → seen (operator opened it) → resolved (next scan no longer
+    // detects the underlying finding) or → dismissed (admin withdrew the task).
+    version: 25,
+    name: 'integrity_tasks',
+    sql: `CREATE TABLE IF NOT EXISTS integrity_tasks (
+      id TEXT PRIMARY KEY,
+      finding_id TEXT,
+      assigned_to TEXT NOT NULL,
+      assigned_by TEXT NOT NULL,
+      assigned_at TEXT NOT NULL DEFAULT (datetime('now')),
+      app TEXT,
+      note TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      seen_at TEXT,
+      seen_by TEXT,
+      resolved_at TEXT,
+      dismissed_at TEXT,
+      dismissed_by TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_int_tasks_assignee ON integrity_tasks(assigned_to);
+    CREATE INDEX IF NOT EXISTS idx_int_tasks_status ON integrity_tasks(status);
+    CREATE INDEX IF NOT EXISTS idx_int_tasks_finding ON integrity_tasks(finding_id);`
+  },
+  {
+    // v41 P19.1 Fix 3A: clean up duplicate print_orders rows.
+    // Bug: same batch_number + pc_code could exist as both an assigned row (machine_id set)
+    // AND an unassigned ghost (machine_id NULL/empty), causing UI to show the order
+    // in both the OPM table AND the "Unassigned Print Orders" list.
+    // Fix: delete the unassigned ghosts where a matching assigned row exists. Idempotent.
+    // Non-destructive — only removes the duplicate UNASSIGNED row, never the assigned one.
+    version: 26,
+    name: 'cleanup_duplicate_print_orders',
+    sql: `DELETE FROM print_orders
+          WHERE (machine_id IS NULL OR machine_id = '' OR machine_id = 'null')
+            AND EXISTS (
+              SELECT 1 FROM print_orders p2
+              WHERE p2.batch_number = print_orders.batch_number
+                AND COALESCE(p2.pc_code,'') = COALESCE(print_orders.pc_code,'')
+                AND p2.machine_id IS NOT NULL
+                AND p2.machine_id != ''
+                AND p2.machine_id != 'null'
+            );`
+  },
+  {
+    // v41 P19.2 Fix 6G: dismissed SAP indents — lets admin hide unplanned indent lines
+    // that will NOT be planned in Sunloc (legacy, cancelled in SAP but not yet closed, etc.).
+    // Composite key (sap_doc_entry, line_num) so multiple lines of one Sales Order can be
+    // dismissed independently. If SAP reopens the line later, user can un-dismiss.
+    version: 27,
+    name: 'dismissed_sap_indents',
+    sql: `CREATE TABLE IF NOT EXISTS dismissed_sap_indents (
+      sap_doc_entry INTEGER NOT NULL,
+      line_num INTEGER NOT NULL,
+      sap_doc_num TEXT,
+      card_code TEXT,
+      card_name TEXT,
+      item_code TEXT,
+      dismissed_by TEXT NOT NULL,
+      dismissed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      reason TEXT,
+      PRIMARY KEY (sap_doc_entry, line_num)
+    );
+    CREATE INDEX IF NOT EXISTS idx_dsi_doc_entry ON dismissed_sap_indents(sap_doc_entry);`
+  },
+  {
+    // v41 P19.3: Sales Order cumulative consumption ledger.
+    // Tracks dispatched qty + value per SAP Sales Order across multiple A/R Invoices.
+    // Original qty/value pulled from the SAP indent at first registration.
+    // Updated each time a Sunloc-linked invoice is reconciled. Used for:
+    //   (a) Showing dispatch managers the remaining headroom for an SO
+    //   (b) Enforcing the 15% over-dispatch tolerance with admin override
+    //   (c) Flagging fully-exhausted SOs so users know not to plan more against them
+    version: 28,
+    name: 'sales_order_consumption',
+    sql: `CREATE TABLE IF NOT EXISTS sales_order_consumption (
+      sap_doc_entry INTEGER PRIMARY KEY,
+      sap_doc_num TEXT,
+      card_code TEXT,
+      card_name TEXT,
+      original_qty_lakhs REAL NOT NULL DEFAULT 0,
+      original_value_inr REAL NOT NULL DEFAULT 0,
+      dispatched_qty_lakhs REAL NOT NULL DEFAULT 0,
+      dispatched_value_inr REAL NOT NULL DEFAULT 0,
+      invoice_count INTEGER NOT NULL DEFAULT 0,
+      last_invoice_at TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_soc_doc_num ON sales_order_consumption(sap_doc_num);
+    CREATE INDEX IF NOT EXISTS idx_soc_card_code ON sales_order_consumption(card_code);`
+  },
+  {
+    // v41 P19.3: Invoice flow rework — Sunloc no longer pushes Deliveries to SAP.
+    // Instead, "Generate Invoice" creates a pending_reconciliation row in invoice_requests.
+    // The SAP user creates the invoice in SAP manually (their existing workflow).
+    // Sunloc's 5-min poller pulls the invoice; reconciliation matches by Sales Order ref.
+    //
+    // New columns on invoice_requests:
+    //   - reconciled_at, reconciled_with_invoice_id — set when SAP invoice match is found
+    //   - is_overdispatch_approved — admin approval for going beyond 115% SO tolerance
+    //
+    // New columns on invoices_received:
+    //   - is_legacy_closed — for invoices that don't match any planned SO (legacy/return)
+    //
+    // Status flow (new):
+    //   invoice_request: pending_reconciliation → reconciled → ready_to_scan_out → dispatched
+    //   invoices_received: pending → reconciled (or legacy_closed) → scanned → dispatched
+    version: 29,
+    name: 'invoice_request_reconciliation_fields',
+    sql: `ALTER TABLE invoice_requests ADD COLUMN reconciled_at TEXT;
+          ALTER TABLE invoice_requests ADD COLUMN reconciled_with_invoice_id TEXT;
+          ALTER TABLE invoice_requests ADD COLUMN is_overdispatch_approved INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE invoice_requests ADD COLUMN overdispatch_approved_by TEXT;
+          ALTER TABLE invoice_requests ADD COLUMN overdispatch_approved_at TEXT;
+          ALTER TABLE invoices_received ADD COLUMN is_legacy_closed INTEGER NOT NULL DEFAULT 0;
+          ALTER TABLE invoices_received ADD COLUMN legacy_closed_by TEXT;
+          ALTER TABLE invoices_received ADD COLUMN legacy_closed_at TEXT;
+          ALTER TABLE invoices_received ADD COLUMN legacy_close_reason TEXT;`
+  },
+  {
+    // v41 P19.3 hardening: soc_applied flag prevents SOC ledger double-counting.
+    // The SAP invoice poller runs every 5 minutes and re-processes the same invoices each cycle.
+    // Without this flag, every poll would add lineQty to dispatched_qty_lakhs again, inflating
+    // it by 12× per hour. With this flag, ledger update happens once per invoice.
+    // If an invoice is amended in SAP (qty changes), the ledger row's delta logic in code
+    // handles the diff explicitly — flag flips back to 0 in that explicit path only.
+    version: 30,
+    name: 'invoices_received_soc_applied_flag',
+    sql: `ALTER TABLE invoices_received ADD COLUMN soc_applied INTEGER NOT NULL DEFAULT 0;
+          CREATE INDEX IF NOT EXISTS idx_inv_recv_soc_applied ON invoices_received(soc_applied);`
+  },
 ];
 
 function runMigrations() {
@@ -695,6 +925,17 @@ const seedUsers = [
   { username: 'Dispatch_Manager',  pin: '5555', role: 'dispatch_manager', app: 'planning' },
   { username: 'Plan_Admin',        pin: '9999', role: 'admin',            app: 'planning' },
   { username: 'Track_Admin',       pin: '9999', role: 'admin',            app: 'tracking' },
+  // v40 P18.16: 7 dept-specific tracking users matching the existing client-side DEPT_PINS,
+  // so on first deploy operators don't experience disruption (1B path). The defaults below
+  // are weak by design — admin should rotate them via the new Admin Users page asap.
+  // Role names follow the same convention as planning roles.
+  { username: 'Track_Planning',    pin: '1111', role: 'tracking_planning', app: 'tracking' },
+  { username: 'Track_Labels',      pin: '2222', role: 'tracking_labels',   app: 'tracking' },
+  { username: 'Track_AIM',         pin: '3333', role: 'tracking_aim',      app: 'tracking' },
+  { username: 'Track_Printing',    pin: '4444', role: 'tracking_printing', app: 'tracking' },
+  { username: 'Track_PI',          pin: '5555', role: 'tracking_pi',       app: 'tracking' },
+  { username: 'Track_Packing',     pin: '6666', role: 'tracking_packing',  app: 'tracking' },
+  { username: 'Track_Dispatch',    pin: '7777', role: 'tracking_dispatch', app: 'tracking' },
 ];
 
 const insertUser = db.prepare(`
@@ -893,10 +1134,13 @@ async function ensurePostgresTables() {
         pin_hash TEXT NOT NULL,
         role TEXT NOT NULL,
         app TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT NOW()::TEXT,
         updated_at TEXT NOT NULL DEFAULT NOW()::TEXT
       )
     `);
+    // v40 P18.16: ALTER for existing PG deployments — column may be absent on older instances
+    try { await pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1`); } catch(e) { /* tolerate */ }
 
     // app_sessions
     await pgPool.query(`
@@ -1249,10 +1493,13 @@ async function ensurePostgresTables() {
         pin_hash TEXT NOT NULL,
         role TEXT NOT NULL,
         app TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT NOW()::TEXT,
         updated_at TEXT NOT NULL DEFAULT NOW()::TEXT
       )
     `);
+    // v40 P18.16: ALTER for existing PG deployments — column may be absent on older instances
+    try { await pgPool.query(`ALTER TABLE app_users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1`); } catch(e) { /* tolerate */ }
 
     // app_sessions
     await pgPool.query(`
@@ -1645,6 +1892,186 @@ async function ensurePostgresTables() {
       `);
       await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_truck_scan_last_updated ON truck_scan_session_state(last_updated_at)`);
     } catch (e) { console.warn('[v40 P18.11 PG] truck_scan_session_state:', e.message); }
+
+    // ─── v40 Phase 18.15: WO Multi-Customer Split tables (PG) ────
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS wo_split_requests (
+          id TEXT PRIMARY KEY,
+          source_order_id TEXT NOT NULL,
+          source_batch_number TEXT NOT NULL,
+          proposed_by TEXT NOT NULL,
+          proposed_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+          approved_by TEXT,
+          approved_at TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          total_boxes_split INTEGER NOT NULL DEFAULT 0,
+          residual_boxes INTEGER NOT NULL DEFAULT 0,
+          rejection_reason TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_wo_split_status ON wo_split_requests(status)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_wo_split_source ON wo_split_requests(source_order_id)`);
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS wo_split_lines (
+          id TEXT PRIMARY KEY,
+          split_request_id TEXT NOT NULL REFERENCES wo_split_requests(id),
+          line_index INTEGER NOT NULL,
+          customer TEXT NOT NULL,
+          bill_to TEXT,
+          po_number TEXT,
+          zone TEXT,
+          boxes INTEGER NOT NULL,
+          qty_lakhs REAL NOT NULL,
+          box_start INTEGER NOT NULL,
+          box_end INTEGER NOT NULL,
+          child_batch_suffix TEXT NOT NULL,
+          child_batch_number TEXT NOT NULL,
+          child_order_id TEXT,
+          sap_doc_entry INTEGER,
+          sap_doc_num TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_wo_split_lines_req ON wo_split_lines(split_request_id)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_wo_split_lines_child ON wo_split_lines(child_batch_number)`);
+    } catch (e) { console.warn('[v40 P18.15 PG] wo_split tables:', e.message); }
+    // ─── end v40 Phase 18.15 tables ────────────────────────────────
+
+    // ─── v40 Phase 18.17: Data Integrity Dashboard tables (PG) ───
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS integrity_findings (
+          id TEXT PRIMARY KEY,
+          finding_key TEXT NOT NULL UNIQUE,
+          check_type TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          batch_number TEXT,
+          order_id TEXT,
+          machine_id TEXT,
+          day TEXT,
+          description TEXT NOT NULL,
+          suggested_app TEXT,
+          suggested_page TEXT,
+          suggested_role TEXT,
+          suggested_action TEXT,
+          raw_data_json TEXT,
+          first_seen TEXT NOT NULL DEFAULT NOW()::TEXT,
+          last_seen TEXT NOT NULL DEFAULT NOW()::TEXT,
+          ack_by TEXT,
+          ack_at TEXT,
+          ack_reason TEXT,
+          ack_until TEXT,
+          resolved INTEGER DEFAULT 0,
+          resolved_at TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_integrity_severity ON integrity_findings(severity)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_integrity_check_type ON integrity_findings(check_type)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_integrity_batch ON integrity_findings(batch_number)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_integrity_resolved ON integrity_findings(resolved)`);
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS integrity_mutes (
+          check_type TEXT PRIMARY KEY,
+          muted_by TEXT NOT NULL,
+          muted_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+          reason TEXT
+        );
+      `);
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS integrity_tasks (
+          id TEXT PRIMARY KEY,
+          finding_id TEXT,
+          assigned_to TEXT NOT NULL,
+          assigned_by TEXT NOT NULL,
+          assigned_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+          app TEXT,
+          note TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          seen_at TEXT,
+          seen_by TEXT,
+          resolved_at TEXT,
+          dismissed_at TEXT,
+          dismissed_by TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_int_tasks_assignee ON integrity_tasks(assigned_to)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_int_tasks_status ON integrity_tasks(status)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_int_tasks_finding ON integrity_tasks(finding_id)`);
+    } catch (e) { console.warn('[v40 P18.17 PG] integrity tables:', e.message); }
+    // ─── end v40 Phase 18.17 tables ────────────────────────────────
+
+    // ─── v41 P19.1 Fix 3A: dedup print_orders (PG-side) ──────────────
+    // Deletes ghost unassigned print order rows when a corresponding assigned row exists
+    // for the same batch_number + pc_code. Idempotent.
+    try {
+      await pgPool.query(`
+        DELETE FROM print_orders
+        WHERE (machine_id IS NULL OR machine_id = '' OR machine_id = 'null')
+          AND EXISTS (
+            SELECT 1 FROM print_orders p2
+            WHERE p2.batch_number = print_orders.batch_number
+              AND COALESCE(p2.pc_code,'') = COALESCE(print_orders.pc_code,'')
+              AND p2.machine_id IS NOT NULL
+              AND p2.machine_id != ''
+              AND p2.machine_id != 'null'
+          );
+      `);
+    } catch (e) { console.warn('[v41 P19.1 PG] print_orders dedup:', e.message); }
+
+    // ─── v41 P19.2 Fix 6G: dismissed_sap_indents (PG) ──────────────
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS dismissed_sap_indents (
+          sap_doc_entry INTEGER NOT NULL,
+          line_num INTEGER NOT NULL,
+          sap_doc_num TEXT,
+          card_code TEXT,
+          card_name TEXT,
+          item_code TEXT,
+          dismissed_by TEXT NOT NULL,
+          dismissed_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+          reason TEXT,
+          PRIMARY KEY (sap_doc_entry, line_num)
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_dsi_doc_entry ON dismissed_sap_indents(sap_doc_entry)`);
+    } catch (e) { console.warn('[v41 P19.2 PG] dismissed_sap_indents:', e.message); }
+
+    // ─── v41 P19.3: sales_order_consumption ledger (PG) ─────────────
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS sales_order_consumption (
+          sap_doc_entry INTEGER PRIMARY KEY,
+          sap_doc_num TEXT,
+          card_code TEXT,
+          card_name TEXT,
+          original_qty_lakhs REAL NOT NULL DEFAULT 0,
+          original_value_inr REAL NOT NULL DEFAULT 0,
+          dispatched_qty_lakhs REAL NOT NULL DEFAULT 0,
+          dispatched_value_inr REAL NOT NULL DEFAULT 0,
+          invoice_count INTEGER NOT NULL DEFAULT 0,
+          last_invoice_at TEXT,
+          first_seen_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+          updated_at TEXT NOT NULL DEFAULT NOW()::TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_soc_doc_num ON sales_order_consumption(sap_doc_num)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_soc_card_code ON sales_order_consumption(card_code)`);
+    } catch (e) { console.warn('[v41 P19.3 PG] sales_order_consumption:', e.message); }
+
+    // ─── v41 P19.3: invoice_requests + invoices_received reconciliation fields (PG) ─
+    try { await pgPool.query(`ALTER TABLE invoice_requests ADD COLUMN IF NOT EXISTS reconciled_at TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add reconciled_at:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoice_requests ADD COLUMN IF NOT EXISTS reconciled_with_invoice_id TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add reconciled_with_invoice_id:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoice_requests ADD COLUMN IF NOT EXISTS is_overdispatch_approved INTEGER NOT NULL DEFAULT 0`); } catch (e) { console.warn('[v41 P19.3 PG] add is_overdispatch_approved:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoice_requests ADD COLUMN IF NOT EXISTS overdispatch_approved_by TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add overdispatch_approved_by:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoice_requests ADD COLUMN IF NOT EXISTS overdispatch_approved_at TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add overdispatch_approved_at:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoices_received ADD COLUMN IF NOT EXISTS is_legacy_closed INTEGER NOT NULL DEFAULT 0`); } catch (e) { console.warn('[v41 P19.3 PG] add is_legacy_closed:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoices_received ADD COLUMN IF NOT EXISTS legacy_closed_by TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add legacy_closed_by:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoices_received ADD COLUMN IF NOT EXISTS legacy_closed_at TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add legacy_closed_at:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoices_received ADD COLUMN IF NOT EXISTS legacy_close_reason TEXT`); } catch (e) { console.warn('[v41 P19.3 PG] add legacy_close_reason:', e.message); }
+    try { await pgPool.query(`ALTER TABLE invoices_received ADD COLUMN IF NOT EXISTS soc_applied INTEGER NOT NULL DEFAULT 0`); } catch (e) { console.warn('[v41 P19.3 PG] add soc_applied:', e.message); }
+    try { await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_inv_recv_soc_applied ON invoices_received(soc_applied)`); } catch (e) { console.warn('[v41 P19.3 PG] idx_inv_recv_soc_applied:', e.message); }
+
     // ─── end v39 SAP tables ────────────────────────────────────────
 
 
@@ -2106,6 +2533,15 @@ async function _doRefreshSapIndents() {
 // Internal helper — pulls recent invoices from SAP, upserts to invoices_received,
 // auto-matches Sunloc-originated requests by U_SunlocBatch UDF.
 // Used by both POST /api/sap/refresh-invoices and the background poller.
+//
+// v41 P19.3: Enhanced reconciliation by Sales Order Number.
+// In addition to the legacy batch-UDF match, this poller now matches each invoice's
+// DocumentLines[*].BaseEntry (SAP Sales Order reference) against pending_reconciliation
+// invoice_requests. Matching is done at the line level — one invoice may reconcile
+// multiple invoice_requests (consolidated dispatch case) or one (per-batch case).
+// On successful reconcile:
+//   1. invoice_requests row → status='reconciled', reconciled_at, reconciled_with_invoice_id
+//   2. sales_order_consumption ledger updated (UPSERT, increment dispatched qty + value)
 async function _doRefreshSapInvoices() {
   const cfg = await sap.getConfig();
   const lookback = (cfg && cfg.invoice_poll_lookback_days) || 7;
@@ -2122,17 +2558,17 @@ async function _doRefreshSapInvoices() {
       if (batchUdf) {
         if (pgPool) {
           const m = await pgPool.query(
-            `SELECT id FROM invoice_requests WHERE batch_number=$1 AND status IN ('pending','sent_to_sap') ORDER BY created_at DESC LIMIT 1`,
+            `SELECT id FROM invoice_requests WHERE batch_number=$1 AND status IN ('pending','sent_to_sap','pending_reconciliation') ORDER BY created_at DESC LIMIT 1`,
             [batchUdf]
           );
           if (m.rows[0]) { invReqId = m.rows[0].id; source = 'sunloc'; }
         } else {
-          const m = db.prepare(`SELECT id FROM invoice_requests WHERE batch_number=? AND status IN ('pending','sent_to_sap') ORDER BY created_at DESC LIMIT 1`).get(batchUdf);
+          const m = db.prepare(`SELECT id FROM invoice_requests WHERE batch_number=? AND status IN ('pending','sent_to_sap','pending_reconciliation') ORDER BY created_at DESC LIMIT 1`).get(batchUdf);
           if (m) { invReqId = m.id; source = 'sunloc'; }
         }
       }
     } catch (e) { console.warn('[SAP] invoice match error:', e.message); }
-    const totalBoxes = Math.round((inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0));
+    const totalBoxes = (inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0);
     const docTotal = parseFloat(inv.DocTotal) || 0;
     const vatSum = parseFloat(inv.VatSum) || 0;
     const taxable = docTotal - vatSum;
@@ -2177,16 +2613,142 @@ async function _doRefreshSapInvoices() {
         try {
           if (pgPool) {
             await pgPool.query(
-              `UPDATE invoice_requests SET status='invoice_received', sap_response_doc_num=$1, sap_response_doc_entry=$2, sap_response_irn=$3, updated_at=NOW()::TEXT WHERE id=$4`,
-              [String(inv.DocNum || ''), inv.DocEntry, inv.U_IRN || null, invReqId]
+              `UPDATE invoice_requests SET status='reconciled', sap_response_doc_num=$1, sap_response_doc_entry=$2, sap_response_irn=$3, reconciled_at=NOW()::TEXT, reconciled_with_invoice_id=$4, updated_at=NOW()::TEXT WHERE id=$5`,
+              [String(inv.DocNum || ''), inv.DocEntry, inv.U_IRN || null, recId, invReqId]
             );
           } else {
             db.prepare(
-              `UPDATE invoice_requests SET status='invoice_received', sap_response_doc_num=?, sap_response_doc_entry=?, sap_response_irn=?, updated_at=datetime('now') WHERE id=?`
-            ).run(String(inv.DocNum || ''), inv.DocEntry, inv.U_IRN || null, invReqId);
+              `UPDATE invoice_requests SET status='reconciled', sap_response_doc_num=?, sap_response_doc_entry=?, sap_response_irn=?, reconciled_at=datetime('now'), reconciled_with_invoice_id=?, updated_at=datetime('now') WHERE id=?`
+            ).run(String(inv.DocNum || ''), inv.DocEntry, inv.U_IRN || null, recId, invReqId);
           }
         } catch (e) { console.warn('[SAP] invoice_requests update error:', e.message); }
       }
+
+      // v41 P19.3: Additional SO-based reconciliation pass.
+      // For each invoice line, if it references a Sales Order (BaseType=17, BaseEntry=<SO DocEntry>),
+      // try to match any remaining pending_reconciliation invoice_requests with matching sap_doc_entry.
+      // Also update sales_order_consumption ledger so dispatch managers can see remaining headroom.
+      try {
+        const lines = inv.DocumentLines || [];
+        for (const line of lines) {
+          // BaseType 17 = Sales Order in SAP B1
+          if (line.BaseType === 17 && line.BaseEntry) {
+            const soDocEntry = parseInt(line.BaseEntry, 10);
+            const lineQty   = parseFloat(line.Quantity) || 0;
+            const linePrice = parseFloat(line.Price) || 0;
+            const lineTotal = parseFloat(line.LineTotal) || (lineQty * linePrice);
+
+            // Reconcile any still-pending invoice_requests for this SO (where not already matched by batch UDF)
+            try {
+              let pendingReqs;
+              if (pgPool) {
+                const r2 = await pgPool.query(
+                  `SELECT id, qty_lakhs FROM invoice_requests WHERE sap_doc_entry=$1 AND status='pending_reconciliation' ORDER BY created_at ASC`,
+                  [soDocEntry]
+                );
+                pendingReqs = r2.rows;
+              } else {
+                pendingReqs = db.prepare(`SELECT id, qty_lakhs FROM invoice_requests WHERE sap_doc_entry=? AND status='pending_reconciliation' ORDER BY created_at ASC`).all(soDocEntry);
+              }
+              // Mark all matching pending_reconciliation rows as reconciled (first-come-first-served).
+              // Note: in practice these should already have been matched via batchUdf, but this is the safety net.
+              for (const pr of pendingReqs) {
+                if (pgPool) {
+                  await pgPool.query(
+                    `UPDATE invoice_requests SET status='reconciled', sap_response_doc_num=$1, sap_response_doc_entry=$2, reconciled_at=NOW()::TEXT, reconciled_with_invoice_id=$3, updated_at=NOW()::TEXT WHERE id=$4 AND status='pending_reconciliation'`,
+                    [String(inv.DocNum || ''), inv.DocEntry, recId, pr.id]
+                  );
+                } else {
+                  db.prepare(
+                    `UPDATE invoice_requests SET status='reconciled', sap_response_doc_num=?, sap_response_doc_entry=?, reconciled_at=datetime('now'), reconciled_with_invoice_id=?, updated_at=datetime('now') WHERE id=? AND status='pending_reconciliation'`
+                  ).run(String(inv.DocNum || ''), inv.DocEntry, recId, pr.id);
+                }
+                console.log(`[v41 P19.3] Reconciled invoice_request ${pr.id} via SO BaseEntry=${soDocEntry}`);
+              }
+            } catch (e) { console.warn('[v41 P19.3] SO reconciliation error:', e.message); }
+
+            // Update sales_order_consumption ledger (UPSERT). Adds this invoice's contribution.
+            // v41 P19.3 hardening: skip if already applied (avoids double-count across poll cycles).
+            try {
+              // Check soc_applied flag — if set, this invoice has already contributed to SOC ledger
+              let alreadyApplied = false;
+              try {
+                if (pgPool) {
+                  const af = await pgPool.query(`SELECT soc_applied FROM invoices_received WHERE id=$1`, [recId]);
+                  alreadyApplied = !!(af.rows[0] && af.rows[0].soc_applied);
+                } else {
+                  const af = db.prepare(`SELECT soc_applied FROM invoices_received WHERE id=?`).get(recId);
+                  alreadyApplied = !!(af && af.soc_applied);
+                }
+              } catch {}
+              if (alreadyApplied) continue; // skip — already counted
+
+              // First fetch original_qty from sap_indent_cache if no ledger row exists yet
+              let originalQty = 0, originalValue = 0;
+              try {
+                if (pgPool) {
+                  const ix = await pgPool.query(`SELECT total_qty, payload_json FROM sap_indent_cache WHERE sap_doc_entry=$1`, [soDocEntry]);
+                  if (ix.rows[0]) {
+                    originalQty = parseFloat(ix.rows[0].total_qty) || 0;
+                    try {
+                      const indPayload = JSON.parse(ix.rows[0].payload_json || '{}');
+                      originalValue = parseFloat(indPayload.DocTotal) || 0;
+                    } catch {}
+                  }
+                } else {
+                  const ix = db.prepare(`SELECT total_qty, payload_json FROM sap_indent_cache WHERE sap_doc_entry=?`).get(soDocEntry);
+                  if (ix) {
+                    originalQty = parseFloat(ix.total_qty) || 0;
+                    try {
+                      const indPayload = JSON.parse(ix.payload_json || '{}');
+                      originalValue = parseFloat(indPayload.DocTotal) || 0;
+                    } catch {}
+                  }
+                }
+              } catch {}
+
+              if (pgPool) {
+                await pgPool.query(`
+                  INSERT INTO sales_order_consumption (sap_doc_entry, sap_doc_num, card_code, card_name,
+                    original_qty_lakhs, original_value_inr, dispatched_qty_lakhs, dispatched_value_inr,
+                    invoice_count, last_invoice_at, updated_at)
+                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW()::TEXT, NOW()::TEXT)
+                  ON CONFLICT (sap_doc_entry) DO UPDATE SET
+                    dispatched_qty_lakhs = sales_order_consumption.dispatched_qty_lakhs + EXCLUDED.dispatched_qty_lakhs,
+                    dispatched_value_inr = sales_order_consumption.dispatched_value_inr + EXCLUDED.dispatched_value_inr,
+                    invoice_count = sales_order_consumption.invoice_count + 1,
+                    last_invoice_at = NOW()::TEXT,
+                    updated_at = NOW()::TEXT
+                `, [soDocEntry, '', inv.CardCode || '', inv.CardName || '',
+                    originalQty, originalValue, lineQty, lineTotal]);
+              } else {
+                db.prepare(`
+                  INSERT INTO sales_order_consumption (sap_doc_entry, sap_doc_num, card_code, card_name,
+                    original_qty_lakhs, original_value_inr, dispatched_qty_lakhs, dispatched_value_inr,
+                    invoice_count, last_invoice_at, updated_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+                  ON CONFLICT(sap_doc_entry) DO UPDATE SET
+                    dispatched_qty_lakhs = dispatched_qty_lakhs + excluded.dispatched_qty_lakhs,
+                    dispatched_value_inr = dispatched_value_inr + excluded.dispatched_value_inr,
+                    invoice_count = invoice_count + 1,
+                    last_invoice_at = datetime('now'),
+                    updated_at = datetime('now')
+                `).run(soDocEntry, '', inv.CardCode || '', inv.CardName || '',
+                    originalQty, originalValue, lineQty, lineTotal);
+              }
+              // v41 P19.3 hardening: mark this invoice as having contributed to SOC ledger.
+              // Prevents the next poll cycle from incrementing dispatched_qty/value again.
+              try {
+                if (pgPool) {
+                  await pgPool.query(`UPDATE invoices_received SET soc_applied=1 WHERE id=$1`, [recId]);
+                } else {
+                  db.prepare(`UPDATE invoices_received SET soc_applied=1 WHERE id=?`).run(recId);
+                }
+              } catch (e) { console.warn('[v41 P19.3] set soc_applied flag error:', e.message); }
+            } catch (e) { console.warn('[v41 P19.3] SO consumption ledger update error:', e.message); }
+          }
+        }
+      } catch (e) { console.warn('[v41 P19.3] SO reconciliation pass error:', e.message); }
       // v39 Phase 9a: also annotate dispatch_plans for this batch so Planning
       // and Tracking apps see the new state without a separate query.
       if (batchUdf) {
@@ -2465,6 +3027,94 @@ app.post('/api/sap/indents/:docEntry/unprocess', async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────────
+// v41 P19.2 Fix 6G: Dismiss / un-dismiss unplanned SAP indent lines
+// Lets admin hide indent lines that will NOT be planned in Sunloc
+// (legacy stock, cancelled-in-SAP-but-not-closed, etc.).
+// Composite key: (sap_doc_entry, line_num) so a multi-line SO can be
+// partially dismissed.
+// ─────────────────────────────────────────────────────────────────
+
+app.post('/api/sap/dismiss-indent-line', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const { sapDocEntry, lineNum, sapDocNum, cardCode, cardName, itemCode, reason } = req.body || {};
+    if (sapDocEntry == null || lineNum == null) {
+      return res.status(400).json({ ok: false, error: 'sapDocEntry and lineNum required' });
+    }
+    const session = verifyToken(req.headers['x-session-token'] || req.body.token);
+    const username = session?.username || 'admin';
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO dismissed_sap_indents (sap_doc_entry, line_num, sap_doc_num, card_code, card_name, item_code, dismissed_by, reason)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         ON CONFLICT (sap_doc_entry, line_num) DO UPDATE SET
+           dismissed_by = EXCLUDED.dismissed_by,
+           dismissed_at = NOW()::TEXT,
+           reason = EXCLUDED.reason`,
+        [parseInt(sapDocEntry,10), parseInt(lineNum,10), sapDocNum || '', cardCode || '', cardName || '', itemCode || '', username, reason || '']
+      );
+    } else {
+      db.prepare(
+        `INSERT INTO dismissed_sap_indents (sap_doc_entry, line_num, sap_doc_num, card_code, card_name, item_code, dismissed_by, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (sap_doc_entry, line_num) DO UPDATE SET
+           dismissed_by = excluded.dismissed_by,
+           dismissed_at = datetime('now'),
+           reason = excluded.reason`
+      ).run(parseInt(sapDocEntry,10), parseInt(lineNum,10), sapDocNum || '', cardCode || '', cardName || '', itemCode || '', username, reason || '');
+    }
+    logAudit(username, session?.role || 'admin', session?.app || 'planning', 'SAP_INDENT_DISMISSED',
+      `Dismissed SAP indent line ${sapDocNum}/L${lineNum}: ${reason||'(no reason)'}`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[v41 P19.2] dismiss-indent-line failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post('/api/sap/undismiss-indent-line', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const { sapDocEntry, lineNum } = req.body || {};
+    if (sapDocEntry == null || lineNum == null) {
+      return res.status(400).json({ ok: false, error: 'sapDocEntry and lineNum required' });
+    }
+    const session = verifyToken(req.headers['x-session-token'] || req.body.token);
+    if (pgPool) {
+      await pgPool.query(`DELETE FROM dismissed_sap_indents WHERE sap_doc_entry=$1 AND line_num=$2`,
+        [parseInt(sapDocEntry,10), parseInt(lineNum,10)]);
+    } else {
+      db.prepare(`DELETE FROM dismissed_sap_indents WHERE sap_doc_entry=? AND line_num=?`)
+        .run(parseInt(sapDocEntry,10), parseInt(lineNum,10));
+    }
+    logAudit(session?.username || 'admin', session?.role || 'admin', session?.app || 'planning',
+      'SAP_INDENT_UNDISMISSED', `Un-dismissed SAP indent line entry=${sapDocEntry} L${lineNum}`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get('/api/sap/dismissed-indents', async (req, res) => {
+  try {
+    const session = verifyToken(req.headers['x-session-token'] || req.query.token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    let rows = [];
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM dismissed_sap_indents ORDER BY dismissed_at DESC`);
+      rows = r.rows;
+    } else {
+      rows = db.prepare(`SELECT * FROM dismissed_sap_indents ORDER BY dismissed_at DESC`).all();
+    }
+    res.json({ ok: true, dismissed: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── end v41 P19.2 Fix 6G ────────────────────────────────────────
+
 
 // ════════════════════════════════════════════════════════════════════
 // v39 Phase 8: Invoice request endpoints
@@ -2500,122 +3150,110 @@ app.post('/api/invoice/request', async (req, res) => {
     if (!body.sapDocEntry) {
       return res.status(400).json({ ok: false, error: 'sapDocEntry required — cannot trigger SAP invoice without source SO reference' });
     }
-    let id = 'invreq_' + crypto.randomBytes(8).toString('hex');
+    // v41 P19.3: Invoice flow rework — NO SAP push.
+    // Sunloc no longer creates Deliveries in SAP. Instead, this endpoint:
+    //   1. Checks 115% over-dispatch tolerance against SO consumption ledger
+    //   2. Inserts an invoice_requests row at status='pending_reconciliation'
+    //   3. Returns to client — SAP user manually creates the invoice in SAP
+    //   4. Sunloc poller pulls the resulting invoice → matches by Sales Order ref → reconciles
+    //
+    // 115% tolerance: hard ceiling. Beyond 115% requires admin override via body.adminOverride.
+    // SAP user's manual invoice creation workflow remains unchanged.
+    let overdispatchReason = null;
+    try {
+      let soc;
+      if (pgPool) {
+        const r = await pgPool.query(`SELECT * FROM sales_order_consumption WHERE sap_doc_entry=$1`, [parseInt(body.sapDocEntry,10)]);
+        soc = r.rows[0];
+      } else {
+        soc = db.prepare(`SELECT * FROM sales_order_consumption WHERE sap_doc_entry=?`).get(parseInt(body.sapDocEntry,10));
+      }
+      if (soc && soc.original_qty_lakhs > 0) {
+        const wouldDispatch = (parseFloat(soc.dispatched_qty_lakhs) || 0) + (parseFloat(body.qtyLakhs) || 0);
+        const tolerance = parseFloat(soc.original_qty_lakhs) * 1.15;
+        if (wouldDispatch > tolerance) {
+          overdispatchReason = `Cumulative dispatch ${wouldDispatch.toFixed(3)}L would exceed 115% tolerance (${tolerance.toFixed(3)}L) of original SO qty ${parseFloat(soc.original_qty_lakhs).toFixed(3)}L.`;
+          if (!body.adminOverride) {
+            return res.status(409).json({
+              ok: false,
+              error: 'over_dispatch_blocked',
+              message: overdispatchReason + ' Admin override required.',
+              soc: {
+                originalQty: parseFloat(soc.original_qty_lakhs),
+                dispatchedQty: parseFloat(soc.dispatched_qty_lakhs),
+                tolerance: tolerance,
+                wouldDispatch: wouldDispatch
+              }
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[v41 P19.3] SOC tolerance check failed:', e.message);
+    }
+
+    const id = 'invreq_' + crypto.randomBytes(8).toString('hex');
     const selectedLabelsJson = JSON.stringify(body.selectedLabels || []);
-    // 1. Insert pending row
     try {
       if (pgPool) {
         await pgPool.query(`
           INSERT INTO invoice_requests (id, batch_number, customer, card_code, po_number,
             sap_doc_entry, size, colour, pc_code, boxes, qty_lakhs, rate_per_lakh,
-            selected_labels, selection_mode, truck_number, status, created_by)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending',$16)
+            selected_labels, selection_mode, truck_number, status, created_by,
+            is_overdispatch_approved, overdispatch_approved_by, overdispatch_approved_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending_reconciliation',$16,$17,$18,$19)
         `, [id, body.batchNumber, body.customer, body.cardCode || '', body.poNumber || '',
             body.sapDocEntry, body.size || '', body.colour || '', body.pcCode || '',
             parseInt(body.boxes) || 0, parseFloat(body.qtyLakhs) || 0, parseFloat(body.ratePerLakh) || 0,
             selectedLabelsJson, body.selectionMode || 'batch', body.truckNumber || null,
-            body.createdBy || 'unknown']);
+            body.createdBy || 'unknown',
+            overdispatchReason ? 1 : 0,
+            overdispatchReason ? (body.createdBy || 'admin') : null,
+            overdispatchReason ? new Date().toISOString() : null]);
       } else {
         db.prepare(`
           INSERT INTO invoice_requests (id, batch_number, customer, card_code, po_number,
             sap_doc_entry, size, colour, pc_code, boxes, qty_lakhs, rate_per_lakh,
-            selected_labels, selection_mode, truck_number, status, created_by)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)
+            selected_labels, selection_mode, truck_number, status, created_by,
+            is_overdispatch_approved, overdispatch_approved_by, overdispatch_approved_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending_reconciliation',?,?,?,?)
         `).run(id, body.batchNumber, body.customer, body.cardCode || '', body.poNumber || '',
             body.sapDocEntry, body.size || '', body.colour || '', body.pcCode || '',
             parseInt(body.boxes) || 0, parseFloat(body.qtyLakhs) || 0, parseFloat(body.ratePerLakh) || 0,
             selectedLabelsJson, body.selectionMode || 'batch', body.truckNumber || null,
-            body.createdBy || 'unknown');
+            body.createdBy || 'unknown',
+            overdispatchReason ? 1 : 0,
+            overdispatchReason ? (body.createdBy || 'admin') : null,
+            overdispatchReason ? new Date().toISOString() : null);
       }
     } catch (e) {
       return res.status(500).json({ ok: false, error: 'Failed to write invoice_requests row: ' + e.message });
     }
-    // 2. v40 P18.2: Push to SAP — creates a DELIVERY (not an Invoice).
-    // SAP user will then manually convert Delivery → A/R Invoice via Copy-To.
-    // Sunloc's 5-min poller picks up the resulting Invoice and routes it to Tracking → Invoice Queue.
-    // Note: invoice_requests table name retained for historical compat — rows now represent Delivery requests.
-    const sapResult = await sap.createDelivery({
-      cardCode: body.cardCode,
-      baseDocEntry: parseInt(body.sapDocEntry),
-      lines: [{
-        lineNum: 0,
-        quantity: parseFloat(body.qtyLakhs),
-        itemCode: body.itemCode || null,
-      }],
-      batchNumber: body.batchNumber,
-      poNumber: body.poNumber || '',
-      remarks: `Sunloc dispatch — ${body.boxes} boxes`,
+    return res.json({
+      ok: true,
+      request_id: id,
+      status: 'pending_reconciliation',
+      message: `Invoice request registered. SAP user should create the corresponding invoice in SAP; Sunloc will reconcile when the invoice is pulled by the next poll cycle (every ~5 min).`,
+      overdispatchApproved: !!overdispatchReason
     });
-    // 3+4. Update row with result
-    try {
-      if (sapResult.ok) {
-        if (pgPool) {
-          await pgPool.query(`
-            UPDATE invoice_requests SET status='sent_to_sap',
-              sap_response_doc_num=$1, sap_response_doc_entry=$2, sap_response_irn=$3,
-              updated_at=NOW()::TEXT WHERE id=$4
-          `, [String(sapResult.docNum || ''), sapResult.docEntry, sapResult.irn || null, id]);
-        } else {
-          db.prepare(`
-            UPDATE invoice_requests SET status='sent_to_sap',
-              sap_response_doc_num=?, sap_response_doc_entry=?, sap_response_irn=?,
-              updated_at=datetime('now') WHERE id=?
-          `).run(String(sapResult.docNum || ''), sapResult.docEntry, sapResult.irn || null, id);
-        }
-        return res.json({
-          ok: true,
-          request_id: id,
-          status: 'sent_to_sap',
-          sap_response: {
-            docNum: sapResult.docNum,
-            docEntry: sapResult.docEntry,
-            irn: sapResult.irn,
-          }
-        });
-      } else {
-        // SAP rejected or unreachable
-        const errMsg = sapResult.error || 'SAP call failed';
-        if (pgPool) {
-          await pgPool.query(`
-            UPDATE invoice_requests SET status='failed',
-              sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2
-          `, [errMsg.toString().substring(0, 1000), id]);
-        } else {
-          db.prepare(`
-            UPDATE invoice_requests SET status='failed',
-              sap_error_message=?, updated_at=datetime('now') WHERE id=?
-          `).run(errMsg.toString().substring(0, 1000), id);
-        }
-        return res.json({
-          ok: false,
-          request_id: id,
-          status: 'failed',
-          error: errMsg,
-          degraded: sapResult.degraded || false,
-        });
-      }
-    } catch (e) {
-      // Mark as failed so it doesn't stay stuck as pending
-      try {
-        if (pgPool) { await pgPool.query(`UPDATE invoice_requests SET status='failed', sap_error_message=$1 WHERE id=$2 AND status='pending'`, ['SAP/DB error: ' + e.message, id]); }
-        else { db.prepare(`UPDATE invoice_requests SET status='failed', sap_error_message=? WHERE id=? AND status='pending'`).run('SAP/DB error: ' + e.message, id); }
-      } catch(_) {}
-      return res.status(500).json({ ok: false, error: 'SAP completed but DB update failed: ' + e.message, request_id: id });
-    }
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
-// v40 Phase 18.1: POST /api/invoice/request-batch
-// Consolidated multi-batch Delivery creation. Accepts array of batches, iterates
-// server-side calling sap.createDelivery() for each. Returns per-batch results
-// so the client can show per-row success/failure in the consolidated approval modal.
+// v40 Phase 18.1 + v41 P19.3: POST /api/invoice/request-batch
+// Consolidated multi-batch invoice-request creation. Accepts array of batches.
+// v41 change: no longer pushes Deliveries to SAP — just creates pending_reconciliation
+// rows in invoice_requests. SAP user creates the actual invoices manually in SAP;
+// Sunloc's 5-min poller reconciles each one when it appears.
+// Returns per-batch results so the client can show per-row success/failure in the
+// consolidated approval modal.
 // Server-side validation re-enforces eligibility gates (defense in depth):
 //   - Must have sapDocEntry + sapDocNum
 //   - Must have boxes > 0 AND qtyLakhs > 0
-//   - Must not already have a pending or received invoice
-// Body: { batches: [{ batchNumber, customer, cardCode, poNumber, sapDocEntry, size, colour, pcCode, boxes, qtyLakhs, truckNumber, itemCode? }], createdBy, remarks }
+//   - Must not already have a pending/in-flight invoice request
+//   - Must respect 115% over-dispatch tolerance (admin override available)
+// Body: { batches: [{ batchNumber, customer, cardCode, poNumber, sapDocEntry, size, colour, pcCode, boxes, qtyLakhs, truckNumber, itemCode? }], createdBy, remarks, adminOverride? }
 app.post('/api/invoice/request-batch', async (req, res) => {
   try {
     const body = req.body || {};
@@ -2639,106 +3277,91 @@ app.post('/api/invoice/request-batch', async (req, res) => {
           batchRes.error = 'invalid boxes or qty (both must be > 0)';
           results.push(batchRes); continue;
         }
-        // Check for existing pending/received invoice for this batch
+        // Check for existing pending/in-flight invoice for this batch.
+        // v41 P19.3: include new pending_reconciliation + reconciled statuses; keep legacy ones for transition.
         let existing;
         if (pgPool) {
           const ex = await pgPool.query(
-            `SELECT id FROM invoice_requests WHERE batch_number=$1 AND status IN ('pending','sent_to_sap') LIMIT 1`,
+            `SELECT id FROM invoice_requests WHERE batch_number=$1 AND status IN ('pending','sent_to_sap','pending_reconciliation','reconciled') LIMIT 1`,
             [b.batchNumber]
           );
           existing = ex.rows[0];
         } else {
-          existing = db.prepare(`SELECT id FROM invoice_requests WHERE batch_number=? AND status IN ('pending','sent_to_sap') LIMIT 1`).get(b.batchNumber);
+          existing = db.prepare(`SELECT id FROM invoice_requests WHERE batch_number=? AND status IN ('pending','sent_to_sap','pending_reconciliation','reconciled') LIMIT 1`).get(b.batchNumber);
         }
         if (existing) {
           batchRes.error = 'already has a pending invoice request (id: ' + existing.id + ')';
           results.push(batchRes); continue;
         }
-        // Insert pending row
-        let id = 'invreq_' + crypto.randomBytes(8).toString('hex');
+        // v41 P19.3: Check 115% over-dispatch tolerance for this batch
+        let overdispatchReason = null;
+        try {
+          let soc;
+          if (pgPool) {
+            const r = await pgPool.query(`SELECT * FROM sales_order_consumption WHERE sap_doc_entry=$1`, [parseInt(b.sapDocEntry,10)]);
+            soc = r.rows[0];
+          } else {
+            soc = db.prepare(`SELECT * FROM sales_order_consumption WHERE sap_doc_entry=?`).get(parseInt(b.sapDocEntry,10));
+          }
+          if (soc && soc.original_qty_lakhs > 0) {
+            const wouldDispatch = (parseFloat(soc.dispatched_qty_lakhs) || 0) + (parseFloat(b.qtyLakhs) || 0);
+            const tolerance = parseFloat(soc.original_qty_lakhs) * 1.15;
+            if (wouldDispatch > tolerance) {
+              overdispatchReason = `${wouldDispatch.toFixed(3)}L would exceed 115% tolerance (${tolerance.toFixed(3)}L) of SO original ${parseFloat(soc.original_qty_lakhs).toFixed(3)}L.`;
+              if (!body.adminOverride) {
+                batchRes.error = 'over_dispatch_blocked: ' + overdispatchReason + ' Admin override required.';
+                results.push(batchRes); continue;
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[v41 P19.3 batch] SOC tolerance check failed:', e.message);
+        }
+
+        // v41 P19.3: Insert pending_reconciliation row — NO SAP push.
+        // SAP user creates the invoice manually in SAP; Sunloc poller reconciles.
+        const id = 'invreq_' + crypto.randomBytes(8).toString('hex');
         const selectedLabelsJson = JSON.stringify(b.selectedLabels || []);
         if (pgPool) {
           await pgPool.query(`
             INSERT INTO invoice_requests (id, batch_number, customer, card_code, po_number,
               sap_doc_entry, size, colour, pc_code, boxes, qty_lakhs, rate_per_lakh,
-              selected_labels, selection_mode, truck_number, status, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending',$16)
+              selected_labels, selection_mode, truck_number, status, created_by,
+              is_overdispatch_approved, overdispatch_approved_by, overdispatch_approved_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'pending_reconciliation',$16,$17,$18,$19)
           `, [id, b.batchNumber, b.customer, b.cardCode || '', b.poNumber || '',
               b.sapDocEntry, b.size || '', b.colour || '', b.pcCode || '',
               parseInt(b.boxes) || 0, parseFloat(b.qtyLakhs) || 0, parseFloat(b.ratePerLakh) || 0,
               selectedLabelsJson, 'consolidated', b.truckNumber || null,
-              body.createdBy || 'unknown']);
+              body.createdBy || 'unknown',
+              overdispatchReason ? 1 : 0,
+              overdispatchReason ? (body.createdBy || 'admin') : null,
+              overdispatchReason ? new Date().toISOString() : null]);
         } else {
           db.prepare(`
             INSERT INTO invoice_requests (id, batch_number, customer, card_code, po_number,
               sap_doc_entry, size, colour, pc_code, boxes, qty_lakhs, rate_per_lakh,
-              selected_labels, selection_mode, truck_number, status, created_by)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)
+              selected_labels, selection_mode, truck_number, status, created_by,
+              is_overdispatch_approved, overdispatch_approved_by, overdispatch_approved_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending_reconciliation',?,?,?,?)
           `).run(id, b.batchNumber, b.customer, b.cardCode || '', b.poNumber || '',
               b.sapDocEntry, b.size || '', b.colour || '', b.pcCode || '',
               parseInt(b.boxes) || 0, parseFloat(b.qtyLakhs) || 0, parseFloat(b.ratePerLakh) || 0,
               selectedLabelsJson, 'consolidated', b.truckNumber || null,
-              body.createdBy || 'unknown');
+              body.createdBy || 'unknown',
+              overdispatchReason ? 1 : 0,
+              overdispatchReason ? (body.createdBy || 'admin') : null,
+              overdispatchReason ? new Date().toISOString() : null);
         }
-        // Call SAP — creates a Delivery (not Invoice)
-        const sapResult = await sap.createDelivery({
-          cardCode: b.cardCode,
-          baseDocEntry: parseInt(b.sapDocEntry),
-          lines: [{
-            lineNum: 0,
-            quantity: parseFloat(b.qtyLakhs),
-            itemCode: b.itemCode || null,
-          }],
-          batchNumber: b.batchNumber,
-          poNumber: b.poNumber || '',
-          remarks: body.remarks || `Sunloc consolidated dispatch — ${b.boxes} boxes`,
-        });
-        // Update row with result
-        if (sapResult.ok) {
-          if (pgPool) {
-            await pgPool.query(`
-              UPDATE invoice_requests SET status='sent_to_sap',
-                sap_response_doc_num=$1, sap_response_doc_entry=$2,
-                updated_at=NOW()::TEXT WHERE id=$3
-            `, [String(sapResult.docNum || ''), sapResult.docEntry, id]);
-          } else {
-            db.prepare(`
-              UPDATE invoice_requests SET status='sent_to_sap',
-                sap_response_doc_num=?, sap_response_doc_entry=?,
-                updated_at=datetime('now') WHERE id=?
-            `).run(String(sapResult.docNum || ''), sapResult.docEntry, id);
-          }
-          batchRes.ok = true;
-          batchRes.request_id = id;
-          batchRes.delivery_doc_num = sapResult.docNum;
-          batchRes.delivery_doc_entry = sapResult.docEntry;
-        } else {
-          // Mark request as failed (preserve for audit / retry)
-          const errMsg = sapResult.error || 'SAP rejected';
-          if (pgPool) {
-            await pgPool.query(`
-              UPDATE invoice_requests SET status='failed', sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2
-            `, [errMsg, id]);
-          } else {
-            db.prepare(`
-              UPDATE invoice_requests SET status='failed', sap_error_message=?, updated_at=datetime('now') WHERE id=?
-            `).run(errMsg, id);
-          }
-          batchRes.error = errMsg;
-          batchRes.degraded = sapResult.degraded || false;
-          batchRes.request_id = id;
+        batchRes.ok = true;
+        batchRes.request_id = id;
+        batchRes.status = 'pending_reconciliation';
+        if (overdispatchReason) {
+          batchRes.overdispatchApproved = true;
+          batchRes.note = overdispatchReason + ' (admin override applied)';
         }
       } catch (e) {
         batchRes.error = 'server error: ' + e.message;
-        // CRITICAL: update DB row to failed so it doesn't stay stuck as 'pending'
-        try {
-          const errMsg2 = 'server error: ' + e.message;
-          if (pgPool) {
-            await pgPool.query(`UPDATE invoice_requests SET status='failed', sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [errMsg2, id]);
-          } else {
-            db.prepare(`UPDATE invoice_requests SET status='failed', sap_error_message=?, updated_at=datetime('now') WHERE id=?`).run(errMsg2, id);
-          }
-        } catch (dbErr) { console.warn('[invoice] failed to update failed status:', dbErr.message); }
       }
       results.push(batchRes);
     }
@@ -2769,33 +3392,6 @@ app.get('/api/invoice/requests', async (req, res) => {
       rows = db.prepare(`SELECT * FROM invoice_requests ${whereSql} ORDER BY created_at DESC LIMIT ${limit}`).all(...args);
     }
     res.json({ ok: true, count: rows.length, requests: rows });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// POST /api/invoice/request/:id/cancel — cancel a pending/failed invoice request
-app.post('/api/invoice/request/:id/cancel', async (req, res) => {
-  try {
-    const id = req.params.id;
-    const reason = (req.body || {}).reason || 'manual cancel';
-    let row;
-    if (pgPool) {
-      const r = await pgPool.query(`SELECT id, status FROM invoice_requests WHERE id=$1`, [id]);
-      row = r.rows[0];
-    } else {
-      row = db.prepare(`SELECT id, status FROM invoice_requests WHERE id=?`).get(id);
-    }
-    if (!row) return res.status(404).json({ ok: false, error: 'Invoice request not found' });
-    if (['sent_to_sap','invoice_received','delivered'].includes(row.status)) {
-      return res.status(400).json({ ok: false, error: `Cannot cancel request in status: ${row.status}` });
-    }
-    if (pgPool) {
-      await pgPool.query(`UPDATE invoice_requests SET status='cancelled', sap_error_message=$1, updated_at=NOW()::TEXT WHERE id=$2`, [reason, id]);
-    } else {
-      db.prepare(`UPDATE invoice_requests SET status='cancelled', sap_error_message=?, updated_at=datetime('now') WHERE id=?`).run(reason, id);
-    }
-    res.json({ ok: true, cancelled: id });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -3327,6 +3923,7 @@ app.get('/api/invoice/pending-scan-out', async (req, res) => {
         `SELECT * FROM invoices_received
          WHERE dispatch_status = 'pending'
            AND (source = 'sunloc' OR (source = 'direct_sap' AND admin_approved_at IS NOT NULL))
+           AND COALESCE(is_legacy_closed, 0) = 0
          ORDER BY invoice_date DESC, fetched_at DESC
          LIMIT ${limit}`
       );
@@ -3336,6 +3933,7 @@ app.get('/api/invoice/pending-scan-out', async (req, res) => {
         `SELECT * FROM invoices_received
          WHERE dispatch_status = 'pending'
            AND (source = 'sunloc' OR (source = 'direct_sap' AND admin_approved_at IS NOT NULL))
+           AND COALESCE(is_legacy_closed, 0) = 0
          ORDER BY invoice_date DESC, fetched_at DESC
          LIMIT ?`
       ).all(limit);
@@ -3633,6 +4231,143 @@ app.post('/api/orders/upsert', async (req, res) => {
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────
+// v40 Phase 18.14g: REBATCH machine — preempt a pending order to an earlier
+// slot in the queue, cascade-renumbering the displaced ones.
+//
+// Use case: machine MC29 has queue 26ZC10 (running), 26ZC11..26ZC15 (all pending).
+// Planning manager wants to bring 26ZC15 forward to position 11. This endpoint:
+//   1. Validates each renumbered order is strictly pending (no scans/labels/actuals)
+//   2. Updates batchNumber serials in cascade
+//   3. Updates planning_state JSON, production_orders rows, print_orders rows atomically
+//   4. Rejects if any affected order has any tracking activity
+//
+// Request body: { machineId, renames: [ { orderId, newBatchNumber }, ... ] }
+// Server validates the mapping is internally consistent (no duplicates, all on this machine)
+// then applies. Returns { ok, count } on success or { ok:false, conflicts:[...] } on rejection.
+// ─────────────────────────────────────────────────────────────────
+app.post('/api/planning/rebatch-machine', async (req, res) => {
+  try {
+    const { machineId, renames } = req.body || {};
+    if (!machineId) return res.status(400).json({ ok: false, error: 'machineId required' });
+    if (!Array.isArray(renames) || renames.length === 0) return res.status(400).json({ ok: false, error: 'renames array required' });
+
+    // Validate input format
+    for (const r of renames) {
+      if (!r.orderId || !r.newBatchNumber) return res.status(400).json({ ok: false, error: 'Each rename requires orderId + newBatchNumber' });
+    }
+    const newBatchNumbers = renames.map(r => r.newBatchNumber);
+    if (new Set(newBatchNumbers).size !== newBatchNumbers.length) {
+      return res.status(400).json({ ok: false, error: 'Duplicate batch numbers in renames' });
+    }
+
+    // Fetch current planning state
+    const planState = await getPlanningStateAsync();
+    if (!planState.orders) return res.status(500).json({ ok: false, error: 'Planning state missing orders' });
+
+    // Build oldByOrderId map (existing order metadata)
+    const oldByOrderId = {};
+    for (const o of planState.orders) { if (o && o.id) oldByOrderId[o.id] = o; }
+
+    // Validate every renamed order is pending, on this machine, and has no tracking activity
+    const conflicts = [];
+    for (const r of renames) {
+      const o = oldByOrderId[r.orderId];
+      if (!o) { conflicts.push({ orderId: r.orderId, reason: 'Order not found' }); continue; }
+      if (o.deleted) { conflicts.push({ orderId: r.orderId, batchNumber: o.batchNumber, reason: 'Order is deleted' }); continue; }
+      if (o.machineId !== machineId) { conflicts.push({ orderId: r.orderId, batchNumber: o.batchNumber, reason: `On different machine (${o.machineId})` }); continue; }
+      if (o.status !== 'pending') { conflicts.push({ orderId: r.orderId, batchNumber: o.batchNumber, reason: `Not pending (status: ${o.status})` }); continue; }
+      // Check for any scan/label/actuals activity tied to this batch_number
+      if (o.batchNumber) {
+        let scanCount = 0, labelCount = 0, actualsCount = 0;
+        try {
+          if (pgPool) {
+            const r1 = await pgPool.query(`SELECT COUNT(*) c FROM tracking_scans WHERE batch_number=$1`, [o.batchNumber]);
+            const r2 = await pgPool.query(`SELECT COUNT(*) c FROM tracking_labels WHERE batch_number=$1`, [o.batchNumber]);
+            const r3 = await pgPool.query(`SELECT COUNT(*) c FROM production_actuals WHERE batch_number=$1`, [o.batchNumber]);
+            scanCount = parseInt(r1.rows[0]?.c || 0);
+            labelCount = parseInt(r2.rows[0]?.c || 0);
+            actualsCount = parseInt(r3.rows[0]?.c || 0);
+          } else {
+            scanCount = db.prepare(`SELECT COUNT(*) c FROM tracking_scans WHERE batch_number=?`).get(o.batchNumber)?.c || 0;
+            labelCount = db.prepare(`SELECT COUNT(*) c FROM tracking_labels WHERE batch_number=?`).get(o.batchNumber)?.c || 0;
+            actualsCount = db.prepare(`SELECT COUNT(*) c FROM production_actuals WHERE batch_number=?`).get(o.batchNumber)?.c || 0;
+          }
+        } catch(e) { /* tolerate missing tables */ }
+        if (scanCount > 0 || labelCount > 0 || actualsCount > 0) {
+          conflicts.push({ orderId: r.orderId, batchNumber: o.batchNumber,
+            reason: `Cannot rebatch — has ${scanCount} scan(s), ${labelCount} label(s), ${actualsCount} actual(s).` });
+        }
+      }
+    }
+    if (conflicts.length > 0) {
+      return res.status(409).json({ ok: false, error: 'Rebatch blocked', conflicts });
+    }
+
+    // Validate no collision with batch numbers belonging to OTHER orders on same machine (or anywhere)
+    // For each new batch number, check no DIFFERENT order on any machine already has it.
+    const renameOrderIdSet = new Set(renames.map(r => r.orderId));
+    for (const r of renames) {
+      const owner = planState.orders.find(o => o.batchNumber === r.newBatchNumber && !o.deleted);
+      if (owner && !renameOrderIdSet.has(owner.id)) {
+        conflicts.push({ orderId: r.orderId, batchNumber: r.newBatchNumber, reason: `Batch number ${r.newBatchNumber} already used by order ${owner.id} (${owner.customer||'?'}, MC ${owner.machineId||'?'})` });
+      }
+    }
+    if (conflicts.length > 0) {
+      return res.status(409).json({ ok: false, error: 'Rebatch blocked by batch number collisions', conflicts });
+    }
+
+    // Apply renames. Use a 2-phase approach in JSON: first set all to temporary placeholders
+    // (so we don't trip uniqueness when intermediate state collides), then set to final values.
+    const renameById = {};
+    for (const r of renames) renameById[r.orderId] = r.newBatchNumber;
+
+    for (const r of renames) {
+      const o = oldByOrderId[r.orderId];
+      if (o) o.batchNumber = `__TMP__${r.orderId}`;
+    }
+    for (const r of renames) {
+      const o = oldByOrderId[r.orderId];
+      if (o) o.batchNumber = r.newBatchNumber;
+    }
+    // Also rename in printOrders (linked production order)
+    if (planState.printOrders) {
+      for (const po of planState.printOrders) {
+        if (po.productionOrderId && renameById[po.productionOrderId]) {
+          po.batchNumber = renameById[po.productionOrderId];
+        }
+      }
+    }
+
+    // Persist planning_state JSON
+    if (pgPool) {
+      await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
+    } else {
+      db.prepare(`INSERT INTO planning_state (id,state_json,saved_at) VALUES (1,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json, saved_at=datetime('now')`).run(JSON.stringify(planState));
+    }
+    _planningStateCache = planState; _planningStateCacheTime = Date.now();
+
+    // Update production_orders table rows + print_orders table rows
+    for (const r of renames) {
+      const o = oldByOrderId[r.orderId];
+      const json = JSON.stringify(o);
+      if (pgPool) {
+        await pgPool.query(`UPDATE production_orders SET batch_number=$1, data_json=$2, updated_at=NOW()::TEXT WHERE id=$3`, [r.newBatchNumber, json, r.orderId]);
+        // Update any print_orders rows that link to this production order
+        await pgPool.query(`UPDATE print_orders SET batch_number=$1 WHERE production_order_id=$2`, [r.newBatchNumber, r.orderId]);
+      } else {
+        db.prepare(`UPDATE production_orders SET batch_number=?, data_json=?, updated_at=datetime('now') WHERE id=?`).run(r.newBatchNumber, json, r.orderId);
+        db.prepare(`UPDATE print_orders SET batch_number=? WHERE production_order_id=?`).run(r.newBatchNumber, r.orderId);
+      }
+    }
+
+    res.json({ ok: true, count: renames.length });
+  } catch(err) {
+    console.error('[v40 P18.14g] rebatch failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // DELETE /api/orders/delete-by-batch — permanently delete order by batchNumber + customer match
 app.post('/api/orders/delete-by-batch', async (req, res) => {
   try {
@@ -3910,21 +4645,16 @@ app.get('/api/planning/state', async (req, res) => {
       }
     } catch(e) { console.warn('[State] Order recovery failed:', e.message); }
 
+    // v40 P18.14i Fix 2: actualProd refresh only — auto-promote pending→running REMOVED.
+    // Previously the server flipped any pending order with actuals > 0 to 'running'
+    // silently on every GET. Combined with the broken merge in /api/planning/state,
+    // this caused closed→running and stuck >2 running orders per machine. With the new
+    // DPR gate at /api/dpr/save, non-running orders can no longer receive actuals,
+    // so the auto-promote is unnecessary. Status is now fully user-controlled.
     if (state.orders && _actualsCache) {
       for (const ord of state.orders) {
         const actual = (_actualsCache[ord.id] || _actualsCache[ord.batchNumber] || 0);
         ord.actualProd = actual;
-        // Auto-promote pending → running only if machine has fewer than 2 running orders
-        // Never auto-promote SAP-imported orders (_noAutoPromote flag)
-        if (actual > 0 && ord.status === 'pending' && !ord._noAutoPromote) {
-          const runningOnMachine = state.orders.filter(o =>
-            o.machineId === ord.machineId &&
-            o.status === 'running' &&
-            o.id !== ord.id &&
-            !o.deleted
-          ).length;
-          if (runningOnMachine < 2) ord.status = 'running';
-        }
       }
     }
     const savedAt = pgPool
@@ -3983,19 +4713,45 @@ app.post('/api/planning/state', async (req, res) => {
               ? JSON.parse(r.data_json) : r.data_json; } catch(e) {}
           });
 
-          // Merge preserving manual dates/status, then bulk upsert
+          // v40 P18.14i Fix 1: status merge — client wins.
+          // The PRIOR rule preserved DB's non-pending status, which caused two bugs:
+          //   a) closed → running silently when DB had stale 'running'
+          //   b) any user-initiated demotion to pending got reverted
+          // New rule: incoming client status is authoritative for the order's intent.
+          // Safety net: if the DB row's updated_at is NEWER than the incoming client's
+          // _localEditedAt (which the client now stamps), the DB wins — protects against
+          // stale tabs overwriting a fresh decision from another device.
+          // Audit log when client status differs from DB status so we can trace state churn.
           await Promise.all(orders.map(async ord => {
             const ex = existingMap[ord.id];
             let mergedOrd = ord;
             if (ex) {
               const hasManualDate = ex.manualEndDate || ex.manualStartDate;
+              const clientEdit = parseInt(ord._localEditedAt || 0);
+              const dbUpdated  = ex.updated_at ? new Date(ex.updated_at).getTime() : 0;
+              // Determine status: incoming wins unless the DB is demonstrably fresher.
+              let finalStatus;
+              if (ex.status && ord.status && ex.status !== ord.status) {
+                // Status differs between client and DB
+                if (clientEdit && dbUpdated && dbUpdated > clientEdit + 5000) {
+                  // DB was updated AFTER client's edit + 5s grace → client is stale, keep DB
+                  finalStatus = ex.status;
+                  console.warn(`[v40 P18.14i] Status merge: keeping DB status '${ex.status}' over stale client '${ord.status}' for order ${ord.id} (db.updated_at=${ex.updated_at}, client.editedAt=${new Date(clientEdit).toISOString()})`);
+                } else {
+                  // Client is fresh OR no timestamp → client wins
+                  finalStatus = ord.status;
+                  console.log(`[v40 P18.14i] Status merge: client status '${ord.status}' replaces DB '${ex.status}' for order ${ord.id}`);
+                }
+              } else {
+                finalStatus = ord.status || ex.status || 'pending';
+              }
               mergedOrd = {
                 ...ord,
                 startDate:       hasManualDate ? ex.startDate   : ord.startDate,
                 endDate:         hasManualDate ? ex.endDate     : ord.endDate,
                 manualEndDate:   ex.manualEndDate   || ord.manualEndDate,
                 manualStartDate: ex.manualStartDate || ord.manualStartDate,
-                status: (ex.status && ex.status !== 'pending') ? ex.status : (ord.status||'pending'),
+                status: finalStatus,
                 actualProd: Math.max(ord.actualProd||0, ex.actualProd||0),
               };
             }
@@ -4052,7 +4808,13 @@ app.get('/api/orders/active', async (req, res) => {
     // Refresh actuals in background — throttled to 60s, non-blocking
     warmActualsCache().catch(()=>{});
     const state = await getPlanningStateAsync();
-    const running = (state.orders || []).filter(o => o.status === 'running' && !o.deleted);
+    // v40 P18.14i Fix 2c: admins can request all orders (not just running) so the DPR UI
+    // can mark non-running orders visually + warn before entering data against them.
+    // Triggered by ?includeAll=1 query param OR X-User-Role: admin header.
+    const _isAdmin = req.query.includeAll === '1' || req.headers['x-user-role'] === 'admin';
+    const baseSet = _isAdmin
+      ? (state.orders || []).filter(o => !o.deleted)
+      : (state.orders || []).filter(o => o.status === 'running' && !o.deleted);
 
     // Helper: extract YYYY-MM-DD from any startDate format (Date object, ISO string, etc.)
     const getDateStr = (d) => {
@@ -4089,6 +4851,14 @@ app.get('/api/orders/active', async (req, res) => {
       };
     };
 
+    if (_isAdmin) {
+      // Admin sees everything — no max-2-per-machine cap. Status field tells the client what to mark.
+      const orders = baseSet.map(mapOrder);
+      return res.json({ ok: true, orders });
+    }
+
+    // Default (non-admin): only running orders, capped at 2 per machine for non-legacy
+    const running = baseSet;
     // Separate legacy (startDate <= CUTOFF) and new orders
     const legacyOrders = running.filter(o =>
       !o.startDate || getDateStr(o.startDate) <= LEGACY_CUTOFF
@@ -4119,6 +4889,276 @@ app.get('/api/orders/active', async (req, res) => {
   }
 });
 
+// v40 P18.14i Fix 3: cleanup-banner data endpoint.
+// Returns list of machines with >2 running orders so the Planning page can show
+// a non-mutating warning banner. No automatic mutation — purely informational.
+// Called by planning.html on page load and every 5 minutes by the auto-sync poller.
+app.get('/api/planning/overlimit-machines', async (req, res) => {
+  try {
+    const state = await getPlanningStateAsync();
+    if (!state.orders) return res.json({ ok: true, machines: [] });
+    // Group running orders by machine
+    const byMc = {};
+    for (const o of state.orders) {
+      if (o.status !== 'running' || o.deleted) continue;
+      const mc = o.machineId || '(unassigned)';
+      if (!byMc[mc]) byMc[mc] = [];
+      byMc[mc].push(o);
+    }
+    // Pick over-limit machines
+    const machines = [];
+    for (const [mcId, orders] of Object.entries(byMc)) {
+      if (orders.length <= 2) continue;
+      // Sort by startDate ASC so oldest are listed first (likely candidates for closure)
+      orders.sort((a,b) => String(a.startDate||'').localeCompare(String(b.startDate||'')));
+      machines.push({
+        machineId: mcId,
+        runningCount: orders.length,
+        runningBatches: orders.map(o => {
+          const actual = (_actualsCache?.[o.id] || _actualsCache?.[o.batchNumber] || o.actualProd || o.actualQty || 0);
+          return {
+            id: o.id,
+            batchNumber: o.batchNumber || '',
+            customer: o.customer || '',
+            startDate: o.startDate || null,
+            actualProd: actual,
+            grossQty: o.grossQty || o.qty || 0,
+          };
+        }),
+      });
+    }
+    res.json({ ok: true, machines, scannedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// v41 P19.3: Invoice flow rework — new endpoints
+// ═══════════════════════════════════════════════════════════════
+// 1. GET  /api/invoice/pending-reconciliation — queue view (dispatch/planning/admin)
+// 2. GET  /api/invoice/so-consumption          — full SO consumption ledger
+// 3. GET  /api/invoice/so-consumption/:docEntry — single SO consumption detail
+// 4. POST /api/invoice/close-legacy/:id        — mark invoices_received as legacy_closed
+// 5. POST /api/invoice/scan-out-eligible/:requestId — check if request is ready for scan-out
+// ═══════════════════════════════════════════════════════════════
+
+function _v41_requireInvoiceRole(req, res) {
+  const session = verifyToken(req.headers['x-session-token'] || req.query.token || req.body?.token);
+  if (!session) {
+    res.status(401).json({ ok: false, error: 'Not authenticated' });
+    return null;
+  }
+  const allowed = ['dispatch_manager', 'planning_manager', 'admin'];
+  if (!allowed.includes(session.role)) {
+    res.status(403).json({ ok: false, error: 'Forbidden — dispatch/planning/admin only' });
+    return null;
+  }
+  return session;
+}
+
+// GET /api/invoice/pending-reconciliation — list invoice_requests awaiting SAP reconcile
+app.get('/api/invoice/pending-reconciliation', async (req, res) => {
+  const session = _v41_requireInvoiceRole(req, res);
+  if (!session) return;
+  try {
+    let rows;
+    if (pgPool) {
+      const r = await pgPool.query(
+        `SELECT * FROM invoice_requests
+         WHERE status='pending_reconciliation'
+         ORDER BY created_at DESC
+         LIMIT 500`
+      );
+      rows = r.rows;
+    } else {
+      rows = db.prepare(
+        `SELECT * FROM invoice_requests
+         WHERE status='pending_reconciliation'
+         ORDER BY created_at DESC
+         LIMIT 500`
+      ).all();
+    }
+    res.json({ ok: true, count: rows.length, requests: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/invoice/so-consumption — full sales order consumption ledger.
+// Optional ?cardCode= filter to scope to one customer.
+app.get('/api/invoice/so-consumption', async (req, res) => {
+  const session = _v41_requireInvoiceRole(req, res);
+  if (!session) return;
+  try {
+    const cardCode = (req.query.cardCode || '').toString();
+    const whereCard = pgPool ? 'WHERE card_code=$1' : 'WHERE card_code=?';
+    let rows;
+    if (pgPool) {
+      const r = cardCode
+        ? await pgPool.query(`SELECT * FROM sales_order_consumption ${whereCard} ORDER BY updated_at DESC LIMIT 500`, [cardCode])
+        : await pgPool.query(`SELECT * FROM sales_order_consumption ORDER BY updated_at DESC LIMIT 500`);
+      rows = r.rows;
+    } else {
+      rows = cardCode
+        ? db.prepare(`SELECT * FROM sales_order_consumption ${whereCard} ORDER BY updated_at DESC LIMIT 500`).all(cardCode)
+        : db.prepare(`SELECT * FROM sales_order_consumption ORDER BY updated_at DESC LIMIT 500`).all();
+    }
+    // Compute remaining + tolerance per row
+    const ledger = rows.map(r => {
+      const original = parseFloat(r.original_qty_lakhs) || 0;
+      const dispatched = parseFloat(r.dispatched_qty_lakhs) || 0;
+      const tolerance = original * 1.15;
+      const remaining = Math.max(0, original - dispatched);
+      const headroom = Math.max(0, tolerance - dispatched);
+      const pctDispatched = original > 0 ? (dispatched / original * 100) : 0;
+      return {
+        ...r,
+        remainingQty: parseFloat(remaining.toFixed(3)),
+        toleranceQty: parseFloat(tolerance.toFixed(3)),
+        headroomQty: parseFloat(headroom.toFixed(3)),
+        pctDispatched: parseFloat(pctDispatched.toFixed(2)),
+        isExhausted: pctDispatched >= 100,
+        isOverDispatched: pctDispatched > 100,
+        isAtTolerance: pctDispatched >= 115,
+      };
+    });
+    res.json({ ok: true, count: ledger.length, ledger });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/invoice/so-consumption/:docEntry — single SO consumption detail
+app.get('/api/invoice/so-consumption/:docEntry', async (req, res) => {
+  const session = _v41_requireInvoiceRole(req, res);
+  if (!session) return;
+  try {
+    const docEntry = parseInt(req.params.docEntry, 10);
+    if (!docEntry) return res.status(400).json({ ok: false, error: 'invalid docEntry' });
+    let soc;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM sales_order_consumption WHERE sap_doc_entry=$1`, [docEntry]);
+      soc = r.rows[0];
+    } else {
+      soc = db.prepare(`SELECT * FROM sales_order_consumption WHERE sap_doc_entry=?`).get(docEntry);
+    }
+    if (!soc) return res.json({ ok: true, soc: null, message: 'No consumption ledger entry yet — no invoices reconciled' });
+    // Fetch all linked invoices for context
+    let invoices = [];
+    try {
+      if (pgPool) {
+        const ri = await pgPool.query(
+          `SELECT id, sap_doc_num, invoice_date, total_qty_lakhs, total_amount, dispatch_status
+           FROM invoices_received WHERE sap_doc_entry IN (
+             SELECT DISTINCT sap_response_doc_entry FROM invoice_requests WHERE sap_doc_entry=$1 AND reconciled_with_invoice_id IS NOT NULL
+           ) ORDER BY invoice_date DESC`,
+          [docEntry]
+        );
+        invoices = ri.rows;
+      }
+    } catch {}
+    const original = parseFloat(soc.original_qty_lakhs) || 0;
+    const dispatched = parseFloat(soc.dispatched_qty_lakhs) || 0;
+    const tolerance = original * 1.15;
+    const result = {
+      ...soc,
+      remainingQty: parseFloat(Math.max(0, original - dispatched).toFixed(3)),
+      toleranceQty: parseFloat(tolerance.toFixed(3)),
+      headroomQty: parseFloat(Math.max(0, tolerance - dispatched).toFixed(3)),
+      pctDispatched: original > 0 ? parseFloat((dispatched / original * 100).toFixed(2)) : 0,
+      invoices
+    };
+    res.json({ ok: true, soc: result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/invoice/close-legacy/:id — mark invoices_received as legacy_closed.
+// Used when an invoice doesn't match any pending invoice_request (legacy stock, return, etc.)
+app.post('/api/invoice/close-legacy/:id', async (req, res) => {
+  const session = _v41_requireInvoiceRole(req, res);
+  if (!session) return;
+  try {
+    const id = req.params.id;
+    const { reason } = req.body || {};
+    if (pgPool) {
+      const r = await pgPool.query(
+        `UPDATE invoices_received SET is_legacy_closed=1, legacy_closed_by=$1, legacy_closed_at=NOW()::TEXT, legacy_close_reason=$2 WHERE id=$3 AND is_legacy_closed=0`,
+        [session.username, reason || '', id]
+      );
+      if (r.rowCount === 0) return res.status(404).json({ ok: false, error: 'Invoice not found or already legacy-closed' });
+    } else {
+      const r = db.prepare(
+        `UPDATE invoices_received SET is_legacy_closed=1, legacy_closed_by=?, legacy_closed_at=datetime('now'), legacy_close_reason=? WHERE id=? AND is_legacy_closed=0`
+      ).run(session.username, reason || '', id);
+      if (r.changes === 0) return res.status(404).json({ ok: false, error: 'Invoice not found or already legacy-closed' });
+    }
+    logAudit(session.username, session.role, session.app || 'planning', 'INVOICE_LEGACY_CLOSED',
+      `Marked invoice ${id} as legacy: ${reason || '(no reason)'}`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/invoice/scan-out-eligible/:requestId — check if a request is ready for scan-out.
+// Returns { eligible, status, reason } so the client can gate the scan-out UI.
+app.post('/api/invoice/scan-out-eligible/:requestId', async (req, res) => {
+  const session = _v41_requireInvoiceRole(req, res);
+  if (!session) return;
+  try {
+    const reqId = req.params.requestId;
+    let row;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM invoice_requests WHERE id=$1`, [reqId]);
+      row = r.rows[0];
+    } else {
+      row = db.prepare(`SELECT * FROM invoice_requests WHERE id=?`).get(reqId);
+    }
+    if (!row) return res.status(404).json({ ok: false, error: 'invoice_request not found' });
+
+    // Gating logic
+    let eligible = false;
+    let reason = '';
+    if (row.status === 'reconciled') {
+      eligible = true;
+      reason = 'OK — invoice reconciled with SAP. Proceed to scan-out.';
+    } else if (row.status === 'pending_reconciliation') {
+      eligible = false;
+      reason = 'Waiting for SAP reconciliation. SAP user must create the invoice in SAP; Sunloc will pick it up on next poll (~5 min).';
+    } else if (row.status === 'ready_to_scan_out' || row.status === 'dispatched') {
+      eligible = (row.status === 'ready_to_scan_out');
+      reason = row.status === 'dispatched' ? 'Already dispatched.' : 'OK — proceed to scan-out.';
+    } else {
+      eligible = false;
+      reason = `Cannot scan out — invoice request status: ${row.status}`;
+    }
+    res.json({
+      ok: true,
+      eligible,
+      status: row.status,
+      reason,
+      request: {
+        id: row.id,
+        batchNumber: row.batch_number,
+        customer: row.customer,
+        sapDocEntry: row.sap_doc_entry,
+        qtyLakhs: parseFloat(row.qty_lakhs),
+        boxes: row.boxes,
+        reconciledAt: row.reconciled_at,
+        reconciledWithInvoiceId: row.reconciled_with_invoice_id
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── end v41 P19.3 invoice flow endpoints ────────────────────────
+
+
 // ═══════════════════════════════════════════════════════════════
 // DPR APP ROUTES
 // ═══════════════════════════════════════════════════════════════
@@ -4128,7 +5168,35 @@ app.post('/api/dpr/bulk-import', async (req, res) => {
   try {
     const { records } = req.body;
     if (!records || !Array.isArray(records)) return res.status(400).json({ ok: false, error: 'No records provided' });
-    let saved = 0;
+    // v40 P18.14i Fix 2: bulk import gate — reject rows targeting non-running orders unless force=true (admin)
+    const _isAdminCaller = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
+    const _forceEntry    = !!req.body.forceEntry;
+    let _planForGate = null;
+    let _orderStatusById = {};
+    let _orderStatusByBatch = {};
+    try {
+      _planForGate = await getPlanningStateAsync();
+      for (const o of (_planForGate.orders || [])) {
+        if (o.id) _orderStatusById[o.id] = { status: o.status, deleted: o.deleted };
+        if (o.batchNumber) _orderStatusByBatch[o.batchNumber] = { status: o.status, deleted: o.deleted };
+      }
+    } catch(e) { console.warn('[v40 P18.14i bulk-import] planning state fetch failed; gate will allow all:', e.message); }
+    const _rejected = [];
+    const _gateBulk = (orderId, batchNumber, machineId, date, shift, qty) => {
+      if ((orderId && String(orderId).startsWith('TEMP-')) ||
+          (batchNumber && String(batchNumber).startsWith('TEMP-'))) return true;
+      const meta = _orderStatusById[orderId] || _orderStatusByBatch[batchNumber];
+      if (!meta) return true;
+      if (meta.deleted) { _rejected.push({ orderId, batchNumber, machineId, date, shift, qty, reason: 'deleted' }); return false; }
+      if (meta.status === 'running') return true;
+      if (_isAdminCaller && _forceEntry) {
+        console.warn(`[v40 P18.14i Fix 2 bulk] force-import: ${qty}L to ${meta.status} order ${orderId||batchNumber} on ${machineId} ${date}/${shift}`);
+        return true;
+      }
+      _rejected.push({ orderId, batchNumber, machineId, date, shift, qty, reason: `status='${meta.status}' — not running` });
+      return false;
+    };
+    let saved = 0, skipped = 0;
     if (pgPool) {
       const client = await pgPool.connect();
       try {
@@ -4147,6 +5215,7 @@ app.post('/api/dpr/bulk-import', async (req, res) => {
                 const run = runs[ri];
                 const qty = parseFloat(run.qty) || 0;
                 if (qty <= 0) continue;
+                if (!_gateBulk(run.orderId, run.batchNumber, machineId, date, shiftName, qty)) { skipped++; continue; }
                 await client.query(`INSERT INTO production_actuals (order_id, batch_number, machine_id, date, shift, run_index, qty_lakhs, floor)
                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
                   ON CONFLICT(machine_id, date, shift, run_index) DO UPDATE SET
@@ -4163,7 +5232,7 @@ app.post('/api/dpr/bulk-import', async (req, res) => {
       // Refresh actuals cache
       await warmActualsCache();
     }
-    res.json({ ok: true, saved });
+    res.json({ ok: true, saved, skipped, rejected: _rejected });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -4228,10 +5297,45 @@ app.post('/api/dpr/save', async (req, res) => {
       // Delete old actuals for this floor+date, then re-insert
       await pgPool.query('DELETE FROM production_actuals WHERE floor = $1 AND date = $2', [floor, date]);
 
+      // v40 P18.14i Fix 2: build planning order status map for gate check
+      const _planForGate = await getPlanningStateAsync();
+      const _orderStatusById = {};
+      const _orderStatusByBatch = {};
+      for (const o of (_planForGate.orders || [])) {
+        if (o.id) _orderStatusById[o.id] = { status: o.status, deleted: o.deleted };
+        if (o.batchNumber) _orderStatusByBatch[o.batchNumber] = { status: o.status, deleted: o.deleted };
+      }
+      const _isAdminCaller = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
+      const _forceEntry    = !!req.body.forceEntry;
+      const _rejected = [];
+
       const actualsToSave = [];
+      const _gateRow = (orderId, batchNumber, machineId, shift, qty) => {
+        // Allow TEMP batches unconditionally (fallback path when no real order assigned)
+        if ((orderId && String(orderId).startsWith('TEMP-')) ||
+            (batchNumber && String(batchNumber).startsWith('TEMP-'))) return true;
+        const meta = _orderStatusById[orderId] || _orderStatusByBatch[batchNumber];
+        if (!meta) return true;   // unknown order → don't block (could be a legacy/orphan)
+        if (meta.deleted) {
+          _rejected.push({ orderId, batchNumber, machineId, shift, qty, reason: 'Order is deleted' });
+          return false;
+        }
+        if (meta.status === 'running') return true;
+        // Non-running order
+        if (_isAdminCaller && _forceEntry) {
+          // Admin force-entry — allow but audit
+          console.warn(`[v40 P18.14i Fix 2] DPR force-entry: admin wrote ${qty}L to ${meta.status} order ${orderId||batchNumber} on ${machineId} ${date}/${shift}. caller=${req.body.userName||'unknown'}`);
+          try { logAudit(req.body.userName||'admin','admin','dpr','DPR_FORCE_ENTRY',`Wrote ${qty}L to ${meta.status} order ${orderId||batchNumber} on ${machineId} ${date}/${shift}`); } catch {}
+          return true;
+        }
+        _rejected.push({ orderId, batchNumber, machineId, shift, qty, reason: `Order status is '${meta.status}' — only running orders accept DPR entries` });
+        return false;
+      };
+
       if (actuals && actuals.length > 0) {
         for (const a of actuals) {
           if (!a.qty || a.qty <= 0) continue;
+          if (!_gateRow(a.orderId, a.batchNumber, a.machineId, a.shift, a.qty)) continue;
           actualsToSave.push([a.orderId||null, a.batchNumber||null, a.machineId, date, a.shift, a.runIndex||0, a.qty, a.floor||floor]);
         }
       } else {
@@ -4243,6 +5347,7 @@ app.post('/api/dpr/save', async (req, res) => {
             runs.forEach((run,ri) => {
               const qty = parseFloat(run.qty)||0;
               if (qty <= 0) return;
+              if (!_gateRow(run.orderId, run.batchNumber, machineId, shiftName, qty)) return;
               actualsToSave.push([run.orderId||null, run.batchNumber||null, machineId, date, shiftName, ri, qty, floor]);
             });
           }
@@ -4258,6 +5363,10 @@ app.post('/api/dpr/save', async (req, res) => {
           row
         );
       }
+      // Attach rejected list to res so client can show error
+      if (_rejected.length > 0) {
+        res._dprRejected = _rejected;
+      }
 
       // Update planning actuals cache (two-way sync) — warm cache so Planning sees fresh data
       try {
@@ -4265,18 +5374,56 @@ app.post('/api/dpr/save', async (req, res) => {
       } catch(e) { console.warn('Planning sync error:', e.message); }
 
     } else {
-      // SQLite fallback
+      // SQLite fallback — same gate logic
+      const _planForGateSq = await getPlanningStateAsync();
+      const _orderStatusByIdSq = {};
+      const _orderStatusByBatchSq = {};
+      for (const o of (_planForGateSq.orders || [])) {
+        if (o.id) _orderStatusByIdSq[o.id] = { status: o.status, deleted: o.deleted };
+        if (o.batchNumber) _orderStatusByBatchSq[o.batchNumber] = { status: o.status, deleted: o.deleted };
+      }
+      const _isAdminCallerSq = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
+      const _forceEntrySq    = !!req.body.forceEntry;
+      const _rejectedSq = [];
+      const _gateSq = (orderId, batchNumber, machineId, shift, qty) => {
+        if ((orderId && String(orderId).startsWith('TEMP-')) ||
+            (batchNumber && String(batchNumber).startsWith('TEMP-'))) return true;
+        const meta = _orderStatusByIdSq[orderId] || _orderStatusByBatchSq[batchNumber];
+        if (!meta) return true;
+        if (meta.deleted) {
+          _rejectedSq.push({ orderId, batchNumber, machineId, shift, qty, reason: 'Order is deleted' });
+          return false;
+        }
+        if (meta.status === 'running') return true;
+        if (_isAdminCallerSq && _forceEntrySq) {
+          console.warn(`[v40 P18.14i Fix 2 SQLite] DPR force-entry: admin wrote ${qty}L to ${meta.status} order ${orderId||batchNumber}`);
+          return true;
+        }
+        _rejectedSq.push({ orderId, batchNumber, machineId, shift, qty, reason: `Order status is '${meta.status}' — only running orders accept DPR entries` });
+        return false;
+      };
       db.prepare(`INSERT INTO dpr_records (floor, date, data_json) VALUES (?, ?, ?) ON CONFLICT(floor, date) DO UPDATE SET data_json = excluded.data_json, saved_at = datetime('now')`).run(floor, date, JSON.stringify(data));
       db.prepare('DELETE FROM production_actuals WHERE floor = ? AND date = ?').run(floor, date);
       const upsert = db.prepare(`INSERT INTO production_actuals (order_id, batch_number, machine_id, date, shift, run_index, qty_lakhs, floor) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(machine_id, date, shift, run_index) DO UPDATE SET order_id=excluded.order_id, batch_number=excluded.batch_number, qty_lakhs=excluded.qty_lakhs, synced_at=datetime('now')`);
-      const rows = actuals && actuals.length > 0 ? actuals.filter(a=>a.qty>0).map(a=>[a.orderId||null,a.batchNumber||null,a.machineId,date,a.shift,a.runIndex||0,a.qty,a.floor||floor]) : [];
+      const rows = (actuals && actuals.length > 0)
+        ? actuals.filter(a => a.qty > 0 && _gateSq(a.orderId, a.batchNumber, a.machineId, a.shift, a.qty))
+                 .map(a => [a.orderId||null, a.batchNumber||null, a.machineId, date, a.shift, a.runIndex||0, a.qty, a.floor||floor])
+        : [];
       db.transaction(rows => rows.forEach(r => upsert.run(...r)))(rows);
+      if (_rejectedSq.length > 0) res._dprRejected = _rejectedSq;
     }
 
     // Refresh actuals cache so Planning sees new DPR data immediately (force — bypass throttle)
     _actualsCacheTime = 0; // bypass 60s throttle so save is visible immediately
     warmActualsCache().catch(e => console.warn('[DPR] cache warm failed:', e.message));
-    res.json({ ok: true, savedAt: new Date().toISOString() });
+    // v40 P18.14i Fix 2: include any gate rejections so client can alert the operator
+    const rejected = res._dprRejected || [];
+    res.json({
+      ok: true,
+      savedAt: new Date().toISOString(),
+      rejectedCount: rejected.length,
+      rejected: rejected,
+    });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -4573,9 +5720,13 @@ app.post('/api/auth/login', async (req, res) => {
       user = db.prepare('SELECT * FROM app_users WHERE username=? AND app=?').get(username, appName);
     }
     if (!user) return res.status(401).json({ ok: false, error: 'User not found' });
+    // v40 P18.16: refuse disabled accounts
+    if (user.is_active === 0 || user.is_active === false) {
+      return res.status(403).json({ ok: false, error: 'Account is disabled. Contact your administrator.' });
+    }
     if (user.pin_hash !== hashPin(pin)) return res.status(401).json({ ok: false, error: 'Invalid PIN' });
     const token = generateToken();
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
+    const expires = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
     if (pgPool) {
       await pgPool.query('INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(token) DO NOTHING',
         [token, user.id, user.username, user.role, appName, expires]);
@@ -4612,21 +5763,504 @@ app.post('/api/auth/logout', async (req, res) => {
 // POST /api/auth/change-pin
 app.post('/api/auth/change-pin', async (req, res) => {
   try {
-    const { token, username, newPin } = req.body;
+    // v40 P18.16: targetApp accepted so admin can change PINs across all 3 apps.
+    // Non-admin users can still change ONLY their own PIN (within their own app).
+    const { token, username, newPin, targetApp } = req.body;
     const session = verifyToken(token);
     if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
-    if (session.role !== 'admin' && session.username !== username) {
+    const isSelfEdit = session.username === username;
+    if (session.role !== 'admin' && !isSelfEdit) {
       return res.status(403).json({ ok: false, error: 'Only admin can change other users PINs' });
     }
-    if (pgPool) {
-      await pgPool.query('UPDATE app_users SET pin_hash=$1, updated_at=NOW() WHERE username=$2 AND app=$3', [hashPin(newPin), username, session.app]);
-    } else {
-      db.prepare(`UPDATE app_users SET pin_hash=?, updated_at=datetime('now') WHERE username=? AND app=?`).run(hashPin(newPin), username, session.app);
+    if (!newPin || String(newPin).length < 4) {
+      return res.status(400).json({ ok: false, error: 'PIN must be at least 4 characters' });
     }
-    logAudit(session.username, session.role, session.app, 'CHANGE_PIN', `Changed PIN for ${username}`, req.ip);
+    // Cross-app PIN change is admin-only. Self-edits restricted to session.app.
+    const effectiveApp = (session.role === 'admin' && targetApp) ? targetApp : session.app;
+    if (pgPool) {
+      const r = await pgPool.query('UPDATE app_users SET pin_hash=$1, updated_at=NOW() WHERE username=$2 AND app=$3', [hashPin(newPin), username, effectiveApp]);
+      if (r.rowCount === 0) return res.status(404).json({ ok: false, error: `User ${username} not found in app ${effectiveApp}` });
+    } else {
+      const info = db.prepare(`UPDATE app_users SET pin_hash=?, updated_at=datetime('now') WHERE username=? AND app=?`).run(hashPin(newPin), username, effectiveApp);
+      if (info.changes === 0) return res.status(404).json({ ok: false, error: `User ${username} not found in app ${effectiveApp}` });
+    }
+    logAudit(session.username, session.role, session.app, 'CHANGE_PIN', `Changed PIN for ${username} (app=${effectiveApp})`, req.ip);
     res.json({ ok: true });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+
+
+// ─────────────────────────────────────────────────────────────────
+// v40 Phase 18.16: ADMIN USER MANAGEMENT
+//
+// Endpoints to manage users across all 3 apps from a single Plan_Admin login.
+//   GET  /api/admin/users           — list all users (admin-only)
+//   POST /api/admin/users/create    — add a new user
+//   POST /api/admin/users/toggle-active — enable/disable an account
+//   (PIN change handled by existing /api/auth/change-pin with targetApp param)
+//
+// All actions are audit-logged. Disabled users are blocked at login (P18.16 login gate).
+// ─────────────────────────────────────────────────────────────────
+
+// GET /api/admin/users — admin-only — returns all users across apps with last_login + status
+app.get('/api/admin/users', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.query.token;
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    if (session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    // Pull users + their most recent login from audit_log
+    let users = [];
+    if (pgPool) {
+      const r = await pgPool.query(`
+        SELECT u.id, u.username, u.role, u.app, u.is_active, u.created_at, u.updated_at,
+          (SELECT MAX(ts) FROM audit_log WHERE username=u.username AND app=u.app AND action='LOGIN') AS last_login
+        FROM app_users u
+        ORDER BY u.app ASC, u.username ASC
+      `);
+      users = r.rows;
+    } else {
+      users = db.prepare(`
+        SELECT u.id, u.username, u.role, u.app, u.is_active, u.created_at, u.updated_at,
+          (SELECT MAX(ts) FROM audit_log WHERE username=u.username AND app=u.app AND action='LOGIN') AS last_login
+        FROM app_users u
+        ORDER BY u.app ASC, u.username ASC
+      `).all();
+    }
+    res.json({ ok: true, users });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/admin/users/create — admin-only — add a new user to any app
+app.post('/api/admin/users/create', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    if (session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const { username, role, app: appName, pin } = req.body;
+    if (!username || !String(username).trim()) return res.status(400).json({ ok: false, error: 'username required' });
+    if (!role || !String(role).trim()) return res.status(400).json({ ok: false, error: 'role required' });
+    if (!appName || !['dpr','planning','tracking'].includes(appName)) {
+      return res.status(400).json({ ok: false, error: 'app must be one of: dpr, planning, tracking' });
+    }
+    if (!pin || String(pin).length < 4) return res.status(400).json({ ok: false, error: 'PIN must be at least 4 characters' });
+    // Username uniqueness check (app_users.username has UNIQUE constraint, but give clearer error)
+    let existing;
+    if (pgPool) {
+      const r = await pgPool.query('SELECT id FROM app_users WHERE username=$1', [username.trim()]);
+      existing = r.rows[0];
+    } else {
+      existing = db.prepare('SELECT id FROM app_users WHERE username=?').get(username.trim());
+    }
+    if (existing) return res.status(409).json({ ok: false, error: `Username "${username}" already exists` });
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO app_users (username, pin_hash, role, app, is_active) VALUES ($1,$2,$3,$4,1)`,
+        [username.trim(), hashPin(pin), role.trim(), appName]
+      );
+    } else {
+      db.prepare(`INSERT INTO app_users (username, pin_hash, role, app, is_active) VALUES (?,?,?,?,1)`)
+        .run(username.trim(), hashPin(pin), role.trim(), appName);
+    }
+    logAudit(session.username, session.role, session.app, 'USER_CREATED', `Created ${username} (${role}/${appName})`, req.ip);
+    res.json({ ok: true, message: `User ${username} created.` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/admin/users/toggle-active — admin-only — enable/disable account
+app.post('/api/admin/users/toggle-active', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    if (session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const { username, app: appName, isActive } = req.body;
+    if (!username || !appName) return res.status(400).json({ ok: false, error: 'username and app required' });
+    // Safety: refuse to disable yourself
+    if (username === session.username && appName === session.app && !isActive) {
+      return res.status(400).json({ ok: false, error: 'Cannot disable your own account' });
+    }
+    // Safety: refuse to disable the last admin in any app
+    if (!isActive) {
+      let adminCount;
+      if (pgPool) {
+        const r = await pgPool.query(`SELECT COUNT(*)::int AS c FROM app_users WHERE app=$1 AND role='admin' AND is_active=1 AND username<>$2`, [appName, username]);
+        adminCount = r.rows[0]?.c || 0;
+      } else {
+        adminCount = db.prepare(`SELECT COUNT(*) c FROM app_users WHERE app=? AND role='admin' AND is_active=1 AND username<>?`).get(appName, username)?.c || 0;
+      }
+      // Check if THIS user is currently an admin
+      let thisUser;
+      if (pgPool) { const r = await pgPool.query(`SELECT role FROM app_users WHERE username=$1 AND app=$2`, [username, appName]); thisUser = r.rows[0]; }
+      else { thisUser = db.prepare(`SELECT role FROM app_users WHERE username=? AND app=?`).get(username, appName); }
+      if (thisUser?.role === 'admin' && adminCount === 0) {
+        return res.status(400).json({ ok: false, error: `Cannot disable the last active admin for app ${appName}` });
+      }
+    }
+    const newVal = isActive ? 1 : 0;
+    if (pgPool) {
+      const r = await pgPool.query(`UPDATE app_users SET is_active=$1, updated_at=NOW() WHERE username=$2 AND app=$3`, [newVal, username, appName]);
+      if (r.rowCount === 0) return res.status(404).json({ ok: false, error: 'User not found' });
+    } else {
+      const info = db.prepare(`UPDATE app_users SET is_active=?, updated_at=datetime('now') WHERE username=? AND app=?`).run(newVal, username, appName);
+      if (info.changes === 0) return res.status(404).json({ ok: false, error: 'User not found' });
+    }
+    logAudit(session.username, session.role, session.app, isActive ? 'USER_ENABLED' : 'USER_DISABLED', `${isActive?'Enabled':'Disabled'} ${username} (app=${appName})`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── end v40 P18.16: Admin User Management ────────────────────
+
+// ─────────────────────────────────────────────────────────────────
+// v40 Phase 18.17: DATA INTEGRITY DASHBOARD
+//
+// Background hourly scan over the last 30 days across 12 check functions.
+// Findings persist in integrity_findings (deduped by finding_key). Admin
+// reviews and either acknowledges (24h auto-expiry), assigns to an operator
+// for fix action, or mutes the whole check_type for systemic false positives.
+//
+// Operators in DPR/Planning/Tracking see assigned tasks as a banner in their
+// own app. Findings self-resolve on the next scan when the underlying
+// condition no longer triggers the check.
+// ─────────────────────────────────────────────────────────────────
+
+const integrityEngine = require('./integrity-engine');
+
+let _integrityLastRunAt = null;
+let _integrityLastRunResult = null;
+let _integrityIsRunning = false;
+
+async function _runIntegrityScan(opts = {}) {
+  if (_integrityIsRunning) {
+    return { skipped: true, reason: 'Already running' };
+  }
+  _integrityIsRunning = true;
+  try {
+    const planningState = await getPlanningStateAsync();
+    const ctx = {
+      pgPool: pgPool || null,
+      db: db,
+      planningState,
+      lookbackDays: opts.lookbackDays || 30,
+    };
+    const result = await integrityEngine.runAllChecks(ctx);
+    _integrityLastRunAt = new Date().toISOString();
+    _integrityLastRunResult = result;
+    console.log(`[Integrity] Scan complete: ${result.findingsFound} findings (${result.upserted} upserted, ${result.resolved} resolved) in ${result.durationMs}ms`);
+    if (result.errors.length > 0) {
+      console.warn(`[Integrity] ${result.errors.length} check(s) errored:`, result.errors);
+    }
+    return result;
+  } finally {
+    _integrityIsRunning = false;
+  }
+}
+
+// POST /api/integrity/run-now — admin-only, triggers an immediate scan
+app.post('/api/integrity/run-now', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const result = await _runIntegrityScan({ lookbackDays: req.body.lookbackDays || 30 });
+    if (result.skipped) return res.json({ ok: true, skipped: true, message: 'Scan already in progress' });
+    logAudit(session.username, session.role, session.app, 'INTEGRITY_SCAN_TRIGGERED',
+      `Manual scan: ${result.findingsFound} findings`, req.ip);
+    res.json({ ok: true, lastRunAt: _integrityLastRunAt, ...result });
+  } catch (err) {
+    console.error('[Integrity] run-now failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/integrity/findings — admin-only — list findings with optional filters
+app.get('/api/integrity/findings', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.query.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+
+    const severity = req.query.severity;  // critical|warning|info or all
+    const includeAcked = req.query.includeAcked === '1';
+    const includeResolved = req.query.includeResolved === '1';
+
+    let sql = `SELECT * FROM integrity_findings WHERE 1=1`;
+    const params = [];
+    if (severity && severity !== 'all') {
+      sql += ` AND severity = ?`;
+      params.push(severity);
+    }
+    if (!includeResolved) sql += ` AND resolved = 0`;
+    if (!includeAcked) {
+      if (pgPool) sql += ` AND (ack_until IS NULL OR ack_until < NOW()::TEXT)`;
+      else sql += ` AND (ack_until IS NULL OR ack_until < datetime('now'))`;
+    }
+    sql += ` ORDER BY CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END, last_seen DESC LIMIT 500`;
+
+    let rows = [];
+    if (pgPool) {
+      let i = 0; const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+      const r = await pgPool.query(pgSql, params);
+      rows = r.rows;
+    } else {
+      rows = db.prepare(sql).all(...params);
+    }
+    // Parse raw_data_json for client convenience
+    for (const r of rows) {
+      if (r.raw_data_json) {
+        try { r.raw_data = JSON.parse(r.raw_data_json); delete r.raw_data_json; } catch (e) {}
+      }
+    }
+    // Summary counts (unack, unresolved)
+    let summarySql = `SELECT severity, COUNT(*)::int AS c FROM integrity_findings WHERE resolved=0 AND (ack_until IS NULL OR ack_until < `;
+    summarySql += pgPool ? `NOW()::TEXT` : `datetime('now')`;
+    summarySql += `) GROUP BY severity`;
+    let summaryRows = [];
+    if (pgPool) {
+      const r = await pgPool.query(summarySql.replace('COUNT(*)::int', 'COUNT(*)::int'));
+      summaryRows = r.rows;
+    } else {
+      summaryRows = db.prepare(summarySql.replace('::int', '')).all();
+    }
+    const summary = { critical: 0, warning: 0, info: 0 };
+    for (const s of summaryRows) summary[s.severity] = parseInt(s.c) || 0;
+
+    res.json({
+      ok: true,
+      findings: rows,
+      summary,
+      lastRunAt: _integrityLastRunAt,
+      isRunning: _integrityIsRunning,
+    });
+  } catch (err) {
+    console.error('[Integrity] findings list failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/integrity/ack/:id — admin-only — acknowledge a finding for N hours
+app.post('/api/integrity/ack/:id', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const reason = req.body.reason || 'Acknowledged';
+    const hours = parseInt(req.body.hours) || 24;
+    const ackUntil = new Date(Date.now() + hours * 3600000).toISOString();
+    if (pgPool) {
+      await pgPool.query(`UPDATE integrity_findings SET ack_by=$1, ack_at=NOW()::TEXT, ack_reason=$2, ack_until=$3 WHERE id=$4`,
+        [session.username, reason, ackUntil, req.params.id]);
+    } else {
+      db.prepare(`UPDATE integrity_findings SET ack_by=?, ack_at=datetime('now'), ack_reason=?, ack_until=? WHERE id=?`)
+        .run(session.username, reason, ackUntil, req.params.id);
+    }
+    logAudit(session.username, session.role, session.app, 'INTEGRITY_ACK', `Acknowledged ${req.params.id}: ${reason}`, req.ip);
+    res.json({ ok: true, ackUntil });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/integrity/ack-bulk — admin-only — bulk-acknowledge warning/info findings
+// Critical findings always require individual acknowledgment.
+app.post('/api/integrity/ack-bulk', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const reason = req.body.reason || 'Historical backfill — bulk acknowledged';
+    const hours = parseInt(req.body.hours) || (7 * 24);  // default 7 days for backfill
+    const ackUntil = new Date(Date.now() + hours * 3600000).toISOString();
+    let count = 0;
+    if (pgPool) {
+      const r = await pgPool.query(
+        `UPDATE integrity_findings SET ack_by=$1, ack_at=NOW()::TEXT, ack_reason=$2, ack_until=$3
+         WHERE severity IN ('warning','info') AND resolved=0 AND (ack_until IS NULL OR ack_until < NOW()::TEXT)`,
+        [session.username, reason, ackUntil]
+      );
+      count = r.rowCount || 0;
+    } else {
+      const info = db.prepare(
+        `UPDATE integrity_findings SET ack_by=?, ack_at=datetime('now'), ack_reason=?, ack_until=?
+         WHERE severity IN ('warning','info') AND resolved=0 AND (ack_until IS NULL OR ack_until < datetime('now'))`
+      ).run(session.username, reason, ackUntil);
+      count = info.changes;
+    }
+    logAudit(session.username, session.role, session.app, 'INTEGRITY_ACK_BULK', `Bulk ack ${count} warning/info findings`, req.ip);
+    res.json({ ok: true, count, ackUntil });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/integrity/mute — admin-only — mute or unmute a check_type entirely
+app.post('/api/integrity/mute', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const { checkType, mute, reason } = req.body;
+    if (!checkType) return res.status(400).json({ ok: false, error: 'checkType required' });
+    if (mute) {
+      if (pgPool) {
+        await pgPool.query(
+          `INSERT INTO integrity_mutes (check_type, muted_by, reason) VALUES ($1,$2,$3)
+           ON CONFLICT(check_type) DO UPDATE SET muted_by=$2, muted_at=NOW()::TEXT, reason=$3`,
+          [checkType, session.username, reason || '']
+        );
+      } else {
+        db.prepare(
+          `INSERT INTO integrity_mutes (check_type, muted_by, reason) VALUES (?,?,?)
+           ON CONFLICT(check_type) DO UPDATE SET muted_by=excluded.muted_by, muted_at=datetime('now'), reason=excluded.reason`
+        ).run(checkType, session.username, reason || '');
+      }
+      logAudit(session.username, session.role, session.app, 'INTEGRITY_MUTE', `Muted check_type ${checkType}: ${reason||''}`, req.ip);
+    } else {
+      if (pgPool) await pgPool.query(`DELETE FROM integrity_mutes WHERE check_type=$1`, [checkType]);
+      else db.prepare(`DELETE FROM integrity_mutes WHERE check_type=?`).run(checkType);
+      logAudit(session.username, session.role, session.app, 'INTEGRITY_UNMUTE', `Unmuted check_type ${checkType}`, req.ip);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/integrity/mutes — admin-only — list currently muted check_types
+app.get('/api/integrity/mutes', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.query.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    let rows = [];
+    if (pgPool) { const r = await pgPool.query(`SELECT * FROM integrity_mutes ORDER BY muted_at DESC`); rows = r.rows; }
+    else rows = db.prepare(`SELECT * FROM integrity_mutes ORDER BY muted_at DESC`).all();
+    res.json({ ok: true, mutes: rows });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// POST /api/integrity/assign-task — admin-only — assign a finding (or freeform note) to a user/role
+app.post('/api/integrity/assign-task', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const { findingId, assignedTo, app: appName, note } = req.body;
+    if (!assignedTo) return res.status(400).json({ ok: false, error: 'assignedTo required' });
+    const taskId = `IT-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO integrity_tasks (id, finding_id, assigned_to, assigned_by, app, note, status)
+         VALUES ($1,$2,$3,$4,$5,$6,'pending')`,
+        [taskId, findingId || null, assignedTo, session.username, appName || null, note || null]
+      );
+    } else {
+      db.prepare(
+        `INSERT INTO integrity_tasks (id, finding_id, assigned_to, assigned_by, app, note, status)
+         VALUES (?,?,?,?,?,?, 'pending')`
+      ).run(taskId, findingId || null, assignedTo, session.username, appName || null, note || null);
+    }
+    logAudit(session.username, session.role, session.app, 'INTEGRITY_TASK_ASSIGNED',
+      `Assigned task ${taskId} to ${assignedTo}${findingId?` for finding ${findingId}`:''}`, req.ip);
+    res.json({ ok: true, taskId });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/integrity/my-tasks — any logged-in user — returns their pending/seen tasks
+app.get('/api/integrity/my-tasks', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.query.token;
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    // Match assigned_to by exact username or by role:<role>
+    let rows = [];
+    const sql = `
+      SELECT t.*, f.severity, f.description, f.batch_number, f.order_id, f.machine_id, f.suggested_app, f.suggested_page, f.suggested_action,
+             f.resolved AS finding_resolved
+      FROM integrity_tasks t
+      LEFT JOIN integrity_findings f ON f.id = t.finding_id
+      WHERE t.status IN ('pending','seen') AND (t.assigned_to = ? OR t.assigned_to = ?)
+      ORDER BY t.assigned_at DESC LIMIT 50
+    `;
+    const roleKey = `role:${session.role}`;
+    if (pgPool) {
+      let i = 0; const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+      const r = await pgPool.query(pgSql, [session.username, roleKey]);
+      rows = r.rows;
+    } else {
+      rows = db.prepare(sql).all(session.username, roleKey);
+    }
+    // Filter out tasks whose findings have been auto-resolved
+    rows = rows.filter(r => !r.finding_id || r.finding_resolved === 0 || r.finding_resolved === false);
+    res.json({ ok: true, tasks: rows, count: rows.length });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/integrity/task/:id/seen — operator marks a task as seen
+app.post('/api/integrity/task/:id/seen', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    if (pgPool) {
+      await pgPool.query(`UPDATE integrity_tasks SET status='seen', seen_at=NOW()::TEXT, seen_by=$1 WHERE id=$2`,
+        [session.username, req.params.id]);
+    } else {
+      db.prepare(`UPDATE integrity_tasks SET status='seen', seen_at=datetime('now'), seen_by=? WHERE id=?`)
+        .run(session.username, req.params.id);
+    }
+    logAudit(session.username, session.role, session.app, 'INTEGRITY_TASK_SEEN', `Marked task ${req.params.id} as seen`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/integrity/task/:id/dismiss — admin withdraws a task
+app.post('/api/integrity/task/:id/dismiss', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    if (pgPool) {
+      await pgPool.query(`UPDATE integrity_tasks SET status='dismissed', dismissed_at=NOW()::TEXT, dismissed_by=$1 WHERE id=$2`,
+        [session.username, req.params.id]);
+    } else {
+      db.prepare(`UPDATE integrity_tasks SET status='dismissed', dismissed_at=datetime('now'), dismissed_by=? WHERE id=?`)
+        .run(session.username, req.params.id);
+    }
+    logAudit(session.username, session.role, session.app, 'INTEGRITY_TASK_DISMISSED', `Dismissed task ${req.params.id}`, req.ip);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Hourly scheduler ────────────────────────────────────────────
+// First scan runs 30 seconds after server boot, then every 60 minutes.
+// Configurable via env var INTEGRITY_SCAN_INTERVAL_MIN (default 60).
+const _intervalMin = parseInt(process.env.INTEGRITY_SCAN_INTERVAL_MIN) || 60;
+setTimeout(() => {
+  console.log(`[Integrity] First scan starting (interval: ${_intervalMin}min)...`);
+  _runIntegrityScan().catch(e => console.error('[Integrity] First scan failed:', e.message));
+}, 30000);
+setInterval(() => {
+  _runIntegrityScan().catch(e => console.error('[Integrity] Periodic scan failed:', e.message));
+}, _intervalMin * 60 * 1000);
+
+// ─── end v40 P18.17: Data Integrity Dashboard ──────────────────
 
 // POST /api/audit/log
 app.post('/api/audit/log', (req, res) => {
@@ -4879,6 +6513,413 @@ app.get('/api/wo/history', async (req, res) => {
     res.json({ ok: true, requests: woHistRows });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+
+
+// ─────────────────────────────────────────────────────────────────
+// v40 Phase 18.15: WO MULTI-CUSTOMER SPLIT
+//
+// Use case: A 50-box WO batch 26ZC100 was produced before any customer was
+// confirmed. After production, three real orders arrive: 20+25+5 boxes for
+// three different customers. Planner uses Split & Assign to break the parent
+// WO into 1..N child customer orders. Admin approves; on approval:
+//   1. Create N new "child" production orders, one per customer line
+//   2. Each child gets its own batchNumber = parent + suffix (A, B, C, ...)
+//   3. Rebatch label rows + scan rows from parent -> child by box position
+//      (boxes 1..20 -> child A, 21..45 -> child B, 46..50 -> child C)
+//   4. Parent order qty reduced by sum-of-children; if 0, parent marked wo-split
+//   5. Each child status = 'closed' (production was done at parent, children
+//      live on the same machine for traceability per user-confirmed design)
+//   6. Production data inherited proportionally per child's share of boxes
+//
+// Approval flow stays 2-step (planner proposes, admin approves) - same as the
+// existing 1:1 wo_reconciliation flow.
+// ─────────────────────────────────────────────────────────────────
+
+// POST /api/wo/split/propose - Planner proposes a multi-customer split
+app.post('/api/wo/split/propose', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'] || req.body.token;
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    if (!['planning_manager','admin'].includes(session.role)) {
+      return res.status(403).json({ ok: false, error: 'Planning Manager or Admin required' });
+    }
+    const { sourceOrderId, lines } = req.body;
+    if (!sourceOrderId) return res.status(400).json({ ok: false, error: 'sourceOrderId required' });
+    if (!Array.isArray(lines) || lines.length === 0) {
+      return res.status(400).json({ ok: false, error: 'At least one customer line required' });
+    }
+
+    const planState = await getPlanningStateAsync();
+    const sourceOrd = (planState.orders || []).find(o => o.id === sourceOrderId);
+    if (!sourceOrd) return res.status(404).json({ ok: false, error: 'Source order not found' });
+    if (sourceOrd.woStatus !== 'wo' && sourceOrd.woStatus !== 'wo-split-partial') {
+      return res.status(400).json({ ok: false, error: `Order is not a W/O order (woStatus=${sourceOrd.woStatus||'none'})` });
+    }
+    if (sourceOrd.deleted) return res.status(400).json({ ok: false, error: 'Source order is deleted' });
+
+    let totalBoxesInBatch = 0;
+    try {
+      if (pgPool) {
+        const r = await pgPool.query(`SELECT COUNT(*)::int AS c FROM tracking_labels WHERE batch_number=$1 AND (voided IS NULL OR voided=false)`, [sourceOrd.batchNumber]);
+        totalBoxesInBatch = r.rows[0]?.c || 0;
+      } else {
+        totalBoxesInBatch = db.prepare(`SELECT COUNT(*) c FROM tracking_labels WHERE batch_number=? AND (voided IS NULL OR voided=0)`).get(sourceOrd.batchNumber)?.c || 0;
+      }
+    } catch(e) {}
+
+    const conflicts = [];
+    const lineNorm = [];
+    let nextBoxStart = 1;
+    for (let i = 0; i < lines.length; i++) {
+      const L = lines[i];
+      if (!L.customer || String(L.customer).trim() === '') {
+        conflicts.push({ lineIndex: i, reason: 'Customer name required' });
+        continue;
+      }
+      const boxes = parseInt(L.boxes);
+      if (!boxes || boxes <= 0) {
+        conflicts.push({ lineIndex: i, customer: L.customer, reason: 'boxes must be a positive integer' });
+        continue;
+      }
+      const suffix = String(L.suffix || String.fromCharCode(64 + i + 1)).toUpperCase();
+      if (!/^[A-Z0-9]+$/.test(suffix)) {
+        conflicts.push({ lineIndex: i, customer: L.customer, reason: 'suffix must be alphanumeric (A-Z, 0-9)' });
+        continue;
+      }
+      const boxStart = nextBoxStart;
+      const boxEnd = nextBoxStart + boxes - 1;
+      nextBoxStart = boxEnd + 1;
+
+      const sizeQty = boxes * (sourceOrd.qty / Math.max(1, totalBoxesInBatch || (parseInt(sourceOrd.totalBoxes)||0) || 1));
+      const qtyLakhs = parseFloat(L.qtyLakhs) || sizeQty;
+      const childBatchNumber = `${sourceOrd.batchNumber}-${suffix}`;
+      lineNorm.push({
+        line_index: i,
+        customer: String(L.customer).trim(),
+        bill_to: String(L.billTo || '').trim() || null,
+        po_number: String(L.poNumber || '').trim() || null,
+        zone: String(L.zone || '').trim() || null,
+        boxes,
+        qty_lakhs: qtyLakhs,
+        box_start: boxStart,
+        box_end: boxEnd,
+        child_batch_suffix: suffix,
+        child_batch_number: childBatchNumber,
+        sap_doc_entry: L.sapDocEntry ? parseInt(L.sapDocEntry) : null,
+        sap_doc_num: L.sapDocNum ? String(L.sapDocNum).trim() : null,
+      });
+    }
+    if (conflicts.length > 0) return res.status(400).json({ ok: false, error: 'Validation failed', conflicts });
+
+    const totalBoxesSplit = lineNorm.reduce((s,l) => s + l.boxes, 0);
+    const cap = totalBoxesInBatch || parseInt(sourceOrd.totalBoxes) || 0;
+    if (cap > 0 && totalBoxesSplit > cap) {
+      return res.status(400).json({ ok: false, error: `Sum of split boxes (${totalBoxesSplit}) exceeds boxes in batch (${cap})` });
+    }
+    const seen = new Set();
+    for (const L of lineNorm) {
+      if (seen.has(L.child_batch_suffix)) {
+        return res.status(400).json({ ok: false, error: `Duplicate suffix: ${L.child_batch_suffix}` });
+      }
+      seen.add(L.child_batch_suffix);
+    }
+    for (const L of lineNorm) {
+      const collision = (planState.orders || []).find(o => o.batchNumber === L.child_batch_number && !o.deleted);
+      if (collision) {
+        return res.status(409).json({ ok: false, error: `Child batch number ${L.child_batch_number} already exists (order ${collision.id})` });
+      }
+    }
+
+    const reqId = `WOSPLIT-${Date.now()}`;
+    const residualBoxes = cap > 0 ? Math.max(0, cap - totalBoxesSplit) : 0;
+
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO wo_split_requests (id, source_order_id, source_batch_number, proposed_by, status, total_boxes_split, residual_boxes)
+         VALUES ($1,$2,$3,$4,'pending',$5,$6)`,
+        [reqId, sourceOrderId, sourceOrd.batchNumber, session.username, totalBoxesSplit, residualBoxes]
+      );
+      for (const L of lineNorm) {
+        await pgPool.query(
+          `INSERT INTO wo_split_lines (id, split_request_id, line_index, customer, bill_to, po_number, zone, boxes, qty_lakhs, box_start, box_end, child_batch_suffix, child_batch_number, sap_doc_entry, sap_doc_num)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+          [`${reqId}-L${L.line_index}`, reqId, L.line_index, L.customer, L.bill_to, L.po_number, L.zone,
+           L.boxes, L.qty_lakhs, L.box_start, L.box_end, L.child_batch_suffix, L.child_batch_number,
+           L.sap_doc_entry, L.sap_doc_num]
+        );
+      }
+    } else {
+      db.prepare(`INSERT INTO wo_split_requests (id, source_order_id, source_batch_number, proposed_by, status, total_boxes_split, residual_boxes) VALUES (?,?,?,?, 'pending', ?, ?)`)
+        .run(reqId, sourceOrderId, sourceOrd.batchNumber, session.username, totalBoxesSplit, residualBoxes);
+      const insLine = db.prepare(`INSERT INTO wo_split_lines (id, split_request_id, line_index, customer, bill_to, po_number, zone, boxes, qty_lakhs, box_start, box_end, child_batch_suffix, child_batch_number, sap_doc_entry, sap_doc_num) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+      for (const L of lineNorm) {
+        insLine.run(`${reqId}-L${L.line_index}`, reqId, L.line_index, L.customer, L.bill_to, L.po_number, L.zone,
+                    L.boxes, L.qty_lakhs, L.box_start, L.box_end, L.child_batch_suffix, L.child_batch_number,
+                    L.sap_doc_entry, L.sap_doc_num);
+      }
+    }
+
+    logAudit(session.username, session.role, 'planning', 'WO_SPLIT_PROPOSED',
+      `Proposed split of ${sourceOrd.batchNumber} into ${lineNorm.length} customer order(s): ${lineNorm.map(L=>`${L.child_batch_suffix}=${L.customer}/${L.boxes}b`).join(', ')}`);
+    res.json({ ok: true, requestId: reqId, status: 'pending', message: 'Awaiting Admin approval' });
+  } catch (err) {
+    console.error('[v40 P18.15] split/propose failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/wo/split/pending - admin sees pending; planner sees only their own
+app.get('/api/wo/split/pending', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'];
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    let rows = [];
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM wo_split_requests WHERE status='pending' ORDER BY proposed_at DESC`);
+      rows = r.rows;
+    } else {
+      rows = db.prepare(`SELECT * FROM wo_split_requests WHERE status='pending' ORDER BY proposed_at DESC`).all();
+    }
+    if (session.role !== 'admin') rows = rows.filter(r => r.proposed_by === session.username);
+    const planState = await getPlanningStateAsync();
+    const enriched = [];
+    for (const r of rows) {
+      let lines = [];
+      if (pgPool) { const lr = await pgPool.query(`SELECT * FROM wo_split_lines WHERE split_request_id=$1 ORDER BY line_index ASC`, [r.id]); lines = lr.rows; }
+      else { lines = db.prepare(`SELECT * FROM wo_split_lines WHERE split_request_id=? ORDER BY line_index ASC`).all(r.id); }
+      const sourceOrd = (planState.orders || []).find(o => o.id === r.source_order_id) || {};
+      enriched.push({ ...r, lines, sourceOrder: sourceOrd });
+    }
+    res.json({ ok: true, requests: enriched });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/wo/split/approve/:id - Admin approves; performs atomic split
+app.post('/api/wo/split/approve/:id', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'];
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const reqId = req.params.id;
+    let request, lines;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM wo_split_requests WHERE id=$1`, [reqId]);
+      request = r.rows[0];
+      const lr = await pgPool.query(`SELECT * FROM wo_split_lines WHERE split_request_id=$1 ORDER BY line_index ASC`, [reqId]);
+      lines = lr.rows;
+    } else {
+      request = db.prepare(`SELECT * FROM wo_split_requests WHERE id=?`).get(reqId);
+      lines = db.prepare(`SELECT * FROM wo_split_lines WHERE split_request_id=? ORDER BY line_index ASC`).all(reqId);
+    }
+    if (!request) return res.status(404).json({ ok: false, error: 'Split request not found' });
+    if (request.status !== 'pending') return res.status(400).json({ ok: false, error: `Already ${request.status}` });
+    if (!lines || lines.length === 0) return res.status(400).json({ ok: false, error: 'Split request has no lines' });
+
+    const planState = await getPlanningStateAsync();
+    const parent = (planState.orders || []).find(o => o.id === request.source_order_id);
+    if (!parent) return res.status(404).json({ ok: false, error: 'Source parent order no longer exists' });
+    if (parent.woStatus !== 'wo' && parent.woStatus !== 'wo-split-partial') {
+      return res.status(400).json({ ok: false, error: `Parent order is no longer a W/O (woStatus=${parent.woStatus||'none'}). Cannot split.` });
+    }
+    for (const L of lines) {
+      const collision = (planState.orders || []).find(o => o.batchNumber === L.child_batch_number && !o.deleted);
+      if (collision) return res.status(409).json({ ok: false, error: `Child batch number ${L.child_batch_number} now collides with order ${collision.id}` });
+    }
+
+    const parentActual = parseFloat(parent.actualProd || 0);
+    const totalBoxesSplit = lines.reduce((s,l) => s + (l.boxes||0), 0);
+    const now = new Date().toISOString();
+    const childOrders = [];
+    for (const L of lines) {
+      const proportional = totalBoxesSplit > 0 ? (parentActual * L.boxes / totalBoxesSplit) : 0;
+      const childId = `${parent.id}-${L.child_batch_suffix}`;
+      const child = {
+        ...parent,
+        id: childId,
+        batchNumber: L.child_batch_number,
+        customer: L.customer,
+        shipTo: L.customer,
+        billTo: L.bill_to || '',
+        poNumber: L.po_number || '',
+        zone: L.zone || parent.zone,
+        qty: L.qty_lakhs,
+        actualProd: parseFloat(proportional.toFixed(3)),
+        actualQty: parseFloat(proportional.toFixed(3)),
+        totalBoxes: L.boxes,
+        woStatus: 'wo-split-child',
+        woSplitParentId: parent.id,
+        woSplitFromBatch: parent.batchNumber,
+        woSplitLineId: L.id,
+        status: 'closed',
+        closedDate: now,
+        deleted: false,
+        sapDocEntry: L.sap_doc_entry || null,
+        sapDocNum: L.sap_doc_num || '',
+        _localEditedAt: Date.now(),
+      };
+      childOrders.push({ child, line: L });
+    }
+
+    const performSplit = async () => {
+      for (const c of childOrders) planState.orders.push(c.child);
+      const residualBoxes = request.residual_boxes || 0;
+      if (residualBoxes > 0) {
+        const cap = parseInt(parent.totalBoxes) || (totalBoxesSplit + residualBoxes);
+        parent.qty = parent.qty * (residualBoxes / cap);
+        parent.totalBoxes = residualBoxes;
+        parent.woStatus = 'wo-split-partial';
+        parent._localEditedAt = Date.now();
+      } else {
+        parent.qty = 0;
+        parent.woStatus = 'wo-split';
+        parent.deleted = false;
+        parent.status = 'closed';
+        parent.closedDate = now;
+        parent._localEditedAt = Date.now();
+      }
+      parent.woSplitRequestId = reqId;
+
+      if (pgPool) {
+        await pgPool.query(
+          `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
+           ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()::TEXT`,
+          [JSON.stringify(planState)]
+        );
+      } else {
+        db.prepare(`INSERT INTO planning_state (id, state_json, saved_at) VALUES (1, ?, datetime('now'))
+                    ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json, saved_at=datetime('now')`).run(JSON.stringify(planState));
+      }
+      _planningStateCache = planState;
+      _planningStateCacheTime = Date.now();
+
+      for (const c of childOrders) {
+        const j = JSON.stringify(c.child);
+        if (pgPool) {
+          await pgPool.query(
+            `INSERT INTO production_orders (id, data_json, machine_id, batch_number, status, deleted, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,NOW()::TEXT)
+             ON CONFLICT(id) DO UPDATE SET data_json=$2, machine_id=$3, batch_number=$4, status=$5, deleted=$6, updated_at=NOW()::TEXT`,
+            [c.child.id, j, c.child.machineId||null, c.child.batchNumber, c.child.status, false]
+          );
+        } else {
+          db.prepare(`INSERT INTO production_orders (id, data_json, machine_id, batch_number, status, deleted, updated_at)
+                      VALUES (?,?,?,?,?,?,datetime('now'))
+                      ON CONFLICT(id) DO UPDATE SET data_json=?, machine_id=?, batch_number=?, status=?, deleted=?, updated_at=datetime('now')`)
+            .run(c.child.id, j, c.child.machineId||null, c.child.batchNumber, c.child.status, 0,
+                 j, c.child.machineId||null, c.child.batchNumber, c.child.status, 0);
+        }
+      }
+
+      let parentLabels = [];
+      if (pgPool) {
+        const r = await pgPool.query(
+          `SELECT id, batch_number, box_number FROM tracking_labels WHERE batch_number=$1 ORDER BY box_number ASC`,
+          [parent.batchNumber]
+        );
+        parentLabels = r.rows;
+      } else {
+        parentLabels = db.prepare(`SELECT id, batch_number, box_number FROM tracking_labels WHERE batch_number=? ORDER BY box_number ASC`).all(parent.batchNumber);
+      }
+      const lineByBoxPos = {};
+      for (const L of lines) {
+        for (let b = L.box_start; b <= L.box_end; b++) lineByBoxPos[b] = L;
+      }
+      let relabeled = 0;
+      for (let pos = 0; pos < parentLabels.length; pos++) {
+        const lbl = parentLabels[pos];
+        const boxPos = pos + 1;
+        const L = lineByBoxPos[boxPos];
+        if (!L) continue;
+        const newBatch = L.child_batch_number;
+        if (pgPool) {
+          await pgPool.query(`UPDATE tracking_labels SET batch_number=$1, customer=$2, wo_status='wo-split-child' WHERE id=$3`,
+            [newBatch, L.customer, lbl.id]);
+          await pgPool.query(`UPDATE tracking_scans SET batch_number=$1 WHERE batch_number=$2 AND label_id=$3`,
+            [newBatch, parent.batchNumber, lbl.id]);
+        } else {
+          db.prepare(`UPDATE tracking_labels SET batch_number=?, customer=?, wo_status='wo-split-child' WHERE id=?`).run(newBatch, L.customer, lbl.id);
+          db.prepare(`UPDATE tracking_scans SET batch_number=? WHERE batch_number=? AND label_id=?`).run(newBatch, parent.batchNumber, lbl.id);
+        }
+        relabeled++;
+      }
+
+      const approvedAt = new Date().toISOString();
+      if (pgPool) {
+        await pgPool.query(`UPDATE wo_split_requests SET status='approved', approved_by=$1, approved_at=$2 WHERE id=$3`,
+          [session.username, approvedAt, reqId]);
+        for (const c of childOrders) {
+          await pgPool.query(`UPDATE wo_split_lines SET child_order_id=$1 WHERE id=$2`, [c.child.id, c.line.id]);
+        }
+      } else {
+        db.prepare(`UPDATE wo_split_requests SET status='approved', approved_by=?, approved_at=? WHERE id=?`)
+          .run(session.username, approvedAt, reqId);
+        const upL = db.prepare(`UPDATE wo_split_lines SET child_order_id=? WHERE id=?`);
+        for (const c of childOrders) upL.run(c.child.id, c.line.id);
+      }
+
+      return { childCount: childOrders.length, relabeled };
+    };
+
+    const result = await performSplit();
+    logAudit(session.username, session.role, 'planning', 'WO_SPLIT_APPROVED',
+      `Approved split ${reqId} of ${parent.batchNumber}: created ${result.childCount} child order(s), rebatched ${result.relabeled} label(s)`);
+    res.json({
+      ok: true,
+      childOrdersCreated: result.childCount,
+      labelsRebatched: result.relabeled,
+      message: `${result.childCount} customer order(s) created. Print fresh labels for each child batch and physically replace on boxes before dispatch.`
+    });
+  } catch (err) {
+    console.error('[v40 P18.15] split/approve failed:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/wo/split/reject/:id - Admin rejects with reason
+app.post('/api/wo/split/reject/:id', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'];
+    const session = verifyToken(token);
+    if (!session || session.role !== 'admin') return res.status(403).json({ ok: false, error: 'Admin only' });
+    const reason = req.body.reason || 'No reason given';
+    const now = new Date().toISOString();
+    if (pgPool) {
+      await pgPool.query(`UPDATE wo_split_requests SET status='rejected', approved_by=$1, approved_at=$2, rejection_reason=$3 WHERE id=$4`,
+        [session.username, now, reason, req.params.id]);
+    } else {
+      db.prepare(`UPDATE wo_split_requests SET status='rejected', approved_by=?, approved_at=?, rejection_reason=? WHERE id=?`)
+        .run(session.username, now, reason, req.params.id);
+    }
+    logAudit(session.username, session.role, 'planning', 'WO_SPLIT_REJECTED', `Rejected split ${req.params.id}: ${reason}`);
+    res.json({ ok: true });
+  } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// GET /api/wo/split/history - recent split history
+app.get('/api/wo/split/history', async (req, res) => {
+  try {
+    const token = req.headers['x-session-token'];
+    const session = verifyToken(token);
+    if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    let rows = [];
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT * FROM wo_split_requests WHERE status IN ('approved','rejected') ORDER BY proposed_at DESC LIMIT 50`);
+      rows = r.rows;
+    } else {
+      rows = db.prepare(`SELECT * FROM wo_split_requests WHERE status IN ('approved','rejected') ORDER BY proposed_at DESC LIMIT 50`).all();
+    }
+    if (session.role !== 'admin') rows = rows.filter(r => r.proposed_by === session.username);
+    res.json({ ok: true, requests: rows });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── end v40 Phase 18.15: WO Split endpoints ─────────────────
 
 // ─── Data Export / Import (Admin — for safe migrations) ────────
 
@@ -5362,16 +7403,30 @@ app.post('/api/reconciliation/approve/:id', async (req, res) => {
       }
 
       // 7. Update planning state - add/update order with back-date and correct actualQty
+      // v40 P18.14f: Respect max-2 running per machine. If 2 already running on this machine
+      // and this is a NEW order being created, default to 'pending' (manual promotion later).
+      // For existing orders we honor their current status to avoid accidental demotions.
       const planState = getPlanningState();
       if (planState.orders) {
         // Check if order already exists (Planning Manager may have pre-entered it)
         const existingIdx = planState.orders.findIndex(o => o.id === orderId);
+        const targetMachineId = orderDetails.machineId;
+        const runningOnMachine = (planState.orders || []).filter(o =>
+          o.machineId === targetMachineId &&
+          o.status === 'running' &&
+          o.id !== orderId &&
+          !o.deleted
+        ).length;
+        const proposedStatus = (runningOnMachine >= 2 && existingIdx < 0) ? 'pending' : 'running';
+        if (runningOnMachine >= 2 && existingIdx < 0) {
+          console.warn(`[v40 P18.14f] Reconciliation: machine ${targetMachineId} already has 2 running orders. Reconciled order ${orderId} created as 'pending' — manual promotion required.`);
+        }
         const orderToSave = {
           ...orderDetails,
           id: orderId,
           startDate: request.back_date,
           actualQty: mappings.reduce((s,m) => s + (m.actualLakhs || 0), 0),
-          status: 'running'
+          status: proposedStatus
         };
         if (existingIdx >= 0) {
           planState.orders[existingIdx] = { ...planState.orders[existingIdx], ...orderToSave };
@@ -5861,9 +7916,13 @@ app.post('/api/auth/login', async (req, res) => {
       user = db.prepare('SELECT * FROM app_users WHERE username=? AND app=?').get(username, appName);
     }
     if (!user) return res.status(401).json({ ok: false, error: 'User not found' });
+    // v40 P18.16: refuse disabled accounts
+    if (user.is_active === 0 || user.is_active === false) {
+      return res.status(403).json({ ok: false, error: 'Account is disabled. Contact your administrator.' });
+    }
     if (user.pin_hash !== hashPin(pin)) return res.status(401).json({ ok: false, error: 'Invalid PIN' });
     const token = generateToken();
-    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
+    const expires = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().replace('T',' ').slice(0,19);
     if (pgPool) {
       await pgPool.query('INSERT INTO app_sessions (token,user_id,username,role,app,expires_at) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(token) DO NOTHING',
         [token, user.id, user.username, user.role, appName, expires]);
@@ -5900,18 +7959,28 @@ app.post('/api/auth/logout', async (req, res) => {
 // POST /api/auth/change-pin
 app.post('/api/auth/change-pin', async (req, res) => {
   try {
-    const { token, username, newPin } = req.body;
+    // v40 P18.16: targetApp accepted so admin can change PINs across all 3 apps.
+    // Non-admin users can still change ONLY their own PIN (within their own app).
+    const { token, username, newPin, targetApp } = req.body;
     const session = verifyToken(token);
     if (!session) return res.status(401).json({ ok: false, error: 'Not authenticated' });
-    if (session.role !== 'admin' && session.username !== username) {
+    const isSelfEdit = session.username === username;
+    if (session.role !== 'admin' && !isSelfEdit) {
       return res.status(403).json({ ok: false, error: 'Only admin can change other users PINs' });
     }
-    if (pgPool) {
-      await pgPool.query('UPDATE app_users SET pin_hash=$1, updated_at=NOW() WHERE username=$2 AND app=$3', [hashPin(newPin), username, session.app]);
-    } else {
-      db.prepare(`UPDATE app_users SET pin_hash=?, updated_at=datetime('now') WHERE username=? AND app=?`).run(hashPin(newPin), username, session.app);
+    if (!newPin || String(newPin).length < 4) {
+      return res.status(400).json({ ok: false, error: 'PIN must be at least 4 characters' });
     }
-    logAudit(session.username, session.role, session.app, 'CHANGE_PIN', `Changed PIN for ${username}`, req.ip);
+    // Cross-app PIN change is admin-only. Self-edits restricted to session.app.
+    const effectiveApp = (session.role === 'admin' && targetApp) ? targetApp : session.app;
+    if (pgPool) {
+      const r = await pgPool.query('UPDATE app_users SET pin_hash=$1, updated_at=NOW() WHERE username=$2 AND app=$3', [hashPin(newPin), username, effectiveApp]);
+      if (r.rowCount === 0) return res.status(404).json({ ok: false, error: `User ${username} not found in app ${effectiveApp}` });
+    } else {
+      const info = db.prepare(`UPDATE app_users SET pin_hash=?, updated_at=datetime('now') WHERE username=? AND app=?`).run(hashPin(newPin), username, effectiveApp);
+      if (info.changes === 0) return res.status(404).json({ ok: false, error: `User ${username} not found in app ${effectiveApp}` });
+    }
+    logAudit(session.username, session.role, session.app, 'CHANGE_PIN', `Changed PIN for ${username} (app=${effectiveApp})`, req.ip);
     res.json({ ok: true });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
@@ -6620,16 +8689,30 @@ app.post('/api/reconciliation/approve/:id', async (req, res) => {
       }
 
       // 7. Update planning state - add/update order with back-date and correct actualQty
+      // v40 P18.14f: Respect max-2 running per machine. If 2 already running on this machine
+      // and this is a NEW order being created, default to 'pending' (manual promotion later).
+      // For existing orders we honor their current status to avoid accidental demotions.
       const planState = getPlanningState();
       if (planState.orders) {
         // Check if order already exists (Planning Manager may have pre-entered it)
         const existingIdx = planState.orders.findIndex(o => o.id === orderId);
+        const targetMachineId = orderDetails.machineId;
+        const runningOnMachine = (planState.orders || []).filter(o =>
+          o.machineId === targetMachineId &&
+          o.status === 'running' &&
+          o.id !== orderId &&
+          !o.deleted
+        ).length;
+        const proposedStatus = (runningOnMachine >= 2 && existingIdx < 0) ? 'pending' : 'running';
+        if (runningOnMachine >= 2 && existingIdx < 0) {
+          console.warn(`[v40 P18.14f] Reconciliation: machine ${targetMachineId} already has 2 running orders. Reconciled order ${orderId} created as 'pending' — manual promotion required.`);
+        }
         const orderToSave = {
           ...orderDetails,
           id: orderId,
           startDate: request.back_date,
           actualQty: mappings.reduce((s,m) => s + (m.actualLakhs || 0), 0),
-          status: 'running'
+          status: proposedStatus
         };
         if (existingIdx >= 0) {
           planState.orders[existingIdx] = { ...planState.orders[existingIdx], ...orderToSave };

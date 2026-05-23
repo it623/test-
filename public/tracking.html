@@ -161,7 +161,7 @@ input[type=number]{font-family:var(--mono)}
 .modal{background:var(--surface);border-radius:var(--r);padding:24px;max-width:580px;width:90%;max-height:85vh;overflow-y:auto;box-shadow:var(--shadow-lg);border:1px solid var(--border)}
 .modal-title{font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px}
 .modal-sub{font-size:12px;color:var(--text3);margin-bottom:20px}
-.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
 
 /* ── ALERTS ── */
 .alert{padding:12px 14px;border-radius:var(--r-sm);font-size:12px;margin-bottom:12px;border:1px solid transparent}
@@ -3018,7 +3018,7 @@ function renderPrintQueue(selBatch){
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:8px">
     <div style="min-width:0">
       <div style="font-size:14px;font-weight:700;letter-spacing:0.03em">PRINT QUEUE — ${selBatch}</div>
-      <div style="font-size:11px;color:var(--text3);margin-top:2px">${batch?.customer||''} | Size ${batch?.size} | ${labels.length} labels</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px">${batch?.customer||''} | Size ${batch?.size} | ${labels.length} labels${batch?.packing?` | <span style="color:var(--accent);font-weight:700">📦 ${batch.packing}</span>`:''}</div>
       <div style="font-size:11px;margin-top:2px">${unprintedCount>0?`<span style="color:var(--accent3);font-weight:600">${unprintedCount} unprinted</span>`:'<span style="color:var(--green);font-weight:600">✅ All printed</span>'}</div>
     </div>
     ${unprintedCount>0?`<button class="btn btn-sm btn-success" style="white-space:nowrap;flex-shrink:0;font-size:11px" onclick="printBatchLabels('${selBatch}')">🖨️ Print All Unprinted</button>`:''}
@@ -3034,7 +3034,7 @@ function renderPrintQueue(selBatch){
     <tbody>
     ${labels.map(l=>`
       <tr style="border-bottom:1px solid var(--border);${l.voided?'opacity:0.4':''}${!l.printed&&!l.voided?'background:rgba(240,192,96,0.05)':''}">
-        <td style="padding:6px;font-weight:700;color:var(--accent);font-family:monospace">${l.isExcess?`<span style="color:#C55A11">E-${l.excessNum}</span>`:`${Math.abs(l.labelNumber||0)}`}${l.isPartial?'<span style="font-size:9px;background:var(--accent2);color:#fff;border-radius:3px;padding:1px 3px;margin-left:2px">P</span>':''}</td>
+        <td style="padding:6px;font-weight:700;color:${l.voided?'#ef4444':'var(--accent)'};font-family:monospace">${l.isExcess?`<span style="color:#C55A11">E-${l.excessNum}</span>`:`<span style="${l.voided?'text-decoration:line-through;opacity:0.7':''}">${Math.abs(l.labelNumber||0)}</span>`}${l.voided?'<span style="font-size:8px;background:#ef4444;color:#fff;border-radius:3px;padding:1px 3px;margin-left:3px;letter-spacing:0.5px">VOID</span>':''}${l.isPartial?'<span style="font-size:9px;background:var(--accent2);color:#fff;border-radius:3px;padding:1px 3px;margin-left:2px">P</span>':''}</td>
         <td style="padding:6px;font-family:monospace">${fmt(l.qty)}</td>
         <td style="padding:6px">${l.voided?'<span style="background:#ef444422;color:#ef4444;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Voided</span>':l.printed?'<span style="background:#22c55e22;color:#22c55e;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">✅ Printed</span>':'<span style="background:rgba(240,192,96,0.2);color:var(--accent2);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Pending</span>'}</td>
         <td style="padding:6px;font-size:10px;color:var(--text3);white-space:nowrap">${fmtDateTime(l.generated)}</td>
@@ -3119,7 +3119,7 @@ function renderLabels(){
           <td style="padding:5px 6px;font-weight:700;font-family:monospace;font-size:11px;white-space:nowrap;color:var(--accent)">${b.batchNumber}</td>
           <td style="padding:5px 6px;font-size:11px;max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${b.customer||'-'}</td>
           <td style="padding:5px 6px;font-family:monospace;font-size:11px;text-align:center">${b.size}</td>
-          <td style="padding:5px 6px;font-size:11px;max-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${clr?`<span style="display:inline-block;max-width:75px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clr}">${clr}</span>`:'—'}</td>
+          <td style="padding:5px 6px;font-size:11px;max-width:80px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${clr?`<span style="display:inline-block;max-width:75px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${clr}">${clr}</span>`:'—'}${b.packing?`<br><span style="font-size:9px;color:var(--accent);font-weight:700" title="Packing instruction">📦 ${b.packing}</span>`:''}</td>
           <td style="padding:5px 6px;font-family:monospace;font-size:11px">${b.pcCode||'—'}</td>
           <td style="padding:5px 6px;font-family:monospace;font-size:11px;color:${actualProd>0?'var(--text1)':'var(--text3)'}">${actualProd>0?actualProd.toFixed(2):'—'}</td>
           <td style="padding:5px 6px;font-family:monospace;font-size:11px;font-weight:700">${generated}</td>
@@ -3651,7 +3651,7 @@ function renderDeptScan(dept){
         <label>Batch</label>
         <select id="wastage-batch-${dept}">
           <option value="">-- Select Batch --</option>
-          ${activeBatches.map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''}</option>`).join('')}
+          ${activeBatches.map(b=>`<option value="${b.batchNumber}">${b.batchNumber} — ${b.customer||''}${b.colour?' — '+b.colour:''}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">

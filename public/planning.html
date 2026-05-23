@@ -3550,8 +3550,14 @@ function showAddOrderModal(machineId, existingOrder) {
         <input class="form-control" id="fo-enddate" type="date" value="${toDateInput(ord.endDate)||''}">
       </div>
       <div class="form-group">
-        <label>Packing</label>
-        <input class="form-control" id="fo-packing" value="${ord.packing||''}" placeholder="e.g. HDCL">
+        <label>📦 Packing</label>
+        <select class="form-control" id="fo-packing">
+          <option value="" ${!ord.packing?'selected':''}>— Select —</option>
+          <option value="3 Ply" ${ord.packing==='3 Ply'?'selected':''}>3 Ply</option>
+          <option value="3 Ply with HDCL" ${ord.packing==='3 Ply with HDCL'?'selected':''}>3 Ply with HDCL</option>
+          <option value="5 Ply" ${ord.packing==='5 Ply'?'selected':''}>5 Ply</option>
+          ${ord.packing && !['3 Ply','3 Ply with HDCL','5 Ply'].includes(ord.packing) ? `<option value="${ord.packing}" selected>${ord.packing} (legacy)</option>` : ''}
+        </select>
       </div>
       <div class="form-group">
         <label>Zone</label>

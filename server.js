@@ -4848,6 +4848,7 @@ app.get('/api/orders/active', async (req, res) => {
         isLegacy: !o.startDate || getDateStr(o.startDate) <= LEGACY_CUTOFF,
         printMatter: o.printMatter || '',
         printingMatter: o.printMatter || o.printingMatter || '',
+        packing: o.packing || '',
       };
     };
 

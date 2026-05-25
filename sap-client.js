@@ -580,7 +580,7 @@ class SapClient {
     // Replaces previously-planned PDF download with structured Sales Register data.
     // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total
     // Lines: ItemCode (=PC Code), ItemDescription, Quantity, UnitPrice, LineTotal, VAT%, VAT amount
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
+    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,Comments,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&${select}&$top=500&$orderby=DocEntry desc` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
     return { ok: true, invoices: r.data?.value || [] };

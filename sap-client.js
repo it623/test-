@@ -481,7 +481,7 @@ class SapClient {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
     // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge datetime'YYYY-MM-DDT00:00:00'
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge datetime'${dateStr}T00:00:00'`;
+    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
     // v41 P19.2 Fix 6A: include RemainingOpenQuantity in DocumentLines. SAP returns this per line
     // for partially-delivered Sales Orders. Sunloc should plan only NOT-YET-DELIVERED qty.
     // Note: $select on a navigation property (DocumentLines) returns all line fields; the field
@@ -575,7 +575,7 @@ class SapClient {
   async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    const filter = `$filter=DocDate ge datetime'${dateStr}T00:00:00'`;
+    const filter = `$filter=DocDate ge '${dateStr}'`;
     // v40 P18.7: Pull richer line-item fields and addresses for Scan-Out matching.
     // Replaces previously-planned PDF download with structured Sales Register data.
     // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total

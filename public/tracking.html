@@ -1584,6 +1584,10 @@ async function pullFromServer(){
           state.scanSummary  = sj.summary   || {};
           state.wastageSummary = sj.wastage  || {};
           state.dispatchedSummary = sj.dispatched || {};
+          // v41 P19.6 (deep-audit fix): scan/wastage data just refreshed → the month-attributed
+          // A-Grade windowed cache is now stale. Clear it so the next report render re-fetches
+          // fresh windowed data, keeping month-attributed reports as live as cumulative ones.
+          if (typeof _v41_clearAgradeMonthCache === 'function') _v41_clearAgradeMonthCache();
           saveLocal();
           // v37F: Now that scan-summary has loaded, clear _local from scans summary now reflects
           state.scans.forEach(s => {
@@ -2245,6 +2249,119 @@ function getBatchAGrade(batchNo, stage){
     };
   }
   return {inspected:0,aGrade:0,pct:0,wip:0};
+}
+
+// ═══ v41 P19.6 (Q3): Month-attributed A-Grade ═══
+// Cache of windowed scan/wastage data per 'YYYY-MM', fetched from the server endpoint
+// which slices at the 6 AM production-month boundary. Keyed by month string.
+let _v41_agradeMonthCache = {};   // { 'YYYY-MM': { summary, wastage, crossMonth, window } }
+let _v41_useMonthAttributed = true; // toggle — default ON so monthly reports lock A-Grade to production month
+
+async function _v41_fetchAgradeMonth(ym){
+  if (_v41_agradeMonthCache[ym]) return _v41_agradeMonthCache[ym];
+  try {
+    const r = await fetch(serverUrl + '/api/tracking/agrade-by-month?month=' + encodeURIComponent(ym), { signal: AbortSignal.timeout(20000) });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error||'failed');
+    _v41_agradeMonthCache[ym] = { summary: j.summary||{}, wastage: j.wastage||{}, crossMonth: j.crossMonth||{}, window: j.window };
+    return _v41_agradeMonthCache[ym];
+  } catch(e){
+    console.warn('[agrade-by-month] fetch failed:', e.message);
+    return null;
+  }
+}
+function _v41_clearAgradeMonthCache(){ _v41_agradeMonthCache = {}; }
+
+// ═══ v41 P19.6 (Q1): Shared A-Grade selector — used by ALL A-Grade reports ═══
+// Returns month-attributed A-Grade (6 AM-cut) when the toggle is ON and the windowed data
+// for the current month is already cached; otherwise the live cumulative A-Grade. This is the
+// single decision point so every report (A, D, E, G, batch card, exports) stays consistent.
+// Reports must call _v41_ensureAgradeMonthLoaded() once before their batch loop so the cache
+// is warm; if it isn't (e.g. fetch failed), this transparently falls back to cumulative.
+function _v41_agradeFor(batchNo, stage){
+  if (_v41_useMonthAttributed) {
+    const md = _v41_agradeMonthCache[_trkSelectedMonth];
+    if (md) {
+      const r = _v41_getBatchAGradeMonth(batchNo, stage, md);
+      if (r) return r;           // includes explicit zero result (_noActivity) — correct attribution
+    }
+  }
+  return getBatchAGrade(batchNo, stage);
+}
+// Ensure windowed data for the selected month is loaded (call before a report's batch loop).
+async function _v41_ensureAgradeMonthLoaded(){
+  if (_v41_useMonthAttributed && !_v41_agradeMonthCache[_trkSelectedMonth]) {
+    await _v41_fetchAgradeMonth(_trkSelectedMonth);
+  }
+}
+// Per-report A-Grade attribution toggle. `reRenderFn` = name of the report's render function
+// to call after flipping the (shared) state. Per-report switch, shared backing variable so
+// reports can never silently disagree.
+function _v41_agradeToggleHtml(reRenderFn){
+  const on = _v41_useMonthAttributed;
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:6px 10px;background:var(--surface2);border-radius:4px;border-left:3px solid #16a34a;flex-wrap:wrap">
+    <span style="font-size:11px;font-weight:700;color:var(--text)">A-Grade:</span>
+    <button onclick="_v41_useMonthAttributed=true;_v41_clearAgradeMonthCache();${reRenderFn}()" style="font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer;border:1px solid ${on?'#16a34a':'var(--border)'};background:${on?'rgba(22,163,74,0.15)':'transparent'};color:${on?'#16a34a':'var(--text3)'};font-weight:${on?'700':'400'}">📅 Month of Production</button>
+    <button onclick="_v41_useMonthAttributed=false;${reRenderFn}()" style="font-size:10px;padding:3px 8px;border-radius:4px;cursor:pointer;border:1px solid ${!on?'var(--accent)':'var(--border)'};background:${!on?'rgba(96,165,250,0.15)':'transparent'};color:${!on?'var(--accent)':'var(--text3)'};font-weight:${!on?'700':'400'}">∑ Cumulative</button>
+    <span style="font-size:9px;color:var(--text3)">${on?`Sliced at 6 AM, 1st of next month — A-Grade for ${_trkSelectedMonth} production only`:'All-time cumulative'}</span>
+  </div>`;
+}
+
+// Compute month-attributed A-Grade for a batch using windowed data (same formula as getBatchAGrade).
+// `md` = the cached month data from _v41_fetchAgradeMonth. Returns null if no windowed data for batch.
+// boxes are converted via boxToLakh; synthetic reconciliation 'output' is added as reconQty (already Lakhs).
+function _v41_getBatchAGradeMonth(batchNo, stage, md){
+  if(!md || !md.summary) return null;
+  const batch = getBatch(batchNo);
+  if(!batch) return null;
+  const sz = batch.size;
+  const s = md.summary[batchNo] || {};
+  const w = md.wastage[batchNo] || {};
+  const dep = d => s[d] || { inBoxes:0, outBoxes:0, inReconQty:0, outReconQty:0 };
+  const was = d => w[d] || { salvage:0, remelt:0 };
+  // If this batch has NO windowed scans AND no windowed wastage at all, it had no production
+  // activity in this month window. Return an explicit ZERO result (not null) so the caller
+  // attributes NOTHING to this month — this is the whole point of month-attribution. A May-
+  // produced carry-forward batch viewed in June must show zero June A-Grade, not its cumulative.
+  const hasAny = Object.keys(s).length || Object.keys(w).length;
+  if(!hasAny) return { inspected:0, aGrade:0, salvage:0, remelt:0, wip:0, pct:0, crossMonth:false, _noActivity:true };
+
+  if(stage==='unprinted'){
+    const aim = dep('aim'); const wA = was('aim');
+    const aGrade = boxToLakh(aim.outBoxes, sz) + aim.outReconQty;
+    const salvage = wA.salvage, remelt = wA.remelt;
+    const inspected = aGrade + salvage + remelt;
+    return { inspected, aGrade, salvage, remelt, wip:0,
+             pct: inspected>0 ? (aGrade/inspected*100) : 0,
+             crossMonth: !!md.crossMonth[batchNo] };
+  }
+  if(stage==='printed'){
+    const aim = dep('aim'), pr = dep('printing'), pi = dep('pi');
+    const wA = was('aim'), wP = was('printing'), wI = was('pi');
+    const aimOut   = boxToLakh(aim.outBoxes, sz) + aim.outReconQty;
+    const printOut = boxToLakh(pr.outBoxes,  sz) + pr.outReconQty;
+    const piOut    = boxToLakh(pi.outBoxes,  sz) + pi.outReconQty;
+    const aimInspected   = aimOut   + wA.salvage + wA.remelt;
+    const printInspected = printOut + wP.salvage + wP.remelt;
+    const piInspected    = piOut    + wI.salvage + wI.remelt;
+    const downstreamWastage = wP.salvage + wP.remelt + wI.salvage + wI.remelt;
+    const netAGrade = Math.max(0, aimOut - downstreamWastage);
+    const totalSalvage = wA.salvage + wP.salvage + wI.salvage;
+    const totalRemelt  = wA.remelt  + wP.remelt  + wI.remelt;
+    return {
+      inspected: aimInspected, aGrade: netAGrade, wip:0,
+      salvage: totalSalvage, remelt: totalRemelt,
+      pct: aimInspected>0 ? (netAGrade/aimInspected*100) : 0,
+      crossMonth: !!md.crossMonth[batchNo],
+      stages: {
+        aim:   { out:aimOut,   wastage:wA.salvage+wA.remelt, inspected:aimInspected,   pct:aimInspected>0?(aimOut/aimInspected*100):0 },
+        print: { out:printOut, wastage:wP.salvage+wP.remelt, inspected:printInspected, pct:printInspected>0?(printOut/printInspected*100):0 },
+        pi:    { out:piOut,    wastage:wI.salvage+wI.remelt, inspected:piInspected,    pct:piInspected>0?(piOut/piInspected*100):0 },
+      }
+    };
+  }
+  return null;
 }
 
 function updatePlanningStageStatus(batchNo){
@@ -6606,7 +6723,7 @@ function renderBatchCard(batch){
   const wipDays = dailyCap > 0 ? remainingWIP / dailyCap : 0;
   const std=batch.isPrinted?3:2;
   const dispDate=calcDispatchDate(batch);
-  const ag=getBatchAGrade(batchNo,batch.isPrinted?'printed':'unprinted');
+  const ag=_v41_agradeFor(batchNo,batch.isPrinted?'printed':'unprinted');
   const labels=getLabelsByBatch(batchNo);
   const totalBoxes=labels.length;
   // v40 Phase 18.14: combined-source dispatched count (legacy scans + Phase 18 records)
@@ -6848,6 +6965,13 @@ function renderReports(forceRebuild){
       <div class="text-sm text-muted">Chronological list of all SAP invoices received during the selected month. Columns: Sales Order Number, date, customer, batch, boxes, qty, taxable amount, IGST, total, IRN, dispatch status, vehicle, dispatched-at. Totals row at bottom. Print-friendly + CSV export. Use for GST audits and monthly reconciliation.</div>
       <button class="btn btn-sm mt-12" style="background:#0e7490;color:#fff">Generate Invoice Ledger →</button>
     </div>
+    <!-- v41 P19.6 (Q1/Q2): Report Z — Month Changeover / Open Items + WIP Reconciliation (admin only). Named Z to avoid collision with Dispatch Report K. -->
+    ${currentDept==='admin'?`<div class="card cursor-pointer" onclick="renderReportZ()" style="border-left:4px solid #be123c;grid-column:span 2">
+      <div class="card-title" style="color:#be123c">🧹 Report Z — Month Changeover / Open Items</div>
+      <div class="fw-bold mb-4">Unclosed Orders &amp; Residual WIP for ${_trkSelectedMonth}</div>
+      <div class="text-sm text-muted">Lists every batch in ${_trkSelectedMonth} that is still open: unclosed orders and/or non-zero residual WIP. For each, admin can reconcile residual WIP — write it off as salvage/remelt (A-Grade drops) or record it as completed output (A-Grade holds). Reconciliation entries are timestamped into the selected month so A-Grade attribution stays correct. Use at month changeover to get a clean slate. Works for any month, not just May.</div>
+      <button class="btn btn-sm mt-12" style="background:#be123c;color:#fff">Open Changeover Tool →</button>
+    </div>`:''}
   </div>
   <div id="report-output" class="mt-20"></div>`;
   // Restore previously generated report (user navigated back to Reports — same month)
@@ -7089,6 +7213,15 @@ function exportReportH(){
 
 function renderReportG(){ window._activeReport = renderReportG;
   if(!document.getElementById('report-output')) renderReports();
+  // v41 P19.6 (Q3): fetch month-attributed A-Grade data (6 AM-cut), then render.
+  if(_v41_useMonthAttributed){
+    _v41_fetchAgradeMonth(_trkSelectedMonth).then(()=>{ _v41_renderReportGInner(); });
+  } else {
+    _v41_renderReportGInner();
+  }
+}
+function _v41_renderReportGInner(){
+  const md = _v41_useMonthAttributed ? _v41_agradeMonthCache[_trkSelectedMonth] : null;
   const batches = getTrkMonthBatches().filter(b=>!b.deleted && b.batchNumber).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||''));
   let totalGrossProd = 0;
   let totalAGradeQty = 0;
@@ -7101,7 +7234,16 @@ function renderReportG(){ window._activeReport = renderReportG;
   const alerts = [];
 
   const rows = batches.map(b=>{
-    const ag  = getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
+    // v41 P19.6: month-attributed A-Grade when toggle ON.
+    // - md loaded + batch has windowed activity → month-sliced A-Grade
+    // - md loaded + NO windowed activity → explicit zero (carry-forward batch produced another month)
+    // - md FAILED to load (network) → fall back to live cumulative so report isn't blank
+    let ag = null;
+    if (_v41_useMonthAttributed && md) {
+      ag = _v41_getBatchAGradeMonth(b.batchNumber, b.isPrinted?'printed':'unprinted', md);
+      // md is loaded → trust the month result (incl. explicit zero). Do NOT fall back here.
+    }
+    if (!ag) ag = getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
     const wip = getBatchWIPBreakdown(b.batchNumber);
     const grossProd = b.actualProd || b.actualQty || 0;
     totalGrossProd += grossProd;
@@ -7121,6 +7263,7 @@ function renderReportG(){ window._activeReport = renderReportG;
     }
 
     const pctCls = ag.pct>=95?'green':ag.pct>=90?'var(--amber)':'var(--red)';
+    const crossFlag = ag.crossMonth ? `<span title="Production spans the month boundary — A-Grade shown is the portion inspected within ${_trkSelectedMonth} (sliced at 6 AM on the 1st of next month)" style="color:#0ea5e9;cursor:help;margin-left:4px;font-size:10px">⇄ split</span>` : '';
     let aGradeBreakdown = '';
     if(b.isPrinted && ag.stages){
       const s = ag.stages;
@@ -7150,7 +7293,7 @@ function renderReportG(){ window._activeReport = renderReportG;
     const alertFlag = (overInspected||noGross) ? `<span title="${overInspected?'Inspected > Gross Production — check DPR':'No DPR entry'}" style="color:var(--accent4);cursor:help;margin-left:4px">⚠️</span>` : '';
 
     return `<tr ${overInspected||noGross?'style="background:rgba(220,38,38,0.04)"':''}>
-      <td class="td-bold td-mono">${b.batchNumber}${alertFlag}</td>
+      <td class="td-bold td-mono">${b.batchNumber}${alertFlag}${crossFlag}</td>
       <td class="text-sm">${b.customer||'—'}</td>
       <td class="td-mono">${b.size}</td>
       <td>${b.isPrinted?'<span class="badge badge-purple">PTD</span>':'<span class="badge badge-gray">UP</span>'}</td>
@@ -7190,6 +7333,13 @@ function renderReportG(){ window._activeReport = renderReportG;
   const html = `
   <div class="card mb-16">
     <div class="section-title mb-12">Report G — A-Grade Performance &amp; WIP Breakdown</div>
+
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:4px;border-left:3px solid #16a34a;flex-wrap:wrap">
+      <span style="font-size:12px;font-weight:700;color:var(--text)">A-Grade attribution:</span>
+      <button onclick="_v41_useMonthAttributed=true;_v41_clearAgradeMonthCache();renderReportG()" style="font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;border:1px solid ${_v41_useMonthAttributed?'#16a34a':'var(--border)'};background:${_v41_useMonthAttributed?'rgba(22,163,74,0.15)':'transparent'};color:${_v41_useMonthAttributed?'#16a34a':'var(--text3)'};font-weight:${_v41_useMonthAttributed?'700':'400'}">📅 Month of Production (6 AM cut)</button>
+      <button onclick="_v41_useMonthAttributed=false;renderReportG()" style="font-size:11px;padding:4px 10px;border-radius:4px;cursor:pointer;border:1px solid ${!_v41_useMonthAttributed?'var(--accent)':'var(--border)'};background:${!_v41_useMonthAttributed?'rgba(96,165,250,0.15)':'transparent'};color:${!_v41_useMonthAttributed?'var(--accent)':'var(--text3)'};font-weight:${!_v41_useMonthAttributed?'700':'400'}">∑ Live Cumulative</button>
+      <span style="font-size:10px;color:var(--text3)">${_v41_useMonthAttributed?`Showing A-Grade for production inspected within ${_trkSelectedMonth} (scans up to 6 AM on the 1st of next month). ⇄ = batch spans boundary.`:'Showing all-time cumulative A-Grade per batch (not month-sliced).'}</span>
+    </div>
 
     <div class="kpi-grid mb-16">
       <div class="kpi"><div class="kpi-label">Total Gross Production</div><div class="kpi-val cyan">${fmt(totalGrossProd)}L</div></div>
@@ -7239,14 +7389,20 @@ _scrollIntoReportIfFirstView('G');
 
 function exportReportG(){
   const batches = getTrkMonthBatches().filter(b=>!b.deleted&&b.batchNumber).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||''));
+  // v41 P19.6: match on-screen attribution. If month-attributed toggle is ON and the windowed
+  // data is already cached (user viewed the report before exporting), use month-sliced A-Grade.
+  const md = (_v41_useMonthAttributed && _v41_agradeMonthCache[_trkSelectedMonth]) ? _v41_agradeMonthCache[_trkSelectedMonth] : null;
   const rows = batches.map(b=>{
-    const ag  = getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
+    let ag = md ? _v41_getBatchAGradeMonth(b.batchNumber, b.isPrinted?'printed':'unprinted', md) : null;
+    if (!ag) ag = getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
     const wip = getBatchWIPBreakdown(b.batchNumber);
     const row = {
       'Batch': b.batchNumber,
       'Customer': b.customer||'',
       'Size': b.size,
       'Type': b.isPrinted?'PTD':'UP',
+      'A-Grade Basis': md ? (`Production month ${_trkSelectedMonth} (6 AM cut)`) : 'Live cumulative',
+      'Cross-Month': (ag && ag.crossMonth) ? 'YES — spans boundary' : '',
       'Gross Production (L)': fmt(b.actualProd||b.actualQty||0),
       'Inspected (L)': fmt(ag.inspected),
       'A-Grade (L)': fmt(ag.aGrade),
@@ -7272,6 +7428,167 @@ function exportReportG(){
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'A-Grade Report');
   XLSX.writeFile(wb, 'AGrade_Report_'+today()+'.xlsx');
+}
+
+// ═══ v41 P19.6 (Q1/Q2): Report Z — Month Changeover / Open Items + WIP Reconciliation ═══
+// NOTE: named "Z" because "Report K" is already taken by the Dispatch Pack-In→Dispatch-Out
+// summary (renderReportK(targetId) further below). Keeping them distinct avoids a fatal
+// duplicate-function-name shadow.
+function renderReportZ(){ window._activeReport = renderReportZ;
+  if(currentDept!=='admin'){ toast('Admin only','#dc2626'); return; }
+  if(!document.getElementById('report-output')) renderReports();
+  const ym = _trkSelectedMonth;
+  const batches = getTrkMonthBatches().filter(b=>!b.deleted && b.batchNumber).sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||''));
+  // An "open item" = order not closed OR has non-zero residual WIP.
+  const items = batches.map(b=>{
+    const wip = getBatchWIPBreakdown(b.batchNumber);
+    const totalWIP = wip ? (wip.totalWIP||0) : 0;
+    const packWIP  = wip ? (wip.packWIP||0)  : 0;   // FG awaiting dispatch
+    const isOpen = (b.status!=='closed') || totalWIP>0.005 || packWIP>0.005;
+    return { b, wip, totalWIP, packWIP, isOpen };
+  }).filter(x=>x.isOpen);
+
+  const rows = items.map(({b,wip,totalWIP,packWIP})=>{
+    const statusBadge = b.status==='closed'
+      ? '<span class="badge badge-gray">closed</span>'
+      : '<span class="badge" style="background:rgba(220,38,38,0.15);color:#dc2626">open</span>';
+    const wipDetail = wip ? [
+      wip.preAIM>0.005?`Pre-AIM ${fmt(wip.preAIM)}L`:'',
+      wip.aimWIP>0.005?`AIM ${fmt(wip.aimWIP)}L`:'',
+      wip.printWIP>0.005?`Print ${fmt(wip.printWIP)}L`:'',
+      wip.piWIP>0.005?`PI ${fmt(wip.piWIP)}L`:'',
+      wip.toPackTransit>0.005?`Transit ${fmt(wip.toPackTransit)}L`:'',
+    ].filter(Boolean).join(', ') : '';
+    return `<tr>
+      <td class="td-bold td-mono">${b.batchNumber}</td>
+      <td class="text-sm">${b.customer||'—'}</td>
+      <td class="td-mono">${b.size}</td>
+      <td>${b.isPrinted?'<span class="badge badge-purple">PTD</span>':'<span class="badge badge-gray">UP</span>'}</td>
+      <td>${statusBadge}</td>
+      <td class="td-mono">${fmt(b.actualProd||b.actualQty||0)}L</td>
+      <td class="td-mono amber">${totalWIP>0.005?fmt(totalWIP)+'L':'—'}</td>
+      <td class="text-sm" style="color:var(--text3)">${wipDetail||'—'}</td>
+      <td class="td-mono green">${packWIP>0.005?fmt(packWIP)+'L':'—'}</td>
+      <td>${(totalWIP>0.005)?`<button class="btn btn-sm" style="background:#be123c;color:#fff;font-size:11px" onclick="_v41_openReconcileModal('${b.batchNumber}','${b.isPrinted?'printed':'unprinted'}')">Reconcile WIP</button>`:'—'}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `
+  <div class="card mb-16">
+    <div class="section-title mb-12">🧹 Report Z — Month Changeover / Open Items (${ym})</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:4px;border-left:3px solid #be123c">
+      Lists batches in <b>${ym}</b> still open: unclosed orders and/or non-zero residual WIP. To get a clean slate before the next month, either complete the genuine production (close the order in Planning) or, for material that was produced but never fully scanned, use <b>Reconcile WIP</b> to resolve the residual. Reconciliation entries are timestamped inside <b>${ym}</b> so A-Grade stays attributed to this production month.
+    </div>
+    <div class="tbl-wrap tbl-sticky"><table>
+      <thead><tr>
+        <th>Batch</th><th>Customer</th><th>Sz</th><th>Type</th><th>Order Status</th>
+        <th>Gross Prod</th><th>Total WIP</th><th>WIP Breakdown</th><th>FG Awaiting Dispatch</th><th>Action</th>
+      </tr></thead>
+      <tbody>${rows||'<tr><td colspan="10" class="text-center text-muted">✅ No open items for '+ym+' — clean slate</td></tr>'}</tbody>
+    </table></div>
+    <div style="font-size:11px;color:var(--text3);margin-top:10px">${items.length} open item${items.length===1?'':'s'}. FG awaiting dispatch (packed, not yet dispatched) is shown for context but is not WIP — it resolves on dispatch scan.</div>
+  </div>`;
+  _captureReportScroll();
+  document.getElementById('report-output').innerHTML = html;
+  _scrollIntoReportIfFirstView('Z');
+}
+
+function _v41_openReconcileModal(batchNo, stage){
+  if(currentDept!=='admin'){ toast('Admin only','#dc2626'); return; }
+  const wip = getBatchWIPBreakdown(batchNo);
+  const totalWIP = wip ? (wip.totalWIP||0) : 0;
+  const ym = _trkSelectedMonth;
+  // Suggest the dept that holds the most WIP as the default reconciliation dept
+  const stageWips = wip ? [
+    ['aim', (wip.preAIM||0)+(wip.aimWIP||0)],
+    ['printing', wip.printWIP||0],
+    ['pi', wip.piWIP||0],
+  ] : [['aim',0]];
+  stageWips.sort((a,b)=>b[1]-a[1]);
+  const defaultDept = stageWips[0][0];
+  const deptOpts = (stage==='printed'?['aim','printing','pi']:['aim'])
+    .map(d=>`<option value="${d}" ${d===defaultDept?'selected':''}>${({aim:'AIM',printing:'Printing',pi:'PI'})[d]}</option>`).join('');
+
+  openModal(`Reconcile WIP — ${batchNo}`, `Resolve residual WIP for ${ym}`, `
+    <div style="font-size:12px;color:var(--text3);margin-bottom:10px">
+      Total residual WIP: <b style="color:var(--amber)">${fmt(totalWIP)}L</b>. Choose how to resolve it.
+      The A-Grade impact differs — pick the one that reflects what the material actually was.
+    </div>
+    <div class="form-group">
+      <label>Department (stage holding the WIP)</label>
+      <select id="recon-dept" class="form-control">${deptOpts}</select>
+    </div>
+    <div class="form-group">
+      <label>Resolution mode</label>
+      <select id="recon-mode" class="form-control" onchange="_v41_reconModeChange()">
+        <option value="writeoff">Write off as wastage — A-Grade DROPS (material scrapped/remelted)</option>
+        <option value="output">Record as completed output — A-Grade HOLDS (good, just unscanned)</option>
+      </select>
+    </div>
+    <div id="recon-writeoff-fields">
+      <div class="form-group">
+        <label>Salvage (Lakhs)</label>
+        <input type="number" id="recon-salvage" class="form-control" value="0" min="0" step="0.01">
+      </div>
+      <div class="form-group">
+        <label>Remelt (Lakhs)</label>
+        <input type="number" id="recon-remelt" class="form-control" value="0" min="0" step="0.01">
+      </div>
+    </div>
+    <div id="recon-output-fields" style="display:none">
+      <div class="form-group">
+        <label>Completed output to record (Lakhs)</label>
+        <input type="number" id="recon-outqty" class="form-control" value="${fmt(totalWIP)}" min="0" step="0.01">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Reason / note (audit)</label>
+      <input type="text" id="recon-reason" class="form-control" placeholder="e.g. May data incomplete — reconciled at changeover">
+    </div>
+    <div style="font-size:11px;color:var(--text3)">This action is logged in the audit trail and timestamped into ${ym}.</div>
+  `, [
+    { label:'Cancel', cls:'btn-secondary', fn:'closeModal()' },
+    { label:'Apply Reconciliation', cls:'btn-danger', fn:`_v41_submitReconcile('${batchNo}','${ym}')` },
+  ]);
+}
+
+function _v41_reconModeChange(){
+  const mode = document.getElementById('recon-mode')?.value;
+  const wo = document.getElementById('recon-writeoff-fields');
+  const op = document.getElementById('recon-output-fields');
+  if(wo) wo.style.display = mode==='writeoff' ? '' : 'none';
+  if(op) op.style.display = mode==='output'   ? '' : 'none';
+}
+
+async function _v41_submitReconcile(batchNo, ym){
+  const dept = document.getElementById('recon-dept')?.value;
+  const mode = document.getElementById('recon-mode')?.value;
+  const reason = document.getElementById('recon-reason')?.value || '';
+  const body = { batchNumber:batchNo, dept, mode, month:ym, reason, reconciledBy: (currentDept||'admin') };
+  if(mode==='writeoff'){
+    body.salvage = parseFloat(document.getElementById('recon-salvage')?.value||0);
+    body.remelt  = parseFloat(document.getElementById('recon-remelt')?.value||0);
+    if((body.salvage||0)<=0 && (body.remelt||0)<=0){ toast('Enter salvage and/or remelt > 0','#dc2626'); return; }
+  } else {
+    body.outQty = parseFloat(document.getElementById('recon-outqty')?.value||0);
+    if((body.outQty||0)<=0){ toast('Enter output qty > 0','#dc2626'); return; }
+  }
+  try{
+    const r = await fetch(serverUrl+'/api/tracking/reconcile-wip',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body),
+      signal:AbortSignal.timeout(15000)
+    });
+    const j = await r.json();
+    if(!j.ok){ toast('Failed: '+(j.error||'error'),'#dc2626'); return; }
+    toast('Reconciliation applied','#16a34a');
+    closeModal();
+    // Refresh: clear month A-Grade cache (windowed data changed) + reload scans/wastage, then re-render
+    _v41_clearAgradeMonthCache();
+    if(typeof pullFromServer==='function'){ try{ await pullFromServer(); }catch(e){} }
+    renderReportZ();
+  }catch(e){
+    toast('Network error: '+e.message,'#dc2626');
+  }
 }
 
 function renderReportF(){ window._activeReport = renderReportF;
@@ -7663,6 +7980,14 @@ _scrollIntoReportIfFirstView('C');
 }
 
 function renderReportD(){ window._activeReport = renderReportD;
+  // v41 P19.6 (Q1): warm month-attributed cache, then render (fallback to cumulative on fetch fail).
+  if (_v41_useMonthAttributed && !_v41_agradeMonthCache[_trkSelectedMonth]) {
+    _v41_ensureAgradeMonthLoaded().then(()=>_v41_renderReportDInner());
+    return;
+  }
+  _v41_renderReportDInner();
+}
+function _v41_renderReportDInner(){
   if(!document.getElementById('report-output')) renderReports();
   const monthBatches = getTrkMonthBatches();
   const monthBatchNos = new Set(monthBatches.map(b=>b.batchNumber).filter(Boolean));
@@ -7686,12 +8011,13 @@ function renderReportD(){ window._activeReport = renderReportD;
     stageWIP[dept]=Math.max(0,inn-out);
   });
   const totalAGrade=monthBatches.reduce((s,b)=>{
-    const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
+    const ag=_v41_agradeFor(b.batchNumber,b.isPrinted?'printed':'unprinted');
     return s+ag.aGrade;
   },0);
-  const totalInspectedD=monthBatches.reduce((s,b)=>{const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');return s+ag.inspected;},0);
+  const totalInspectedD=monthBatches.reduce((s,b)=>{const ag=_v41_agradeFor(b.batchNumber,b.isPrinted?'printed':'unprinted');return s+ag.inspected;},0);
   const aGradePct=totalInspectedD>0?(totalAGrade/totalInspectedD*100):0;
   const html=`<div class="card"><div class="section-title mb-16">Report D — Overall Summary</div>
+  ${_v41_agradeToggleHtml('renderReportD')}
   <div class="kpi-grid">
     <div class="kpi"><div class="kpi-label">Gross Production</div><div class="kpi-val">${fmt(totalGross)}L</div></div>
     <div class="kpi"><div class="kpi-label">Total A-Grade</div><div class="kpi-val green">${fmt(totalAGrade)}L</div></div>
@@ -7717,6 +8043,14 @@ _scrollIntoReportIfFirstView('D');
 }
 
 function renderReportA(){ window._activeReport = renderReportA;
+  // v41 P19.6 (Q1): warm month-attributed cache, then render (fallback to cumulative on fetch fail).
+  if (_v41_useMonthAttributed && !_v41_agradeMonthCache[_trkSelectedMonth]) {
+    _v41_ensureAgradeMonthLoaded().then(()=>_v41_renderReportAInner());
+    return;
+  }
+  _v41_renderReportAInner();
+}
+function _v41_renderReportAInner(){
   if(!document.getElementById('report-output')) renderReports();
   // Date filter
   const filterBatch = window._rptABatch||'';
@@ -7729,6 +8063,7 @@ function renderReportA(){ window._activeReport = renderReportA;
 
   let html=`<div class="card">
     <div class="section-title mb-16">Report A — Complete Batch Tracking (Full Duration)</div>
+    ${_v41_agradeToggleHtml('renderReportA')}
     <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;align-items:center;position:sticky;top:0;background:var(--surface);z-index:10;padding:8px 0;border-bottom:1px solid var(--border)">
       <div style="position:relative;min-width:280px;max-width:340px">
         <input type="text" id="rptA-batch-search" list="rptA-batch-list" placeholder="🔍 Type to search batches or pick from list…"
@@ -7745,7 +8080,7 @@ function renderReportA(){ window._activeReport = renderReportA;
 
   batches.forEach(b=>{
     const wipDays=getBatchWIPDays(b.batchNumber);
-    const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
+    const ag=_v41_agradeFor(b.batchNumber,b.isPrinted?'printed':'unprinted');
     const labels=getLabelsByBatch(b.batchNumber);
     // v40 Phase 18.14: combined-source dispatch (legacy scans + Phase 18 records)
     const dispatched = _v40_dispatchedLakhs(b.batchNumber, b.size);
@@ -7879,6 +8214,15 @@ function renderBatchFlowSummary(batch){
 function normMcId(id){ return (id||'').replace(/[.\s]/g,'').toUpperCase(); }
 
 function renderReportE(){ window._activeReport = renderReportE;
+  // v41 P19.6 (Q1): warm the month-attributed A-Grade cache, then render. If fetch fails,
+  // _v41_agradeFor transparently falls back to cumulative so the report still renders.
+  if (_v41_useMonthAttributed && !_v41_agradeMonthCache[_trkSelectedMonth]) {
+    _v41_ensureAgradeMonthLoaded().then(()=>_v41_renderReportEInner());
+    return;
+  }
+  _v41_renderReportEInner();
+}
+function _v41_renderReportEInner(){
   // Build all data first (same computation as before)
   const filterDate = window._rptEDate || '';
   // Build date list for filter — use state.scans timestamps (date grouping is display only)
@@ -7911,7 +8255,7 @@ function renderReportE(){ window._activeReport = renderReportE;
     const aimW=getTotalWastage(b.batchNumber,'aim');
     const aimIn=aimOutQty+aimW.total;
     const manW=getTotalWastage(b.batchNumber,'manual');
-    const ag=getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
+    const ag=_v41_agradeFor(b.batchNumber, b.isPrinted?'printed':'unprinted');
     const totalAG=ag.aGrade;
     const aGradePct=ag.pct;
     const wip=Math.max(0,grossProd-aimIn);
@@ -8348,6 +8692,7 @@ document.querySelectorAll('thead th').forEach((th,col)=>{
   // works even if popup is blocked or user is on mobile. Search input + sticky headers added.
   document.getElementById('report-output').innerHTML = `<div class="card">
     <div class="section-title mb-8">Report E — Machine-wise Production Tracking Sheet</div>
+    ${_v41_agradeToggleHtml('renderReportE')}
     <div class="text-sm text-muted mb-12">${dateLabel} · ${rows.length} batch rows</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px">
       ${dateSelectHtml}
@@ -10111,7 +10456,7 @@ function exportDispatch() {
 
 function exportReportA(){
   const rows=getTrkMonthBatches().filter(b=>!b.deleted).map(b=>{
-    const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
+    const ag=_v41_agradeFor(b.batchNumber,b.isPrinted?'printed':'unprinted');
     const wipDays=getBatchWIPDays(b.batchNumber);
     // v40 Phase 18.14: combined-source dispatch
     const dispatched = _v40_dispatchedLakhs(b.batchNumber, b.size);
@@ -10225,7 +10570,7 @@ function exportReportD(){
   const monthBatches=getTrkMonthBatches();
   const monthBatchNos=new Set(monthBatches.map(b=>b.batchNumber).filter(Boolean));
   const totalGross=monthBatches.reduce((s,b)=>s+(b.actualProd||0),0);
-  const totalAGrade=monthBatches.reduce((s,b)=>{const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');return s+ag.aGrade;},0);
+  const totalAGrade=monthBatches.reduce((s,b)=>{const ag=_v41_agradeFor(b.batchNumber,b.isPrinted?'printed':'unprinted');return s+ag.aGrade;},0);
   const aGradePct=totalGross>0?(totalAGrade/totalGross*100):0;
   const totalDispatched=state.dispatchRecs.reduce((s,r)=>s+r.qty,0);
   const stages=['aim','printing','pi','packing','dispatch'];
@@ -10252,7 +10597,7 @@ function exportReportD(){
     {'Metric':'Active Batches','Value':monthBatches.filter(b=>b.status==='running').length},
   ];
   const batchRows=monthBatches.filter(b=>!b.deleted).map(b=>{
-    const ag=getBatchAGrade(b.batchNumber,b.isPrinted?'printed':'unprinted');
+    const ag=_v41_agradeFor(b.batchNumber,b.isPrinted?'printed':'unprinted');
     return {'Batch':b.batchNumber,'Gross Prod (L)':fmt(b.actualProd||0),'A-Grade (L)':fmt(ag.aGrade),'A-Grade %':fmt(ag.pct,1),'Salvage (L)':fmt(ag.salvage),'Remelt (L)':fmt(ag.remelt)};
   });
   const wb=XLSX.utils.book_new();
@@ -10275,7 +10620,7 @@ function exportReportE(){
         const aimOut=boxToLakh(aimOutBoxes,b.size);
         const aimW=getTotalWastage(b.batchNumber,'aim');
         const aimIn=aimOut+aimW.total;
-        const ag=getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
+        const ag=_v41_agradeFor(b.batchNumber, b.isPrinted?'printed':'unprinted');
         const aGradePct=ag.pct, netAGrade=ag.aGrade;
         const wip=Math.max(0,grossProd-aimIn);
         const localPackOut = state.scans.filter(sc=>sc.batchNumber===b.batchNumber&&sc.dept==='packing'&&sc.type==='in'&&sc._local).length;

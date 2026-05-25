@@ -9495,6 +9495,115 @@ app.get('/api/tracking/scan-summary', async (req, res) => {
   }
 });
 
+// ═══ v41 P19.6 (Q3): Month-attributed A-Grade ═══
+// Attributes A-Grade to the MONTH OF PRODUCTION using a 6 AM boundary on scan ts.
+// Production window for month YYYY-MM = [YYYY-MM-01 06:00:00, nextMonth-01 06:00:00).
+// Rationale (per Ishan): a batch produced across a month boundary (e.g. 31 May–2 Jun)
+// has its May A-Grade computed from ONLY the scans/wastage timestamped before 6 AM on
+// 1 Jun (end of C-shift). Everything after rolls into June. OUT, salvage and remelt are
+// ALL sliced at the same boundary (option A — symmetric slice) so each month's A-Grade %
+// is internally consistent: pct = OUT / (OUT + Salvage + Remelt), all within-window.
+// Read-only aggregation from tracking_scans + tracking_wastage (both carry `ts`).
+// No migration, no schema change.
+function _v41_monthWindow(ym){
+  // ym = 'YYYY-MM' → { start, end } as 'YYYY-MM-DD HH:MM:SS' strings (local clock, 06:00 boundary)
+  const [y, m] = ym.split('-').map(Number);
+  const pad = n => String(n).padStart(2,'0');
+  const start = `${y}-${pad(m)}-01 06:00:00`;
+  // next month
+  const ny = m === 12 ? y+1 : y;
+  const nm = m === 12 ? 1   : m+1;
+  const end = `${ny}-${pad(nm)}-01 06:00:00`;
+  return { start, end };
+}
+
+app.get('/api/tracking/agrade-by-month', async (req, res) => {
+  try {
+    const ym = String(req.query.month||'').trim();
+    if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ ok:false, error:'month=YYYY-MM required' });
+    const { start, end } = _v41_monthWindow(ym);
+
+    // Also need to know which batches had ANY production activity that SPANS the boundary,
+    // so the client can flag cross-month batches. A batch is cross-month if it has scans
+    // both before `start`+window AND after `end` boundary anywhere in its history.
+    let scanRows, wastageRows, spanRows;
+    if (pgPool) {
+      const sq = async (sql, params) => {
+        try { return (await pgPool.query(sql, params)).rows; }
+        catch(e){ console.warn('[agrade-by-month] pg query failed:', e.message); return []; }
+      };
+      [scanRows, wastageRows, spanRows] = await Promise.all([
+        sq(`SELECT batch_number, dept, type,
+              COUNT(*) FILTER (WHERE label_id NOT LIKE 'recon-%') AS box_cnt,
+              COALESCE(SUM(qty) FILTER (WHERE label_id LIKE 'recon-%'),0) AS recon_qty
+            FROM tracking_scans WHERE ts >= $1 AND ts < $2
+            GROUP BY batch_number, dept, type`, [start, end]),
+        sq(`SELECT batch_number, dept, type, COALESCE(SUM(qty),0) AS total_qty
+            FROM tracking_wastage WHERE ts >= $1 AND ts < $2
+            GROUP BY batch_number, dept, type`, [start, end]),
+        // batches with scans before window start AND scans on/after window end (true span across this month's boundaries)
+        sq(`SELECT batch_number,
+              MIN(ts) AS first_ts, MAX(ts) AS last_ts
+            FROM tracking_scans GROUP BY batch_number`, [])
+      ]);
+    } else {
+      const sq = (sql, params) => { try { return db.prepare(sql).all(...params); } catch(e){ console.warn('[agrade-by-month] sqlite query failed:', e.message); return []; } };
+      scanRows    = sq(`SELECT batch_number, dept, type,
+                          SUM(CASE WHEN label_id NOT LIKE 'recon-%' THEN 1 ELSE 0 END) AS box_cnt,
+                          COALESCE(SUM(CASE WHEN label_id LIKE 'recon-%' THEN qty ELSE 0 END),0) AS recon_qty
+                        FROM tracking_scans WHERE ts >= ? AND ts < ?
+                        GROUP BY batch_number, dept, type`, [start, end]);
+      wastageRows = sq(`SELECT batch_number, dept, type, COALESCE(SUM(qty),0) AS total_qty
+                        FROM tracking_wastage WHERE ts >= ? AND ts < ?
+                        GROUP BY batch_number, dept, type`, [start, end]);
+      spanRows    = sq(`SELECT batch_number, MIN(ts) AS first_ts, MAX(ts) AS last_ts
+                        FROM tracking_scans GROUP BY batch_number`, []);
+    }
+
+    // Build per-batch, per-dept windowed scan summary.
+    // boxes = real scan count (box-count path, matches canonical A-Grade via boxToLakh client-side)
+    // reconQty = Lakhs from synthetic reconciliation 'output' scans (already in Lakhs, added directly)
+    const summary = {};
+    const ensure = (bn, dept) => {
+      if (!summary[bn]) summary[bn] = {};
+      if (!summary[bn][dept]) summary[bn][dept] = { inBoxes:0, outBoxes:0, inReconQty:0, outReconQty:0 };
+    };
+    scanRows.forEach(r => {
+      const bn = r.batch_number; if (!bn) return;
+      ensure(bn, r.dept);
+      const boxes = parseInt(r.box_cnt||0,10);
+      const reconQ = parseFloat(r.recon_qty||0);
+      if (r.type === 'in')  { summary[bn][r.dept].inBoxes  += boxes; summary[bn][r.dept].inReconQty  += reconQ; }
+      if (r.type === 'out') { summary[bn][r.dept].outBoxes += boxes; summary[bn][r.dept].outReconQty += reconQ; }
+    });
+    const wastage = {};
+    wastageRows.forEach(r => {
+      const bn = r.batch_number; if (!bn) return;
+      if (!wastage[bn]) wastage[bn] = {};
+      if (!wastage[bn][r.dept]) wastage[bn][r.dept] = { salvage:0, remelt:0 };
+      if (r.type === 'salvage') wastage[bn][r.dept].salvage += parseFloat(r.total_qty||0);
+      if (r.type === 'remelt')  wastage[bn][r.dept].remelt  += parseFloat(r.total_qty||0);
+    });
+    // Cross-month flag: batch whose scan history starts before this window's end but also
+    // continues at/after the window end boundary → production straddled the boundary.
+    const crossMonth = {};
+    spanRows.forEach(r => {
+      const bn = r.batch_number; if (!bn) return;
+      const first = r.first_ts || '', last = r.last_ts || '';
+      // straddles if first scan is before window end AND last scan is on/after window end,
+      // OR first scan is before window start AND last scan is on/after window start
+      const straddlesEnd   = first && last && first < end   && last >= end;
+      const straddlesStart = first && last && first < start && last >= start;
+      if (straddlesEnd || straddlesStart) crossMonth[bn] = true;
+    });
+
+    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth });
+  } catch(err) {
+    console.error('[agrade-by-month]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
 app.get('/api/tracking/wip-summary', async (req, res) => {
   try {
     let summary, closures;
@@ -10364,6 +10473,71 @@ app.post('/api/tracking/stage-close', async (req, res) => {
 });
 
 // ── Wastage — save salvage/remelt records ─────────────────────
+// ═══ v41 P19.6 (Q2): WIP reconciliation / write-off ═══
+// Lets admin resolve residual WIP on a batch at month changeover with an explicit
+// A-Grade impact choice:
+//   mode='writeoff' → inserts salvage/remelt into tracking_wastage → A-Grade % DROPS
+//                     (the unaccounted material is declared scrapped/remelted)
+//   mode='output'   → inserts 'out' scans into tracking_scans → A-Grade % HOLDS
+//                     (material was good, just never scanned out)
+// The entry ts is placed INSIDE the target month's production window (just before the
+// 6 AM cutoff) so the A-Grade/WIP impact is attributed to the correct production month,
+// even if the admin performs the reconciliation in a later month. Fully audit-logged.
+app.post('/api/tracking/reconcile-wip', async (req, res) => {
+  try {
+    const { batchNumber, dept, mode, salvage, remelt, outQty, month, reason, reconciledBy } = req.body;
+    if (!batchNumber || !dept) return res.status(400).json({ ok:false, error:'batchNumber and dept required' });
+    if (mode !== 'writeoff' && mode !== 'output') return res.status(400).json({ ok:false, error:"mode must be 'writeoff' or 'output'" });
+    // Timestamp the reconciliation entry inside the target month's window (1s before cutoff).
+    // If no month given, use current time (impact lands in current month).
+    let ts;
+    if (/^\d{4}-\d{2}$/.test(String(month||''))) {
+      const { end } = _v41_monthWindow(month);
+      // end is 'YYYY-MM-DD 06:00:00' (next month) — subtract 1 second to land inside target month
+      const endDate = new Date(end.replace(' ','T'));
+      endDate.setSeconds(endDate.getSeconds() - 1);
+      const pad = n => String(n).padStart(2,'0');
+      ts = `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())} ${pad(endDate.getHours())}:${pad(endDate.getMinutes())}:${pad(endDate.getSeconds())}`;
+    } else {
+      ts = new Date().toISOString();
+    }
+    const genId = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+    const who = reconciledBy || 'admin';
+    const auditDetails = JSON.stringify({ batchNumber, dept, mode, salvage:salvage||0, remelt:remelt||0, outQty:outQty||0, month:month||null, reason:reason||'', ts });
+
+    if (mode === 'writeoff') {
+      const sv = parseFloat(salvage||0), rm = parseFloat(remelt||0);
+      if (sv <= 0 && rm <= 0) return res.status(400).json({ ok:false, error:'writeoff needs salvage and/or remelt > 0' });
+      if (pgPool) {
+        if (sv > 0) await pgPool.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,"by") VALUES ($1,$2,$3,'salvage',$4,$5,$6) ON CONFLICT(id) DO NOTHING`, [genId(),batchNumber,dept,sv,ts,`recon:${who}`]);
+        if (rm > 0) await pgPool.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,"by") VALUES ($1,$2,$3,'remelt',$4,$5,$6) ON CONFLICT(id) DO NOTHING`, [genId(),batchNumber,dept,rm,ts,`recon:${who}`]);
+        await pgPool.query(`INSERT INTO audit_log (username,role,app,action,details) VALUES ($1,'admin','tracking','WIP_RECONCILE_WRITEOFF',$2)`, [who, auditDetails]);
+      } else {
+        const insW = db.prepare(`INSERT OR IGNORE INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES (?,?,?,?,?,?,?)`);
+        if (sv > 0) insW.run(genId(),batchNumber,dept,'salvage',sv,ts,`recon:${who}`);
+        if (rm > 0) insW.run(genId(),batchNumber,dept,'remelt',rm,ts,`recon:${who}`);
+        db.prepare(`INSERT INTO audit_log (username,role,app,action,details) VALUES (?,'admin','tracking','WIP_RECONCILE_WRITEOFF',?)`).run(who, auditDetails);
+      }
+    } else { // mode === 'output'
+      const oq = parseFloat(outQty||0);
+      if (oq <= 0) return res.status(400).json({ ok:false, error:'output needs outQty > 0' });
+      // Insert a single synthetic 'out' scan carrying the qty. label_id is a synthetic recon id.
+      const sid = 'recon-' + genId();
+      if (pgPool) {
+        await pgPool.query(`INSERT INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,qty) VALUES ($1,$2,$3,$4,'out',$5,$6,$7) ON CONFLICT(id) DO NOTHING`, [genId(),sid,batchNumber,dept,ts,`recon:${who}`,oq]);
+        await pgPool.query(`INSERT INTO audit_log (username,role,app,action,details) VALUES ($1,'admin','tracking','WIP_RECONCILE_OUTPUT',$2)`, [who, auditDetails]);
+      } else {
+        db.prepare(`INSERT OR IGNORE INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,qty) VALUES (?,?,?,?,'out',?,?,?)`).run(genId(),sid,batchNumber,dept,ts,`recon:${who}`,oq);
+        db.prepare(`INSERT INTO audit_log (username,role,app,action,details) VALUES (?,'admin','tracking','WIP_RECONCILE_OUTPUT',?)`).run(who, auditDetails);
+      }
+    }
+    res.json({ ok:true, ts, mode });
+  } catch(err) {
+    console.error('[reconcile-wip]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
 app.post('/api/tracking/wastage', async (req, res) => {
   try {
     const { batchNumber, dept, salvage, remelt } = req.body;

@@ -892,6 +892,32 @@ const MIGRATIONS = [
     sql: `ALTER TABLE invoices_received ADD COLUMN soc_applied INTEGER NOT NULL DEFAULT 0;
           CREATE INDEX IF NOT EXISTS idx_inv_recv_soc_applied ON invoices_received(soc_applied);`
   },
+  {
+    // v41 PERF FIX (tracking slowness root cause): tracking_scans has grown to ~29.5k rows.
+    // The scans-recent endpoint runs `ORDER BY ts DESC` (and the initial load filters
+    // `WHERE ts >= ...`), but SQLite had NO index on `ts` — only idx_scans_batch(batch_number,dept).
+    // Every scan query therefore did a full-table scan + sort of all 29.5k rows, exceeding the
+    // client fetch timeout and ABORTING ("refreshScans error / STEP 3 scans failed: aborted"),
+    // which in turn starved the labels load (label count showed 0). A plain ts index turns the
+    // ORDER BY ts DESC / WHERE ts >= into an index range scan. (The PG path already had
+    // idx_scans_dept_ts; this brings SQLite to parity. CREATE INDEX IF NOT EXISTS is a no-op on PG.)
+    version: 31,
+    name: 'tracking_scans_ts_index',
+    sql: `CREATE INDEX IF NOT EXISTS idx_scans_ts ON tracking_scans(ts);`
+  },
+  {
+    // v41b LABEL-LOAD FIX: tracking_labels has grown to ~10.2k rows. The labels-all endpoint
+    // runs `SELECT * FROM tracking_labels ORDER BY generated DESC` on every page load. There was
+    // an index on batch_number but NONE on `generated`, so the ORDER BY did a full-table sort of
+    // all 10.2k rows every load. Combined with the heavy SELECT * (pulling the big qr_data string
+    // per row), the fetch was timing out under the shared pool, leaving the client's label cache
+    // empty → "Labels Generated: 0", empty label table, empty print queue, no orange labels.
+    // This index makes the ORDER BY generated DESC an index scan. (qr_data is also dropped from the
+    // bulk response in code — fetched on demand when actually printing a label.)
+    version: 32,
+    name: 'tracking_labels_generated_index',
+    sql: `CREATE INDEX IF NOT EXISTS idx_labels_generated ON tracking_labels(generated);`
+  },
 ];
 
 function runMigrations() {
@@ -1837,7 +1863,7 @@ async function ensurePostgresTables() {
         endpoint TEXT,
         status_code INTEGER,
         duration_ms INTEGER,
-        success BOOLEAN NOT NULL DEFAULT FALSE,
+        success INTEGER NOT NULL DEFAULT 0,
         error_message TEXT,
         request_summary TEXT,
         response_summary TEXT
@@ -2467,7 +2493,13 @@ app.post('/api/customers', async (req, res) => {
 // ════════════════════════════════════════════════════════════════════
 
 function _requireAdmin(req, res) {
-  const role = (req.headers['x-sunloc-role'] || req.body?._role || '').toString().toLowerCase();
+  // v41e FIX (issue 4): the client authenticates with the session token (x-session-token), NOT an
+  // x-sunloc-role header — so the old header/body role read was always empty and every admin got
+  // a false "Admin role required" 403. Resolve the role from the verified session instead, with a
+  // legacy fallback to the explicit role header/body for any old caller that still sends it.
+  const session = verifyToken(req.headers['x-session-token'] || req.body?.token || req.query?.token);
+  let role = (session?.role || '').toString().toLowerCase();
+  if (!role) role = (req.headers['x-sunloc-role'] || req.body?._role || '').toString().toLowerCase();
   if (role !== 'admin') {
     res.status(403).json({ ok: false, error: 'Admin role required' });
     return false;
@@ -2568,7 +2600,10 @@ async function _doRefreshSapInvoices() {
         }
       }
     } catch (e) { console.warn('[SAP] invoice match error:', e.message); }
-    const totalBoxes = (inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0);
+    // v41 fix: total_boxes is an INTEGER column. SAP DocumentLines.Quantity can be decimal
+    // (e.g. 31.35 Lakhs), which PostgreSQL rejects for an integer column ("invalid input syntax
+    // for type integer: 31.35"). Round to nearest whole unit for the box-count column.
+    const totalBoxes = Math.round((inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0));
     const docTotal = parseFloat(inv.DocTotal) || 0;
     const vatSum = parseFloat(inv.VatSum) || 0;
     const taxable = docTotal - vatSum;
@@ -2932,6 +2967,48 @@ app.post('/api/sap/refresh-invoices', async (req, res) => {
 // Backed by sap_indent_cache; no SAP roundtrip. The poller keeps this fresh
 // every N min (default 5). Used by Planning App's Unplanned Orders page.
 // Any logged-in role can read (planners need this).
+// v41f (issue 1 diagnostic): dump the raw field names + sample values from cached SAP indent
+// lines so we can identify exactly which field holds the printing matter. Admin only. Returns,
+// per cached indent, the full set of keys present on its first DocumentLine and the U_* (UDF)
+// fields with their values — without exposing the entire payload. Use: GET /api/sap/indent-fields
+app.get('/api/sap/indent-fields', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    let rows;
+    if (pgPool) {
+      const r = await pgPool.query(`SELECT sap_doc_num, payload_json FROM sap_indent_cache ORDER BY fetched_at DESC LIMIT 20`);
+      rows = r.rows;
+    } else {
+      rows = db.prepare(`SELECT sap_doc_num, payload_json FROM sap_indent_cache ORDER BY fetched_at DESC LIMIT 20`).all();
+    }
+    const out = [];
+    for (const row of rows) {
+      let payload = null;
+      try { payload = JSON.parse(row.payload_json); } catch { continue; }
+      const line = (payload?.DocumentLines || [])[0];
+      if (!line) continue;
+      const allKeys = Object.keys(line);
+      const udfFields = {};
+      for (const k of allKeys) {
+        if (k.startsWith('U_')) udfFields[k] = line[k];
+      }
+      out.push({
+        docNum: row.sap_doc_num,
+        docCurrency: payload?.DocCurrency || null,
+        lineKeys: allKeys,                                   // every field SAP returned on the line
+        udfFields,                                           // all U_* UDFs with values
+        itemCode: line.ItemCode || null,
+        itemDescription: line.ItemDescription || null,       // print matter may live here
+        freeText: line.FreeText || null,                     // ...or here
+        text: line.Text || null,                             // ...or here
+      });
+    }
+    res.json({ ok: true, count: out.length, lines: out });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.get('/api/sap/indents', async (req, res) => {
   try {
     const filter = (req.query.status || 'unprocessed').toString();
@@ -2965,6 +3042,7 @@ app.get('/api/sap/indents', async (req, res) => {
         processed_at: r.processed_at,
         processed_by: r.processed_by,
         processed_order_id: r.processed_order_id,
+        DocCurrency: payload?.DocCurrency || null, // v41e: authoritative export signal (non-INR = export)
         DocumentLines: payload?.DocumentLines || [],
       };
     });
@@ -4721,26 +4799,25 @@ app.post('/api/planning/state', async (req, res) => {
           // Safety net: if the DB row's updated_at is NEWER than the incoming client's
           // _localEditedAt (which the client now stamps), the DB wins — protects against
           // stale tabs overwriting a fresh decision from another device.
-          // Audit log when client status differs from DB status so we can trace state churn.
-          await Promise.all(orders.map(async ord => {
+
+          // v41 PERF FIX: previously this issued one INSERT per order via Promise.all — with
+          // 479 orders that fired 479 concurrent queries against a 5-connection pool EVERY 30s
+          // (Planning auto-sync cadence), saturating the pool and starving all other endpoints
+          // (Tracking tabs slowed to a crawl). Now: a single batched multi-row upsert per save.
+          // Chunked to stay well under PostgreSQL's 65535-parameter limit (6 params/row → ~10000 rows/chunk).
+          const mergedList = await Promise.all(orders.map(async ord => {
             const ex = existingMap[ord.id];
             let mergedOrd = ord;
             if (ex) {
               const hasManualDate = ex.manualEndDate || ex.manualStartDate;
               const clientEdit = parseInt(ord._localEditedAt || 0);
               const dbUpdated  = ex.updated_at ? new Date(ex.updated_at).getTime() : 0;
-              // Determine status: incoming wins unless the DB is demonstrably fresher.
               let finalStatus;
               if (ex.status && ord.status && ex.status !== ord.status) {
-                // Status differs between client and DB
                 if (clientEdit && dbUpdated && dbUpdated > clientEdit + 5000) {
-                  // DB was updated AFTER client's edit + 5s grace → client is stale, keep DB
                   finalStatus = ex.status;
-                  console.warn(`[v40 P18.14i] Status merge: keeping DB status '${ex.status}' over stale client '${ord.status}' for order ${ord.id} (db.updated_at=${ex.updated_at}, client.editedAt=${new Date(clientEdit).toISOString()})`);
                 } else {
-                  // Client is fresh OR no timestamp → client wins
                   finalStatus = ord.status;
-                  console.log(`[v40 P18.14i] Status merge: client status '${ord.status}' replaces DB '${ex.status}' for order ${ord.id}`);
                 }
               } else {
                 finalStatus = ord.status || ex.status || 'pending';
@@ -4755,15 +4832,29 @@ app.post('/api/planning/state', async (req, res) => {
                 actualProd: Math.max(ord.actualProd||0, ex.actualProd||0),
               };
             }
+            return mergedOrd;
+          }));
+
+          const CHUNK = 500;
+          for (let i = 0; i < mergedList.length; i += CHUNK) {
+            const chunk = mergedList.slice(i, i + CHUNK);
+            const vals = [];
+            const params = [];
+            chunk.forEach((m, idx) => {
+              const b = idx * 6;
+              vals.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},NOW()::TEXT)`);
+              params.push(m.id, JSON.stringify(m), m.machineId||null,
+                          m.batchNumber||null, m.status||'pending', m.deleted||false);
+            });
             await pgPool.query(`
               INSERT INTO production_orders (id,data_json,machine_id,batch_number,status,deleted,updated_at)
-              VALUES ($1,$2,$3,$4,$5,$6,NOW()::TEXT)
-              ON CONFLICT(id) DO UPDATE SET data_json=$2,machine_id=$3,batch_number=$4,
-                status=$5,deleted=$6,updated_at=NOW()::TEXT
-            `, [mergedOrd.id, JSON.stringify(mergedOrd), mergedOrd.machineId||null,
-                mergedOrd.batchNumber||null, mergedOrd.status||'pending', mergedOrd.deleted||false]);
-          }));
-          console.log(`[State] Background merged ${orders.length} orders into production_orders`);
+              VALUES ${vals.join(',')}
+              ON CONFLICT(id) DO UPDATE SET data_json=EXCLUDED.data_json,machine_id=EXCLUDED.machine_id,
+                batch_number=EXCLUDED.batch_number,status=EXCLUDED.status,deleted=EXCLUDED.deleted,
+                updated_at=NOW()::TEXT
+            `, params);
+          }
+          console.log(`[State] Background merged ${orders.length} orders into production_orders (batched)`);
         } catch(e) { console.warn('[State] Background order merge failed:', e.message); }
       });
     }
@@ -5298,13 +5389,35 @@ app.post('/api/dpr/save', async (req, res) => {
       // Delete old actuals for this floor+date, then re-insert
       await pgPool.query('DELETE FROM production_actuals WHERE floor = $1 AND date = $2', [floor, date]);
 
-      // v40 P18.14i Fix 2: build planning order status map for gate check
+      // v41h FIX (issues 1 & 2): build the gate status map from the AUTHORITATIVE production_orders
+      // table — that is where changeOrderStatus → upsertOrderToDB writes the planner's "In Production"
+      // status. The planning_state JSON blob lags (only rewritten on full saveState), so reading
+      // status from the blob alone made freshly-promoted "running" orders still look "pending",
+      // wrongly rejecting their DPR entries. We seed from the blob, then OVERLAY production_orders
+      // (newest wins) so the latest planner-set status is always honoured.
       const _planForGate = await getPlanningStateAsync();
       const _orderStatusById = {};
       const _orderStatusByBatch = {};
       for (const o of (_planForGate.orders || [])) {
         if (o.id) _orderStatusById[o.id] = { status: o.status, deleted: o.deleted };
         if (o.batchNumber) _orderStatusByBatch[o.batchNumber] = { status: o.status, deleted: o.deleted };
+      }
+      // Overlay authoritative production_orders rows (status column is the source of truth).
+      try {
+        let _poRows;
+        if (pgPool) {
+          const _r = await pgPool.query(`SELECT id, batch_number, status, deleted FROM production_orders`);
+          _poRows = _r.rows;
+        } else {
+          _poRows = db.prepare(`SELECT id, batch_number, status, deleted FROM production_orders`).all();
+        }
+        for (const r of (_poRows || [])) {
+          const meta = { status: r.status, deleted: (r.deleted === true || r.deleted === 1) };
+          if (r.id) _orderStatusById[r.id] = meta;
+          if (r.batch_number) _orderStatusByBatch[r.batch_number] = meta;
+        }
+      } catch (e) {
+        console.warn('[v41h DPR gate] production_orders overlay failed, using blob status:', e.message);
       }
       const _isAdminCaller = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
       const _forceEntry    = !!req.body.forceEntry;
@@ -5382,6 +5495,23 @@ app.post('/api/dpr/save', async (req, res) => {
       for (const o of (_planForGateSq.orders || [])) {
         if (o.id) _orderStatusByIdSq[o.id] = { status: o.status, deleted: o.deleted };
         if (o.batchNumber) _orderStatusByBatchSq[o.batchNumber] = { status: o.status, deleted: o.deleted };
+      }
+      // v41h FIX (issues 1 & 2): overlay authoritative production_orders status (see PG-path note).
+      try {
+        let _poRowsSq;
+        if (pgPool) {
+          const _r = await pgPool.query(`SELECT id, batch_number, status, deleted FROM production_orders`);
+          _poRowsSq = _r.rows;
+        } else {
+          _poRowsSq = db.prepare(`SELECT id, batch_number, status, deleted FROM production_orders`).all();
+        }
+        for (const r of (_poRowsSq || [])) {
+          const meta = { status: r.status, deleted: (r.deleted === true || r.deleted === 1) };
+          if (r.id) _orderStatusByIdSq[r.id] = meta;
+          if (r.batch_number) _orderStatusByBatchSq[r.batch_number] = meta;
+        }
+      } catch (e) {
+        console.warn('[v41h DPR gate Sq] production_orders overlay failed, using blob status:', e.message);
       }
       const _isAdminCallerSq = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
       const _forceEntrySq    = !!req.body.forceEntry;
@@ -7500,6 +7630,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
+      build: 'v41j',
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -7508,7 +7639,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v41j', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -8786,6 +8917,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
+      build: 'v41j',
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -8794,7 +8926,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v41j', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -8834,7 +8966,28 @@ app.get('/api/tracking/label', async (req, res) => {
 
 app.get('/api/tracking/state', async (req, res) => {
   try {
+    // v41 PERF: ?light=1 omits the heavy scans + labels arrays (SELECT * over ~29.5k scan rows).
+    // The client requests light mode once it has already loaded scans (STEP 3) and labels (STEP 2)
+    // via their own endpoints — it only needs stageClosure/dispatchRecs/wastage/alerts from here.
+    // This removes a large per-sync payload that was a primary cause of Tracking slowness.
+    const light = req.query.light === '1' || req.query.light === 'true';
     if (pgPool) {
+      const mapClosure = r => ({ ...r, batchNumber: r.batch_number, closedAt: r.closed_at, closedBy: r.closed_by });
+      const mapWastage = r => ({ ...r, batchNumber: r.batch_number });
+      const mapDispatch = r => ({ ...r, batchNumber: r.batch_number, vehicleNo: r.vehicle_no, invoiceNo: r.invoice_no });
+      const mapAlert = r => ({ ...r, labelId: r.label_id, batchNumber: r.batch_number, scanInTs: r.scan_in_ts, hoursStuck: r.hours_stuck });
+      if (light) {
+        const [closure, wastage, dispatch, alerts] = await Promise.all([
+          pgPool.query('SELECT * FROM tracking_stage_closure'),
+          pgPool.query('SELECT * FROM tracking_wastage ORDER BY ts ASC'),
+          pgPool.query('SELECT * FROM tracking_dispatch_records ORDER BY ts ASC'),
+          pgPool.query('SELECT * FROM tracking_alerts WHERE resolved = 0'),
+        ]);
+        return res.json({ ok: true, light: true, state: {
+          stageClosure: closure.rows.map(mapClosure), wastage: wastage.rows.map(mapWastage),
+          dispatchRecs: dispatch.rows.map(mapDispatch), alerts: alerts.rows.map(mapAlert)
+        }});
+      }
       const [labels, scans, closure, wastage, dispatch, alerts] = await Promise.all([
         pgPool.query('SELECT * FROM tracking_labels ORDER BY generated DESC'),
         pgPool.query('SELECT * FROM tracking_scans ORDER BY ts ASC'),
@@ -8845,22 +8998,21 @@ app.get('/api/tracking/state', async (req, res) => {
       ]);
       const mapLabel = r => ({ ...r, batchNumber: r.batch_number, labelNumber: r.label_number, isPartial: r.is_partial, isOrange: r.is_orange, parentLabelId: r.parent_label_id, pcCode: r.pc_code, poNumber: r.po_number, machineId: r.machine_id, printingMatter: r.printing_matter, printedAt: r.printed_at, voidReason: r.void_reason, voidedAt: r.voided_at, voidedBy: r.voided_by, qrData: r.qr_data, woStatus: r.wo_status, shipTo: r.ship_to, billTo: r.bill_to, isExcess: r.is_excess, excessNum: r.excess_num, excessTotal: r.excess_total, normalTotal: r.normal_total });
       const mapScan = r => ({ ...r, labelId: r.label_id, batchNumber: r.batch_number, labelNumber: r.label_number });
-      const mapClosure = r => ({ ...r, batchNumber: r.batch_number, closedAt: r.closed_at, closedBy: r.closed_by });
-      const mapWastage = r => ({ ...r, batchNumber: r.batch_number });
-      const mapDispatch = r => ({ ...r, batchNumber: r.batch_number, vehicleNo: r.vehicle_no, invoiceNo: r.invoice_no });
-      const mapAlert = r => ({ ...r, labelId: r.label_id, batchNumber: r.batch_number, scanInTs: r.scan_in_ts, hoursStuck: r.hours_stuck });
       res.json({ ok: true, state: {
         labels: labels.rows.map(mapLabel), scans: scans.rows.map(mapScan),
         stageClosure: closure.rows.map(mapClosure), wastage: wastage.rows.map(mapWastage),
         dispatchRecs: dispatch.rows.map(mapDispatch), alerts: alerts.rows.map(mapAlert)
       }});
     } else {
-      const labels  = db.prepare('SELECT * FROM tracking_labels ORDER BY generated DESC').all();
-      const scans   = db.prepare('SELECT * FROM tracking_scans ORDER BY ts ASC').all();
       const closure = db.prepare('SELECT * FROM tracking_stage_closure').all();
       const wastage = db.prepare('SELECT * FROM tracking_wastage ORDER BY ts ASC').all();
       const dispatch= db.prepare('SELECT * FROM tracking_dispatch_records ORDER BY ts ASC').all();
       const alerts  = db.prepare('SELECT * FROM tracking_alerts WHERE resolved = 0').all();
+      if (light) {
+        return res.json({ ok: true, light: true, state: { stageClosure: closure, wastage, dispatchRecs: dispatch, alerts } });
+      }
+      const labels  = db.prepare('SELECT * FROM tracking_labels ORDER BY generated DESC').all();
+      const scans   = db.prepare('SELECT * FROM tracking_scans ORDER BY ts ASC').all();
       res.json({ ok: true, state: { labels, scans, stageClosure: closure, wastage, dispatchRecs: dispatch, alerts } });
     }
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -9597,7 +9749,30 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
       if (straddlesEnd || straddlesStart) crossMonth[bn] = true;
     });
 
-    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth });
+    // v41i FIX (issue 4): month-sliced GROSS production per batch, summed from production_actuals
+    // by CALENDAR month of the entry date — exactly the basis the DPR "Produced" report uses
+    // (DPR sums daily shift entries whose date is in the selected YYYY-MM). Report E previously used
+    // the batch's ALL-TIME actualProd attributed to one month, so batches spanning April→May didn't
+    // reconcile with DPR. With this, Report E gross (month mode) = sum of that batch's DPR entries
+    // dated within YYYY-MM, matching DPR per-machine totals.
+    const monthGross = {};
+    try {
+      let grossRows;
+      if (pgPool) {
+        grossRows = (await pgPool.query(
+          `SELECT batch_number, COALESCE(SUM(qty_lakhs),0) AS g
+             FROM production_actuals WHERE date LIKE $1 GROUP BY batch_number`, [ym + '%'])).rows;
+      } else {
+        grossRows = db.prepare(
+          `SELECT batch_number, COALESCE(SUM(qty_lakhs),0) AS g
+             FROM production_actuals WHERE date LIKE ? GROUP BY batch_number`).all(ym + '%');
+      }
+      for (const r of (grossRows||[])) {
+        if (r.batch_number) monthGross[r.batch_number] = parseFloat(r.g) || 0;
+      }
+    } catch(e) { console.warn('[agrade-by-month] monthGross query failed:', e.message); }
+
+    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth, monthGross });
   } catch(err) {
     console.error('[agrade-by-month]', err.message);
     res.status(500).json({ ok:false, error: err.message });
@@ -9709,11 +9884,18 @@ app.get('/api/tracking/labels', async (req, res) => {
 });
 
 // ── All labels fast endpoint ──
+// v41b PAYLOAD SLIM: qr_data (the full QR string per label) is intentionally EXCLUDED here.
+// It is only needed when actually printing a label, and the client rebuilds it deterministically
+// from batchNumber|labelNumber|size|qty|id via generateQRData() (identical to what was stored).
+// Excluding it roughly halves the ~10.2k-row bulk response, removing the remaining timeout risk
+// on the label load. Explicit column list (no SELECT *) keeps the payload to exactly what the
+// label list / dashboard / print queue need.
 app.get('/api/tracking/labels-all', async (req, res) => {
   try {
-    const m=r=>({id:r.id,batchNumber:r.batch_number,labelNumber:r.label_number,size:r.size,qty:r.qty,isPartial:!!r.is_partial,isOrange:!!r.is_orange,parentLabelId:r.parent_label_id||null,customer:r.customer||'',colour:r.colour||'',pcCode:r.pc_code||'',poNumber:r.po_number||'',machineId:r.machine_id||'',printingMatter:r.printing_matter||'',generated:r.generated,printed:!!r.printed,printedAt:r.printed_at||null,voided:!!r.voided,voidReason:r.void_reason||'',voidedAt:r.voided_at||null,voidedBy:r.voided_by||null,qrData:r.qr_data||'',woStatus:r.wo_status||null,shipTo:r.ship_to||'',billTo:r.bill_to||'',isExcess:!!r.is_excess,excessNum:r.excess_num||null,excessTotal:r.excess_total||null,normalTotal:r.normal_total||null});
-    if(pgPool){const r=await pgPool.query('SELECT * FROM tracking_labels ORDER BY generated DESC');res.json({ok:true,labels:r.rows.map(m)});}
-    else{const labels=db.prepare('SELECT * FROM tracking_labels ORDER BY generated DESC').all();res.json({ok:true,labels:labels.map(m)});}
+    const COLS = `id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total`;
+    const m=r=>({id:r.id,batchNumber:r.batch_number,labelNumber:r.label_number,size:r.size,qty:r.qty,isPartial:!!r.is_partial,isOrange:!!r.is_orange,parentLabelId:r.parent_label_id||null,customer:r.customer||'',colour:r.colour||'',pcCode:r.pc_code||'',poNumber:r.po_number||'',machineId:r.machine_id||'',printingMatter:r.printing_matter||'',generated:r.generated,printed:!!r.printed,printedAt:r.printed_at||null,voided:!!r.voided,voidReason:r.void_reason||'',voidedAt:r.voided_at||null,voidedBy:r.voided_by||null,woStatus:r.wo_status||null,shipTo:r.ship_to||'',billTo:r.bill_to||'',isExcess:!!r.is_excess,excessNum:r.excess_num||null,excessTotal:r.excess_total||null,normalTotal:r.normal_total||null});
+    if(pgPool){const r=await pgPool.query(`SELECT ${COLS} FROM tracking_labels ORDER BY generated DESC`);res.json({ok:true,labels:r.rows.map(m)});}
+    else{const labels=db.prepare(`SELECT ${COLS} FROM tracking_labels ORDER BY generated DESC`).all();res.json({ok:true,labels:labels.map(m)});}
   }catch(err){res.status(500).json({ok:false,error:err.message});}
 });
 // ── All scans endpoint (formerly "scans-recent", LIMIT removed in v40 P18.14) ──
@@ -9724,7 +9906,15 @@ app.get('/api/tracking/labels-all', async (req, res) => {
 // were older than the last 2000 scans system-wide.
 app.get('/api/tracking/scans-recent', async (req, res) => {
   try {
-    const since = req.query.since || null;   // optional: 'YYYY-MM-DD'
+    const since = req.query.since || null;   // optional: 'YYYY-MM-DD' window start
+    // v41 PERF FIX: optional ?limit=N caps the number of most-recent rows returned.
+    // The 5-second operator-UI refresh only needs the latest handful of scans + recent
+    // alerts; it does NOT need full history (reports use scan-summary, per-box uses
+    // box-stages). Capping it keeps the frequent poll tiny so it never aborts/starves
+    // the rest of the sync. When neither since nor limit is supplied behaviour is
+    // unchanged (returns all) for backward compatibility with any other caller.
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 0; // 0 = no cap
     const mapScan = r => ({
       id: r.id,
       labelId: r.label_id,
@@ -9738,18 +9928,19 @@ app.get('/api/tracking/scans-recent', async (req, res) => {
       labelNumber: r.label_number || null
     });
     const whereClause = since ? `WHERE ts >= '${since.replace(/'/g,'')}'` : '';
+    const limitClause = limit > 0 ? ` LIMIT ${limit}` : '';
     if (pgPool) {
       // Try with label_number column first (after migration v10)
       let rows;
       try {
         const r = await pgPool.query(
-          `SELECT * FROM tracking_scans ${whereClause} ORDER BY ts DESC`
+          `SELECT * FROM tracking_scans ${whereClause} ORDER BY ts DESC${limitClause}`
         );
         rows = r.rows;
       } catch(e) {
         // Fallback if column issues — select without label_number
         const r = await pgPool.query(
-          `SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ${whereClause} ORDER BY ts DESC`
+          `SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ${whereClause} ORDER BY ts DESC${limitClause}`
         );
         rows = r.rows;
       }
@@ -9757,9 +9948,9 @@ app.get('/api/tracking/scans-recent', async (req, res) => {
     } else {
       let scans;
       try {
-        scans = db.prepare(`SELECT * FROM tracking_scans ${whereClause} ORDER BY ts DESC`).all();
+        scans = db.prepare(`SELECT * FROM tracking_scans ${whereClause} ORDER BY ts DESC${limitClause}`).all();
       } catch(e) {
-        scans = db.prepare(`SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ${whereClause} ORDER BY ts DESC`).all();
+        scans = db.prepare(`SELECT id,label_id,batch_number,dept,type,ts,operator,size,qty FROM tracking_scans ${whereClause} ORDER BY ts DESC${limitClause}`).all();
       }
       res.json({ ok: true, scans: scans.map(mapScan), count: scans.length });
     }

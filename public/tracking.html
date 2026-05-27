@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v41</title>
+<title>Sunloc Tracking Suite v1.0 · build v41j</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -560,7 +560,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v41</p>
+      <p>Tracking Suite v1.0 · build v41j</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -591,7 +591,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v41</p>
+      <p>Tracking Suite v1.0 · build v41j</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -1140,25 +1140,50 @@ function checkAlerts(){
   // Server alerts are authoritative — loaded from /api/tracking/alerts (ALL scans).
   const ALERT_START = new Date('2026-04-27T00:00:00');
   state.alerts = state.alerts.filter(a=>!a.scanInTs||new Date(a.scanInTs)>=ALERT_START);
+
+  // v41 PERF FIX: this function runs on EVERY tab open (called from renderPage). The prior
+  // implementation was O(n²): for each 'in' scan it did state.scans.some(...) over the ENTIRE
+  // scans array, plus repeated `new Date()` parsing. With the unbounded scan history that
+  // accumulated since April, this made every tab switch progressively slower ("never seen before").
+  // Now: index all 'out' scans once by labelId+dept (O(n)), then each lookup is O(1).
+  // Output is identical to the prior logic.
+  const outIndex = new Map();   // key: labelId|dept → array of out-scan timestamps (ms)
+  for (const s of state.scans) {
+    if (s.type !== 'out') continue;
+    const key = s.labelId + '|' + s.dept;
+    let arr = outIndex.get(key);
+    if (!arr) { arr = []; outIndex.set(key, arr); }
+    arr.push(new Date(s.ts).getTime());
+  }
+  const hasOutAfter = (labelId, dept, afterMs) => {
+    const arr = outIndex.get(labelId + '|' + dept);
+    if (!arr) return false;
+    for (const t of arr) if (t > afterMs) return true;
+    return false;
+  };
+
   const resolvedIds = new Set();
   state.alerts.forEach(a=>{
-    const hasOut = state.scans.some(s=>s.labelId===a.labelId&&s.dept===a.dept&&s.type==='out'&&(!a.scanInTs||new Date(s.ts)>new Date(a.scanInTs)));
-    if(hasOut) resolvedIds.add(a.id||a.labelId+a.dept);
+    const afterMs = a.scanInTs ? new Date(a.scanInTs).getTime() : -Infinity;
+    if(hasOutAfter(a.labelId, a.dept, afterMs)) resolvedIds.add(a.id||a.labelId+a.dept);
   });
   state.alerts = state.alerts.filter(a=>!resolvedIds.has(a.id||a.labelId+a.dept));
-  state.scans.forEach(scan=>{
-    if(scan.type!=='in') return;
-    if(new Date(scan.ts) < ALERT_START) return;
-    const hasOut = state.scans.some(s=>s.labelId===scan.labelId&&s.dept===scan.dept&&s.type==='out'&&new Date(s.ts)>new Date(scan.ts));
-    if(!hasOut && hoursAgo(scan.ts)>=ALERT_HOURS){
-      const existing = state.alerts.find(a=>a.labelId===scan.labelId&&a.dept===scan.dept);
-      if(!existing){
-        const lbl = state.labels.find(l=>l.id===scan.labelId);
-        const boxNo = lbl ? Math.abs(lbl.labelNumber||0) : (scan.labelNumber ? Math.abs(scan.labelNumber) : '?');
-        state.alerts.push({ id:uid(), labelId:scan.labelId, batchNumber:scan.batchNumber, boxNo, dept:scan.dept, scanInTs:scan.ts, hoursStuck:hoursAgo(scan.ts).toFixed(1), resolved:0 });
-      }
-    }
-  });
+
+  // Index existing alerts for O(1) duplicate check (was state.alerts.find per scan)
+  const alertKey = new Set(state.alerts.map(a=>a.labelId+'|'+a.dept));
+
+  for (const scan of state.scans) {
+    if(scan.type!=='in') continue;
+    const scanMs = new Date(scan.ts).getTime();
+    if(scanMs < ALERT_START.getTime()) continue;
+    if(hasOutAfter(scan.labelId, scan.dept, scanMs)) continue;
+    if(hoursAgo(scan.ts) < ALERT_HOURS) continue;
+    if(alertKey.has(scan.labelId+'|'+scan.dept)) continue;
+    const lbl = state.labels.find(l=>l.id===scan.labelId);
+    const boxNo = lbl ? Math.abs(lbl.labelNumber||0) : (scan.labelNumber ? Math.abs(scan.labelNumber) : '?');
+    state.alerts.push({ id:uid(), labelId:scan.labelId, batchNumber:scan.batchNumber, boxNo, dept:scan.dept, scanInTs:scan.ts, hoursStuck:hoursAgo(scan.ts).toFixed(1), resolved:0 });
+    alertKey.add(scan.labelId+'|'+scan.dept);
+  }
   state.alerts.forEach(a=>{ if(a.scanInTs) a.hoursStuck = hoursAgo(a.scanInTs).toFixed(1); });
   return state.alerts;
 }
@@ -1476,7 +1501,7 @@ function configureServer(){
 // Normalise DB snake_case → camelCase for labels loaded from server
 function normLabel(l){
   if(l.batchNumber) return l; // already camelCase (local label)
-  return {
+  const out = {
     id:            l.id,
     batchNumber:   l.batch_number,
     labelNumber:   l.label_number,
@@ -1500,7 +1525,7 @@ function normLabel(l){
     voidReason:    l.void_reason || '',
     voidedAt:      l.voided_at || null,
     voidedBy:      l.voided_by || null,
-    qrData:        l.qr_data || '',
+    qrData:        l.qr_data || l.qrData || '',
     woStatus:      l.wo_status || null,
     // Excess fields (may be null for older labels)
     isExcess:      !!l.is_excess,
@@ -1508,6 +1533,10 @@ function normLabel(l){
     excessTotal:   l.excess_total || null,
     normalTotal:   l.normal_total || null,
   };
+  // v41b: if the source row carried no qr_data (e.g. labels-all slim payload), rebuild it
+  // deterministically from the label's own fields so printing/RFID always have a valid QR.
+  if (!out.qrData) out.qrData = generateQRData(out);
+  return out;
 }
 
 async function pullFromServer(){
@@ -1535,18 +1564,76 @@ async function pullFromServer(){
         // State updated silently — no auto-render to prevent screen flipping
       }
     }
-    // STEP 2: Load all labels fast
+    // STEP 2: Load all labels — with retry so a single slow/timed-out fetch never leaves the
+    // client label cache empty (which showed as "Labels Generated: 0", empty label table, empty
+    // print queue, no orange labels). v41b: the labels-all query (~10.2k rows) was timing out on
+    // the shared pool; the new idx_labels_generated index fixes the speed, and this retry loop is
+    // the safety net so a transient slow response self-heals instead of silently giving up.
+    flushPendingLabelPush();
+    let _labelsLoaded = false;
+    for (let _attempt = 1; _attempt <= 3 && !_labelsLoaded; _attempt++) {
+      try {
+        const lr = await fetch(serverUrl+'/api/tracking/labels-all', { signal: AbortSignal.timeout(30000) });
+        if (lr.ok) {
+          const lj = await lr.json();
+          if (lj.ok && lj.labels) {
+            const sl = lj.labels;
+            // v41 DATA-INTEGRITY GUARD: never let an empty/short server response wipe a non-empty
+            // local labels cache. Only overwrite when the server actually returns data.
+            if (sl.length === 0 && state.labels.length > 0) {
+              console.warn('[labels-all] server returned 0 labels but local has '+state.labels.length+' — NOT overwriting; re-pushing local to server');
+              pushLabelsToServer(state.labels);
+              _labelsLoaded = true; // local cache is intact; nothing more to do
+            } else {
+              const sids = new Set(sl.map(l=>l.id));
+              const lo = state.labels.filter(l=>!sids.has(l.id));
+              if (lo.length>0) pushLabelsToServer(lo);
+              state.labels = sl;
+              // v41b: labels-all no longer ships qr_data (payload slim). Rebuild it locally from
+              // the label's own fields so every consumer (printing at the ZPL ^BQN sites, future
+              // RFID) always has a populated, correct QR string. Format is deterministic and
+              // identical to what was originally stored: SUNLOC|batch|box|size|qty|id.
+              state.labels.forEach(l => { if (!l.qrData) l.qrData = generateQRData(l); });
+              saveLocal();
+              _labelsLoaded = true;
+              console.log('[labels-all] loaded '+sl.length+' labels (attempt '+_attempt+')');
+              // Re-render the current label-dependent view now that labels are in — fixes the
+              // case where the page rendered with 0 labels before this fetch completed.
+              try {
+                if (currentPage === 'labels') renderLabels();
+                else if (currentPage === 'dashboard') renderDashboard();
+              } catch(_re) {}
+            }
+          }
+        }
+      } catch(e2) {
+        console.warn('[labels-all] attempt '+_attempt+' failed:', e2?.message||e2);
+      }
+      if (!_labelsLoaded && _attempt < 3) {
+        await new Promise(r => setTimeout(r, 1500 * _attempt)); // backoff 1.5s, 3s
+      }
+    }
+    if (!_labelsLoaded) {
+      console.warn('[labels-all] all 3 attempts failed — keeping any cached labels ('+state.labels.length+')');
+    }
+    // STEP 3: Recent scans for the operator scan UI + alerts.
+    // v41 PERF ROOT-CAUSE FIX: the endpoint previously returned ALL scans (LIMIT removed in v40).
+    // With ~29.5k scans accumulated, the fetch+parse exceeded the 20s timeout and ABORTED every
+    // sync ("STEP 3 scans failed: The operation was aborted"), blocking the UI ~1 min per action.
+    // Fix: request only a recent window via ?since= (start of PREVIOUS month). This covers the
+    // operator scan UI (recent boxes) and alerts (only care since 2026-04-27). Full-history needs
+    // are served elsewhere: reports use the server-side scan-summary (_ss), and per-box stage uses
+    // the box-stages endpoint — both unaffected. Scan duplicate-prevention is server-authoritative.
+    let _step3ScansOk = false;
     try{
-      flushPendingLabelPush();
-      const lr=await fetch(serverUrl+'/api/tracking/labels-all',{signal:AbortSignal.timeout(30000)});
-      if(lr.ok){const lj=await lr.json();if(lj.ok&&lj.labels){const sl=lj.labels;const sids=new Set(sl.map(l=>l.id));const lo=state.labels.filter(l=>!sids.has(l.id));if(lo.length>0)pushLabelsToServer(lo);state.labels=sl;saveLocal();}}
-    }catch(e2){}
-    // STEP 3: Recent scans fast (for scan UI only — limited to last 500)
-    try{
-      const sr=await fetch(serverUrl+'/api/tracking/scans-recent',{signal:AbortSignal.timeout(20000)});
+      const _now=new Date();
+      const _since=new Date(_now.getFullYear(), _now.getMonth()-1, 1); // 1st of previous month
+      const _sinceStr=`${_since.getFullYear()}-${String(_since.getMonth()+1).padStart(2,'0')}-01`;
+      const sr=await fetch(serverUrl+'/api/tracking/scans-recent?since='+_sinceStr,{signal:AbortSignal.timeout(30000)});
       if(sr.ok){
         const sj=await sr.json();
         if(sj.ok&&sj.scans){
+          _step3ScansOk = true;
           const ns=sj.scans.map(s=>({...s,labelId:s.labelId||s.label_id,batchNumber:s.batchNumber||s.batch_number,labelNumber:s.labelNumber||s.label_number}));
           const serverIds=new Set(ns.map(s=>s.id));
           const localOnly=state.scans.filter(s=>!serverIds.has(s.id));
@@ -1573,7 +1660,17 @@ async function pullFromServer(){
     // STEP 3.5: Load wastage fast (dedicated endpoint)
     try{
       const wr=await fetch(serverUrl+'/api/tracking/wastage',{signal:AbortSignal.timeout(15000)});
-      if(wr.ok){const wj=await wr.json();if(wj.ok&&wj.wastage){state.wastage=wj.wastage.map(w=>({...w,batchNumber:w.batchNumber||w.batch_number}));saveLocal();}}
+      if(wr.ok){const wj=await wr.json();if(wj.ok&&wj.wastage){
+        const sw=wj.wastage.map(w=>({...w,batchNumber:w.batchNumber||w.batch_number}));
+        // v41 DATA-INTEGRITY GUARD (same class as labels): don't let a transient empty response
+        // wipe + persist non-empty local wastage. Empty server wastage while we hold local entries
+        // is treated as suspect (deploy restart / DB-not-ready) — keep local, don't saveLocal emptiness.
+        if(sw.length===0 && (state.wastage&&state.wastage.length>0)){
+          console.warn('[wastage] server returned 0 but local has '+state.wastage.length+' — NOT overwriting');
+        } else {
+          state.wastage=sw;saveLocal();
+        }
+      }}
     }catch(e35){}
     // STEP 3.6: Full scan summary (aggregated — NO LIMIT — correct source for all reports)
     try{
@@ -1619,13 +1716,19 @@ async function pullFromServer(){
           window._v40_boxStagesLoadedAt = Date.now();
           window._v40_dispatchedByBatch = bj.dispatchedByBatch || {};
           window._v40_boxCountsByBatch = bj.boxCounts || {};
-          console.log(`[v40 P18.14] Box stages loaded: ${Object.keys(window._v40_boxStagesMap).length} labels, ${bj.scanCount} scans, ${bj.dispatchRecCount} dispatch records`);
+          console.log(`[v41j PERF] Box stages loaded: ${Object.keys(window._v40_boxStagesMap).length} labels, ${bj.scanCount} scans, ${bj.dispatchRecCount} dispatch records`);
         }
       }
     } catch (e37) { console.warn('STEP 3.7 box-stages failed:', e37?.message || e37); }
-    // STEP 4: Full state fallback (scans + alerts + stageClosure)
+    // STEP 4: Full state (stageClosure + dispatchRecs + alerts; scans only as fallback)
+    // v41 PERF FIX: /api/tracking/state returns SELECT * FROM tracking_scans (ALL ~29.5k rows) —
+    // extremely heavy, and it ran every sync. stageClosure & dispatchRecs are ONLY available here,
+    // so we can't simply skip it. Instead: when STEP 3 already loaded scans, request ?light=1 which
+    // omits the giant scans array but still returns stageClosure/dispatchRecs/alerts. Only when
+    // STEP 3 failed do we request the full payload (scans included) as the recovery path.
     try{
-      const r=await fetch(serverUrl+'/api/tracking/state',{signal:AbortSignal.timeout(30000)});
+      const _stateUrl = serverUrl+'/api/tracking/state'+(_step3ScansOk?'?light=1':'');
+      const r=await fetch(_stateUrl,{signal:AbortSignal.timeout(30000)});
       if(r.ok){
         const j=await r.json();
         if(j.ok&&j.state){
@@ -1634,8 +1737,11 @@ async function pullFromServer(){
             const ns=(j.state.scans||[]).map(s=>({...s,labelId:s.labelId||s.label_id,batchNumber:s.batchNumber||s.batch_number,labelNumber:s.labelNumber||s.label_number}));
             state.scans=ns;
           }
-          if(j.state.stageClosure) state.stageClosure=j.state.stageClosure;
-          if(j.state.dispatchRecs) state.dispatchRecs=j.state.dispatchRecs;
+          // v41 DATA-INTEGRITY GUARD (same class as labels): only overwrite when the server
+          // actually returns entries. An empty array passes the truthiness check and would wipe +
+          // persist non-empty local data on a transient empty fetch (deploy restart). Guard it.
+          if(Array.isArray(j.state.stageClosure) && !(j.state.stageClosure.length===0 && state.stageClosure&&state.stageClosure.length>0)) state.stageClosure=j.state.stageClosure;
+          if(Array.isArray(j.state.dispatchRecs) && !(j.state.dispatchRecs.length===0 && state.dispatchRecs&&state.dispatchRecs.length>0)) state.dispatchRecs=j.state.dispatchRecs;
           if(j.state.alerts){
             state.alerts=j.state.alerts.map(a=>({
               ...a,
@@ -2264,7 +2370,7 @@ async function _v41_fetchAgradeMonth(ym){
     if (!r.ok) throw new Error('HTTP '+r.status);
     const j = await r.json();
     if (!j.ok) throw new Error(j.error||'failed');
-    _v41_agradeMonthCache[ym] = { summary: j.summary||{}, wastage: j.wastage||{}, crossMonth: j.crossMonth||{}, window: j.window };
+    _v41_agradeMonthCache[ym] = { summary: j.summary||{}, wastage: j.wastage||{}, crossMonth: j.crossMonth||{}, monthGross: j.monthGross||{}, window: j.window };
     return _v41_agradeMonthCache[ym];
   } catch(e){
     console.warn('[agrade-by-month] fetch failed:', e.message);
@@ -2381,6 +2487,9 @@ function updatePlanningStageStatus(batchNo){
 // ═══════════════════════════════════════════════════════
 
 function generateZPL(label, batch){
+  // v41b: labels-all no longer ships qr_data; guarantee a valid QR string here as a final
+  // safety net before it is embedded in the ZPL (^BQN). generateQRData is the canonical format.
+  if (!label.qrData) label.qrData = generateQRData(label);
   const cp = (label.colour||'').split('/');
   const colourCap  = (cp[0]||'').trim() || (label.colour||'');
   const colourBody = (cp[1]||'').trim() || '';
@@ -7245,7 +7354,13 @@ function _v41_renderReportGInner(){
     }
     if (!ag) ag = getBatchAGrade(b.batchNumber, b.isPrinted?'printed':'unprinted');
     const wip = getBatchWIPBreakdown(b.batchNumber);
-    const grossProd = b.actualProd || b.actualQty || 0;
+    // v41i FIX (issue 4): month-sliced gross in month mode (reconciles with DPR); see Report E note.
+    let grossProd = b.actualProd || b.actualQty || 0;
+    if (_v41_useMonthAttributed) {
+      const _mg = _v41_agradeMonthCache[_trkSelectedMonth]?.monthGross;
+      if (_mg && Object.prototype.hasOwnProperty.call(_mg, b.batchNumber)) grossProd = _mg[b.batchNumber];
+      else if (_mg) grossProd = 0;
+    }
     totalGrossProd += grossProd;
     totalAGradeQty += ag.aGrade;
     totalInspected += ag.inspected;
@@ -8240,7 +8355,19 @@ function _v41_renderReportEInner(){
   function _addBatchRowToReport(b, mc, floorKey){
     includedBatchNos.add(b.batchNumber);
     // v37E T4: align with Report G — fall back to actualQty (legacy field) when actualProd absent
-    const grossProd=b.actualProd||b.actualQty||0;
+    // v41i FIX (issue 4): in "Month of Production" mode, use the month-sliced gross (sum of this
+    // batch's DPR entries dated within the selected month) so Report E gross reconciles with the
+    // DPR per-machine "Produced" total. In cumulative mode (or if month data hasn't loaded), fall
+    // back to the batch's all-time actualProd as before.
+    let grossProd = b.actualProd||b.actualQty||0;
+    if (_v41_useMonthAttributed) {
+      const _mg = _v41_agradeMonthCache[_trkSelectedMonth]?.monthGross;
+      if (_mg && Object.prototype.hasOwnProperty.call(_mg, b.batchNumber)) {
+        grossProd = _mg[b.batchNumber];
+      } else if (_mg) {
+        grossProd = 0; // month data loaded but this batch had no production this month
+      }
+    }
     const useSS = hasScanSummary();
     // Fallback dataset used when scan-summary API hasn't loaded — covers all 5 fallback ternaries below
     const scansForBatch = state.scans.filter(s=>s.batchNumber===b.batchNumber);
@@ -11273,14 +11400,24 @@ async function refreshScans(){
   if(!serverUrl) return;
   if(_refreshFailCount >= 3 && _refreshFailCount % 3 !== 0) return;
   try{
-    const sr=await fetch(serverUrl+'/api/tracking/scans-recent',{signal:AbortSignal.timeout(15000)});
+    // v41 PERF FIX: this poll fires every 5s. Previously it fetched ALL ~29.5k scans with a
+    // 15s timeout and REPLACED state.scans wholesale — the heavy fetch aborted constantly
+    // ("refreshScans error: aborted") and starved the labels load. Now it pulls only the most
+    // recent 200 scans (?limit=200) with a short 6s timeout and MERGES them into state.scans by
+    // id, so full history loaded once by STEP 3 / scan-summary is preserved and never truncated.
+    const sr=await fetch(serverUrl+'/api/tracking/scans-recent?limit=200',{signal:AbortSignal.timeout(6000)});
     if(!sr.ok) return;
     const sj=await sr.json();
     if(!sj.ok||!sj.scans) return;
     const ns=sj.scans.map(s=>({...s,labelId:s.labelId||s.label_id,batchNumber:s.batchNumber||s.batch_number,labelNumber:s.labelNumber||s.label_number}));
-    const serverIds=new Set(ns.map(s=>s.id));
-    const localOnly=state.scans.filter(s=>!serverIds.has(s.id)&&s._local);
-    state.scans=[...ns,...localOnly];
+    // Merge: index existing scans by id, overlay the freshly fetched recent ones, then add any
+    // remaining existing scans (full history + still-pending local-only scans) on top.
+    const incomingIds=new Set(ns.map(s=>s.id));
+    const kept=state.scans.filter(s=>!incomingIds.has(s.id)); // older history + local-only not in window
+    // Preserve _local flag on any scan that the recent window now confirms server-side
+    const localByConfirm = new Set(state.scans.filter(s=>s._local).map(s=>s.id));
+    ns.forEach(s=>{ if(localByConfirm.has(s.id)) { delete s._local; } });
+    state.scans=[...ns,...kept];
     checkAlerts();
     // Restore orange label search after scan refresh (re-render wipes input value)
     if(currentPage==='labels') setTimeout(_restoreOlSearch, 50);

@@ -460,7 +460,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v41</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v41j</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -1752,7 +1752,10 @@ async function fetchActiveOrders(){
       // Build map by machineId — admin sees all orders (status preserved for UI marking),
       // non-admins only see In Production (already filtered by server).
       activeOrders={};
-      j.orders.filter(o => o.machineId && (isDprAdmin || o.status === 'running')).forEach(o=>{
+      // v41h FIX (issue 2): never show CLOSED orders in the DPR dropdown — they cannot accept
+      // production entries and only clutter the list. Admins still see running + pending (pending
+      // is force-entry-able); non-admins see only running. Closed is excluded for everyone.
+      j.orders.filter(o => o.machineId && o.status !== 'closed' && (isDprAdmin || o.status === 'running')).forEach(o=>{
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
       });

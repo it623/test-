@@ -517,7 +517,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v41n</p>
+      <p>Planning Suite v3.0 · build v41o</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -4502,20 +4502,25 @@ function _v39_reconcileSapIndents(indents) {
     // next SAP poll), fall back to a CONSERVATIVE foreign-suffix test that deliberately EXCLUDES the
     // generic LTD/LIMITED — it only matches unambiguously-foreign forms (LTDA, GMBH, SRL, S.A.,
     // S.p.A, B.V., PTY, country names). Indian "PVT LTD"/"LIMITED" therefore stay domestic.
-    const docCurrency = String(ind.DocCurrency || '').toUpperCase().trim();
-    let isExportIndent;
-    if (docCurrency) {
-      isExportIndent = docCurrency !== 'INR';            // authoritative
-    } else {
-      // currency unavailable — conservative foreign-suffix/region fallback (NOT generic LTD/LIMITED).
-      // v41m: widened with more export company forms seen in live data: SAOC (Oman), FZE/FZ-LLC/LLC
-      // (Gulf free-zone), LDA, SARL, SP Z O O, country/region words. Indian PVT LTD/LIMITED excluded.
-      isExportIndent = /\b(LTDA|LDA|GMBH|S\.?R\.?L|SARL|S\.?P\.?A|SP\.?\s?Z\.?\s?O\.?\s?O|PTY|SDN\.?\s?BHD|N\.?V|B\.?V|SAOC|SAOG|FZE|FZ[\s-]?LLC|L\.?L\.?C|W\.?L\.?L|PJSC|JSC)\b|\b(BRAZIL|GERMANY|NEPAL|BANGLADESH|VIETNAM|INDONESIA|PHILIPPINES|MEXICO|EGYPT|KENYA|NIGERIA|OMAN|MUSCAT|DUBAI|UAE|EMIRATES|SAUDI|QATAR|KUWAIT|BAHRAIN|JORDAN|YEMEN|SRI\s?LANKA|MYANMAR|FARMACEUTICOS|FARMACEUTICA|PHARMACEUTICA|INSUMOS|SUPLEMENTOS)\b/i.test(cardName);
-    }
-    const uomScale = isExportIndent ? 0.01 : 1; // export thousands → lakhs; domestic unchanged
+    // v41o FIX (issue 2 — REAL signal, from live diagnostic): export vs domestic is determined by
+    // the LINE's Unit of Measure, NOT currency (SAP returned DocCurrency=null) and NOT company name
+    // (unreliable — removed). Diagnostic + SAP screens show export lines use UoM "THOUSAND" and
+    // domestic use "LAC". Export qty is in thousands → ×0.01 to lakhs; domestic is already lakhs →×1.
+    // We read the UoM per line (it can differ line-to-line) from whichever UoM field SAP populates,
+    // and match THOUSAND robustly (value text or code). Anything not clearly THOUSAND = domestic (×1),
+    // which is the safe default. _uomScaleForLine returns the multiplier for one line.
+    const _uomScaleForLine = (line) => {
+      const u = String(
+        line.UoMCode || line.UnitsOfMeasurement || line.MeasureUnit || line.InventoryUoM || ''
+      ).toUpperCase().trim();
+      // THOUSAND in any spelling/code → export (÷100). LAC/LAKH/blank/anything else → domestic (×1).
+      if (/THOUSAND|THOU|^THO$|^000$|^M$|^K$/.test(u)) return 0.01;
+      return 1;
+    };
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
+      const uomScale = _uomScaleForLine(line); // v41o: per-line, UoM-based
       // v41 P19.2 Fix 6A: use RemainingOpenQuantity (open qty after partial dispatches).
       // SAP returns this per line for partially-delivered Sales Orders.
       // Fallback to Quantity if RemainingOpenQuantity is null/undefined (e.g. brand new SO with no delivery yet).
@@ -4550,17 +4555,13 @@ function _v39_reconcileSapIndents(indents) {
       if (!size) size = line.U_Size || line.ItemDescription?.match(/\bSize\s+([0-4]|00)\b/i)?.[1] || '';
       if (!colour) colour = line.U_Colour || '';
       if (!pcCode) pcCode = line.U_PCCode || itemCode || '';
-      // v41f (issue 1): print matter comes from SAP, not from the PC master and not from manual
-      // entry. We don't assume a single UDF name — different SAP B1 setups store it differently —
-      // so check the common candidates in priority order. Whatever is found is the print matter;
-      // if any is non-empty, the order is PRINTED (PTD). Only if ALL are empty is it unprinted.
+      // v41o FIX (issue 1 — CONFIRMED field): the live diagnostic shows the SAP print-matter UDF is
+      // named U_PRNT_MATTR (e.g. "SEMPLX + SEMP"). Earlier guesses (U_PrintMatter etc.) never matched,
+      // which is why it was always blank. Read U_PRNT_MATTR per line, with light fallbacks. If present
+      // on this line, the line is printed (PTD); a few legacy field names kept only as fallback.
       printMatter = (
-        line.U_PrintMatter || line.U_PrintingMatter || line.U_Print_Matter ||
-        line.U_PrintMater || line.U_Matter || line.U_Print || line.U_PrintText ||
-        line.U_Printing || line.FreeText || line.Text || ''
+        line.U_PRNT_MATTR || line.U_PrintMatter || line.U_PrintingMatter || ''
       ).toString().trim();
-      // Note: ItemDescription is NOT used as print matter — it's the item name/colour text and would
-      // produce false "printed" flags. Print matter must come from a dedicated SAP field above.
       // Find matching planned orders
       const planned = (state.orders || []).filter(o =>
         !o.deleted &&

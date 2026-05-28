@@ -4520,6 +4520,12 @@ function _v39_reconcileSapIndents(indents) {
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
+      let isExportIndent;
+      if (docCurrency && docCurrency !== 'INR') {
+        isExportIndent = true;
+      } else {
+        isExportIndent = /\b(LTDA|GMBH|S\.?R\.?L|S\.?P\.?A|PTY|SDN\.?\s?BHD|N\.?V|B\.?V)\b|\b(BRAZIL|GERMANY|NEPAL|BANGLADESH|VIETNAM|INDONESIA|PHILIPPINES|MEXICO|EGYPT|KENYA|NIGERIA|FARMACEUTICOS|PHARMACEUTICA)\b/i.test(cardName);
+      }
       const uomScale = _uomScaleForLine(line); // v41o: per-line, UoM-based
       // v41 P19.2 Fix 6A: use RemainingOpenQuantity (open qty after partial dispatches).
       // SAP returns this per line for partially-delivered Sales Orders.

@@ -146,7 +146,7 @@ class SapClient {
         endpoint: entry.endpoint || '',
         status_code: entry.statusCode || 0,
         duration_ms: entry.durationMs || 0,
-        success: !!entry.success,
+        success: entry.success ? 1 : 0,
         error_message: (entry.errorMessage || '').toString().substring(0, 1000),
         request_summary: (entry.requestSummary || '').toString().substring(0, 2000),
         response_summary: (entry.responseSummary || '').toString().substring(0, 2000),
@@ -167,7 +167,7 @@ class SapClient {
         this.db.prepare(
           `INSERT INTO sap_audit_log (method, endpoint, status_code, duration_ms, success, error_message, request_summary, response_summary)
            VALUES (?,?,?,?,?,?,?,?)`
-        ).run(e.method, e.endpoint, e.status_code, e.duration_ms, e.success, e.error_message, e.request_summary, e.response_summary);
+        ).run(e.method, e.endpoint, e.status_code, e.duration_ms, (e.success ? 1 : 0), e.error_message, e.request_summary, e.response_summary);
         // SQLite prune
         this.db.prepare(`
           DELETE FROM sap_audit_log WHERE id NOT IN (
@@ -477,19 +477,44 @@ class SapClient {
    * Pulls all Orders with DocumentStatus 'O' (open) and DocDate >= today - N days.
    * Returns { ok, indents } where each indent has { DocEntry, DocNum, CardCode, CardName, DocDate, DocDueDate, DocumentLines: [...] }
    */
-  async fetchOpenSalesOrders({ lookbackDays = 30 } = {}) {
+  async fetchOpenSalesOrders({ lookbackDays = 365 } = {}) {
+    // Open Sales Orders are fetched by DocumentStatus eq 'bost_Open'. The DocDate window is only a
+    // sanity guardrail (kept at 365 days). NOTE: the real reason recent open orders (e.g. Alkem #199)
+    // were missing was NOT the date window but SAP Service Layer PAGINATION — see the nextLink loop
+    // below; the old code read only the first page.
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
     // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge datetime'YYYY-MM-DDT00:00:00'
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
-    // v41 P19.2 Fix 6A: include RemainingOpenQuantity in DocumentLines. SAP returns this per line
-    // for partially-delivered Sales Orders. Sunloc should plan only NOT-YET-DELIVERED qty.
-    // Note: $select on a navigation property (DocumentLines) returns all line fields; the field
-    // RemainingOpenQuantity is part of the standard DocumentLine entity in SAP B1 Service Layer.
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocumentLines`;
-    const r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}&$top=200` });
+    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge datetime'${dateStr}T00:00:00'`;
+    // v41f FIX (issue 1): use $expand=DocumentLines (NOT $select) so SAP B1 Service Layer returns
+    // the COMPLETE line entity for each line — including user-defined fields (U_* UDFs) such as the
+    // printing-matter field. With $select=DocumentLines, the Service Layer does not reliably return
+    // line-level UDFs, which is why print matter came back blank even when the SO was printed.
+    // Header fields stay in $select; the line collection comes via $expand.
+    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocCurrency&$expand=DocumentLines`;
+    // v41m FIX (issue 3 — REAL cause): SAP B1 Service Layer paginates at ~20 records per page and
+    // does NOT honour a large $top — it returns one page plus an @odata.nextLink. The old code read
+    // only r.data.value (first page), so any open order beyond the first page never reached the
+    // cache, regardless of its age. ("22 loaded" was a first-page artifact, not the true open count.)
+    // We now follow nextLink and accumulate ALL pages (capped to avoid runaway loops).
+    let indents = [];
+    let r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
-    const indents = r.data?.value || [];
+    indents = indents.concat(r.data?.value || []);
+    let nextLink = r.data?.['@odata.nextLink'];
+    let pageGuard = 0;
+    while (nextLink && pageGuard < 60) {
+      pageGuard++;
+      // nextLink may be relative ("Orders?$skip=20...") or absolute ("https://host/b1s/v1/Orders?...").
+      // Normalise to the relative path call() expects (it prefixes /b1s/v1/ for non-slash paths).
+      let nlPath = nextLink;
+      const m = /\/b1s\/v1\/(.*)$/.exec(nextLink);
+      if (m) nlPath = m[1];                 // strip scheme+host+/b1s/v1/ if absolute
+      const nr = await this.call({ method: 'GET', path: nlPath });
+      if (!nr.ok) { console.warn('[SAP fetch] nextLink page failed, returning partial:', nr.error); break; }
+      indents = indents.concat(nr.data?.value || []);
+      nextLink = nr.data?.['@odata.nextLink'];
+    }
     return { ok: true, indents };
   }
 
@@ -575,12 +600,12 @@ class SapClient {
   async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
-    const filter = `$filter=DocDate ge '${dateStr}'`;
+    const filter = `$filter=DocDate ge datetime'${dateStr}T00:00:00'`;
     // v40 P18.7: Pull richer line-item fields and addresses for Scan-Out matching.
     // Replaces previously-planned PDF download with structured Sales Register data.
     // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total
     // Lines: ItemCode (=PC Code), ItemDescription, Quantity, UnitPrice, LineTotal, VAT%, VAT amount
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,Comments,DocumentLines`;
+    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
     const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&${select}&$top=500&$orderby=DocEntry desc` });
     if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
     return { ok: true, invoices: r.data?.value || [] };

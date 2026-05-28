@@ -918,6 +918,23 @@ const MIGRATIONS = [
     name: 'tracking_labels_generated_index',
     sql: `CREATE INDEX IF NOT EXISTS idx_labels_generated ON tracking_labels(generated);`
   },
+  {
+    // v41l: batch REOPEN support. A Production Manager may reopen an inadvertently-closed batch
+    // ONCE, same calendar day (IST) only. This log records every reopen so the once-per-batch limit
+    // survives the deletion of the dpr_batch_closed row (which reopen removes) and any page refresh.
+    // A row here for an order_id means "this batch has already used its one reopen" → no second one.
+    // Separate table (not ALTER on dpr_batch_closed) because SQLite lacks ADD COLUMN IF NOT EXISTS,
+    // so a single cross-dialect ALTER block isn't safe; a fresh CREATE TABLE IF NOT EXISTS is.
+    version: 33,
+    name: 'dpr_batch_reopen_log',
+    sql: `CREATE TABLE IF NOT EXISTS dpr_batch_reopen_log (
+        order_id TEXT PRIMARY KEY,
+        batch_number TEXT,
+        closed_at TEXT,
+        reopened_at TEXT NOT NULL DEFAULT (datetime('now')),
+        reopened_by TEXT
+      );`
+  },
 ];
 
 function runMigrations() {
@@ -2974,36 +2991,53 @@ app.post('/api/sap/refresh-invoices', async (req, res) => {
 app.get('/api/sap/indent-fields', async (req, res) => {
   if (!_requireAdmin(req, res)) return;
   try {
+    // v41m: optional ?docNum=199 to inspect ONE specific indent (e.g. a missing order). Without it,
+    // returns the 20 most-recent cached indents' field shapes (for print-matter/currency discovery).
+    const wantDocNum = (req.query.docNum || '').toString().trim();
     let rows;
     if (pgPool) {
-      const r = await pgPool.query(`SELECT sap_doc_num, payload_json FROM sap_indent_cache ORDER BY fetched_at DESC LIMIT 20`);
-      rows = r.rows;
+      rows = wantDocNum
+        ? (await pgPool.query(`SELECT sap_doc_num, sap_doc_entry, card_name, fetched_at, payload_json FROM sap_indent_cache WHERE sap_doc_num=$1`, [wantDocNum])).rows
+        : (await pgPool.query(`SELECT sap_doc_num, sap_doc_entry, card_name, fetched_at, payload_json FROM sap_indent_cache ORDER BY fetched_at DESC LIMIT 20`)).rows;
     } else {
-      rows = db.prepare(`SELECT sap_doc_num, payload_json FROM sap_indent_cache ORDER BY fetched_at DESC LIMIT 20`).all();
+      rows = wantDocNum
+        ? db.prepare(`SELECT sap_doc_num, sap_doc_entry, card_name, fetched_at, payload_json FROM sap_indent_cache WHERE sap_doc_num=?`).all(wantDocNum)
+        : db.prepare(`SELECT sap_doc_num, sap_doc_entry, card_name, fetched_at, payload_json FROM sap_indent_cache ORDER BY fetched_at DESC LIMIT 20`).all();
+    }
+    if (wantDocNum && rows.length === 0) {
+      return res.json({ ok: true, docNum: wantDocNum, inCache: false,
+        note: `Indent ${wantDocNum} is NOT in the SAP cache — it was not returned by the SAP fetch (check DocumentStatus is open and it matches the fetch filter). Run a Force Refresh, then retry.` });
     }
     const out = [];
     for (const row of rows) {
       let payload = null;
       try { payload = JSON.parse(row.payload_json); } catch { continue; }
-      const line = (payload?.DocumentLines || [])[0];
-      if (!line) continue;
-      const allKeys = Object.keys(line);
+      const docLines = payload?.DocumentLines || [];
+      const line = docLines[0];
+      const allKeys = line ? Object.keys(line) : [];
       const udfFields = {};
-      for (const k of allKeys) {
-        if (k.startsWith('U_')) udfFields[k] = line[k];
-      }
+      for (const k of allKeys) { if (k.startsWith('U_')) udfFields[k] = line[k]; }
       out.push({
         docNum: row.sap_doc_num,
+        docEntry: row.sap_doc_entry,
+        cardName: row.card_name,
+        fetchedAt: row.fetched_at,
         docCurrency: payload?.DocCurrency || null,
-        lineKeys: allKeys,                                   // every field SAP returned on the line
-        udfFields,                                           // all U_* UDFs with values
-        itemCode: line.ItemCode || null,
-        itemDescription: line.ItemDescription || null,       // print matter may live here
-        freeText: line.FreeText || null,                     // ...or here
-        text: line.Text || null,                             // ...or here
+        documentStatus: payload?.DocumentStatus || payload?.DocStatus || null,
+        lineCount: docLines.length,
+        // v41m: per-line open/qty so we can see if reconcile drops a line for qty<=0.
+        linesQty: docLines.map(l => ({
+          itemCode: l.ItemCode, lineStatus: l.LineStatus,
+          quantity: l.Quantity, remainingOpenQuantity: l.RemainingOpenQuantity
+        })),
+        lineKeys: allKeys,
+        udfFields,
+        itemDescription: line?.ItemDescription || null,
+        freeText: line?.FreeText || null,
+        text: line?.Text || null,
       });
     }
-    res.json({ ok: true, count: out.length, lines: out });
+    res.json({ ok: true, inCache: true, count: out.length, lines: out });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -5419,6 +5453,15 @@ app.post('/api/dpr/save', async (req, res) => {
       } catch (e) {
         console.warn('[v41h DPR gate] production_orders overlay failed, using blob status:', e.message);
       }
+      // v41l (point 2): load DPR-closed batches — entries to a closed batch are rejected (unless it
+      // was reopened, in which case the dpr_batch_closed row is gone and it's not in this set).
+      const _closedSet = new Set();
+      try {
+        let _cRows;
+        if (pgPool) _cRows = (await pgPool.query('SELECT order_id, batch_number FROM dpr_batch_closed')).rows;
+        else _cRows = db.prepare('SELECT order_id, batch_number FROM dpr_batch_closed').all();
+        for (const r of (_cRows || [])) { if (r.order_id) _closedSet.add('id:'+r.order_id); if (r.batch_number) _closedSet.add('bn:'+r.batch_number); }
+      } catch (e) { console.warn('[v41l DPR gate] closed-batch load failed:', e.message); }
       const _isAdminCaller = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
       const _forceEntry    = !!req.body.forceEntry;
       const _rejected = [];
@@ -5428,6 +5471,15 @@ app.post('/api/dpr/save', async (req, res) => {
         // Allow TEMP batches unconditionally (fallback path when no real order assigned)
         if ((orderId && String(orderId).startsWith('TEMP-')) ||
             (batchNumber && String(batchNumber).startsWith('TEMP-'))) return true;
+        // v41l (point 2): block entries to DPR-closed batches (reopen removes them from this set).
+        if (_closedSet.has('id:'+orderId) || (batchNumber && _closedSet.has('bn:'+batchNumber))) {
+          if (_isAdminCaller && _forceEntry) {
+            try { logAudit(req.body.userName||'admin','admin','dpr','DPR_FORCE_ENTRY_CLOSED',`Wrote ${qty}L to CLOSED batch ${batchNumber||orderId} on ${machineId} ${date}/${shift}`); } catch {}
+            return true;
+          }
+          _rejected.push({ orderId, batchNumber, machineId, shift, qty, reason: `Batch ${batchNumber||orderId} is CLOSED in DPR — reopen it (same day, once) before entering data` });
+          return false;
+        }
         const meta = _orderStatusById[orderId] || _orderStatusByBatch[batchNumber];
         if (!meta) return true;   // unknown order → don't block (could be a legacy/orphan)
         if (meta.deleted) {
@@ -5513,12 +5565,29 @@ app.post('/api/dpr/save', async (req, res) => {
       } catch (e) {
         console.warn('[v41h DPR gate Sq] production_orders overlay failed, using blob status:', e.message);
       }
+      // v41l (point 2): closed-batch set for the SQLite path.
+      const _closedSetSq = new Set();
+      try {
+        let _cRowsSq;
+        if (pgPool) _cRowsSq = (await pgPool.query('SELECT order_id, batch_number FROM dpr_batch_closed')).rows;
+        else _cRowsSq = db.prepare('SELECT order_id, batch_number FROM dpr_batch_closed').all();
+        for (const r of (_cRowsSq || [])) { if (r.order_id) _closedSetSq.add('id:'+r.order_id); if (r.batch_number) _closedSetSq.add('bn:'+r.batch_number); }
+      } catch (e) { console.warn('[v41l DPR gate Sq] closed-batch load failed:', e.message); }
       const _isAdminCallerSq = (req.body.userRole === 'admin') || (req.headers['x-user-role'] === 'admin');
       const _forceEntrySq    = !!req.body.forceEntry;
       const _rejectedSq = [];
       const _gateSq = (orderId, batchNumber, machineId, shift, qty) => {
         if ((orderId && String(orderId).startsWith('TEMP-')) ||
             (batchNumber && String(batchNumber).startsWith('TEMP-'))) return true;
+        // v41l (point 2): block entries to DPR-closed batches.
+        if (_closedSetSq.has('id:'+orderId) || (batchNumber && _closedSetSq.has('bn:'+batchNumber))) {
+          if (_isAdminCallerSq && _forceEntrySq) {
+            try { logAudit(req.body.userName||'admin','admin','dpr','DPR_FORCE_ENTRY_CLOSED',`Wrote ${qty}L to CLOSED batch ${batchNumber||orderId} on ${machineId} ${date}/${shift}`); } catch {}
+            return true;
+          }
+          _rejectedSq.push({ orderId, batchNumber, machineId, shift, qty, reason: `Batch ${batchNumber||orderId} is CLOSED in DPR — reopen it (same day, once) before entering data` });
+          return false;
+        }
         const meta = _orderStatusByIdSq[orderId] || _orderStatusByBatchSq[batchNumber];
         if (!meta) return true;
         if (meta.deleted) {
@@ -5634,17 +5703,81 @@ app.delete('/api/dpr/batch-close/:orderId', async (req, res) => {
   }
 });
 
+// v41l: REOPEN a batch in DPR — Production Manager gets ONE reopen per batch, same IST day only.
+// Guards: (1) the batch must currently be closed; (2) it must not have been reopened before
+// (dpr_batch_reopen_log row absent); (3) the close must be on the SAME IST calendar day as now.
+// On success: delete the dpr_batch_closed row (so data entry is allowed again) AND write a
+// reopen-log row (so a second reopen is permanently blocked). The client also audit-logs it.
+function _istYMD(dtStr) {
+  // Convert a stored timestamp (UTC-ish 'YYYY-MM-DD HH:MM:SS' or ISO) to the IST calendar date.
+  // All users are IST (UTC+5:30). datetime('now') / NOW() store UTC; add 5h30m then take the date.
+  try {
+    let d = dtStr ? new Date(dtStr.replace(' ', 'T') + (/[zZ]|[+\-]\d\d:?\d\d$/.test(dtStr) ? '' : 'Z')) : new Date();
+    if (isNaN(d.getTime())) d = new Date(dtStr);
+    const ist = new Date(d.getTime() + (5 * 60 + 30) * 60000);
+    return ist.toISOString().slice(0, 10);
+  } catch { return null; }
+}
+app.post('/api/dpr/batch-reopen', async (req, res) => {
+  try {
+    const { orderId, batchNumber, reopenedBy } = req.body;
+    if (!orderId) return res.status(400).json({ ok: false, error: 'orderId required' });
+
+    // Look up the current closed row + any prior reopen.
+    let closedRow, reopenRow;
+    if (pgPool) {
+      closedRow = (await pgPool.query('SELECT order_id, batch_number, closed_at FROM dpr_batch_closed WHERE order_id=$1', [orderId])).rows[0];
+      reopenRow = (await pgPool.query('SELECT order_id FROM dpr_batch_reopen_log WHERE order_id=$1', [orderId])).rows[0];
+    } else {
+      closedRow = db.prepare('SELECT order_id, batch_number, closed_at FROM dpr_batch_closed WHERE order_id=?').get(orderId);
+      reopenRow = db.prepare('SELECT order_id FROM dpr_batch_reopen_log WHERE order_id=?').get(orderId);
+    }
+
+    if (!closedRow) return res.status(409).json({ ok: false, error: 'Batch is not currently closed in DPR.' });
+    if (reopenRow)  return res.status(409).json({ ok: false, error: 'This batch has already been reopened once and cannot be reopened again. Contact Admin.' });
+
+    // Same-IST-day guard: the close date (IST) must equal today (IST).
+    const closeDayIST = _istYMD(closedRow.closed_at);
+    const todayIST    = _istYMD(new Date().toISOString());
+    if (closeDayIST && todayIST && closeDayIST !== todayIST) {
+      return res.status(409).json({ ok: false, error: `Reopen window expired. A batch can only be reopened on the same day it was closed (closed ${closeDayIST}, today ${todayIST}). Contact Admin.` });
+    }
+
+    // Perform: record the reopen (blocks future reopens) then delete the closed row.
+    if (pgPool) {
+      await pgPool.query(
+        `INSERT INTO dpr_batch_reopen_log (order_id, batch_number, closed_at, reopened_at, reopened_by)
+         VALUES ($1,$2,$3,NOW(),$4) ON CONFLICT(order_id) DO NOTHING`,
+        [orderId, batchNumber || closedRow.batch_number || null, closedRow.closed_at || null, reopenedBy || null]
+      );
+      await pgPool.query('DELETE FROM dpr_batch_closed WHERE order_id=$1', [orderId]);
+    } else {
+      db.prepare(`INSERT OR IGNORE INTO dpr_batch_reopen_log (order_id, batch_number, closed_at, reopened_at, reopened_by)
+        VALUES (?, ?, ?, datetime('now'), ?)`).run(orderId, batchNumber || closedRow.batch_number || null, closedRow.closed_at || null, reopenedBy || null);
+      db.prepare('DELETE FROM dpr_batch_closed WHERE order_id=?').run(orderId);
+    }
+    res.json({ ok: true, reopenedAt: new Date().toISOString() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET all DPR-closed batches (used by Planning to gate close button)
 app.get('/api/dpr/batch-closed', async (req, res) => {
   try {
-    let rows;
+    let rows, reopened;
     if (pgPool) {
       const r = await pgPool.query('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed');
       rows = r.rows;
+      reopened = (await pgPool.query('SELECT order_id FROM dpr_batch_reopen_log')).rows;
     } else {
       rows = db.prepare('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed').all();
+      reopened = db.prepare('SELECT order_id FROM dpr_batch_reopen_log').all();
     }
-    res.json({ ok: true, closed: rows });
+    const reopenedSet = new Set((reopened || []).map(r => r.order_id));
+    // Annotate each closed row with whether this batch has already used its one reopen.
+    rows = (rows || []).map(r => ({ ...r, alreadyReopened: reopenedSet.has(r.order_id) }));
+    res.json({ ok: true, closed: rows, reopenedOrderIds: Array.from(reopenedSet) });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
@@ -7630,7 +7763,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
-      build: 'v41j',
+      build: 'v41m',
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -7639,7 +7772,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v41j', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v41m', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -8917,7 +9050,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
-      build: 'v41j',
+      build: 'v41m',
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -8926,7 +9059,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v41j', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v41m', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -9894,8 +10027,19 @@ app.get('/api/tracking/labels-all', async (req, res) => {
   try {
     const COLS = `id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total`;
     const m=r=>({id:r.id,batchNumber:r.batch_number,labelNumber:r.label_number,size:r.size,qty:r.qty,isPartial:!!r.is_partial,isOrange:!!r.is_orange,parentLabelId:r.parent_label_id||null,customer:r.customer||'',colour:r.colour||'',pcCode:r.pc_code||'',poNumber:r.po_number||'',machineId:r.machine_id||'',printingMatter:r.printing_matter||'',generated:r.generated,printed:!!r.printed,printedAt:r.printed_at||null,voided:!!r.voided,voidReason:r.void_reason||'',voidedAt:r.voided_at||null,voidedBy:r.voided_by||null,woStatus:r.wo_status||null,shipTo:r.ship_to||'',billTo:r.bill_to||'',isExcess:!!r.is_excess,excessNum:r.excess_num||null,excessTotal:r.excess_total||null,normalTotal:r.normal_total||null});
-    if(pgPool){const r=await pgPool.query(`SELECT ${COLS} FROM tracking_labels ORDER BY generated DESC`);res.json({ok:true,labels:r.rows.map(m)});}
-    else{const labels=db.prepare(`SELECT ${COLS} FROM tracking_labels ORDER BY generated DESC`).all();res.json({ok:true,labels:labels.map(m)});}
+    // v41k PERF FIX: generated column stores ISO timestamps (e.g. 2026-03-21T09:06:45.261Z)
+    // Load current month + previous month labels, hard-capped at 4000 rows.
+    // All 10k+ labels timeouts the browser fetch; 4000 covers the full current month view.
+    // Pass ?since=YYYY-MM-DD to override (e.g. for reports needing older labels).
+    const sinceParam = req.query.since || null;
+    const sinceDate = sinceParam || (() => {
+      const d = new Date();
+      d.setDate(1); d.setMonth(d.getMonth() - 1); // start of previous month
+      return d.toISOString().slice(0, 7) + '-01'; // YYYY-MM-01
+    })();
+    const whereClause = `WHERE generated >= '${sinceDate.replace(/'/g,'')}'`;
+    if(pgPool){const r=await pgPool.query(`SELECT ${COLS} FROM tracking_labels ${whereClause} ORDER BY generated DESC LIMIT 4000`);res.json({ok:true,labels:r.rows.map(m)});}
+    else{const labels=db.prepare(`SELECT ${COLS} FROM tracking_labels ${whereClause} ORDER BY generated DESC LIMIT 4000`).all();res.json({ok:true,labels:labels.map(m)});}
   }catch(err){res.status(500).json({ok:false,error:err.message});}
 });
 // ── All scans endpoint (formerly "scans-recent", LIMIT removed in v40 P18.14) ──

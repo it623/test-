@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v41j</title>
+<title>Sunloc Tracking Suite v1.0 · build v41m</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -560,7 +560,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v41j</p>
+      <p>Tracking Suite v1.0 · build v41m</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -591,7 +591,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v41j</p>
+      <p>Tracking Suite v1.0 · build v41m</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -1716,7 +1716,7 @@ async function pullFromServer(){
           window._v40_boxStagesLoadedAt = Date.now();
           window._v40_dispatchedByBatch = bj.dispatchedByBatch || {};
           window._v40_boxCountsByBatch = bj.boxCounts || {};
-          console.log(`[v41j PERF] Box stages loaded: ${Object.keys(window._v40_boxStagesMap).length} labels, ${bj.scanCount} scans, ${bj.dispatchRecCount} dispatch records`);
+          console.log(`[v41m PERF] Box stages loaded: ${Object.keys(window._v40_boxStagesMap).length} labels, ${bj.scanCount} scans, ${bj.dispatchRecCount} dispatch records`);
         }
       }
     } catch (e37) { console.warn('STEP 3.7 box-stages failed:', e37?.message || e37); }
@@ -7066,6 +7066,15 @@ function renderReports(forceRebuild){
       <div class="fw-bold mb-4">FG Stock Aging &amp; Transitional Flow B</div>
       <div class="text-sm text-muted"><b>Flow A — FG Stock Aging:</b> labels packed (scan-IN to packing) but not yet received by dispatch within 7 days (15 days for export batches). Active indefinitely. <b>Flow B — Legacy/Recovery Detector (transitional):</b> applies only to admin-override legacy scans (pre-v39 in-flight batches or SAP-offline recovery). v39's primary atomic Scan Out flow makes Flow B inert for all SAP-linked orders. Once legacy backfill is complete and the legacy dispatch panel is no longer used, this tab will show zero alerts. Acknowledge with reason (24h auto-expiry).</div>
       <button class="btn btn-sm mt-12" style="background:#d97706;color:#fff">Generate Reconciliation Alerts →</button>
+    </div>
+    <!-- v41m: Report K — Per-day Scan In/Out Movement, now exposed on the Reports page (previously
+         only reachable via the Dispatch page container). Renders into its own output container. -->
+    <div class="card cursor-pointer" onclick="setTimeout(()=>renderReportK('report-k-container'),50)" style="border-left:4px solid #0891b2;grid-column:span 2">
+      <div class="card-title" style="color:#0891b2">📦 Report K — Daily Scan In / Out Movement</div>
+      <div class="fw-bold mb-4">Per-day Pack-In → Dispatch-Out Movement</div>
+      <div class="text-sm text-muted">Daily movement of boxes: scanned IN to packing vs scanned OUT for dispatch, per batch/customer, for the selected period. Use to reconcile dispatch flow day by day.</div>
+      <button class="btn btn-sm mt-12" style="background:#0891b2;color:#fff">Generate Movement Report →</button>
+      <div id="report-k-container" class="mt-12"></div>
     </div>
     <!-- v39 Phase 12: Report L — sequential invoice ledger -->
     <div class="card cursor-pointer" onclick="renderReportL()" style="border-left:4px solid #0e7490;grid-column:span 2">

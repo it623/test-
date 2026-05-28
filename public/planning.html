@@ -517,7 +517,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v41j</p>
+      <p>Planning Suite v3.0 · build v41m</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -1283,7 +1283,12 @@ const SYNC = (() => {
               // any direction of change (corrections, deletions, edits) propagates correctly.
               dp.actualDispatched = trackingActual;
               dp._trackingDispatched = trackingActual; // mark as coming from tracking
-              if (dp.actualDispatched >= dp.qty) dp.status = 'dispatched';
+              // v41m FIX: a MANUAL dispatch (planner clicked ✓ Dispatch) must NOT be downgraded by a
+              // lagging/zero tracking scan-out total. Tracking may still UPGRADE status (e.g. confirm
+              // full dispatch), but it cannot revert a manually-dispatched lot back to pending/ready.
+              if (dp.manuallyDispatched) {
+                dp.status = 'dispatched';
+              } else if (dp.actualDispatched >= dp.qty) dp.status = 'dispatched';
               else if (dp.actualDispatched > 0) dp.status = 'partial';
               else if (dp.status === 'partial' || dp.status === 'dispatched') dp.status = 'pending';
             }
@@ -4485,8 +4490,10 @@ function _v39_reconcileSapIndents(indents) {
     if (docCurrency) {
       isExportIndent = docCurrency !== 'INR';            // authoritative
     } else {
-      // currency unavailable — conservative foreign-suffix fallback (NOT generic LTD/LIMITED)
-      isExportIndent = /\b(LTDA|GMBH|S\.?R\.?L|S\.?P\.?A|PTY|SDN\.?\s?BHD|N\.?V|B\.?V)\b|\b(BRAZIL|GERMANY|NEPAL|BANGLADESH|VIETNAM|INDONESIA|PHILIPPINES|MEXICO|EGYPT|KENYA|NIGERIA|FARMACEUTICOS|PHARMACEUTICA)\b/i.test(cardName);
+      // currency unavailable — conservative foreign-suffix/region fallback (NOT generic LTD/LIMITED).
+      // v41m: widened with more export company forms seen in live data: SAOC (Oman), FZE/FZ-LLC/LLC
+      // (Gulf free-zone), LDA, SARL, SP Z O O, country/region words. Indian PVT LTD/LIMITED excluded.
+      isExportIndent = /\b(LTDA|LDA|GMBH|S\.?R\.?L|SARL|S\.?P\.?A|SP\.?\s?Z\.?\s?O\.?\s?O|PTY|SDN\.?\s?BHD|N\.?V|B\.?V|SAOC|SAOG|FZE|FZ[\s-]?LLC|L\.?L\.?C|W\.?L\.?L|PJSC|JSC)\b|\b(BRAZIL|GERMANY|NEPAL|BANGLADESH|VIETNAM|INDONESIA|PHILIPPINES|MEXICO|EGYPT|KENYA|NIGERIA|OMAN|MUSCAT|DUBAI|UAE|EMIRATES|SAUDI|QATAR|KUWAIT|BAHRAIN|JORDAN|YEMEN|SRI\s?LANKA|MYANMAR|FARMACEUTICOS|FARMACEUTICA|PHARMACEUTICA|INSUMOS|SUPLEMENTOS)\b/i.test(cardName);
     }
     const uomScale = isExportIndent ? 0.01 : 1; // export thousands → lakhs; domestic unchanged
 
@@ -8499,7 +8506,7 @@ function updateDispatchActual(id, val) {
 
 function markDispatched(id) {
   const dp = state.dispatchPlans.find(d=>d.id===id);
-  if (dp) { dp.status='dispatched'; dp.actualDispatched=dp.qty; saveState(); render(); }
+  if (dp) { dp.status='dispatched'; dp.actualDispatched=dp.qty; dp.manuallyDispatched=true; saveState(); render(); }
 }
 
 function updateDispatchRemark(id, val) {

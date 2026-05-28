@@ -10032,16 +10032,8 @@ app.get('/api/tracking/labels-all', async (req, res) => {
   try {
     const COLS = `id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total`;
     const m=r=>({id:r.id,batchNumber:r.batch_number,labelNumber:r.label_number,size:r.size,qty:r.qty,isPartial:!!r.is_partial,isOrange:!!r.is_orange,parentLabelId:r.parent_label_id||null,customer:r.customer||'',colour:r.colour||'',pcCode:r.pc_code||'',poNumber:r.po_number||'',machineId:r.machine_id||'',printingMatter:r.printing_matter||'',generated:r.generated,printed:!!r.printed,printedAt:r.printed_at||null,voided:!!r.voided,voidReason:r.void_reason||'',voidedAt:r.voided_at||null,voidedBy:r.voided_by||null,woStatus:r.wo_status||null,shipTo:r.ship_to||'',billTo:r.bill_to||'',isExcess:!!r.is_excess,excessNum:r.excess_num||null,excessTotal:r.excess_total||null,normalTotal:r.normal_total||null});
-    // v41k PERF FIX: Filter to previous month + current month, LIMIT 4000
-    const sinceParam = req.query.since || null;
-    const sinceDate = sinceParam || (() => {
-      const d = new Date();
-      d.setDate(1); d.setMonth(d.getMonth() - 1);
-      return d.toISOString().slice(0, 7) + '-01';
-    })();
-    const whereClause = `WHERE generated >= '${sinceDate.replace(/'/g,'')}'`;
-    if(pgPool){const r=await pgPool.query(`SELECT ${COLS} FROM tracking_labels ${whereClause} ORDER BY generated DESC LIMIT 4000`);res.json({ok:true,labels:r.rows.map(m)});}
-    else{const labels=db.prepare(`SELECT ${COLS} FROM tracking_labels ${whereClause} ORDER BY generated DESC LIMIT 4000`).all();res.json({ok:true,labels:labels.map(m)});}
+    if(pgPool){const r=await pgPool.query(`SELECT ${COLS} FROM tracking_labels ORDER BY generated DESC`);res.json({ok:true,labels:r.rows.map(m)});}
+    else{const labels=db.prepare(`SELECT ${COLS} FROM tracking_labels ORDER BY generated DESC`).all();res.json({ok:true,labels:labels.map(m)});}
   }catch(err){res.status(500).json({ok:false,error:err.message});}
 });
 // ── All scans endpoint (formerly "scans-recent", LIMIT removed in v40 P18.14) ──

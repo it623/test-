@@ -652,8 +652,11 @@ const PRINT_MACHINES = [
   {id:'OPM20', size:'0', cap:10, pref:'ANY CUSTOMER'},
 ];
 
+const PACK_SIZES = {'00':75000,'0':100000,'1':125000,'2':175000,'3':225000,'0EL':100000,'0SEL':100000,'4':175000,'5':175000};
 
-// Toast notification helper
+// v41o FIX (added by IT, adopted into baseline): toast() was referenced in several places
+// (e.g. batch close/reopen feedback) but never defined in planning.html — a ReferenceError at
+// call time. Lightweight non-blocking toast notification.
 function toast(msg, col, duration) {
   const t = document.createElement('div');
   t.textContent = msg;
@@ -661,7 +664,6 @@ function toast(msg, col, duration) {
   document.body.appendChild(t);
   setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 400); }, duration||2500);
 }
-const PACK_SIZES = {'00':75000,'0':100000,'1':125000,'2':175000,'3':225000,'0EL':100000,'0SEL':100000,'4':175000,'5':175000};
 const CAPSULE_COLOURS = ['White/White','White/Yellow','White/Clear','Yellow/Yellow','Clear/Clear','Orange/White','Orange/Orange','Blue/White','Blue/Blue','Green/White','Green/Green','Pink/White','Pink/Pink','Red/White','Red/Red','Purple/White','Purple/Purple','Brown/White','Black/White','Maroon/White'];
 const SIZES = ['00','0','0EL','0SEL','1','2','3','4','5'];
 const ZONES = ['BADDI','BADDI + JAMMU','BADDI+JAMMU','NORTH','SOUTH','EAST','WEST','DELHI','MUMBAI','RAJASTHAN','ALWAR','NEPAL','BANGLADESH','LOCAL','EXPORT'];
@@ -4530,7 +4532,6 @@ function _v39_reconcileSapIndents(indents) {
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
       const uomScale = _uomScaleForLine(line); // v41o: per-line, UoM-based
-      const isExportIndent = uomScale < 1; // export = THOUSAND UoM (×0.01); domestic = LAC (×1)
       // v41 P19.2 Fix 6A: use RemainingOpenQuantity (open qty after partial dispatches).
       // SAP returns this per line for partially-delivered Sales Orders.
       // Fallback to Quantity if RemainingOpenQuantity is null/undefined (e.g. brand new SO with no delivery yet).
@@ -4539,6 +4540,11 @@ function _v39_reconcileSapIndents(indents) {
         : parseFloat(line.Quantity) || 0;
       const lineQty = rawOpenQty * uomScale;
       if (lineQty <= 0) continue;
+      // v41o FIX (regression caught on test by IT): when export detection moved to per-line UoM,
+      // the old `isExportIndent` variable was removed but is still referenced below (isExport flag,
+      // line ~4584) — a ReferenceError that crashed the reconcile loop and rendered zero indents.
+      // Derive it from the per-line scale: any line scaled down (<1) is an export (THOUSAND) line.
+      const isExportIndent = uomScale < 1;
       // v40 Phase 18.2: Lookup ItemCode against Sunloc's PC Code master to derive
       // Size + Colour. SAP UDFs (U_Size, U_Colour, U_PCCode) are NOT populated in
       // Sunil Healthcare's SAP — ItemCode IS the PC Code. Search all size buckets

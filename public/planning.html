@@ -517,7 +517,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v41m</p>
+      <p>Planning Suite v3.0 · build v41n</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -543,7 +543,7 @@ input[type="file"] { display:none; }
     <div class="nav-item" onclick="navigate('pc-codes')"><span class="icon">🎨</span> PC Codes</div>
     <div class="nav-item" onclick="navigate('archives')"><span class="icon">🗂️</span> Archives</div>
     <!-- Search button is in the Production Plan tab bar -->
-    <div class="nav-item" id="nav-reconciliation" onclick="navigate('reconciliation')"><span class="icon">🔄</span> Reconciliation</div>
+    <div class="nav-item" id="nav-reconciliation" onclick="navigate('reconciliation')"><span class="icon">🔄</span> TEMP / W/O Reconciliation</div>
     <div class="nav-item" id="nav-sap-config" style="display:none" onclick="navigate('sap-config')"><span class="icon">🔌</span> SAP Configuration</div>
     <div class="nav-item" id="nav-audit-log" style="display:none" onclick="navigate('audit-log')"><span class="icon">📋</span> Audit Log</div>
     <div class="nav-item" id="nav-admin-users" style="display:none" onclick="navigate('admin-users')"><span class="icon">👥</span> Admin · Users</div>
@@ -1107,14 +1107,31 @@ const SYNC = (() => {
               console.log('[Orders] Added missing order from DB:', dbO.batchNumber, dbO.machineId);
             }
           });
-          // Deduplicate by batchNumber+machineId — keep order with most data
+          // Deduplicate by batchNumber+machineId. v41n FIX: the old tie-break kept whichever
+          // duplicate appeared LAST in iteration order when actualProd was equal (e.g. both 0 for
+          // pending orders). Iteration order varies per refresh with blob/table merge timing, so a
+          // batch that existed in both stores with DIFFERENT statuses would flip In Production↔Pending
+          // at random, and the count of "running" machines changed between refreshes. The tie-break
+          // is now FULLY DETERMINISTIC and status-coherent, so the same record always wins.
+          const _dbIds = new Set((ooj.orders||[]).map(o=>o.id)); // ids that came from production_orders (authoritative)
+          const _better = (cand, cur) => {
+            if (!cur) return true;
+            // 1. Prefer the record whose id is in the authoritative production_orders table.
+            const candDb = _dbIds.has(cand.id), curDb = _dbIds.has(cur.id);
+            if (candDb !== curDb) return candDb;
+            // 2. Prefer higher actualProd (more production data).
+            if ((cand.actualProd||0) !== (cur.actualProd||0)) return (cand.actualProd||0) > (cur.actualProd||0);
+            // 3. Prefer the more recently edited record (latest user intent).
+            if ((cand._localEditedAt||0) !== (cur._localEditedAt||0)) return (cand._localEditedAt||0) > (cur._localEditedAt||0);
+            // 4. Stable final tie-break by id so the result never changes between refreshes.
+            return String(cand.id||'') < String(cur.id||'');
+          };
           const batchMcMap = new Map();
           state.orders.forEach(o => {
             if (!o.batchNumber || !o.machineId) { batchMcMap.set(o.id, o); return; }
             const key = `${o.batchNumber}__${o.machineId}`;
             const existing = batchMcMap.get(key);
-            if (!existing) { batchMcMap.set(key, o); }
-            else if ((o.actualProd||0) >= (existing.actualProd||0)) { batchMcMap.set(key, o); }
+            if (_better(o, existing)) batchMcMap.set(key, o);
           });
           state.orders = Array.from(batchMcMap.values());
           // State updated silently — no auto-render to prevent screen flipping
@@ -2631,7 +2648,7 @@ function _renderImmediate() {
     'machines':'Machine Master',
     'pc-codes':'Product Code Master',
     'search':'Search',
-    'reconciliation':'TEMP Batch Reconciliation',
+    'reconciliation':'TEMP / Work-Order Batch Reconciliation',
     'sap-config':'SAP Configuration (Admin)',
     'admin-users':'Admin · User Management',
     'data-integrity':'Data Integrity Dashboard',
@@ -5263,7 +5280,7 @@ function _v39_openGenerateInvoiceModal(planId, mode) {
   openModal(`🧾 Generate Invoice — ${ctx.batchNumber}`, `
     <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:12px;margin-bottom:14px;font-size:12px;line-height:1.5;color:#0e7490">
       <strong>📋 Sunloc will create a Delivery in SAP (not the Invoice itself).</strong><br>
-      A Delivery referencing this Sales Order will be created in SAP. The SAP user then opens the Delivery in SAP and converts it to an A/R Invoice via Copy-To. Sunloc's 5-min poller picks up the resulting Invoice and routes it to the Tracking → Invoice Queue.
+      This logs an invoice request to the Pending Reconciliation ledger (Tracking → Dispatch → ⏳ Pending Reconciliation). No document is pushed to SAP. The SAP user creates the invoice in SAP manually; Sunloc's 5-min poller then matches it by Sales Order reference and reconciles it, after which it appears in the Tracking → Invoice Queue for Scan Out.
     </div>
     <div style="background:var(--surface2);border-radius:6px;padding:14px;margin-bottom:14px;font-size:12px;line-height:1.7">
       <div style="font-weight:700;color:var(--text);margin-bottom:8px;font-size:13px">Invoice details</div>
@@ -5427,7 +5444,7 @@ function _v39_openTruckInvoiceModal(truckIdx, zone) {
   window._v39_truckInvoiceContext = { truckIdx, zone, eligible };
   openModal(`🧾 Generate Invoices for Truck #${truck.truckNumber || truckIdx+1}`, `
     <div style="background:rgba(8,145,178,0.08);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:12px;line-height:1.5;color:#0e7490">
-      <strong>One Delivery per Sales Order.</strong> Each batch in this truck will be sent as a separate Delivery to SAP, referencing its own Sales Order. SAP user will then convert each Delivery → Invoice in SAP via Copy-To.
+      <strong>Each checked batch is logged to the Pending Reconciliation ledger.</strong> Nothing is pushed to SAP. The SAP user creates each invoice in SAP manually; Sunloc's 5-min poller reconciles them by Sales Order reference, after which they move to the Invoice Queue for Scan Out.
     </div>
     <table style="width:100%;font-size:12px;border-collapse:collapse;margin-bottom:12px">
       <thead style="background:var(--surface2)">
@@ -5439,7 +5456,7 @@ function _v39_openTruckInvoiceModal(truckIdx, zone) {
       💡 Uncheck any batch you don't want to invoice now. Each checked batch fires one SAP API call.
     </div>
   `, [
-    { label: '🧾 Create Deliveries for Checked Batches', cls: 'btn-primary', fn: '_v39_submitTruckInvoices()' },
+    { label: '🧾 Log Invoice Requests for Checked Batches', cls: 'btn-primary', fn: '_v39_submitTruckInvoices()' },
     { label: 'Cancel', cls: 'btn-secondary', fn: 'closeModal()' },
   ]);
 }
@@ -5591,14 +5608,14 @@ function _v40_renderConsolidatedApprovalModalBody() {
     footerHtml = `
       <div style="background:${failCount===0?'rgba(16,185,129,0.08)':(okCount===0?'rgba(220,38,38,0.08)':'rgba(245,158,11,0.08)')};border:1px solid ${failCount===0?'rgba(16,185,129,0.3)':(okCount===0?'rgba(220,38,38,0.3)':'rgba(245,158,11,0.3)')};border-radius:6px;padding:10px 14px;margin-top:12px;font-size:12px;line-height:1.6">
         <strong>${failCount===0?'✅ All Deliveries created':okCount===0?'❌ All Deliveries failed':'⚠️ Partial: '+okCount+' succeeded, '+failCount+' failed'}</strong><br>
-        ${okCount > 0 ? `<span style="color:#047857">${okCount} Delivery document${okCount!==1?'s':''} created in SAP. SAP user will convert each Delivery → Invoice via Copy-To. Sunloc's 5-min poller will pick up the resulting Invoices.</span><br>` : ''}
+        ${okCount > 0 ? `<span style="color:#047857">${okCount} invoice request${okCount!==1?'s':''} logged to Pending Reconciliation. SAP user creates each invoice in SAP manually; Sunloc's 5-min poller will reconcile them automatically.</span><br>` : ''}
         ${failCount > 0 ? `<span style="color:#7c2d2d">Failures preserved as 'failed' in invoice_requests for audit.</span>` : ''}
       </div>`;
   } else {
     footerHtml = `
       <div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 14px;margin-top:12px;font-size:11px;line-height:1.6;color:#0e7490">
         <strong>📋 Sunloc will create ${items.length} Deliveries in SAP (one per Sales Order).</strong><br>
-        SAP user converts each Delivery → A/R Invoice via Copy-To in SAP. Sunloc's 5-min poller picks up the resulting Invoices and routes them to the Tracking → Invoice Queue.
+        SAP user creates each invoice in SAP manually. Sunloc's 5-min poller reconciles them by Sales Order reference and routes them to the Tracking → Invoice Queue for Scan Out.
       </div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
         <label style="font-size:11px;color:var(--text3);font-weight:600;white-space:nowrap">Remarks (optional, applied to all):</label>

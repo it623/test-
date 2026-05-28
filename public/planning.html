@@ -652,6 +652,15 @@ const PRINT_MACHINES = [
   {id:'OPM20', size:'0', cap:10, pref:'ANY CUSTOMER'},
 ];
 
+
+// Toast notification helper
+function toast(msg, col, duration) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:' + (col||'#333') + ';color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.3);pointer-events:none;transition:opacity .4s';
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity='0'; setTimeout(() => t.remove(), 400); }, duration||2500);
+}
 const PACK_SIZES = {'00':75000,'0':100000,'1':125000,'2':175000,'3':225000,'0EL':100000,'0SEL':100000,'4':175000,'5':175000};
 const CAPSULE_COLOURS = ['White/White','White/Yellow','White/Clear','Yellow/Yellow','Clear/Clear','Orange/White','Orange/Orange','Blue/White','Blue/Blue','Green/White','Green/Green','Pink/White','Pink/Pink','Red/White','Red/Red','Purple/White','Purple/Purple','Brown/White','Black/White','Maroon/White'];
 const SIZES = ['00','0','0EL','0SEL','1','2','3','4','5'];
@@ -4520,13 +4529,8 @@ function _v39_reconcileSapIndents(indents) {
 
     for (let li = 0; li < lines.length; li++) {
       const line = lines[li];
-      let isExportIndent;
-      if (docCurrency && docCurrency !== 'INR') {
-        isExportIndent = true;
-      } else {
-        isExportIndent = /\b(LTDA|GMBH|S\.?R\.?L|S\.?P\.?A|PTY|SDN\.?\s?BHD|N\.?V|B\.?V)\b|\b(BRAZIL|GERMANY|NEPAL|BANGLADESH|VIETNAM|INDONESIA|PHILIPPINES|MEXICO|EGYPT|KENYA|NIGERIA|FARMACEUTICOS|PHARMACEUTICA)\b/i.test(cardName);
-      }
       const uomScale = _uomScaleForLine(line); // v41o: per-line, UoM-based
+      const isExportIndent = uomScale < 1; // export = THOUSAND UoM (×0.01); domestic = LAC (×1)
       // v41 P19.2 Fix 6A: use RemainingOpenQuantity (open qty after partial dispatches).
       // SAP returns this per line for partially-delivered Sales Orders.
       // Fallback to Quantity if RemainingOpenQuantity is null/undefined (e.g. brand new SO with no delivery yet).

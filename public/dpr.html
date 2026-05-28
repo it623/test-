@@ -460,7 +460,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v41j</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v41l</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -922,7 +922,12 @@ let serverUrl = sanitizeServerUrl(_dprSavedUrl || _dprDefaultUrl);
 let syncStatus = 'offline'; // 'synced' | 'offline' | 'syncing'
 let unsaved = false;
 
-function today(){ const d=new Date(); return d.toISOString().split('T')[0]; }
+// v41k FIX (DPR date bug): compute the LOCAL calendar date, never UTC. toISOString() converts to
+// UTC — for IST (UTC+5:30) this yields the PREVIOUS day for any local time before 05:30, which
+// corrupted DPR date keys, caused data entered on day N to be read/attributed to day N-1, and made
+// the C-shift auto-rollback misfire. _localYMD returns 'YYYY-MM-DD' in the browser's local zone.
+function _localYMD(dt){ const d=dt||new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function today(){ return _localYMD(new Date()); }
 function getDate(){ return document.getElementById('ndate').value || today(); }
 function skey(fl,d){ return `dpr3_${fl}_${d}`; }
 function tgt(fl,mcId){ return parseFloat(targets[`${fl}_${mcId}`]||8); }
@@ -1042,7 +1047,7 @@ function restrictDprDatePicker() {
   if (!input) return;
   const [y, m] = _dprSelectedMonth.split('-').map(Number);
   const minD = `${_dprSelectedMonth}-01`;
-  const maxD = new Date(y, m, 0).toISOString().slice(0,10); // last day of month
+  const maxD = _localYMD(new Date(y, m, 0)); // last day of month (v41k local)
   input.min = minD;
   input.max = maxD;
   // If current date value is outside month range, reset to first day of month
@@ -1630,7 +1635,7 @@ async function _dprPushRaw(fl,d,data){
           ).join('\n');
           const more = j.rejected.length > 5 ? `\n…and ${j.rejected.length - 5} more` : '';
           // Use alert so the user has to acknowledge — these are silent data loss otherwise
-          alert(`⚠️ ${j.rejectedCount} DPR ${j.rejectedCount===1?'entry was':'entries were'} not saved:\n\n${reasons}${more}\n\nThese batches are not currently In Production. Ask Planning to set them to "In Production" before re-entering.`);
+          alert(`⚠️ ${j.rejectedCount} DPR ${j.rejectedCount===1?'entry was':'entries were'} not saved:\n\n${reasons}${more}\n\nSee the reason shown next to each entry. Closed batches need a one-time same-day Reopen; non-running batches must be set to In Production in Planning.`);
         }
       }catch(_){}
       setSyncBadge('synced'); return true;
@@ -1794,7 +1799,9 @@ async function fetchClosedBatches(){
     const j=await r.json();
     if(j.ok && j.closed){
       dprClosedBatches={};
-      j.closed.forEach(c=>{ dprClosedBatches[c.order_id]={closedAt:c.closed_at,closedBy:c.closed_by,batchNumber:c.batch_number}; });
+      j.closed.forEach(c=>{ dprClosedBatches[c.order_id]={closedAt:c.closed_at,closedBy:c.closed_by,batchNumber:c.batch_number,alreadyReopened:!!c.alreadyReopened}; });
+      // v41l: track which orders have already used their one reopen (persisted server-side).
+      window._dprReopenedOrderIds = new Set(j.reopenedOrderIds || []);
     }
   }catch{}
 }
@@ -1816,6 +1823,41 @@ async function closeBatchInDPR(orderId, batchNumber){
   }
   dprClosedBatches[orderId]={closedAt:new Date().toISOString(),closedBy:dprUser?.username||dprUser?.role,batchNumber};
   toast(`✅ Batch ${batchNumber} closed in DPR`,'var(--green)');
+  renderShifts();
+}
+
+// v41l (point 1): REOPEN an inadvertently-closed batch. One reopen per batch, same IST day only.
+// Server enforces both guards authoritatively; this gives immediate UX + audit logging.
+async function reopenBatchInDPR(orderId, batchNumber){
+  if(!dprUser){ alert('Please log in to reopen a batch.'); return; }
+  const info = dprClosedBatches[orderId];
+  if(!info){ alert(`Batch ${batchNumber} is not currently closed.`); return; }
+  if(info.alreadyReopened || (window._dprReopenedOrderIds && window._dprReopenedOrderIds.has(orderId))){
+    alert(`Batch ${batchNumber} has already been reopened once and cannot be reopened again.\n\nContact Admin if further changes are needed.`); return;
+  }
+  // Same-day (IST) check on the client for immediate feedback (server re-checks authoritatively).
+  const closeDay = info.closedAt ? _localYMD(new Date(info.closedAt)) : today();
+  if(closeDay !== today()){
+    alert(`Reopen window expired.\n\nA batch can only be reopened on the same day it was closed (closed ${closeDay}, today ${today()}).\n\nContact Admin to reopen older batches.`); return;
+  }
+  if(!confirm(`Reopen batch ${batchNumber} in DPR?\n\n⚠️ This is your ONE allowed reopen for this batch — it cannot be reopened again today or later.\n\nUse this only if the batch was closed by mistake. After reopening you can enter/correct data, then close it again.`)) return;
+  if(serverUrl){
+    try{
+      const r=await fetch(serverUrl+'/api/dpr/batch-reopen',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({orderId,batchNumber,reopenedBy:dprUser.username||dprUser.role}),
+        signal:AbortSignal.timeout(6000)
+      });
+      const j=await r.json();
+      if(!j.ok){ alert('Could not reopen: '+(j.error||'server error')); return; }
+    }catch{ alert('Could not reach server. Please check connection.'); return; }
+  }
+  // Locally: remove the closed mark and record the reopen so the button won't show again.
+  delete dprClosedBatches[orderId];
+  if(!window._dprReopenedOrderIds) window._dprReopenedOrderIds=new Set();
+  window._dprReopenedOrderIds.add(orderId);
+  dprAuditLog('BATCH_REOPEN', `Reopened batch ${batchNumber} (orderId ${orderId}) in DPR — one-time same-day reopen`);
+  toast(`🔓 Batch ${batchNumber} reopened — you may now enter data`,'var(--amber)');
   renderShifts();
 }
 
@@ -2431,7 +2473,17 @@ function renderShifts(){
                 (r.batchNumber&&Object.values(dprClosedBatches).find(cb=>cb.batchNumber===r.batchNumber));
               // Resolve orderId from activeOrders if not set (fallback by batchNumber)
               const resolvedOrderId=r.orderId||(activeOrders[mc.id]||[]).find(o=>o.batchNumber===r.batchNumber)?.id||'';
-              if(isClosed) return `<span style="padding:2px 8px;background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.3);border-radius:3px;color:var(--green);font-size:10px;font-family:var(--fc)">✅ ${r.batchNumber||'Batch'} Closed in DPR</span>`;
+              if(isClosed){
+                // v41l (point 1): offer a one-time same-day reopen button next to the closed badge.
+                const _ci = (typeof isClosed==='object') ? isClosed : dprClosedBatches[resolvedOrderId];
+                const _closeDay = _ci && _ci.closedAt ? _localYMD(new Date(_ci.closedAt)) : today();
+                const _usedReopen = (_ci && _ci.alreadyReopened) || (window._dprReopenedOrderIds && window._dprReopenedOrderIds.has(resolvedOrderId));
+                const _canReopen = !_usedReopen && _closeDay===today() && resolvedOrderId;
+                const _reopenBtn = _canReopen
+                  ? `<button onclick="reopenBatchInDPR('${resolvedOrderId}','${r.batchNumber||''}')" style="margin-left:5px;padding:2px 8px;background:rgba(240,165,0,0.12);border:1px solid rgba(240,165,0,0.5);border-radius:3px;color:var(--amber);font-size:10px;font-family:var(--fc);cursor:pointer" title="Reopen this batch (one-time, same day only)">🔓 Reopen</button>`
+                  : '';
+                return `<span style="padding:2px 8px;background:rgba(0,230,118,0.1);border:1px solid rgba(0,230,118,0.3);border-radius:3px;color:var(--green);font-size:10px;font-family:var(--fc)">✅ ${r.batchNumber||'Batch'} Closed in DPR</span>${_reopenBtn}`;
+              }
               return `<button onclick="closeBatchInDPR('${resolvedOrderId}','${r.batchNumber||''}')" style="padding:2px 8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.4);border-radius:3px;color:var(--red);font-size:10px;font-family:var(--fc);cursor:pointer" title="Mark production complete for this batch">🔒 Close ${r.batchNumber||'Batch'}</button>`;
             }).join('')}
           </div>
@@ -3016,7 +3068,7 @@ function restrictDateToMonth(inputId) {
   if (!input) return;
   const [y, m] = _dprSelectedMonth.split('-').map(Number);
   const minD = `${_dprSelectedMonth}-01`;
-  const maxD = new Date(y, m, 0).toISOString().slice(0,10);
+  const maxD = _localYMD(new Date(y, m, 0)); // v41k local
   input.min = minD;
   input.max = maxD;
   if (input.value < minD || input.value > maxD) {
@@ -3625,7 +3677,7 @@ async function renderPerf(){
   const allKeys = Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
   const cutoffDate = rangeVal === 'ALL' ? '0000-00-00' : (() => {
     const c = new Date(); c.setDate(c.getDate() - parseInt(rangeVal));
-    return c.toISOString().split('T')[0];
+    return _localYMD(c); // v41k local
   })();
 
   allKeys.forEach(k=>{
@@ -3691,7 +3743,7 @@ async function renderPerf(){
 
   // Trend chart — last 30 days for selected floor
   const perfTrendDates=[];
-  for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);perfTrendDates.push(d2.toISOString().split('T')[0]);}
+  for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);perfTrendDates.push(_localYMD(d2));} // v41k local
   const scores=perfTrendDates.map(date=>{
     const dy=loadDay(fl,date);
     let totalScore=0,cnt=0;
@@ -4156,12 +4208,14 @@ function onDateChange(){
       else if(curPage==='trends') renderTrends();
     })();
   }
-  // C-shift date handling: if current time is 00:00–08:00 and today is selected, auto-switch to previous day
+  // C-shift date handling: if current LOCAL time is 00:00–08:00 and today is selected, the night
+  // shift belongs to the previous production day. All dates here are LOCAL (v41k) — previously this
+  // mixed local getHours() with UTC toISOString() dates, so it misfired and rolled the date back.
   const now=new Date(), h=now.getHours();
-  const selectedDate=getDate(), todayStr=now.toISOString().split('T')[0];
+  const selectedDate=getDate(), todayStr=_localYMD(now);
   if(h>=0&&h<8&&selectedDate===todayStr){
     const prev=new Date(now); prev.setDate(prev.getDate()-1);
-    const prevStr=prev.toISOString().split('T')[0];
+    const prevStr=_localYMD(prev);
     // Auto-switch date to previous day
     document.getElementById('ndate').value=prevStr;
     // Show persistent banner explaining why
@@ -4697,7 +4751,7 @@ function applyDprRoleRestrictions() {
 function isBackDateAllowed() {
   if (!dprUser) return false;
   if (dprUser.role === 'admin') return true;
-  const today = new Date().toISOString().split('T')[0];
+  const today = _localYMD(new Date()); // v41k local
   const selected = document.getElementById('ndate')?.value;
   return selected === today; // GF and FF can only enter today
 }
@@ -4801,13 +4855,13 @@ async function saveToServer() {
   // Back-date lock for non-admin — with 2-hour shift grace window
   if (dprUser && dprUser.role !== 'admin') {
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = _localYMD(now); // v41k local
     const selected = document.getElementById('ndate')?.value;
     if (selected && selected !== todayStr) {
       // Check 2-hour grace window for shift changeover
       // Shifts: A=06:00-14:00, B=14:00-22:00, C=22:00-06:00
       const h = now.getHours();
-      const yesterdayStr = new Date(now - 86400000).toISOString().split('T')[0];
+      const yesterdayStr = _localYMD(new Date(now - 86400000)); // v41k local
       // Grace periods: A shift starts 06:00 — allow B shift (prev day C) edits until 08:00
       //                B shift starts 14:00 — allow A shift edits until 16:00
       //                C shift starts 22:00 — allow B shift edits until 00:00

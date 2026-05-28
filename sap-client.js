@@ -146,7 +146,7 @@ class SapClient {
         endpoint: entry.endpoint || '',
         status_code: entry.statusCode || 0,
         duration_ms: entry.durationMs || 0,
-        success: entry.success ? 1 : 0,
+        success: !!entry.success,
         error_message: (entry.errorMessage || '').toString().substring(0, 1000),
         request_summary: (entry.requestSummary || '').toString().substring(0, 2000),
         response_summary: (entry.responseSummary || '').toString().substring(0, 2000),

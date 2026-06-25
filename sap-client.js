@@ -485,37 +485,55 @@ class SapClient {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
     // SAP OData v3 filter syntax: DocumentStatus eq 'bost_Open' and DocDate ge 'YYYY-MM-DD'
-    const filter = `$filter=DocumentStatus eq 'bost_Open' and DocDate ge '${dateStr}'`;
-    // v41f FIX (issue 1): use $expand=DocumentLines (NOT $select) so SAP B1 Service Layer returns
-    // the COMPLETE line entity for each line — including user-defined fields (U_* UDFs) such as the
-    // printing-matter field. With $select=DocumentLines, the Service Layer does not reliably return
-    // line-level UDFs, which is why print matter came back blank even when the SO was printed.
-    // Header fields stay in $select; the line collection comes via $expand.
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocCurrency&$expand=DocumentLines`;
-    // v41m FIX (issue 3 — REAL cause): SAP B1 Service Layer paginates at ~20 records per page and
-    // does NOT honour a large $top — it returns one page plus an @odata.nextLink. The old code read
-    // only r.data.value (first page), so any open order beyond the first page never reached the
-    // cache, regardless of its age. ("22 loaded" was a first-page artifact, not the true open count.)
-    // We now follow nextLink and accumulate ALL pages (capped to avoid runaway loops).
+    // v41z FIX: Remove date filter — fetch ALL open orders regardless of age
+    // Low-numbered POs (191, 199, 166, 200) were created years ago but still open in SAP
+    // v41z2 FIX: Also fetch bost_Delivered and bost_Close — SAP marks partially delivered orders
+    // as bost_Delivered or bost_Close even when lines still have remaining open quantity
+    // bost_Partial does NOT exist in this SAP version
+    // v41z4 FIX: Use bost_Open only (correct status) + manual $skip pagination
+    // SAP B1 Service Layer ignores $top and returns max 20 per page with no nextLink
+    // So we manually paginate using $skip=0, $skip=20, $skip=40... until empty page
+    const filter = `$filter=DocumentStatus eq 'bost_Open'`;
+    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,DocCurrency,DocumentLines`;
+    // v41ZC issue 1: SINGLE, unambiguous pagination strategy. The previous loop mixed manual $skip
+    // with @odata.nextLink — when a nextLink was present it fetched that page inline AND advanced
+    // skip past it, double-skipping (or dropping) a page and losing orders. SAP B1 Service Layer
+    // pages by $skip with a server-set page size (commonly 20). We page purely by $skip, derive the
+    // page size from the first page, and stop only on a short or empty page. nextLink is followed
+    // ONLY when SAP omits a full page yet provides one (defensive), without also bumping skip.
     let indents = [];
-    let r = await this.call({ method: 'GET', path: 'Orders', query: `${filter}&${select}` });
-    if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
-    indents = indents.concat(r.data?.value || []);
-    let nextLink = r.data?.['@odata.nextLink'];
+    let complete = true;         // v44O: restore prune-safety signal — false if pagination broke mid-way (partial set), so the caller must NOT prune the indent cache on an incomplete fetch
+    let skip = 0;
+    let pageSize = 0;            // learned from the first page
     let pageGuard = 0;
-    while (nextLink && pageGuard < 60) {
+    const seen = new Set();      // guard against any duplicate DocEntry across pages
+    while (pageGuard < 500) {
       pageGuard++;
-      // nextLink may be relative ("Orders?$skip=20...") or absolute ("https://host/b1s/v1/Orders?...").
-      // Normalise to the relative path call() expects (it prefixes /b1s/v1/ for non-slash paths).
-      let nlPath = nextLink;
-      const m = /\/b1s\/v1\/(.*)$/.exec(nextLink);
-      if (m) nlPath = m[1];                 // strip scheme+host+/b1s/v1/ if absolute
-      const nr = await this.call({ method: 'GET', path: nlPath });
-      if (!nr.ok) { console.warn('[SAP fetch] nextLink page failed, returning partial:', nr.error); break; }
-      indents = indents.concat(nr.data?.value || []);
-      nextLink = nr.data?.['@odata.nextLink'];
+      const query = `${filter}&${select}&$skip=${skip}`;
+      const r = await this.call({ method: 'GET', path: 'Orders', query });
+      if (!r.ok) {
+        if (skip === 0) return { ok: false, error: r.error, degraded: r.degraded };
+        console.warn('[SAP fetch] page failed at skip=' + skip + ', returning partial set of ' + indents.length + ':', r.error);
+        complete = false;        // v44O: partial/paged-failure set — caller must NOT prune (would wrongly delete unfetched open orders)
+        break;
+      }
+      const page = r.data?.value || [];
+      if (page.length === 0) break;
+      if (pageSize === 0) pageSize = page.length; // first page defines the server page size
+      let added = 0;
+      for (const o of page) {
+        if (o && o.DocEntry != null && seen.has(o.DocEntry)) continue;
+        if (o && o.DocEntry != null) seen.add(o.DocEntry);
+        indents.push(o); added++;
+      }
+      console.log('[SAP fetch] skip=' + skip + ' got ' + page.length + ' (new ' + added + '), total ' + indents.length);
+      // Stop when SAP returned fewer than a full page → last page reached.
+      if (page.length < pageSize) break;
+      skip += page.length;
     }
-    return { ok: true, indents };
+    if (pageGuard >= 500) { complete = false; console.warn('[SAP fetch] hit 500-page guard — treating as INCOMPLETE (no cache prune this cycle)'); }
+    console.log('[SAP fetch] DONE — ' + indents.length + ' open Sales Orders across ' + pageGuard + ' page(s)' + (complete ? '' : ' [INCOMPLETE — prune skipped]'));
+    return { ok: true, indents, complete };
   }
 
   /**
@@ -597,18 +615,41 @@ class SapClient {
    * Pull invoices generated in SAP within the last N days. Used by Sunloc's
    * invoice poller to discover both Sunloc-triggered and Direct-SAP invoices.
    */
-  async fetchRecentInvoices({ lookbackDays = 7 } = {}) {
+  async fetchRecentInvoices({ lookbackDays = 60 } = {}) {
     const lookbackDate = new Date(Date.now() - lookbackDays * 86400_000);
     const dateStr = lookbackDate.toISOString().slice(0, 10);
     const filter = `$filter=DocDate ge '${dateStr}'`;
-    // v40 P18.7: Pull richer line-item fields and addresses for Scan-Out matching.
-    // Replaces previously-planned PDF download with structured Sales Register data.
-    // Header: DocNum, Customer, BillTo Address, ShipTo Address, Sales Order ref, Date, Total
-    // Lines: ItemCode (=PC Code), ItemDescription, Quantity, UnitPrice, LineTotal, VAT%, VAT amount
-    const select = `$select=DocEntry,DocNum,CardCode,CardName,DocDate,DocDueDate,DocTotal,VatSum,DocTotalSys,Address,Address2,ShipToCode,PayToCode,U_SunlocBatch,U_SunlocPO,U_IRN,Comments,DocumentLines`;
-    const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&${select}&$top=500&$orderby=DocEntry desc` });
-    if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded };
-    return { ok: true, invoices: r.data?.value || [] };
+    // v44W FIX (CRITICAL): fetch the FULL invoice entity — NO $select at all. Earlier builds named
+    // U_SunlocBatch (and other Sunloc UDFs) in $select; on SAP B1 instances where the A/R Invoice
+    // document does not expose that UDF, B1 SL rejects the ENTIRE request ("Property 'U_SunlocBatch'
+    // of 'Document' is invalid") and ALL invoice ingestion silently stopped. Omitting $select cannot
+    // reference any UDF, so this request can never fail on a missing property. The full entity also
+    // returns DocumentLines (so SO-BaseEntry reconciliation + PC/Size/Colour enrichment work) and any
+    // UDFs that DO exist on the instance. Heavier per row, but correct and resilient on every instance.
+    const invoices = [];
+    const seen = new Set();
+    let skip = 0, pageSize = 0, pageGuard = 0;
+    while (pageGuard < 500) {
+      pageGuard++;
+      const r = await this.call({ method: 'GET', path: 'Invoices', query: `${filter}&$orderby=DocEntry desc&$skip=${skip}` });
+      if (!r.ok) {
+        // Partial set (page failure mid-pagination): return what we have, flagged degraded.
+        if (invoices.length > 0) return { ok: true, invoices, degraded: true };
+        return { ok: false, error: r.error, degraded: r.degraded };
+      }
+      const page = r.data?.value || [];
+      if (page.length === 0) break;
+      if (pageSize === 0) pageSize = page.length;
+      for (const inv of page) {
+        const key = String(inv.DocEntry);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        invoices.push(inv);
+      }
+      if (page.length < pageSize) break;   // last page reached
+      skip += page.length;
+    }
+    return { ok: true, invoices };
   }
 
   /** Get a single invoice by DocEntry — used for verifying after creation. */

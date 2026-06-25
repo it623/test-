@@ -21,13 +21,20 @@
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px;min-height:100vh;font-weight:500}
 /* NAV — deep forest green matching Planning sidebar */
-#nav{position:fixed;top:0;left:0;right:0;height:var(--nav);background:#1a3a2e;border-bottom:3px solid #0f2a20;z-index:200;display:flex;align-items:center;padding:0 16px;gap:0;box-shadow:0 2px 8px rgba(26,19,8,0.2)}
+#nav{position:fixed;top:0;left:0;right:0;min-height:var(--nav);background:#1a3a2e;border-bottom:3px solid #0f2a20;z-index:200;display:flex;align-items:center;flex-wrap:wrap;padding:0 16px;gap:0 4px;box-shadow:0 2px 8px rgba(26,19,8,0.2)}
 .nbrand{font-family:var(--fc);font-weight:800;font-size:15px;letter-spacing:1px;color:#f0c060;white-space:nowrap;margin-right:6px;flex-shrink:0}
 .nbrand b{color:#ffffff}
 .nbrand small{font-size:11px;color:rgba(255,255,255,0.5);font-weight:400;margin-left:4px}
-.ntabs{display:flex;flex:1;height:100%;overflow-x:auto;scrollbar-width:none;min-width:0}
-.ntabs::-webkit-scrollbar{display:none}
-.ntab{display:flex;align-items:center;gap:4px;padding:0 8px;height:100%;font-family:var(--fc);font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:rgba(255,255,255,0.55);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
+/* v41ZG #1: the DPR nav row could not be scrolled on the user's setup, so the tabs past "Shift
+   Performance" (History, Plant Report, Search, Settings) were unreachable — admins reported the
+   Plant Report tab "not showing up". Instead of relying on horizontal scroll, let the tab row WRAP
+   onto a second line so every tab is always visible. The nav height is no longer fixed; #wrap's
+   top offset is measured at runtime (see _dprSyncNavOffset) with a CSS fallback. */
+.ntabs{display:flex;flex-wrap:wrap;flex:1;align-items:center;min-height:var(--nav);scrollbar-width:thin;scrollbar-color:rgba(240,192,96,0.5) transparent;min-width:0}
+.ntabs::-webkit-scrollbar{height:5px}
+.ntabs::-webkit-scrollbar-thumb{background:rgba(240,192,96,0.5);border-radius:3px}
+.ntabs::-webkit-scrollbar-track{background:transparent}
+.ntab{display:flex;align-items:center;gap:4px;padding:0 8px;height:var(--nav);font-family:var(--fc);font-weight:700;font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:rgba(255,255,255,0.55);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;transition:.15s;flex-shrink:0}
 .ntab:hover{color:rgba(255,255,255,0.85)}
 .ntab.on{color:#f0c060;border-bottom-color:#f0c060}
 .nright{display:flex;align-items:center;gap:4px;margin-left:6px;flex-shrink:0;min-width:0;overflow:visible}
@@ -44,7 +51,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--t1);font-size:13px
 #syncBadge.syncing{background:#dbeafe;color:#1e3a8a;border:1.5px solid #93c5fd}
 #unsavedDot{width:7px;height:7px;border-radius:50%;background:#f0c060;display:none;flex-shrink:0}
 /* PAGES */
-#wrap{margin-top:var(--nav);min-height:calc(100vh - var(--nav));padding:20px}
+#wrap{margin-top:var(--nav-real,var(--nav));min-height:calc(100vh - var(--nav-real,var(--nav)));padding:20px}
 .page{display:none}.page.on{display:block}
 /* CARDS */
 .card{background:var(--s1);border:1.5px solid var(--b2);border-radius:var(--r);padding:16px;margin-bottom:12px;box-shadow:0 2px 6px rgba(26,19,8,0.07)}
@@ -140,19 +147,21 @@ td.r,th.r{text-align:right}
    ════════════════════════════════════════ */
 @media(max-width:768px){
 
-  /* ── Nav bar — horizontal scroll tabs ── */
-  #nav { height: auto; min-height: var(--nav); flex-wrap: nowrap; padding: 0 6px; gap: 0; }
-  .nbrand { font-size: 13px !important; white-space: nowrap; margin-right: 4px; }
+  /* ── Nav bar — wrap tabs onto their own full-width line so every tab is visible on mobile.
+     v41ZI: the previous nowrap+horizontal-scroll squeezed the tab row between the brand and the
+     right-side controls to a sliver (users reported "cannot see the navigation tab"). Wrapping is
+     the same approach desktop uses; #wrap's top margin tracks the measured nav height (--nav-real). */
+  #nav { height: auto; min-height: var(--nav); flex-wrap: wrap; padding: 4px 8px; gap: 4px 0; align-items: center; }
+  .nbrand { font-size: 13px !important; white-space: nowrap; margin-right: 4px; order: 1; }
   .nbrand small { display: none; } /* hide version on mobile */
-  .ntabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-  .ntabs::-webkit-scrollbar { display: none; }
-  .ntab { padding: 0 10px; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
-  .nright { flex-shrink: 0; gap: 3px; }
+  .nright { order: 2; margin-left: auto; flex-shrink: 0; gap: 3px; }
   .nright .nbtn { padding: 4px 7px; font-size: 10px; }
   #syncBadge { font-size: 9px !important; padding: 3px 7px !important; }
+  .ntabs { order: 3; flex-basis: 100%; width: 100%; flex-wrap: wrap; overflow-x: visible; row-gap: 2px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 2px; }
+  .ntab { padding: 0 10px; height: 30px; font-size: 11px; white-space: nowrap; flex-shrink: 0; }
 
-  /* ── Wrap & content ── */
-  #wrap { padding: 10px 8px !important; margin-top: var(--nav); }
+  /* ── Wrap & content — sit below the (now taller, wrapped) nav ── */
+  #wrap { padding: 10px 8px !important; margin-top: var(--nav-real, var(--nav)) !important; }
 
   /* ── Date input ── */
   #ndate { font-size: 11px; padding: 4px 5px; width: 105px; }
@@ -301,6 +310,7 @@ td.r,th.r{text-align:right}
 
 @media(max-width:480px){
   /* ── Very small screens (iPhone SE, etc) ── */
+  .auth-card { padding: 24px 18px !important; }
   .nbrand { font-size: 12px !important; }
   .ntab { padding: 0 8px; font-size: 10px; }
   .kpi-val { font-size: 18px !important; }
@@ -367,6 +377,10 @@ td.r,th.r{text-align:right}
 @media (hover: none) and (pointer: coarse) {
   .ntab:active { opacity: 0.7; }
   .ftab:active { opacity: 0.7; }
+  /* v41ZI: reliable tap targets so floor/nav switches register on the first tap (users reported the
+     floor bubble needing several taps — partly the old nav overlapping it, partly small hit areas). */
+  .ftab { min-height: 40px; display: flex; align-items: center; touch-action: manipulation; }
+  .ntab { touch-action: manipulation; }
   .btn:active { opacity: 0.85; transform: scale(0.97); }
   .nbtn:active { opacity: 0.7; }
   .run-row input:focus { outline: 2px solid var(--cyan); outline-offset: 1px; border-color: var(--cyan) !important; }
@@ -409,7 +423,7 @@ td.r,th.r{text-align:right}
 @media(max-width:600px){.dpr-month-wrap select{min-width:80px;font-size:10px}}
 </style>
 <style>
-#auth-overlay{position:fixed;inset:0;background:#0b0d12;z-index:9999;display:flex;align-items:center;justify-content:center}
+#auth-overlay{position:fixed;inset:0;background:#0b0d12;z-index:9999;display:flex;align-items:center;justify-content:center;overflow:auto;padding:16px;-webkit-overflow-scrolling:touch}
 #auth-overlay.hidden{display:none}
 .auth-card{background:#181d28;border:1px solid #263040;border-radius:12px;padding:36px 40px;width:100%;max-width:360px}
 .auth-logo{text-align:center;margin-bottom:24px}
@@ -460,7 +474,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v41o</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v44ZL</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -470,6 +484,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
     <div class="ntab" onclick="go('history')">📅 History</div>
     <div class="ntab" onclick="go('plant')">🏭 Plant Report</div>
     <div class="ntab" onclick="go('search')">🔍 Search</div>
+    <div class="ntab" onclick="go('closed')">📦 Closed Batches</div>
     <div class="ntab" onclick="go('settings')">⚙ Settings</div>
   </div>
   <div class="nright">
@@ -496,7 +511,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
 </div>
 
 <!-- v40 P18.17: Operator task banner — hidden by default, populated by _v40_taskBannerTick() -->
-<div id="v40-task-banner" style="display:none;background:linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08));border-bottom:2px solid rgba(245,158,11,0.5);padding:8px 16px;font-size:13px;color:#92400e;align-items:center;justify-content:space-between;gap:8px">
+<div id="v40-task-banner" style="display:none;position:fixed;top:var(--nav-real,var(--nav));left:0;right:0;z-index:400;background:linear-gradient(90deg,rgba(245,158,11,0.18),rgba(245,158,11,0.08));border-bottom:2px solid rgba(245,158,11,0.5);padding:8px 16px;font-size:13px;color:#92400e;align-items:center;justify-content:space-between;gap:8px">
   <div style="display:flex;align-items:center;gap:10px">
     <span style="font-size:18px">🩺</span>
     <span id="v40-task-banner-text"><strong>0 tasks</strong> assigned to you</span>
@@ -646,7 +661,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
     <div id="perf-range-bar"></div>
   </div>
   <div class="card"><div class="card-title">Shift Incharge Scorecard</div><div id="perfTable"></div></div>
-  <div class="card"><div class="card-title">Incharge vs Efficiency</div><div class="chart-wrap-lg"><canvas id="ch-perf"></canvas></div></div>
+  <div class="card"><div class="card-title">Incharge vs Efficiency <span style="font-weight:400;color:var(--t3);font-size:11px">— avg shift efficiency per incharge (rolling 30d)</span></div><div class="chart-wrap-lg"><canvas id="ch-perf"></canvas></div></div>
   <div class="card"><div class="card-title">👤 Operator-wise Performance</div><div id="operatorPerfSection"><p style="color:var(--t3);font-size:12px">Loading...</p></div></div>
   <div class="card"><div class="card-title">🏭 Shift Personnel Performance</div><div id="shiftPersonnelSection"><p style="color:var(--t3);font-size:12px">Loading...</p></div></div>
 </div>
@@ -711,6 +726,15 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
       </select>
     </div>
     <div id="dpr-search-results"><p style="color:var(--t3);font-size:12px">Type to search across all DPR records...</p></div>
+  </div>
+</div>
+
+<!-- ═══ CLOSED BATCHES (v41ZI Item 6) ═══════════════════════ -->
+<div id="page-closed" class="page">
+  <div class="card">
+    <div class="card-title">📦 Closed Batches — Machine-wise</div>
+    <div style="font-size:12px;color:var(--t3);margin-bottom:10px">All closed batches with Planned vs Actual DPR Gross. Production Manager / Admin can correct an incorrect DPR gross here — the correction flows to Planning and Tracking Reports D & E.</div>
+    <div id="closed-batches-container"><p style="color:var(--t3);font-size:12px">Loading…</p></div>
   </div>
 </div>
 
@@ -964,6 +988,9 @@ function go(page) {
 let _dprSelectedMonth = today().slice(0,7); // 'YYYY-MM'
 let _dprMonthArchiveCache = {};
 let _dprCumulativeMode = false; // false = This Month, true = Up To This Month
+let _histSyncedMonth = null; // v41ZG #4: guards the one-time History month sync (avoids re-sync loop)
+let _dprDatesListCache = {}; // v41ZG #5: fl -> {dates:[...], ts} cache for /api/dpr/dates (report perf)
+const _DPR_DATES_TTL = 90000; // 90s — short enough that other devices' new days appear soon
 
 function dprCurrentYM(){ const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; }
 
@@ -1427,6 +1454,7 @@ function _doSaveDay(fl, d){
   localStorage.setItem(skey(fl,d),JSON.stringify(data));
   setUnsaved(false);
   _dprLastSaveTime = Date.now(); // block fetch for 10s after save
+  markDprDatesDirty(fl); // v41ZG #5: a (possibly new) date was saved — let range syncs rediscover it
   pushToServer(fl,d,data); // goes to server regardless
   renderDayKpis();
   // Show warning toast — save always goes through
@@ -1630,12 +1658,24 @@ async function _dprPushRaw(fl,d,data){
         // was no longer In Production). Without this, the operator would think their
         // entry saved but the cache would silently drop it.
         if (j.rejectedCount > 0 && Array.isArray(j.rejected)) {
-          const reasons = j.rejected.slice(0, 5).map(rr =>
-            `• ${rr.batchNumber||rr.orderId||'(no batch)'} on ${rr.machineId} ${rr.shift} — ${rr.reason}`
-          ).join('\n');
-          const more = j.rejected.length > 5 ? `\n…and ${j.rejected.length - 5} more` : '';
-          // Use alert so the user has to acknowledge — these are silent data loss otherwise
-          alert(`⚠️ ${j.rejectedCount} DPR ${j.rejectedCount===1?'entry was':'entries were'} not saved:\n\n${reasons}${more}\n\nSee the reason shown next to each entry. Closed batches need a one-time same-day Reopen; non-running batches must be set to In Production in Planning.`);
+          // All other entries saved successfully. Only show which specific batches were blocked.
+          const closedBatches = j.rejected.filter(rr => rr.reason && rr.reason.includes('CLOSED'));
+          const nonRunning   = j.rejected.filter(rr => rr.reason && !rr.reason.includes('CLOSED') && !rr.reason.includes('deleted'));
+          const deleted      = j.rejected.filter(rr => rr.reason && rr.reason.includes('deleted'));
+          const lines = [];
+          if (closedBatches.length) {
+            const names = [...new Set(closedBatches.map(rr => rr.batchNumber||rr.orderId||'?'))].join(', ');
+            lines.push(`• Closed batch${closedBatches.length>1?'es':''}: ${names} — Reopen to enter data`);
+          }
+          if (nonRunning.length) {
+            const names = [...new Set(nonRunning.map(rr => rr.batchNumber||rr.orderId||'?'))].join(', ');
+            lines.push(`• Not in production: ${names} — Set to In Production in Planning`);
+          }
+          if (deleted.length) {
+            const names = [...new Set(deleted.map(rr => rr.batchNumber||rr.orderId||'?'))].join(', ');
+            lines.push(`• Deleted order${deleted.length>1?'s':''}: ${names}`);
+          }
+          alert(`⚠️ All other entries saved. The following batch entries were skipped:\n\n${lines.join('\n')}`);
         }
       }catch(_){}
       setSyncBadge('synced'); return true;
@@ -1669,18 +1709,22 @@ async function fetchDayFromServer(fl, d){
   // Don't fetch if this floor/date has a pending (unsaved) save in the queue
   if(_dprPendingSaves.has(fl+'|'+d)) return null;
   // Don't fetch for 10 seconds after user saved — prevents server returning stale data
-  if((Date.now() - _dprLastSaveTime) < 10000) return null;
+  if((Date.now() - _dprLastSaveTime) < 120000) return null;
   try{
     const r=await fetch(serverUrl+'/api/dpr/'+encodeURIComponent(fl)+'/'+d, {signal:AbortSignal.timeout(6000)});
     if(!r.ok) return null;
     const j=await r.json();
     if(j.data){
-      // Server is ALWAYS authoritative — always update localStorage
-      // (pending saves protected by _dprPendingSaves.has() guard above)
-      const serverSavedAt = j.savedAt ? new Date(j.savedAt).getTime() : Date.now();
-      j.data._savedAt = serverSavedAt;
-      localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
-      return j.data;
+      // Only overwrite local data if server's savedAt is newer than our local savedAt
+      const serverSavedAt = j.savedAt ? new Date(j.savedAt).getTime() : 0;
+      const localRaw = localStorage.getItem(skey(fl,d));
+      const localSavedAt = localRaw ? (JSON.parse(localRaw)._savedAt || 0) : 0;
+      if(serverSavedAt > localSavedAt + 5000){
+        j.data._savedAt = serverSavedAt;
+        localStorage.setItem(skey(fl,d), JSON.stringify(j.data));
+        return j.data;
+      }
+      return localRaw ? JSON.parse(localRaw) : null;
     }
   }catch(e){ console.warn('fetchDayFromServer failed:', e?.message); }
   return null;
@@ -1699,19 +1743,36 @@ async function fetchDayFromServer(fl, d){
 // fromDate / toDate are YYYY-MM-DD inclusive bounds.
 async function syncDateRangeFromServer(floors, fromDate, toDate) {
   if (!serverUrl || !floors || !floors.length) return;
-  const targets = []; // {fl, d}
-  for (const fl of floors) {
+  // v41ZG #5: previously this fetched /api/dpr/dates/:floor sequentially (one round-trip per floor)
+  // on EVERY analytics/plant/history visit — the all-floors analytics view alone meant 3 serial
+  // round-trips before any day data loaded. Now: (a) fetch all floors' date-lists in parallel, and
+  // (b) cache each floor's list for a short TTL so repeated report visits reuse it. The cache is
+  // invalidated for a floor whenever that floor is saved (see markDprDatesDirty), so freshly saved
+  // days still appear. Day-level data is unaffected (still pulled per missing day, server-authoritative).
+  const _now = Date.now();
+  const listFor = async (fl) => {
+    const c = _dprDatesListCache[fl];
+    if (c && (_now - c.ts) < _DPR_DATES_TTL) return c.dates;
     try {
       const r = await fetch(serverUrl + '/api/dpr/dates/' + encodeURIComponent(fl), {signal: AbortSignal.timeout(6000)});
-      if (!r.ok) continue;
+      if (!r.ok) return (c ? c.dates : []);
       const j = await r.json();
-      if (!j.ok || !Array.isArray(j.dates)) continue;
-      for (const d of j.dates) {
-        if (d < fromDate || d > toDate) continue;
-        if (localStorage.getItem(skey(fl, d))) continue;
-        targets.push({fl, d});
-      }
-    } catch (e) { console.warn('[DPR sync] dates list failed for', fl, e?.message); }
+      if (!j.ok || !Array.isArray(j.dates)) return (c ? c.dates : []);
+      _dprDatesListCache[fl] = { dates: j.dates, ts: Date.now() };
+      return j.dates;
+    } catch (e) {
+      console.warn('[DPR sync] dates list failed for', fl, e?.message);
+      return (c ? c.dates : []);
+    }
+  };
+  const lists = await Promise.all(floors.map(fl => listFor(fl).then(dates => ({fl, dates}))));
+  const targets = []; // {fl, d}
+  for (const {fl, dates} of lists) {
+    for (const d of dates) {
+      if (d < fromDate || d > toDate) continue;
+      if (localStorage.getItem(skey(fl, d))) continue;
+      targets.push({fl, d});
+    }
   }
   if (!targets.length) return;
   const BATCH = 6;
@@ -1720,6 +1781,9 @@ async function syncDateRangeFromServer(floors, fromDate, toDate) {
     await Promise.all(slice.map(t => fetchDayFromServer(t.fl, t.d)));
   }
 }
+
+// v41ZG #5: invalidate a floor's cached date-list (call after a save so a new date is discoverable).
+function markDprDatesDirty(fl){ if(fl) delete _dprDatesListCache[fl]; else _dprDatesListCache = {}; }
 
 // v37I (restoring v37H): Resolve from-date for a range mode (mirrors getDprDateRange's logic
 // but returns just the from-bound for the server sync call).
@@ -1764,6 +1828,10 @@ async function fetchActiveOrders(){
         if(!activeOrders[o.machineId]) activeOrders[o.machineId]=[];
         activeOrders[o.machineId].push(o);
       });
+      // v41ZN #3: full order lookup (INCLUDING closed) — closed orders stay out of the dropdown above,
+      // but the inline Gross/Prod/Rem summary should still show on every saved run, so resolve from this.
+      window._dprOrderById = {};
+      j.orders.forEach(o=>{ if(o && o.id) window._dprOrderById[o.id]=o; });
       // Cache locally
       localStorage.setItem('dpr_active_orders',JSON.stringify(activeOrders));
       // Orders synced silently — toast only on manual sync button click
@@ -1927,7 +1995,7 @@ async function updateTempAlertBanner(){
     if(!banner){
       banner = document.createElement('div');
       banner.id = 'temp-alert-banner';
-      banner.style.cssText = 'position:fixed;top:var(--nav);left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-bottom:2px solid var(--amber);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px';
+      banner.style.cssText = 'position:fixed;top:var(--nav-real,var(--nav));left:0;right:0;z-index:400;background:rgba(255,171,0,0.15);border-bottom:2px solid var(--amber);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px';
       document.body.appendChild(banner);
     }
     if(j.ok && j.count > 0){
@@ -2413,8 +2481,12 @@ function renderShifts(){
             <input type="text" id="run-note-${sh}-${mc.id}-${ri}" value="${esc(run.note||'')}" placeholder="Note" style="width:80px;font-size:10px;color:var(--t3);flex-shrink:0" oninput="markUnsaved()" title="e.g. Colour change, Batch closed">
             ${isMult?`<button onclick="removeRun('${sh}','${mc.id}',${ri})" style="background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:13px;padding:0 2px;flex-shrink:0" title="Remove this run">✕</button>`:''}
             ${(()=>{ 
-              // Fix 1: Show Gross/Prod/Rem summary inline for every run with a known order
-              const ord2 = run.orderId ? (activeOrders[mc.id]||[]).find(o=>o.id===run.orderId) : null;
+              // Fix 1: Show Gross/Prod/Rem summary inline for every run with a known order.
+              // v41ZN #3: closed orders are excluded from activeOrders, so fall back to the full order
+              // map (by id, then by batch+machine) so saved runs on closed batches still show the summary.
+              const ord2 = (run.orderId ? (activeOrders[mc.id]||[]).find(o=>o.id===run.orderId) : null)
+                || (run.orderId && window._dprOrderById ? window._dprOrderById[run.orderId] : null)
+                || (run.batchNumber && window._dprOrderById ? Object.values(window._dprOrderById).find(o=>o.batchNumber===run.batchNumber && o.machineId===mc.id) : null);
               if(!ord2) return '';
               const planned2 = ord2.qty || 0;
               const gross2   = ord2.grossQty || planned2;
@@ -3103,6 +3175,19 @@ function getDprDateRange(fl, mode) {
   return [...dates].sort();
 }
 
+// v41ZD #2: count of ELAPSED calendar days in a range mode, from the period start through today
+// (inclusive). For "This Month" on 4 June this is 4 (1st–4th); for the 30d/90d/etc. windows it is
+// the window length capped so it never exceeds days since the period start. Used to scale the
+// Analytics target so a partly-elapsed period compares actuals against only the elapsed target.
+function _dprElapsedDayCount(mode) {
+  const t = today();
+  if (mode === 'today') return 1;
+  const from = _dprFromDateForMode(mode);
+  const da = new Date(from + 'T00:00:00'), db = new Date(t + 'T00:00:00');
+  const n = Math.floor((db - da) / 86400000) + 1;
+  return n >= 1 ? n : 1;
+}
+
 function addDaysStr(dateStr, n) {
   const d = new Date(dateStr);
   d.setDate(d.getDate() + n);
@@ -3140,44 +3225,88 @@ async function renderAnalytics(){
   // v37I (restoring v37H): For ALL range modes, sync server data before computing.
   // Previously only 'today' fetched from server; range modes used localStorage which was
   // empty on fresh browser sessions, causing blank charts and missing values.
+  // v41ZG #2: when the floor selector is "All Floors", `fl` is the synthetic 'ALL' — which is NOT a
+  // real floor key. The previous sync called fetchDayFromServer('ALL',…) / syncDateRangeFromServer
+  // (['ALL'],…), so NOTHING was fetched for the real floors; the aggregation then summed only
+  // whatever floor-days happened to already be in this browser's localStorage — a partial total
+  // (e.g. 564.60) that matches no real floor and is short of the true all-floor grand total.
+  // Expand 'ALL' to the real floor list for every server fetch.
+  const _aggFloors = (fl === 'ALL') ? Object.keys(FLOORS) : [fl];
   if (rangeMode === 'today') {
-    const serverData = await fetchDayFromServer(fl, d);
-    if(serverData) localStorage.setItem(skey(fl,d), JSON.stringify(serverData));
+    // v41ZG #5: fetch all floors in parallel (was sequential). fetchDayFromServer caches to
+    // localStorage itself, so no separate setItem needed.
+    await Promise.all(_aggFloors.map(_f => fetchDayFromServer(_f, d)));
   } else {
-    await syncDateRangeFromServer([fl], _dprFromDateForMode(rangeMode), today());
+    await syncDateRangeFromServer(_aggFloors, _dprFromDateForMode(rangeMode), today());
   }
 
   // For range modes other than 'today', aggregate across date range
   const dates = getDprDateRange(fl, rangeMode);
 
-  // Build aggregated stats across all dates in range
-  const mcs = getActiveMachines(fl);
+  // Build aggregated stats across all dates in range.
+  // v41ZG #2: support the "All Floors" scope. Build the machine set as the union of every real
+  // floor's active machines, tagging each with its source floor (_fl) so all reads (loadDay, tgt)
+  // hit the correct floor. Previously this used getActiveMachines('ALL') → [] (no such floor),
+  // so the all-floors view aggregated nothing real and fell back to stale partial localStorage.
+  const mcs = _aggFloors.flatMap(_f => getActiveMachines(_f).map(mc => ({ ...mc, _fl: _f })));
   const mcStats = {};
-  mcs.forEach(mc => { mcStats[mc.id] = {prod:0, tgt:0, dt:0, resort:0}; });
-
+  mcs.forEach(mc => { mcStats[mc.id] = {prod:0, tgt:0, dt:0, resort:0, batches:0, dtCats:{}}; });
+  DT_CATS.forEach(c=>mcs.forEach(mc=>mcStats[mc.id].dtCats[c]=0));
+  // v41ZC #1: range-wide aggregates the CHARTS read from (previously charts used single-day `day`,
+  // so range buttons changed nothing). aggResort: reason→qty across range; aggResortByMc: mcId→qty.
+  const aggResort = {};
+  const aggResortByMc = {};
   dates.forEach(date => {
-    const day = loadDay(fl, date);
+    // v41ZG #2: load each floor's day once per date, then read each machine from its own floor.
+    const _dayByFloor = {};
+    _aggFloors.forEach(_f => { _dayByFloor[_f] = loadDay(_f, date); });
     mcs.forEach(mc => {
+      const dDay = _dayByFloor[mc._fl];
       SHIFTS.forEach(sh => {
-        const m = migrateMachineData(day.shifts[sh].machines[mc.id] || blankMachine());
+        const m = migrateMachineData(dDay.shifts[sh].machines[mc.id] || blankMachine());
         mcStats[mc.id].prod += mcTotalProd(m);
-        mcStats[mc.id].tgt  += tgt(fl, mc.id);
-        mcStats[mc.id].dt   += (m.dtEntries||[]).reduce((s,e)=>s+(e.mins||0),0);
+        mcStats[mc.id].tgt  += tgt(mc._fl, mc.id);
+        // v41ZD #4: DT is stored as per-category fields (proc/mech/elec/gpr/hvac/dw), NOT as a
+        // dtEntries[] array — the old `(m.dtEntries||[])` sum was always 0, so the analytics
+        // "DT (min)" column showed blank. Sum the category fields to match the DT donut/% charts.
+        mcStats[mc.id].dt   += DT_CATS.reduce((s,c)=>s+parseFloat(m[c]||0),0);
         mcStats[mc.id].resort += parseFloat(m.resort||0);
+        mcStats[mc.id].batches += m.runs.filter(r=>r.qty||r.batchNumber).length;
+        DT_CATS.forEach(c=>mcStats[mc.id].dtCats[c] += parseFloat(m[c]||0));
+      });
+    });
+    // resort entries are per floor-day — sum across all aggregated floors
+    _aggFloors.forEach(_f => {
+      (_dayByFloor[_f].resort||[]).forEach(r=>{
+        aggResort[r.reason]=(aggResort[r.reason]||0)+parseFloat(r.qty||0);
+        if(r.mc) aggResortByMc[r.mc]=(aggResortByMc[r.mc]||0)+parseFloat(r.qty||0);
       });
     });
   });
+  const isRange = rangeMode !== 'today';
+  // v41ZD #2: elapsed calendar days in the selected range (period start → today). Target is scaled
+  // by this so, e.g., "This Month" on the 4th compares actuals against a 4-day target, and idle
+  // days (no production) still count toward target, correctly pulling efficiency down.
+  const elapsedDays = _dprElapsedDayCount(rangeMode);
 
-  const day = loadDay(fl, d); // for single-date charts fall back
+  // v41ZG #2: single-date data per floor (used for 'today' mode). Keyed by floor so all-floors works.
+  const _dayByFloorToday = {};
+  _aggFloors.forEach(_f => { _dayByFloorToday[_f] = loadDay(_f, d); });
+
+  // v41ZC #1: per-machine production for the active scope. In 'today' mode = selected date `d`;
+  // in any range mode = the range aggregate from mcStats. This is what every chart/table below
+  // now reads, so the RANGE buttons actually change the displayed data.
+  const mcProd = mc => {
+    if (isRange) return mcStats[mc.id].prod;
+    const _day = _dayByFloorToday[mc._fl] || _dayByFloorToday[fl];
+    let p=0; SHIFTS.forEach(sh=>{ p+=mcTotalProd(migrateMachineData(_day.shifts[sh].machines[mc.id]||blankMachine())); });
+    return p;
+  };
+  // v41ZD #2: range target = daily target (tgt × 3 shifts) × elapsed days in range.
+  const mcTargetScope = mc => isRange ? (tgt(mc._fl,mc.id)*3*elapsedDays) : tgt(mc._fl,mc.id)*3;
 
   // P vs T
-  const pvtData=mcs.map(mc=>{
-    let prod=0;SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m);
-    });
-    return {mc:mc.id.replace('MC',''),prod,tgt:tgt(fl,mc.id)*3};
-  });
+  const pvtData=mcs.map(mc=>({mc:mc.id.replace('MC',''),prod:mcProd(mc),tgt:mcTargetScope(mc)}));
   newChart('ch-pvt',{type:'bar',data:{
     labels:pvtData.map(x=>x.mc),
     datasets:[
@@ -3186,16 +3315,22 @@ async function renderAnalytics(){
     ]
   },options:{...chartOpts(),plugins:{...chartOpts().plugins,legend:{display:true,labels:{color:'#7a8ba8',font:{size:10}}}}}});
 
-  // DT by category — minutes + %
+  // DT by category — minutes + %  (v41ZC #1: range-aware)
   const dtCats={proc:0,mech:0,elec:0,gpr:0,hvac:0,dw:0};
   const DT_MAX_MINS = 1440; // 24h * 60min per dept per day
-  mcs.forEach(mc=>SHIFTS.forEach(sh=>{
-    const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-    DT_CATS.forEach(c=>dtCats[c]+=parseFloat(m[c]||0));
-  }));
+  if (isRange) {
+    mcs.forEach(mc=>DT_CATS.forEach(c=>dtCats[c]+=mcStats[mc.id].dtCats[c]||0));
+  } else {
+    mcs.forEach(mc=>SHIFTS.forEach(sh=>{
+      const m=migrateMachineData((_dayByFloorToday[mc._fl]||_dayByFloorToday[fl]).shifts[sh].machines[mc.id]||blankMachine());
+      DT_CATS.forEach(c=>dtCats[c]+=parseFloat(m[c]||0));
+    }));
+  }
+  // For range mode the DT% denominator scales by elapsed days in range (every calendar day counts).
+  const dtDayCount = isRange ? Math.max(1, elapsedDays) : 1;
   const dtTotal = Object.values(dtCats).reduce((a,b)=>a+b,0);
   const dtPcts = {};
-  DT_CATS.forEach(c=>dtPcts[c]=Math.min(100,(dtCats[c]/DT_MAX_MINS*100)));
+  DT_CATS.forEach(c=>dtPcts[c]=Math.min(100,(dtCats[c]/(DT_MAX_MINS*dtDayCount)*100)));
   // Donut: minutes breakdown — show zero-state if no DT recorded
   if(dtTotal === 0){
     newChart('ch-dt',{type:'doughnut',data:{
@@ -3218,18 +3353,15 @@ async function renderAnalytics(){
       borderRadius:4,
     }]
   },options:{...chartOpts(),plugins:{...chartOpts().plugins,
-    tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y}% (${dtCats[DT_CATS[ctx.dataIndex]]} min / ${DT_MAX_MINS} min)`}}},
+    tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y}% (${dtCats[DT_CATS[ctx.dataIndex]]} min / ${DT_MAX_MINS*dtDayCount} min)`}}},
     scales:{y:{min:0,max:Math.max(20,Math.ceil(Math.max(...DT_CATS.map(c=>dtPcts[c]))/5)*5),
       ticks:{color:'#7a8ba8',callback:v=>v+'%'},grid:{color:'rgba(255,255,255,0.04)'}},
       x:{ticks:{color:'#7a8ba8'},grid:{display:false}}}}});
 
   // Efficiency
   const effData=mcs.map(mc=>{
-    let prod=0;SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m);
-    });
-    const t=tgt(fl,mc.id)*3;
+    const prod=mcProd(mc);
+    const t=mcTargetScope(mc);
     return {mc:mc.id.replace('MC',''),eff:t>0?Math.min(120,prod/t*100):0};
   });
   newChart('ch-eff',{type:'bar',data:{
@@ -3237,9 +3369,8 @@ async function renderAnalytics(){
     datasets:[{label:'Efficiency %',data:effData.map(x=>x.eff),backgroundColor:effData.map(x=>x.eff>=90?'rgba(0,230,118,.6)':x.eff>=75?'rgba(255,171,0,.6)':'rgba(255,64,96,.6)'),borderRadius:3}]
   },options:{...chartOpts(),plugins:{...chartOpts().plugins,legend:{display:false}},scales:{...chartOpts().scales,y:{...chartOpts().scales?.y,max:120,ticks:{callback:v=>v+'%',color:'#7a8ba8',font:{size:9}}}}}});
 
-  // Re-sort pareto
-  const rsMap={};
-  (day.resort||[]).forEach(r=>rsMap[r.reason]=(rsMap[r.reason]||0)+parseFloat(r.qty||0));
+  // Re-sort pareto  (v41ZC #1: range-aware)
+  const rsMap = isRange ? aggResort : (()=>{ const m={}; _aggFloors.forEach(_f=>((_dayByFloorToday[_f]||{}).resort||[]).forEach(r=>m[r.reason]=(m[r.reason]||0)+parseFloat(r.qty||0))); return m; })();
   const rsKeys=Object.keys(rsMap).sort((a,b)=>rsMap[b]-rsMap[a]);
   newChart('ch-rs',{type:'bar',data:{
     labels:rsKeys.length?rsKeys:['No re-sort'],
@@ -3249,35 +3380,45 @@ async function renderAnalytics(){
   // Machine summary table
   let html=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Machine</th><th>Size</th><th>Batches Run</th><th>Target</th><th>Produced</th><th>Efficiency</th><th>DT (min)</th><th>Re-Sort</th></tr></thead><tbody>`;
   mcs.forEach(mc=>{
-    let prod=0,dt=0,batchCount=0;
-    SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m);
-      batchCount+=m.runs.filter(r=>r.qty||r.batchNumber).length;
-      DT_CATS.forEach(c=>dt+=parseFloat(m[c]||0));
-    });
-    const t=tgt(fl,mc.id)*3;
+    let prod, dt, batchCount;
+    if (isRange) {
+      prod = mcStats[mc.id].prod; dt = mcStats[mc.id].dt; batchCount = mcStats[mc.id].batches;
+    } else {
+      prod=0; dt=0; batchCount=0;
+      SHIFTS.forEach(sh=>{
+        const m=migrateMachineData((_dayByFloorToday[mc._fl]||_dayByFloorToday[fl]).shifts[sh].machines[mc.id]||blankMachine());
+        prod+=mcTotalProd(m);
+        batchCount+=m.runs.filter(r=>r.qty||r.batchNumber).length;
+        DT_CATS.forEach(c=>dt+=parseFloat(m[c]||0));
+      });
+    }
+    const t=mcTargetScope(mc);
     const eff=t>0?(prod/t*100):0;
-    const rs=(day.resort||[]).filter(r=>r.mc===mc.id).reduce((s,r)=>s+parseFloat(r.qty||0),0);
+    const rs=isRange ? (aggResortByMc[mc.id]||0) : ((_dayByFloorToday[mc._fl]||_dayByFloorToday[fl]).resort||[]).filter(r=>r.mc===mc.id).reduce((s,r)=>s+parseFloat(r.qty||0),0);
     const effCls=eff>=90?'g':eff>=75?'a':'r';
     html+=`<tr><td class="mono">${mc.id}</td><td style="color:var(--t3)">${mc.sz}</td>
-      <td style="color:var(--t2)">${batchCount>1?`<span class="pill a">${batchCount} runs</span>`:'<span style="color:var(--t3)">1</span>'}</td>
-      <td class="mono">${t}</td><td class="mono">${prod>0?prod.toFixed(2):'—'}</td>
+      <td style="color:var(--t2)">${batchCount>1?`<span class="pill a">${batchCount} runs</span>`:'<span style="color:var(--t3)">'+(batchCount||0)+'</span>'}</td>
+      <td class="mono">${t.toFixed?t.toFixed(2):t}</td><td class="mono">${prod>0?prod.toFixed(2):'—'}</td>
       <td><span class="pill ${effCls}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
       <td class="mono">${dt||'—'}</td><td class="mono">${rs>0?`<span style="color:var(--red)">${parseFloat(rs).toFixed(2)}</span>`:'—'}</td></tr>`;
   });
   // Totals row
   let totProd=0,totDT=0,totBatches=0,totTarget=0,totRs=0;
   mcs.forEach(mc=>{
-    let prod=0,dt=0,batchCount=0;
-    SHIFTS.forEach(sh=>{
-      const m=migrateMachineData(day.shifts[sh].machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m);
-      batchCount+=m.runs.filter(r=>r.qty||r.batchNumber).length;
-      DT_CATS.forEach(cat=>dt+=parseFloat(m[cat]||0));
-    });
-    const t=tgt(fl,mc.id)*3;
-    const rs=(day.resort||[]).filter(r=>r.mc===mc.id).reduce((s,r)=>s+parseFloat(r.qty||0),0);
+    let prod, dt, batchCount;
+    if (isRange) {
+      prod = mcStats[mc.id].prod; dt = mcStats[mc.id].dt; batchCount = mcStats[mc.id].batches;
+    } else {
+      prod=0; dt=0; batchCount=0;
+      SHIFTS.forEach(sh=>{
+        const m=migrateMachineData((_dayByFloorToday[mc._fl]||_dayByFloorToday[fl]).shifts[sh].machines[mc.id]||blankMachine());
+        prod+=mcTotalProd(m);
+        batchCount+=m.runs.filter(r=>r.qty||r.batchNumber).length;
+        DT_CATS.forEach(cat=>dt+=parseFloat(m[cat]||0));
+      });
+    }
+    const t=mcTargetScope(mc);
+    const rs=isRange ? (aggResortByMc[mc.id]||0) : ((_dayByFloorToday[mc._fl]||_dayByFloorToday[fl]).resort||[]).filter(r=>r.mc===mc.id).reduce((s,r)=>s+parseFloat(r.qty||0),0);
     totProd+=prod; totDT+=dt; totBatches+=batchCount; totTarget+=t; totRs+=rs;
   });
   const totEff=totTarget>0?(totProd/totTarget*100):0;
@@ -3480,6 +3621,10 @@ function renderShiftPersonnelPerf(){
       const dt=calcShiftDT(fl,date,sh);
       Object.entries(ROLE_MAP).forEach(([roleKey, roleCfg])=>{
         const names=(sd[roleKey]||[]).filter(n=>n.trim());
+        // v41ZE #3: DT is recorded per-MACHINE per-shift, not per-person. Previously the FULL shift
+        // DT total was added to EVERY person in the role — so e.g. 4 electricians each showed the
+        // same 2500. Split the shift's role-DT equally among the staff in that role (per-capita).
+        const _roleHeadcount = names.length || 1;
         names.forEach(name=>{
           if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
           personStats[name].shiftsWorked++;
@@ -3493,10 +3638,10 @@ function renderShiftPersonnelPerf(){
             });
             personStats[name].aimBoxes+=aimSum;
           } else {
-            // DT performance: lower DT = better
+            // DT performance: lower DT = better. Per-capita share of the shift's role DT.
             let roleDT=0;
             roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
-            personStats[name].dtMins+=roleDT;
+            personStats[name].dtMins+=roleDT/_roleHeadcount;
             personStats[name].dtShifts++;
           }
         });
@@ -3511,6 +3656,7 @@ function renderShiftPersonnelPerf(){
     const dt=calcShiftDT(fl,today,sh);
     Object.entries(ROLE_MAP).forEach(([roleKey,roleCfg])=>{
       const names=(sd[roleKey]||[]).filter(n=>n.trim());
+      const _roleHeadcount = names.length || 1; // v41ZE #3: per-capita DT split (see saved-days block)
       names.forEach(name=>{
         if(!personStats[name]) personStats[name]={role:roleKey,label:roleCfg.label,color:roleCfg.color,dtMins:0,dtShifts:0,aimBoxes:0,shiftsWorked:0};
         const already=allKeys.some(k=>k.includes(`_${fl}_${today}`));
@@ -3526,7 +3672,7 @@ function renderShiftPersonnelPerf(){
           } else {
             let roleDT=0;
             roleCfg.dtCats.forEach(cat=>roleDT+=dt[cat]||0);
-            personStats[name].dtMins+=roleDT;
+            personStats[name].dtMins+=roleDT/_roleHeadcount;
             personStats[name].dtShifts++;
           }
         }
@@ -3593,10 +3739,10 @@ function renderShiftPersonnelPerf(){
         html+=`<tr>
           <td style="font-weight:600;color:var(--cyan)">${name}</td>
           <td class="mono">${s.shiftsWorked}</td>
-          <td class="mono">${s.dtMins}</td>
+          <td class="mono">${s.dtMins.toFixed(0)}</td>
           <td class="mono">${avgDT.toFixed(0)}</td>
-          <td><span class="pill ${cls}">${avgDT<=15?'Excellent':avgDT<=30?'Good':'Needs Attention'}</span>
-            <div style="background:var(--s3);border-radius:3px;height:8px;width:80px;display:inline-block;vertical-align:middle;margin-left:6px">
+          <td><span class="pill ${cls}">${avgDT<=15?'Excellent':avgDT<=30?'Good':'Needs Attention'}</span></td>
+          <td><div style="background:var(--s3);border-radius:3px;height:8px;width:80px;display:inline-block;vertical-align:middle">
               <div style="height:100%;width:${barW}%;background:${cls==='g'?'var(--green)':cls==='a'?'var(--amber)':'var(--red)'};border-radius:3px"></div>
             </div></td>
         </tr>`;
@@ -3609,6 +3755,7 @@ function renderShiftPersonnelPerf(){
 }
 
 async function renderPerf(){
+ try {
   restrictDateToMonth('perfDate');
   const flSel = document.getElementById('perfFloor');
   if(flSel && !flSel.dataset.userSet) flSel.value = curFloor;
@@ -3625,98 +3772,131 @@ async function renderPerf(){
   // last 7 days). Without this, charts for 30d / 90d / 6 months / 1 year had blank data
   // on fresh sessions.
   if (rangeMode === 'today') {
-    const serverData = await fetchDayFromServer(fl, d);
-    if(serverData) localStorage.setItem(skey(fl,d), JSON.stringify(serverData));
+    await fetchDayFromServer(fl, d); // fetchDayFromServer now handles timestamp comparison internally
   } else {
     await syncDateRangeFromServer([fl], _dprFromDateForMode(rangeMode), today());
   }
-  // Always ensure selected date itself is fresh
-  const serverData = await fetchDayFromServer(fl, d);
-  if(serverData) localStorage.setItem(skey(fl,d), JSON.stringify(serverData));
+  // Always ensure selected date itself is fresh (timestamp-safe)
+  await fetchDayFromServer(fl, d);
 
   // v37I: Compute dates AFTER sync so newly-fetched data is reflected
   const dates = getDprDateRange(fl, rangeMode);
   const day = loadDay(fl, d);
 
-  // Scorecard for selected date
-  const isToday = (d === today());
+  // v41ZC #2.1: Shift Incharge scorecard now respects the RANGE selector. For 'today' it shows
+  // the selected date; for any range it aggregates production/DT across every date in range.
+  const scoreDates = (rangeMode === 'today') ? [d] : dates;
+  const rangeLabelSC = (rangeMode === 'today')
+    ? `Date: <b style="color:var(--t1)">${d}</b>`
+    : `Range: <b style="color:var(--t1)">${scoreDates[0]||d} → ${scoreDates[scoreDates.length-1]||d}</b> (${scoreDates.length} day${scoreDates.length!==1?'s':''})`;
+  const isToday = (rangeMode === 'today' && d === today());
   const unsavedNote = (isToday && unsaved)
     ? `<div style="background:rgba(255,171,0,0.12);border:1.5px solid var(--amber);border-radius:4px;padding:6px 10px;margin-bottom:10px;font-size:11px;color:var(--amber);font-weight:700">⚠️ Unsaved changes detected — Save data first (Save button) so DT and production figures reflect your latest entries.</div>`
     : '';
-  let html=`${unsavedNote}<div class="text-sm" style="color:var(--t3);margin-bottom:10px">Date: <b style="color:var(--t1)">${d}</b> &nbsp;|&nbsp; Floor: <b style="color:var(--cyan)">${FLOORS[fl]?.label||fl}</b></div>`;
+  let html=`${unsavedNote}<div class="text-sm" style="color:var(--t3);margin-bottom:10px">${rangeLabelSC} &nbsp;|&nbsp; Floor: <b style="color:var(--cyan)">${FLOORS[fl]?.label||fl}</b></div>`;
   html+=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Shift</th><th>Incharge</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Score</th></tr></thead><tbody>`;
   SHIFTS.forEach(sh=>{
-    const sd=day.shifts[sh];
-    let prod=0,t=0;
+    let prod=0,t=0,dtTotal=0,dtBase=0;
+    const inchargeNames = new Set();
     const mcs=getActiveMachines(fl);
-    mcs.forEach(mc=>{
-      const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
-      prod+=mcTotalProd(m);
-      t+=tgt(fl,mc.id);
+    scoreDates.forEach(sdDate=>{
+      const dayN = loadDay(fl, sdDate);
+      const sd = dayN.shifts[sh];
+      if (sd?.incharge) {
+        const names = Array.isArray(sd.incharge) ? sd.incharge : [sd.incharge];
+        names.forEach(n => { if (n) inchargeNames.add(n.trim()); });
+      }
+      mcs.forEach(mc=>{
+        const m=migrateMachineData(sd.machines[mc.id]||blankMachine());
+        prod+=mcTotalProd(m);
+        t+=tgt(fl,mc.id);
+      });
+      const dtd=calcShiftDT(fl,sdDate,sh);
+      dtTotal += dtd.total; dtBase += (dtd.total>0 ? dtd.total/(dtd.dtPct/100) : 0);
     });
     prod = parseFloat(prod.toFixed(2));
-    const dt=calcShiftDT(fl,d,sh);
+    const dtPct = dtBase>0 ? (dtTotal/dtBase*100) : 0;
     const eff=t>0?(prod/t*100):0;
-    const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dt.dtPct)*0.3+(sd.incharge?10:0))).toFixed(0);
+    const inchargeDisp = inchargeNames.size ? [...inchargeNames].join(', ') : '';
+    const score=Math.max(0,Math.min(100,(eff*0.6)+(100-dtPct)*0.3+(inchargeDisp?10:0))).toFixed(0);
     const sc=parseInt(score);
     const scCls=sc>=80?'g':sc>=60?'a':'r';
     html+=`<tr><td style="color:var(--cyan);font-family:var(--fc);font-weight:700">Shift ${sh}</td>
-      <td>${sd.incharge||'<span style="color:var(--t3)">—</span>'}</td>
+      <td>${inchargeDisp||'<span style="color:var(--t3)">—</span>'}</td>
       <td class="mono">${prod||'—'}</td>
       <td><span class="pill ${eff>=90?'g':eff>=75?'a':'r'}">${prod>0?eff.toFixed(1)+'%':'—'}</span></td>
-      <td><span class="pill ${dt.dtPct<=5?'g':dt.dtPct<=10?'a':'r'}">${dt.total>0?dt.dtPct.toFixed(1)+'%':'—'}</span></td>
+      <td><span class="pill ${dtPct<=5?'g':dtPct<=10?'a':'r'}">${dtTotal>0?dtPct.toFixed(1)+'%':'—'}</span></td>
       <td><span class="pill ${scCls}">${prod>0?score:'—'}</span></td>
     </tr>`;
   });
   html+=`</tbody></table></div>`;
   document.getElementById('perfTable').innerHTML=html;
 
-  // Operator-wise performance — use selected range
-  const rangeVal = document.getElementById('perfOpRange')?.value || 'ALL';
+  // Operator-wise performance — v41ZC #2.2: driven by the SAME range bar (the old perfOpRange
+  // dropdown didn't exist in the DOM, so it always defaulted to ALL regardless of the range).
+  const opDates = (rangeMode === 'today') ? [d] : dates;
   const operatorStats = {};
-  const allKeys = Object.keys(localStorage).filter(k=>k.startsWith('dpr3_'));
-  const cutoffDate = rangeVal === 'ALL' ? '0000-00-00' : (() => {
-    const c = new Date(); c.setDate(c.getDate() - parseInt(rangeVal));
-    return _localYMD(c); // v41k local
-  })();
-
-  allKeys.forEach(k=>{
-    const parts=k.split('_');
-    const dayFl=parts[1], dayDate=parts[2];
-    if(dayFl!==fl) return;
-    if(dayDate < cutoffDate) return;
-    const dy=loadDay(dayFl,dayDate);
+  // Canonical display name per normalized key (first-seen casing wins) so case/spacing variants
+  // of the same operator aggregate into ONE row instead of many duplicates.
+  const _opCanon = {};
+  const _opKey = s => (s||'').trim().toUpperCase().replace(/\s+/g,' ');
+  opDates.forEach(opDate=>{
+    const dy=loadDay(fl,opDate);
+    // v41ZE #4: resort entries store {mc, shift, qty} — NOT an operator. The old code matched
+    // r.operator (always undefined), so the Re-Sort column was always empty. Build a machine+shift
+    // → operator-keys map while iterating, then attribute each resort to the operator(s) who ran
+    // that machine on that shift (split per-capita when shared).
+    const _mcShiftOps={}; // { 'mcId|shift': [opKey,...] }
     SHIFTS.forEach(sh=>{
       const sd2=dy.shifts[sh];
       getActiveMachines(fl).forEach(mc=>{
         const m=migrateMachineData(sd2.machines[mc.id]||blankMachine());
-        // Operators field — can be single string or array
         const ops = (m.operators||[m.operator]).filter(Boolean).map(o=>o.trim()).filter(Boolean);
-        ops.forEach(op=>{
+        const _msKey=`${mc.id}|${sh}`;
+        ops.forEach(opRaw=>{
+          const key=_opKey(opRaw);
+          if(!key) return;
+          if(!_opCanon[key]) _opCanon[key]=opRaw.trim();
           const prod=mcTotalProd(m);
           const t2=tgt(fl,mc.id);
-          if(!operatorStats[op]) operatorStats[op]={prod:0,target:0,shifts:0,resort:0};
-          operatorStats[op].prod = parseFloat((operatorStats[op].prod + prod).toFixed(2));
-          operatorStats[op].target += t2;
-          operatorStats[op].shifts += prod>0?1:0;
+          if(!operatorStats[key]) operatorStats[key]={prod:0,target:0,shifts:0,resort:0};
+          operatorStats[key].prod = parseFloat((operatorStats[key].prod + prod).toFixed(2));
+          operatorStats[key].target += t2;
+          operatorStats[key].shifts += prod>0?1:0;
+          if(!_mcShiftOps[_msKey]) _mcShiftOps[_msKey]=[];
+          if(!_mcShiftOps[_msKey].includes(key)) _mcShiftOps[_msKey].push(key);
         });
       });
     });
     (dy.resort||[]).forEach(r=>{
-      const op=(r.operator||'').trim();
-      if(op && operatorStats[op]) operatorStats[op].resort = parseFloat((operatorStats[op].resort + parseFloat(r.qty||0)).toFixed(2));
+      // Attribute by machine+shift. Prefer exact mc+shift; fall back to mc on any shift that day.
+      let targets = _mcShiftOps[`${r.mc}|${r.shift}`];
+      if((!targets||!targets.length)){
+        // fallback: any operator on that machine across shifts this day
+        const merged=[];
+        SHIFTS.forEach(sh=>{(_mcShiftOps[`${r.mc}|${sh}`]||[]).forEach(k=>{if(!merged.includes(k))merged.push(k);});});
+        targets=merged;
+      }
+      if(!targets||!targets.length) return; // no operator to attribute to — skip silently
+      const share=parseFloat(r.qty||0)/targets.length; // per-capita split when shared
+      targets.forEach(key=>{
+        if(operatorStats[key]) operatorStats[key].resort = parseFloat((operatorStats[key].resort + share).toFixed(2));
+      });
     });
   });
 
   const ops=Object.entries(operatorStats).sort((a,b)=>b[1].prod-a[1].prod);
   let opHtml='';
-  const rangeLabel = rangeVal==='ALL' ? 'All Time (Cumulative)' : `Last ${rangeVal} days`;
+  const rangeLabel = (rangeMode === 'today')
+    ? `Date: ${d}`
+    : `${(opDates[0]||d)} → ${(opDates[opDates.length-1]||d)} (${opDates.length} day${opDates.length!==1?'s':''})`;
   if(ops.length>0){
     opHtml=`<div style="font-size:11px;color:var(--t3);margin-bottom:8px">${rangeLabel} · ${ops.length} operators · Floor: ${FLOORS[fl]?.label||fl}</div>`;
     opHtml+=`<div style="overflow-x:auto"><div class="tbl-mobile-wrap"><table class="data-table"><thead><tr>
       <th>Operator</th><th>Total Prod (L)</th><th>Shifts Active</th><th>Avg Efficiency</th><th>Re-Sort</th><th>Performance</th>
     </tr></thead><tbody>`;
-    ops.forEach(([name,s])=>{
+    ops.forEach(([key,s])=>{
+      const name = _opCanon[key] || key;
       const eff=s.target>0?(s.prod/s.target*100):0;
       const cls=eff>=90?'g':eff>=75?'a':'r';
       opHtml+=`<tr>
@@ -3741,24 +3921,64 @@ async function renderPerf(){
   // Shift personnel performance
   renderShiftPersonnelPerf();
 
-  // Trend chart — last 30 days for selected floor
-  const perfTrendDates=[];
-  for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);perfTrendDates.push(_localYMD(d2));} // v41k local
-  const scores=perfTrendDates.map(date=>{
+  // v41ZE #2: genuinely per-incharge trend. Previously this plotted a single floor-wide daily
+  // average mislabeled "Incharge vs Efficiency" with no incharge attribution, over a fixed 30-day
+  // window (so it showed an empty grid with a line only at the right). Now: one line per shift
+  // incharge = that incharge's average shift efficiency on the days they were on duty. Window is a
+  // rolling 30 days with leading empty days trimmed so the x-axis fits the actual data.
+  const _perfWindow=[];
+  for(let i=29;i>=0;i--){const d2=new Date();d2.setDate(d2.getDate()-i);_perfWindow.push(_localYMD(d2));} // v41k local
+  // Per incharge → per date → {effSum, shiftCnt}
+  const _inchargeDaily={}; // { name: { 'YYYY-MM-DD': {sum, cnt} } }
+  _perfWindow.forEach(date=>{
     const dy=loadDay(fl,date);
-    let totalScore=0,cnt=0;
     SHIFTS.forEach(sh=>{
       const sd2=dy.shifts[sh];
+      // shift efficiency (same formula as the scorecard/score line below)
       let p=0,t2=0;
       getActiveMachines(fl).forEach(mc=>{
         const m=migrateMachineData(sd2.machines[mc.id]||blankMachine());
         p+=mcTotalProd(m); t2+=tgt(fl,mc.id);
       });
-      if(p>0){const e=t2>0?p/t2*100:0;totalScore+=Math.max(0,Math.min(100,e*0.7+30));cnt++;}
+      if(p<=0) return; // no production this shift → nothing to attribute
+      const eff=t2>0?Math.max(0,Math.min(100,p/t2*100)):0;
+      const names=Array.isArray(sd2.incharge)?sd2.incharge:(sd2.incharge?[sd2.incharge]:[]);
+      names.filter(n=>n&&n.trim()).forEach(n=>{
+        const nm=n.trim();
+        if(!_inchargeDaily[nm]) _inchargeDaily[nm]={};
+        if(!_inchargeDaily[nm][date]) _inchargeDaily[nm][date]={sum:0,cnt:0};
+        _inchargeDaily[nm][date].sum+=eff;
+        _inchargeDaily[nm][date].cnt++;
+      });
     });
-    return cnt>0?parseFloat((totalScore/cnt).toFixed(1)):null;
   });
-  newChart('ch-perf',{type:'line',data:{labels:perfTrendDates.map(d=>{const[,m,dy]=d.split('-');return`${dy}/${m}`;}),datasets:[{label:'Avg Score',data:scores,borderColor:'#b388ff',backgroundColor:'rgba(179,136,255,.08)',fill:true,borderWidth:2,tension:.3,pointRadius:3,spanGaps:true}]},options:chartOpts()});
+  // Trim leading empty days: find first date in the window that has ANY incharge data.
+  const _hasDataOn=date=>Object.values(_inchargeDaily).some(byDate=>byDate[date]);
+  let _firstIdx=_perfWindow.findIndex(_hasDataOn);
+  if(_firstIdx<0) _firstIdx=_perfWindow.length-1; // no data at all → keep last day so axis isn't empty
+  const perfTrendDates=_perfWindow.slice(_firstIdx);
+  // One dataset per incharge (only those with data in the trimmed window).
+  const _palette=['#b388ff','#00d4ff','#00e676','#ffab00','#ff4060','#7FC8F8','#A8E6CF','#FFD93D','#FF6B6B','#c792ea'];
+  const _inchargeNames=Object.keys(_inchargeDaily).filter(nm=>perfTrendDates.some(d=>_inchargeDaily[nm][d]));
+  const _datasets=_inchargeNames.map((nm,i)=>{
+    const col=_palette[i%_palette.length];
+    return {
+      label:nm,
+      data:perfTrendDates.map(d=>{const cell=_inchargeDaily[nm][d];return cell&&cell.cnt>0?parseFloat((cell.sum/cell.cnt).toFixed(1)):null;}),
+      borderColor:col,backgroundColor:'transparent',fill:false,borderWidth:2,tension:.3,pointRadius:3,spanGaps:true
+    };
+  });
+  const _perfChartData = _datasets.length
+    ? _datasets
+    : [{label:'No incharge data',data:perfTrendDates.map(()=>null),borderColor:'#7a8ba8',borderWidth:1,pointRadius:0}];
+  newChart('ch-perf',{type:'line',data:{labels:perfTrendDates.map(d=>{const[,m,dy]=d.split('-');return`${dy}/${m}`;}),datasets:_perfChartData},options:{...chartOpts(),plugins:{...chartOpts().plugins,legend:{display:true,labels:{color:'#7a8ba8',font:{size:10},boxWidth:12}}}}});
+ } catch(err) {
+   // v41ZD #1: never leave Shift Performance blank. If anything throws mid-render (bad cached
+   // record, chart lib, etc.) show a clear message and log the real cause for diagnosis.
+   console.error('[renderPerf] failed:', err);
+   const pt = document.getElementById('perfTable');
+   if (pt) pt.innerHTML = `<div style="padding:14px;color:var(--amber);font-size:12px;font-weight:600">⚠️ Could not render the scorecard for this date/range. Try another date or reload. <span style="color:var(--t3)">(${(err&&err.message)||'unknown error'})</span></div>`;
+ }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3773,6 +3993,67 @@ async function renderPerf(){
 // allDates is used for cumulative calculation — passed in so caller controls the range.
 function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
   // allDatesMap: { GF: [dates...], '1F': [dates...], '2F': [dates...] }
+  // v41ZD #3: averages use ELAPSED DAYS in the selected scope (not per-machine days-with-production,
+  // not a fixed 30). "This Month" → from the 1st of the month through the selected date;
+  // "Cumulative" → from the earliest date that has any data through the selected date.
+  // The same elapsedDays value is the denominator for every machine, floor, and the plant total,
+  // so a 3-day period always divides by 3 regardless of how many days a given machine ran.
+  const _scopeStart = (() => {
+    if (_dprCumulativeMode) {
+      const allD = [...new Set(Object.values(allDatesMap||{}).flat())].filter(d => d && d <= selectedDate).sort();
+      return allD.length ? allD[0] : selectedDate;
+    }
+    return _dprSelectedMonth + '-01';
+  })();
+  const _daysInclusive = (a, b) => {
+    // inclusive whole-day count between YYYY-MM-DD a..b (b>=a), else 1
+    const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
+    const n = Math.floor((db - da) / 86400000) + 1;
+    return n >= 1 ? n : 1;
+  };
+  const elapsedDays = _daysInclusive(_scopeStart, selectedDate);
+
+  // v41ZG #3: read-once pre-pass. Parse each (floor,date) from localStorage exactly once and cache
+  // it, instead of re-reading + re-parsing the same key for every machine (the old per-machine loop
+  // did N_machines parses of the same day). This builds:
+  //   parsedCache[fl][d]      = parsed day object (reused below)
+  //   floorDateProd[fl][d]    = total floor production that day (for floor/plant active-day counts)
+  // It also reduces localStorage churn, which helps the Plant Report's load time (#5).
+  const _scopeFilter = d => _dprCumulativeMode ? (d <= selectedDate) : (d >= _dprSelectedMonth + '-01' && d <= selectedDate);
+  const parsedCache = {};
+  const floorDateProd = {};
+  Object.keys(FLOORS).forEach(fl => {
+    parsedCache[fl] = {};
+    floorDateProd[fl] = {};
+    const flDates = (allDatesMap[fl] || []).filter(_scopeFilter);
+    const flMachines = FLOORS[fl].machines || [];
+    flDates.forEach(d => {
+      const cached = localStorage.getItem(skey(fl, d));
+      if (!cached) return;
+      try {
+        const dd = JSON.parse(cached);
+        parsedCache[fl][d] = dd;
+        let floorDay = 0;
+        flMachines.forEach(mc => SHIFTS.forEach(sh => {
+          const m = dd.shifts?.[sh]?.machines?.[mc.id];
+          if (m) floorDay += mcTotalProd(migrateMachineData(m));
+        }));
+        floorDateProd[fl][d] = parseFloat(floorDay.toFixed(2));
+      } catch(e) {}
+    });
+  });
+  // Active-day counts (days WITH production) — denominator for averages.
+  const floorProdDays = {};
+  const _plantDates = new Set();
+  Object.keys(FLOORS).forEach(fl => {
+    let cnt = 0;
+    Object.entries(floorDateProd[fl]).forEach(([d, v]) => {
+      if (v > 0.0001) { cnt++; _plantDates.add(d); }
+    });
+    floorProdDays[fl] = cnt;
+  });
+  const plantProdDays = _plantDates.size;
+
   const allMachines = [];
   Object.entries(FLOORS).forEach(([fl, flData]) => {
     flData.machines.forEach(mc => { allMachines.push({id:mc.id, sz:mc.sz, floor:fl, flLabel:flData.label}); });
@@ -3801,27 +4082,24 @@ function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
     const vsTarget  = parseFloat((dayTotal - dailyTgt).toFixed(2));
 
     // Cumulative: scope based on _dprCumulativeMode
-    const flDates = (allDatesMap[fl] || []).filter(d => {
-      if (_dprCumulativeMode) return d <= selectedDate; // all history up to date
-      return d >= _dprSelectedMonth + '-01' && d <= selectedDate; // this month only
-    });
+    const flDates = (allDatesMap[fl] || []).filter(_scopeFilter);
     let cumTotal=0, cumDays=0;
     flDates.forEach(d => {
-      // Try server-cached data first (stored in localStorage by previous fetches), then localStorage
-      const cached = localStorage.getItem(skey(fl, d));
-      if (!cached) return;
-      try {
-        const dd = JSON.parse(cached);
-        let dayProd = 0;
-        SHIFTS.forEach(sh => {
-          const m = dd.shifts?.[sh]?.machines?.[mc.id];
-          if (m) dayProd += mcTotalProd(migrateMachineData(m));
-        });
-        dayProd = parseFloat(dayProd.toFixed(2));
-        if (dayProd > 0) { cumTotal += dayProd; cumDays++; }
-      } catch(e) {}
+      // v41ZG #3: use the pre-parsed cache (read once above) instead of re-reading localStorage.
+      const dd = parsedCache[fl]?.[d];
+      if (!dd) return;
+      let dayProd = 0;
+      SHIFTS.forEach(sh => {
+        const m = dd.shifts?.[sh]?.machines?.[mc.id];
+        if (m) dayProd += mcTotalProd(migrateMachineData(m));
+      });
+      dayProd = parseFloat(dayProd.toFixed(2));
+      if (dayProd > 0) { cumTotal += dayProd; cumDays++; }
     });
     cumTotal = parseFloat(cumTotal.toFixed(2));
+    // v41ZG #3: average over days this machine ACTUALLY produced (days-with-data), not elapsed
+    // calendar days. "Average production" = mean output on the days the machine ran. cumDays is the
+    // count of those days. (For a range where every day has data, this equals elapsed days.)
     const cumAvg = cumDays > 0 ? parseFloat((cumTotal / cumDays).toFixed(2)) : 0;
 
     return { ...mc, dailyTgt, dayA, dayB, dayC, dayTotal, vsTarget, cumTotal, cumDays, cumAvg };
@@ -3834,13 +4112,33 @@ function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
     acc.dayC     += r.dayC;
     acc.dayTotal += r.dayTotal;
     acc.cumTotal += r.cumTotal;
-    acc.cumDays   = Math.max(acc.cumDays, r.cumDays);
     return acc;
-  }, {dailyTgt:0,dayA:0,dayB:0,dayC:0,dayTotal:0,cumTotal:0,cumDays:0});
+  }, {dailyTgt:0,dayA:0,dayB:0,dayC:0,dayTotal:0,cumTotal:0});
+  totals.cumDays  = plantProdDays;
   totals.vsTarget = parseFloat((totals.dayTotal - totals.dailyTgt).toFixed(2));
-  totals.cumAvg   = totals.cumDays > 0 ? parseFloat((totals.cumTotal / totals.cumDays).toFixed(2)) : 0;
+  // v41ZG #3: plant average daily production = plant cumulative ÷ days the plant produced.
+  totals.cumAvg   = plantProdDays > 0 ? parseFloat((totals.cumTotal / plantProdDays).toFixed(2)) : 0;
 
-  return { rows, totals };
+  // v41ZC #3: per-floor subtotals (floor-wise production summed, shown before the grand total).
+  const floorTotals = {};
+  Object.keys(FLOORS).forEach(fl => {
+    const fRows = rows.filter(r => r.floor === fl);
+    if (!fRows.length) return;
+    const ft = fRows.reduce((acc,r)=>{
+      acc.dailyTgt+=r.dailyTgt; acc.dayA+=r.dayA; acc.dayB+=r.dayB; acc.dayC+=r.dayC;
+      acc.dayTotal+=r.dayTotal; acc.cumTotal+=r.cumTotal;
+      return acc;
+    }, {dailyTgt:0,dayA:0,dayB:0,dayC:0,dayTotal:0,cumTotal:0});
+    ['dailyTgt','dayA','dayB','dayC','dayTotal','cumTotal'].forEach(k=>ft[k]=parseFloat(ft[k].toFixed(2)));
+    ft.cumDays  = floorProdDays[fl] || 0;
+    ft.vsTarget = parseFloat((ft.dayTotal - ft.dailyTgt).toFixed(2));
+    // v41ZG #3: floor average daily production = floor cumulative ÷ days that floor produced.
+    ft.cumAvg   = ft.cumDays > 0 ? parseFloat((ft.cumTotal/ft.cumDays).toFixed(2)) : 0;
+    ft.label    = FLOORS[fl]?.label || fl;
+    floorTotals[fl] = ft;
+  });
+
+  return { rows, totals, floorTotals };
 }
 
 // Legacy helper kept for Trends/History which still use localStorage only
@@ -3864,7 +4162,11 @@ async function renderPlantReport(){
   restrictDateToMonth('plant-date');
   const selectedDate = document.getElementById('plant-date')?.value || today();
   const el = document.getElementById('plant-report-output');
-  if(!el) return;
+  // v41ZF #1: the Plant Report was reportedly not rendering under admin login, with no visible
+  // reason. Nothing in this path is role-dependent, so log entry state to surface the real cause
+  // (missing container, fetch failure, etc.) instead of any silent return.
+  console.log('[renderPlantReport] start', { selectedDate, hasEl: !!el, role: (typeof dprUser!=='undefined'&&dprUser)?dprUser.role:'(none)', serverUrl: !!serverUrl, cumulative: _dprCumulativeMode });
+  if(!el){ console.error('[renderPlantReport] ABORT — #plant-report-output not in DOM (page markup missing or not yet shown)'); return; }
 
   // Show loading state
   el.innerHTML = `<div style="padding:20px;color:var(--t3);font-family:var(--fc);font-size:12px">⏳ Loading plant data${serverUrl ? ' from server' : ' from local cache'}...</div>`;
@@ -3899,6 +4201,22 @@ async function renderPlantReport(){
     }
   });
 
+  // v41ZD #3: cumulative totals were built only from days already in localStorage, so on a fresh
+  // session (or a different device) prior days were missing and the cumulative per-machine values
+  // under-counted. Sync the full scope range from the server first so the cumulative is complete.
+  if (serverUrl) {
+    const _scopeFrom = _dprCumulativeMode ? '2000-01-01' : (_dprSelectedMonth + '-01');
+    // v41ZF #1: wrap with a hard timeout. If syncDateRangeFromServer hangs (slow/large range), the
+    // report previously could sit on "Loading" indefinitely — which presents exactly as "doesn't
+    // show up". Time-box it; the cumulative still renders from whatever is already cached locally.
+    try {
+      await Promise.race([
+        syncDateRangeFromServer(Object.keys(FLOORS), _scopeFrom, selectedDate),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('range-sync timeout')), 12000))
+      ]);
+    } catch(e) { console.warn('[plant-report] range sync skipped:', e?.message); }
+  }
+
   // ── Step 3: Build allDatesMap for cumulative — use all localStorage dates per floor ──
   const allDatesMap = {};
   Object.keys(FLOORS).forEach(fl => {
@@ -3911,11 +4229,15 @@ async function renderPlantReport(){
   });
 
   // ── Step 4: Build rows and render ──
-  const { rows, totals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
+  try {
+  const { rows, totals, floorTotals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
 
   const allDates = [...new Set(Object.values(allDatesMap).flat())].filter(d => d <= selectedDate).sort();
-  const cumLabel = allDates.length > 0
-    ? `Cumulative up to ${selectedDate} (${allDates.length} day${allDates.length!==1?'s':''})`
+  // v41ZG #3: the DAYS column / averages now divide by days that actually had production (active
+  // days), per machine/floor/plant — not elapsed calendar days. Label reflects the plant's active days.
+  const _daysWithData = allDates.length;
+  const cumLabel = totals.cumDays > 0
+    ? `Cumulative up to ${selectedDate} · avg over ${totals.cumDays} production day${totals.cumDays!==1?'s':''}`
     : 'No cumulative data yet';
 
   const sourceNote = serverFetched
@@ -3927,7 +4249,27 @@ async function renderPlantReport(){
                    : n>0   ? `<span style="color:var(--green);font-weight:800">+${fmt2(n)}</span>`
                    :         `<span style="color:var(--red);font-weight:800">${fmt2(n)}</span>`;
 
-  const rowsHtml = rows.map(r=>`
+  // v41ZC #3: render machine rows grouped by floor, with a FLOOR SUBTOTAL row after each floor.
+  const floorSubtotalRow = (ft) => `
+    <tr style="background:#16302a">
+      <td colspan="3" style="font-family:var(--fc);font-weight:800;font-size:10px;letter-spacing:.6px;color:#9fd9c0">▸ ${ft.label.split(' ')[0].toUpperCase()} FLOOR TOTAL</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#9fd9c0">${fmt2(ft.dailyTgt)}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#e8f5ee">${ft.dayA>0?fmt2(ft.dayA):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#e8f5ee">${ft.dayB>0?fmt2(ft.dayB):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#e8f5ee">${ft.dayC>0?fmt2(ft.dayC):'—'}</td>
+      <td class="r" style="font-family:var(--fc);font-weight:800;font-size:12px;color:#9fd9c0">${ft.dayTotal>0?fmt2(ft.dayTotal):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:${ft.vsTarget>=0?'#6ee7b7':'#fca5a5'}">${ft.dayTotal>0?(ft.vsTarget>=0?'+':'')+fmt2(ft.vsTarget):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#9fd9c0">${ft.cumTotal>0?fmt2(ft.cumTotal):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#9fd9c0">${ft.cumDays>0?ft.cumDays:'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:800;color:#9fd9c0">${ft.cumAvg>0?fmt2(ft.cumAvg):'—'}</td>
+    </tr>`;
+  let rowsHtml = '';
+  let _prevFloor = null;
+  rows.forEach((r, idx) => {
+    if (_prevFloor !== null && r.floor !== _prevFloor && floorTotals[_prevFloor]) {
+      rowsHtml += floorSubtotalRow(floorTotals[_prevFloor]);
+    }
+    rowsHtml += `
     <tr>
       <td style="font-family:var(--fc);font-weight:800;color:var(--cyan)">${r.id}</td>
       <td style="font-family:var(--mono);font-size:10px;color:var(--t3);font-weight:700">${r.sz}</td>
@@ -3941,7 +4283,11 @@ async function renderPlantReport(){
       <td class="r" style="font-family:var(--mono);font-weight:700;color:var(--cyan)">${r.cumTotal>0?fmt2(r.cumTotal):'—'}</td>
       <td class="r" style="font-family:var(--mono);color:var(--t3)">${r.cumDays>0?r.cumDays:'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:700;color:var(--purple)">${r.cumAvg>0?fmt2(r.cumAvg):'—'}</td>
-    </tr>`).join('');
+    </tr>`;
+    _prevFloor = r.floor;
+  });
+  // subtotal for the final floor
+  if (_prevFloor !== null && floorTotals[_prevFloor]) rowsHtml += floorSubtotalRow(floorTotals[_prevFloor]);
 
   const totRow = `
     <tr style="background:#1a3a2e">
@@ -3957,7 +4303,7 @@ async function renderPlantReport(){
       <td class="r" style="font-family:var(--mono);font-weight:800;color:#f0c060">${totals.cumAvg>0?fmt2(totals.cumAvg):'—'}</td>
     </tr>
     <tr style="background:#142e22">
-      <td colspan="3" style="font-family:var(--fc);font-weight:800;font-size:11px;letter-spacing:.8px;color:rgba(240,192,96,0.7)">PLANT AVERAGE</td>
+      <td colspan="3" style="font-family:var(--fc);font-weight:800;font-size:11px;letter-spacing:.8px;color:rgba(240,192,96,0.7)">PLANT AVG / ACTIVE M·C</td>
       <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">${rows.length>0?fmt2(totals.dailyTgt/rows.length):'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,0.6)">${totals.dayA>0?fmt2(totals.dayA/(rows.filter(r=>r.dayA>0).length||1)):'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(255,255,255,0.6)">${totals.dayB>0?fmt2(totals.dayB/(rows.filter(r=>r.dayB>0).length||1)):'—'}</td>
@@ -3966,7 +4312,7 @@ async function renderPlantReport(){
       <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.6)">${totals.dayTotal>0?fmt2(totals.vsTarget/(rows.filter(r=>r.dayTotal>0).length||1)):'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">${totals.cumTotal>0?fmt2(totals.cumTotal/(rows.filter(r=>r.cumTotal>0).length||1)):'—'}</td>
       <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.6)">—</td>
-      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">${totals.cumAvg>0?fmt2(totals.cumAvg):'—'}</td>
+      <td class="r" style="font-family:var(--mono);font-weight:700;color:rgba(240,192,96,0.7)">—</td>
     </tr>`;
 
   el.innerHTML = `
@@ -4005,6 +4351,11 @@ async function renderPlantReport(){
         <tfoot>${totRow}</tfoot>
       </table>
     </div>`;
+  } catch(err) {
+    // v41ZD #1: never leave Plant Report stuck on "Loading". Surface a clear message + log cause.
+    console.error('[renderPlantReport] failed:', err);
+    el.innerHTML = `<div style="padding:16px;color:var(--amber);font-size:12px;font-weight:600">⚠️ Could not build the plant report for ${selectedDate}. Try another date or reload. <span style="color:var(--t3)">(${(err&&err.message)||'unknown error'})</span></div>`;
+  }
 }
 
 async function exportPlantReport(){
@@ -4025,23 +4376,37 @@ async function exportPlantReport(){
     allDatesMap[fl] = [...new Set(Object.keys(localStorage).filter(k=>k.startsWith(`dpr3_${fl}_`)).map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
   });
 
-  const { rows, totals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
+  const { rows, totals, floorTotals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
   const fmt2 = n => parseFloat((+n).toFixed(2));
 
-  const data = rows.map(r=>({
-    'Machine':      r.id,
-    'Size':         r.sz,
-    'Floor':        r.flLabel,
-    'Daily Target': fmt2(r.dailyTgt),
-    'A-Shift':      fmt2(r.dayA),
-    'B-Shift':      fmt2(r.dayB),
-    'C-Shift':      fmt2(r.dayC),
-    'Day Total':    fmt2(r.dayTotal),
-    'Vs Target':    fmt2(r.vsTarget),
-    'Cum Total':    fmt2(r.cumTotal),
-    'Days Counted': r.cumDays,
-    'Daily Avg':    fmt2(r.cumAvg),
-  }));
+  // v41ZC #3: build with FLOOR TOTAL subtotal rows after each floor's machines, then PLANT TOTAL.
+  const data = [];
+  let _pf = null;
+  const floorTotRow = (ft) => ({
+    'Machine': (ft.label.split(' ')[0].toUpperCase()+' FLOOR TOTAL'), 'Size':'', 'Floor': ft.label,
+    'Daily Target': fmt2(ft.dailyTgt), 'A-Shift': fmt2(ft.dayA), 'B-Shift': fmt2(ft.dayB),
+    'C-Shift': fmt2(ft.dayC), 'Day Total': fmt2(ft.dayTotal), 'Vs Target': fmt2(ft.vsTarget),
+    'Cum Total': fmt2(ft.cumTotal), 'Days Counted': ft.cumDays, 'Daily Avg': fmt2(ft.cumAvg),
+  });
+  rows.forEach(r => {
+    if (_pf !== null && r.floor !== _pf && floorTotals[_pf]) data.push(floorTotRow(floorTotals[_pf]));
+    data.push({
+      'Machine':      r.id,
+      'Size':         r.sz,
+      'Floor':        r.flLabel,
+      'Daily Target': fmt2(r.dailyTgt),
+      'A-Shift':      fmt2(r.dayA),
+      'B-Shift':      fmt2(r.dayB),
+      'C-Shift':      fmt2(r.dayC),
+      'Day Total':    fmt2(r.dayTotal),
+      'Vs Target':    fmt2(r.vsTarget),
+      'Cum Total':    fmt2(r.cumTotal),
+      'Days Counted': r.cumDays,
+      'Daily Avg':    fmt2(r.cumAvg),
+    });
+    _pf = r.floor;
+  });
+  if (_pf !== null && floorTotals[_pf]) data.push(floorTotRow(floorTotals[_pf]));
 
   // Totals row
   data.push({
@@ -4086,9 +4451,34 @@ function renderHistory(){
 
   if(!entries.length){document.getElementById('historyList').innerHTML=`<p style="color:var(--t3);padding:10px">No saved records yet.</p>`;return;}
 
+  // v41ZG #4: one-time month sync so the floor-wise TOTAL/AVG below are complete (History reads
+  // localStorage only; on a fresh session prior days weren't cached, undercounting the totals).
+  // Renders immediately from cache first (fast), then re-renders once after the server fills in.
+  if(serverUrl && dprUser && !filterDate && _histSyncedMonth !== _dprSelectedMonth){
+    _histSyncedMonth = _dprSelectedMonth;
+    const _mStart = _dprSelectedMonth + '-01';
+    // v41ZG #4/#5: bound the sync at the LESSER of today and the selected month's last day — viewing
+    // a past month must not over-fetch into later months (correctness + perf).
+    const [_my,_mm] = _dprSelectedMonth.split('-').map(Number);
+    const _mEnd = _localYMD(new Date(_my, _mm, 0));
+    const _mTo = (today() < _mEnd) ? today() : _mEnd;
+    Promise.resolve().then(async()=>{
+      try{
+        await Promise.race([
+          syncDateRangeFromServer(Object.keys(FLOORS), _mStart, _mTo),
+          new Promise((_,rej)=>setTimeout(()=>rej(new Error('hist-sync timeout')),12000))
+        ]);
+        if(document.getElementById('page-history')?.classList.contains('on')) renderHistory();
+      }catch(e){ console.warn('[history] month sync skipped:', e?.message); }
+    });
+  }
+
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   let html=`<div class="tbl-mobile-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Floor</th><th>Production</th><th>Efficiency</th><th>DT%</th><th>Re-Sort</th><th></th></tr></thead><tbody>`;
-  (filtered.length?filtered:entries).forEach(e=>{
+  const _rowsToShow = (filtered.length?filtered:entries);
+  // v41ZG #4: accumulate floor-wise per-day rows into plant TOTAL + AVERAGE.
+  let _sumProd=0, _sumTgt=0, _sumResort=0, _sumDtPct=0, _nProd=0, _nResort=0, _nDt=0;
+  _rowsToShow.forEach(e=>{
     const s=calcDayStats(e.floor,e.date);
     const[y,mo,dy]=e.date.split('-');
     html+=`<tr>
@@ -4100,8 +4490,34 @@ function renderHistory(){
       <td class="mono">${s.totResort>0?`<span style="color:var(--red)">${parseFloat(s.totResort).toFixed(2)}</span>`:'—'}</td>
       <td><button class="btn-sm" onclick="loadRecord('${e.floor}','${e.date}')">Load</button></td>
     </tr>`;
+    if(s.totProd>0){ _sumProd+=s.totProd; _sumTgt+=s.totTgt; _nProd++; }
+    if(s.totResort>0){ _sumResort+=parseFloat(s.totResort); _nResort++; }
+    if(s.totDT>0){ _sumDtPct+=s.dtPct; _nDt++; }
   });
   if(filtered.length===0 && filterDate) html+=`<tr><td colspan="7" style="color:var(--t3);text-align:center;padding:12px">No records for selected date/floor.</td></tr>`;
+  // TOTAL + AVERAGE footer rows (production & re-sort are additive; efficiency/DT% are rates).
+  if(_nProd>0 || _nResort>0){
+    const _wEff = _sumTgt>0 ? (_sumProd/_sumTgt*100) : 0;          // weighted plant efficiency
+    const _avgProd = _nProd>0 ? (_sumProd/_nProd) : 0;             // avg over days with production
+    const _avgResort = _nResort>0 ? (_sumResort/_nResort) : 0;
+    const _avgDt = _nDt>0 ? (_sumDtPct/_nDt) : 0;                  // mean daily DT%
+    html+=`<tr style="background:#1a3a2e;font-weight:800">
+      <td colspan="2" class="mono" style="color:#f0c060;letter-spacing:.5px">TOTAL${filterFloor?' ('+(FLOORS[filterFloor]?.label||filterFloor)+')':' — ALL FLOORS'}</td>
+      <td class="mono" style="color:#f0c060">${_sumProd>0?_sumProd.toFixed(2):'—'}</td>
+      <td style="color:var(--t3)">—</td>
+      <td style="color:var(--t3)">—</td>
+      <td class="mono" style="color:#f0c060">${_sumResort>0?_sumResort.toFixed(2):'—'}</td>
+      <td></td>
+    </tr>
+    <tr style="background:#142e22;font-weight:700">
+      <td colspan="2" class="mono" style="color:rgba(240,192,96,0.75);letter-spacing:.5px">AVERAGE / DAY${_nProd>0?' ('+_nProd+' prod day'+(_nProd!==1?'s':'')+')':''}</td>
+      <td class="mono" style="color:rgba(240,192,96,0.75)">${_avgProd>0?_avgProd.toFixed(2):'—'}</td>
+      <td><span class="pill ${_wEff>=90?'g':_wEff>=75?'a':'r'}">${_wEff>0?_wEff.toFixed(1)+'%':'—'}</span></td>
+      <td><span class="pill ${_avgDt<=5?'g':_avgDt<=10?'a':'r'}">${_avgDt>0?_avgDt.toFixed(1)+'%':'—'}</span></td>
+      <td class="mono" style="color:rgba(240,192,96,0.75)">${_avgResort>0?_avgResort.toFixed(2):'—'}</td>
+      <td></td>
+    </tr>`;
+  }
   html+=`</tbody></table></div>`;
   document.getElementById('historyList').innerHTML=html;
 }
@@ -4149,7 +4565,7 @@ function go(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.querySelectorAll('.ntab').forEach(t=>t.classList.remove('on'));
   document.getElementById('page-'+page)?.classList.add('on');
-  const idx={entry:0,analytics:1,trends:2,aim:3,perf:4,history:5,plant:6,search:7,settings:8};
+  const idx={entry:0,analytics:1,trends:2,aim:3,perf:4,history:5,plant:6,search:7,closed:8,settings:9};
   document.querySelectorAll('.ntab')[idx[page]]?.classList.add('on');
   if(page==='analytics') renderAnalytics();
   else if(page==='trends') renderTrends();
@@ -4166,7 +4582,179 @@ function go(page){
   else if(page==='perf') renderPerf();
   else if(page==='history') renderHistory();
   else if(page==='plant'){ document.getElementById('plant-date').value=document.getElementById('plant-date').value||today(); renderPlantReport(); }
+  else if(page==='closed') renderClosedBatches();
   else if(page==='settings') renderSettings();
+}
+
+// ═══ v41ZI Item 6: DPR Closed-Batches report + batch-level gross override ═══
+async function renderClosedBatches(){
+  const cont = document.getElementById('closed-batches-container');
+  if(!cont) return;
+  if(!serverUrl){ cont.innerHTML = '<p style="color:var(--t3);font-size:12px">Server not available — closed batches load from the server.</p>'; return; }
+  cont.innerHTML = '<p style="color:var(--t3);font-size:12px">Loading closed batches…</p>';
+  try{
+    const r = await fetch(serverUrl+'/api/dpr/closed-batches',{signal:AbortSignal.timeout(20000)});
+    const j = await r.json();
+    if(!j.ok){ cont.innerHTML = '<p style="color:var(--red)">Failed to load: '+(j.error||'error')+'</p>'; return; }
+    window._closedBatches = j.batches || [];
+  }catch(e){ cont.innerHTML = '<p style="color:var(--red)">Failed to load closed batches: '+e.message+'</p>'; return; }
+
+  window._cbFilters = window._cbFilters || {machineId:'',size:'',colour:'',pcCode:'',customer:'',q:'',dateFrom:'',dateTo:''};
+  _cbRender();
+}
+
+// v41ZL #6: closed-batches in-date-range test (filters on batch START date)
+function _cbInDateRange(b){
+  const f = window._cbFilters||{};
+  if(!f.dateFrom && !f.dateTo) return true;
+  const d = b.startDate ? new Date(b.startDate) : null;
+  if(!d || isNaN(d)) return true; // undated batches aren't excluded by the range
+  if(f.dateFrom){ const from=new Date(f.dateFrom); if(!isNaN(from) && d < from) return false; }
+  if(f.dateTo){ const to=new Date(f.dateTo); to.setHours(23,59,59,999); if(!isNaN(to) && d > to) return false; }
+  return true;
+}
+
+// v41ZL #6: render the filter bar (with CASCADING dropdowns) + table from the cached batch list,
+// so changing a filter re-renders instantly without re-fetching the endpoint.
+function _cbRender(){
+  const cont = document.getElementById('closed-batches-container'); if(!cont) return;
+  const f = window._cbFilters;
+  const esc = v => String(v).replace(/"/g,'&quot;');
+  // Each dropdown lists only values present once the OTHER active filters (+ the date range) are
+  // applied — so picking a machine narrows Size/Colour/PC Code/Customer to that machine's batches.
+  const optData = exceptKey => (window._closedBatches||[]).filter(b=>{
+    if(exceptKey!=='machineId' && f.machineId && b.machineId!==f.machineId) return false;
+    if(exceptKey!=='size' && f.size && String(b.size)!==String(f.size)) return false;
+    if(exceptKey!=='colour' && f.colour && b.colour!==f.colour) return false;
+    if(exceptKey!=='pcCode' && f.pcCode && b.pcCode!==f.pcCode) return false;
+    if(exceptKey!=='customer' && f.customer && b.customer!==f.customer) return false;
+    return _cbInDateRange(b);
+  });
+  const uniq = k => [...new Set(optData(k).map(b=>b[k]).filter(v=>v!==''&&v!=null).map(String))].sort();
+  const selBox = (k,label)=>`<div><label style="font-size:10px;color:var(--t3);display:block;margin-bottom:2px">${label}</label>
+    <select onchange="window._cbFilters.${k}=this.value;_cbRender()" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px">
+      <option value="">All</option>${uniq(k).map(o=>`<option value="${esc(o)}" ${String(f[k])===String(o)?'selected':''}>${o}</option>`).join('')}
+    </select></div>`;
+  const dateBox = (k,label)=>`<div><label style="font-size:10px;color:var(--t3);display:block;margin-bottom:2px">${label}</label>
+    <input type="date" value="${esc(f[k]||'')}" onchange="window._cbFilters.${k}=this.value;_cbRender()" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px"></div>`;
+  cont.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      ${selBox('machineId','MACHINE')}
+      ${selBox('size','SIZE')}
+      ${selBox('colour','COLOUR')}
+      ${selBox('pcCode','PC CODE')}
+      ${selBox('customer','CUSTOMER')}
+      ${dateBox('dateFrom','START FROM')}
+      ${dateBox('dateTo','START TO')}
+      <div><label style="font-size:10px;color:var(--t3);display:block;margin-bottom:2px">SEARCH</label>
+        <input type="text" value="${esc(f.q||'')}" placeholder="batch / customer / PC…" oninput="window._cbFilters.q=this.value;_cbRenderRows()" style="background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--t1);padding:5px 8px;font-size:12px;min-width:160px;outline:none"></div>
+      <button onclick="window._cbFilters={machineId:'',size:'',colour:'',pcCode:'',customer:'',q:'',dateFrom:'',dateTo:''};_cbRender()" style="font-size:11px;border:1px solid var(--b2);background:transparent;color:var(--t2);border-radius:4px;padding:6px 10px;cursor:pointer">✕ Clear</button>
+      <span id="cb-count" style="font-size:12px;color:var(--t3);align-self:center"></span>
+    </div>
+    <div class="table-wrap" style="max-height:62vh;overflow:auto;border:1px solid var(--b2);border-radius:6px">
+      <table class="data-table" style="width:100%">
+        <thead style="position:sticky;top:0;z-index:5"><tr>
+          <th>Machine</th><th>Batch</th><th>Size</th><th>Colour</th><th>PC Code</th><th>Customer</th><th>Start</th><th>End</th>
+          <th>Planned Gross (L)</th><th>Actual DPR Gross (L)</th><th>Action</th>
+        </tr></thead>
+        <tbody id="cb-tbody"></tbody>
+        <tfoot id="cb-tfoot" style="position:sticky;bottom:0"></tfoot>
+      </table>
+    </div>`;
+  _cbRenderRows();
+}
+
+function _cbFiltered(){
+  const data = window._closedBatches || [];
+  const f = window._cbFilters || {};
+  const q = (f.q||'').toLowerCase().trim();
+  return data.filter(b=>{
+    if(f.machineId && b.machineId!==f.machineId) return false;
+    if(f.size && String(b.size)!==String(f.size)) return false;
+    if(f.colour && b.colour!==f.colour) return false;
+    if(f.pcCode && b.pcCode!==f.pcCode) return false;
+    if(f.customer && b.customer!==f.customer) return false;
+    if(q && !((b.batchNumber||'').toLowerCase().includes(q)||(b.customer||'').toLowerCase().includes(q)||(b.pcCode||'').toLowerCase().includes(q))) return false;
+    if(!_cbInDateRange(b)) return false;
+    return true;
+  });
+}
+
+function _cbRenderRows(){
+  const tb = document.getElementById('cb-tbody'); if(!tb) return;
+  const rows = _cbFiltered();
+  const canEdit = !!dprUser; // floor Production Managers + Admin (all authenticated DPR users); every change is audited server-side
+  const fmtL = v => (v||v===0) ? Number(v).toFixed(2) : '—';
+  const fmtDt = d => { if(!d) return '—'; try{ return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }catch(_){ return d; } };
+  tb.innerHTML = rows.map(b=>{
+    const ov = b.hasOverride;
+    const badge = ov ? ` <span title="Overridden by ${(b.overrideBy||'').replace(/"/g,'&quot;')}: ${(b.overrideReason||'').replace(/"/g,'&quot;')}" style="font-size:9px;color:#f0c060;border:1px solid #f0c060;border-radius:3px;padding:0 3px;vertical-align:middle">OVERRIDE</span>` : '';
+    const bn = (b.batchNumber||'').replace(/'/g,"\\'");
+    return `<tr>
+      <td class="mono">${b.machineId||'—'}</td>
+      <td class="mono td-bold">${b.batchNumber||'—'}</td>
+      <td>${b.size||'—'}</td>
+      <td>${b.colour||'—'}</td>
+      <td class="mono">${b.pcCode||'—'}</td>
+      <td>${b.customer||'—'}</td>
+      <td class="mono" style="white-space:nowrap">${fmtDt(b.startDate)}</td>
+      <td class="mono" style="white-space:nowrap">${fmtDt(b.endDate)}</td>
+      <td class="mono">${fmtL(b.plannedGross)}</td>
+      <td class="mono" style="${ov?'color:#f0c060;font-weight:700':''}">${fmtL(b.actualGross)}${badge}</td>
+      <td style="white-space:nowrap">${canEdit?`<button onclick="editClosedGross('${bn}')" title="Correct the DPR gross for this batch" style="font-size:11px;border:1px solid var(--b2);background:transparent;color:var(--accent);border-radius:3px;padding:2px 7px;cursor:pointer">✎ Edit</button>${ov?` <button onclick="clearClosedGross('${bn}')" title="Revert to the DPR-entered sum" style="font-size:11px;border:1px solid var(--b2);background:transparent;color:var(--red);border-radius:3px;padding:2px 7px;cursor:pointer">↺</button>`:''}`:'<span style="color:var(--t3);font-size:11px">—</span>'}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="11" style="text-align:center;color:var(--t3);padding:18px">No closed batches match the filters.</td></tr>`;
+  // v41ZL #6: summation row
+  const tf = document.getElementById('cb-tfoot');
+  if(tf){
+    const sumP = rows.reduce((s,b)=>s+(Number(b.plannedGross)||0),0);
+    const sumA = rows.reduce((s,b)=>s+(Number(b.actualGross)||0),0);
+    tf.innerHTML = rows.length ? `<tr style="background:var(--s2);font-weight:700">
+      <td colspan="8" style="text-align:right;padding-right:10px">TOTAL — ${rows.length} batch${rows.length!==1?'es':''}</td>
+      <td class="mono">${sumP.toFixed(2)}</td>
+      <td class="mono">${sumA.toFixed(2)}</td>
+      <td></td></tr>` : '';
+  }
+  const cnt = document.getElementById('cb-count'); if(cnt) cnt.textContent = rows.length+' batch'+(rows.length!==1?'es':'');
+}
+
+async function editClosedGross(batchNumber){
+  if(!dprUser){ alert('Please log in.'); return; }
+  const b = (window._closedBatches||[]).find(x=>x.batchNumber===batchNumber);
+  if(!b){ return; }
+  const cur = (b.actualGross!=null ? b.actualGross : '');
+  const input = prompt(
+    `Correct Actual DPR Gross for batch ${batchNumber}\n\n`+
+    `Planned Gross : ${Number(b.plannedGross||0).toFixed(2)} L\n`+
+    `DPR sum now   : ${Number(b.rawDprGross||0).toFixed(2)} L\n\n`+
+    `Enter the corrected gross (in Lakhs):`, String(cur));
+  if(input===null) return;
+  const g = parseFloat(input);
+  if(!isFinite(g) || g<0){ alert('Please enter a valid number ≥ 0.'); return; }
+  const reason = prompt('Reason for this correction (recorded for audit):','') || '';
+  try{
+    const r = await fetch(serverUrl+'/api/dpr/gross-override',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-User-Role':(dprUser?.role||'')},
+      body:JSON.stringify({batchNumber, grossLakhs:g, reason, updatedBy:(dprUser?.username||dprUser?.role||'dpr'), userRole:(dprUser?.role||'')})
+    });
+    const j = await r.json();
+    if(!j.ok){ alert('Could not save: '+(j.error||'error')); return; }
+    if(typeof toast==='function') toast(`Gross for ${batchNumber} set to ${g.toFixed(2)} L — updated in Planning & Reports`, 'var(--green)', 4000);
+  }catch(e){ alert('Save failed: '+e.message); return; }
+  renderClosedBatches();
+}
+
+async function clearClosedGross(batchNumber){
+  if(!dprUser){ alert('Please log in.'); return; }
+  if(!confirm(`Revert batch ${batchNumber} to the DPR-entered sum (remove the override)?`)) return;
+  try{
+    const r = await fetch(serverUrl+'/api/dpr/gross-override/'+encodeURIComponent(batchNumber)+'?by='+encodeURIComponent(dprUser?.username||dprUser?.role||'dpr'),{method:'DELETE'});
+    const j = await r.json();
+    if(!j.ok){ alert('Could not revert: '+(j.error||'error')); return; }
+    if(typeof toast==='function') toast(`Override removed for ${batchNumber}`, 'var(--green)', 3500);
+  }catch(e){ alert('Revert failed: '+e.message); return; }
+  renderClosedBatches();
 }
 
 function setFloor(fl){
@@ -4768,19 +5356,22 @@ function addDprUserBadge() {
   if(saveBtn) saveBtn.parentNode.insertBefore(wrap, saveBtn);
   else document.body.appendChild(wrap);
 
-  // Show audit tab for admin
+  // v41ZF #1: do NOT append an "Audit Log" NAV TAB for admin. That extra 10th tab pushed the nav
+  // row into horizontal overflow, scrolling Plant Report / Search / Settings off the right edge with
+  // no obvious scrollbar — which is why admins reported the Plant Report tab "not showing up". The
+  // Audit Log is already reachable from the user menu (showDprUserMenu → showDprAuditPage), so the
+  // nav tab was redundant. We still inject the audit PAGE container so that access keeps working.
   if (dprUser.role === 'admin') {
-    const auditTabEl = document.createElement('div');
-    auditTabEl.className = 'ntab';
-    auditTabEl.textContent = '📋 Audit Log';
-    auditTabEl.onclick = () => go('audit');
-    document.querySelector('.ntabs')?.appendChild(auditTabEl);
-    // Add audit page
-    const auditPage = document.createElement('div');
-    auditPage.id = 'page-audit';
-    auditPage.className = 'page';
-    document.querySelector('.pages')?.appendChild(auditPage);
+    if (!document.getElementById('page-audit')) {
+      const auditPage = document.createElement('div');
+      auditPage.id = 'page-audit';
+      auditPage.className = 'page';
+      document.querySelector('.pages')?.appendChild(auditPage);
+    }
   }
+  // v41ZG #1: the badge changes the nav row width, which can change how the tab row wraps —
+  // re-measure so #wrap's top offset stays correct.
+  if (typeof _dprSyncNavOffset === 'function') { try { _dprSyncNavOffset(); setTimeout(_dprSyncNavOffset, 50); } catch(e){} }
 }
 
 function showDprUserMenu() {
@@ -4805,6 +5396,27 @@ async function doDprLogout() {
   document.getElementById('auth-pin').value = '';
   document.getElementById('auth-error').textContent = '';
   document.getElementById('auth-overlay').classList.remove('hidden');
+  loadDprLoginUsers();
+}
+
+// v41ZK: populate the DPR login picker with EVERY defined DPR user (not just GF/FF/Admin defaults)
+// so admin-created DPR accounts can sign in. Falls back to the built-in <option>s on any failure.
+async function loadDprLoginUsers() {
+  try {
+    let serverUrl = ''; try { serverUrl = localStorage.getItem('sunloc_server_url') || ''; } catch(e) {}
+    if (!serverUrl && window.location.hostname !== 'localhost') serverUrl = window.location.origin;
+    if (!serverUrl) return;
+    const sel = document.getElementById('auth-role');
+    if (!sel) return;
+    const r = await fetch(serverUrl + '/api/auth/login-users?app=dpr', { signal: AbortSignal.timeout(6000) });
+    const j = await r.json();
+    if (j && j.ok && Array.isArray(j.users) && j.users.length) {
+      const prev = sel.value;
+      const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+      sel.innerHTML = j.users.map(u => `<option value="${esc(u.username)}">${esc(u.username)}</option>`).join('');
+      if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+    }
+  } catch(e) { /* keep hardcoded defaults */ }
 }
 
 async function dprAuditLog(action, details) {
@@ -4937,6 +5549,7 @@ function showDprAuditPage() {
     } catch(e) {}
   }
   document.getElementById('auth-overlay').classList.remove('hidden');
+  loadDprLoginUsers();
 })();
 
 // ── TEMP Batch PC Code Prompt ────────────────────────────────────
@@ -5110,6 +5723,33 @@ if (typeof document !== 'undefined') {
   } else {
     document.addEventListener('DOMContentLoaded', () => setTimeout(_v39_sapStatusBadgeInit, 1000));
   }
+}
+
+// v41ZG #1: the nav tab row now WRAPS (so Plant Report / Search / Settings are always visible even
+// when they don't fit on one line). Because the nav can be taller than the fixed --nav height,
+// measure its real height and publish it as --nav-real so #wrap's top margin (and the warning
+// banner) sit just below the nav instead of being overlapped by the second tab row.
+function _dprSyncNavOffset(){
+  try {
+    const nav = document.getElementById('nav');
+    if (!nav) return;
+    const h = Math.ceil(nav.getBoundingClientRect().height);
+    if (h > 0) {
+      document.documentElement.style.setProperty('--nav-real', h + 'px');
+      // keep any fixed warning banner anchored just under the (possibly wrapped) nav
+      const banner = document.getElementById('temp-alert-banner');
+      if (banner) banner.style.top = h + 'px';
+    }
+  } catch(e) { /* non-fatal: CSS fallback (--nav) still applies */ }
+}
+if (typeof window !== 'undefined') {
+  window.addEventListener('load', _dprSyncNavOffset);
+  window.addEventListener('resize', _dprSyncNavOffset);
+  // re-measure shortly after load in case fonts/badges change tab wrapping
+  if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(_dprSyncNavOffset, 0);
+  else document.addEventListener('DOMContentLoaded', () => setTimeout(_dprSyncNavOffset, 0));
+  setTimeout(_dprSyncNavOffset, 400);
+  setTimeout(_dprSyncNavOffset, 1200);
 }
 
 </script>

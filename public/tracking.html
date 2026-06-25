@@ -2830,6 +2830,49 @@ function generateZPL(label, batch){
 ^XZ`;
   }
 
+  // ── PVC / PRE-PRINTED STOCK — VALUES ONLY ───────────────────
+  // v_pvc2: Calibrated against actual pre-printed BOPP/PVC stock. Uses ^FB field blocks (width +
+  // left-justify) so each value is clipped/wrapped to its physical box instead of overflowing onto
+  // neighbouring pre-printed text, and a distinct font size per row to fit each box's printed height.
+  // Do NOT draw any ^GB borders or header/field-name text here — the stock already has them.
+  if (isPvcMode()) {
+    // Indian-style comma grouping for pieces, e.g. 125000 -> "1,25,000"
+    const _piecesStr = String(pieces).replace(/(\d)(?=(\d\d)+\d$)/g, '$1,');
+    // PVC stock shows container as zero-padded "NN / TT" (matches calibrated sample "02 / 40").
+    // Excess labels keep their E-n/total format since there's no fixed box number to pad.
+    const _containerPvc = label.isExcess
+      ? containerNo
+      : (normTot !== '?' ? `${String(_num).padStart(2,'0')} / ${normTot}` : String(_num).padStart(2,'0'));
+    const _pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
+    return `^XA
+^CI28
+^PW800
+^LL1200
+^MMT
+^PON
+^LH0,0
+^FX ===== CUSTOMER BLOCK (1-3 lines) =====
+^FO264,212^FB519,1,0,L^A0N,30,28^FD${customerText}^FS
+^FX ===== ROW 1: QUANTITY (left) / BATCH NO. (right) =====
+^FO248,326^FB170,1,0,L^A0N,42,38^FD${_piecesStr}^FS
+^FO613,318^FB170,1,0,L^A0N,52,46^FD${batchNo}^FS
+^FX ===== ROW 2: SIZE / CONTAINER =====
+^FO248,441^FB170,1,0,L^A0N,42,38^FD${label.size}^FS
+^FO613,441^FB170,1,0,L^A0N,42,38^FD${_containerPvc}^FS
+^FX ===== ROW 3: COLOUR CAP / GROSS WT (blank, manual fill) =====
+^FO248,560^FB170,1,0,L^A0N,38,34^FD${colourCap}^FS
+^FX ===== ROW 4: COLOUR BODY / NETT WT (blank, manual fill) =====
+^FO248,685^FB170,1,0,L^A0N,38,34^FD${colourBody}^FS
+^FX ===== ROW 5 LEFT: PRINTED (top half, blank) / PC CODE (bottom half) =====
+^FO248,792^FB170,1,0,L^A0N,28,24^FD^FS
+^FO248,852^FB170,1,0,L^A0N,32,28^FD${_pcCode}^FS
+^FX ===== ROW 5 RIGHT: MFG DATE (full cell) =====
+^FO613,816^FB170,1,0,L^A0N,42,38^FD${mfgDate}^FS
+^FX ===== QR CODE (bottom box, left side) =====
+^FO80,974^BQN,2,4^FDLA,${label.qrData}^FS
+^XZ`;
+  }
+
   // ── MAIN WHITE LABEL ──────────────────────────────────────────
   // PW=800 (100mm), LL=1200 (150mm) — matches label stock
   // Content fills Y=50 to Y=1180 (full label height)
@@ -12742,6 +12785,13 @@ function renderSettings(){
       </div>
       <div class="text-sm text-muted mb-8">Leave blank to download ZPL files. Install Zebra Browser Print for direct printing.</div>
       <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
+      <div class="form-group" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="s-pvc-mode" ${localStorage.getItem('sunloc_pvc_mode')==='1'?'checked':''} onchange="savePvcMode()">
+          <span>📦 PVC / Pre-printed stock mode</span>
+        </label>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">When ON, labels print ONLY the variable data (values) — no borders, headers, or field names. Use this when loading pre-printed BOPP/PVC label stock that already has the SUNLOC layout and field labels printed on it.</div>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">📦 Pack Size Master</div>
@@ -12960,6 +13010,17 @@ function savePrinterUrl(){
   const url=document.getElementById('s-printer')?.value.trim()||'';
   localStorage.setItem('sunloc_printer_url',url);
   alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
+}
+
+// v_pvc1: PVC / pre-printed stock mode. Persisted globally (not per-label, not per-batch) since it
+// describes which physical label stock is currently loaded in the printer, not a property of the
+// data being printed. generateZPL() reads this via isPvcMode() to decide whether to draw the
+// borders/headers/field-labels (blank stock) or skip them (pre-printed stock).
+function isPvcMode(){ return localStorage.getItem('sunloc_pvc_mode')==='1'; }
+function savePvcMode(){
+  const on = !!document.getElementById('s-pvc-mode')?.checked;
+  localStorage.setItem('sunloc_pvc_mode', on?'1':'0');
+  toast(on?'📦 PVC pre-printed mode ON — labels will print values only':'📦 PVC mode OFF — labels will print full layout','var(--accent)',3000);
 }
 
 // v37I.1: Settings persistence for FG Stock Aging thresholds.

@@ -2831,10 +2831,13 @@ function generateZPL(label, batch){
   }
 
   // ── PVC / PRE-PRINTED STOCK — VALUES ONLY ───────────────────
-  // v_pvc2: Calibrated against actual pre-printed BOPP/PVC stock. Uses ^FB field blocks (width +
+  // v_pvc3: Calibrated against actual pre-printed BOPP/PVC stock. Uses ^FB field blocks (width +
   // left-justify) so each value is clipped/wrapped to its physical box instead of overflowing onto
   // neighbouring pre-printed text, and a distinct font size per row to fit each box's printed height.
   // Do NOT draw any ^GB borders or header/field-name text here — the stock already has them.
+  // Customer is ALWAYS skipped on PVC stock (not printed here regardless of value). Every other
+  // field is only emitted if it actually has a non-empty value for this label — an empty field
+  // emits NO ^FO/^FD/^FS at all, rather than printing a blank ^FD^FS placeholder.
   if (isPvcMode()) {
     // Indian-style comma grouping for pieces, e.g. 125000 -> "1,25,000"
     const _piecesStr = String(pieces).replace(/(\d)(?=(\d\d)+\d$)/g, '$1,');
@@ -2844,6 +2847,24 @@ function generateZPL(label, batch){
       ? containerNo
       : (normTot !== '?' ? `${String(_num).padStart(2,'0')} / ${normTot}` : String(_num).padStart(2,'0'));
     const _pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
+
+    // Each entry: [value, ^FO x,y, ^FB width, font size/lineheight]. Skipped entirely if value is
+    // empty/falsy — no ^FD^FS line is emitted for it. Customer intentionally not in this list.
+    const _fields = [
+      [_piecesStr,            248, 326, 170, 'A0N,42,38'],   // Quantity
+      [batchNo,               613, 318, 170, 'A0N,52,46'],   // Batch No.
+      [label.size,            248, 441, 170, 'A0N,42,38'],   // Size
+      [_containerPvc,         613, 441, 170, 'A0N,42,38'],   // Container
+      [colourCap,             248, 560, 170, 'A0N,38,34'],   // Colour Cap
+      [colourBody,            248, 685, 170, 'A0N,38,34'],   // Colour Body
+      [_pcCode,               248, 852, 170, 'A0N,32,28'],   // PC Code
+      [mfgDate,               613, 816, 170, 'A0N,42,38'],   // Mfg Date
+    ];
+    const _fieldZpl = _fields
+      .filter(([val]) => val !== null && val !== undefined && String(val).trim() !== '')
+      .map(([val,x,y,w,font]) => `^FO${x},${y}^FB${w},1,0,L^${font}^FD${val}^FS`)
+      .join('\n');
+
     return `^XA
 ^CI28
 ^PW800
@@ -2851,24 +2872,7 @@ function generateZPL(label, batch){
 ^MMT
 ^PON
 ^LH0,0
-^FX ===== CUSTOMER BLOCK (1-3 lines) =====
-^FO264,212^FB519,1,0,L^A0N,30,28^FD${customerText}^FS
-^FX ===== ROW 1: QUANTITY (left) / BATCH NO. (right) =====
-^FO248,326^FB170,1,0,L^A0N,42,38^FD${_piecesStr}^FS
-^FO613,318^FB170,1,0,L^A0N,52,46^FD${batchNo}^FS
-^FX ===== ROW 2: SIZE / CONTAINER =====
-^FO248,441^FB170,1,0,L^A0N,42,38^FD${label.size}^FS
-^FO613,441^FB170,1,0,L^A0N,42,38^FD${_containerPvc}^FS
-^FX ===== ROW 3: COLOUR CAP / GROSS WT (blank, manual fill) =====
-^FO248,560^FB170,1,0,L^A0N,38,34^FD${colourCap}^FS
-^FX ===== ROW 4: COLOUR BODY / NETT WT (blank, manual fill) =====
-^FO248,685^FB170,1,0,L^A0N,38,34^FD${colourBody}^FS
-^FX ===== ROW 5 LEFT: PRINTED (top half, blank) / PC CODE (bottom half) =====
-^FO248,792^FB170,1,0,L^A0N,28,24^FD^FS
-^FO248,852^FB170,1,0,L^A0N,32,28^FD${_pcCode}^FS
-^FX ===== ROW 5 RIGHT: MFG DATE (full cell) =====
-^FO613,816^FB170,1,0,L^A0N,42,38^FD${mfgDate}^FS
-^FX ===== QR CODE (bottom box, left side) =====
+${_fieldZpl}
 ^FO80,974^BQN,2,4^FDLA,${label.qrData}^FS
 ^XZ`;
   }

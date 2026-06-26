@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v44ZL</title>
+<title>Sunloc Tracking Suite v1.0 · build v44ZK</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -579,7 +579,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v44ZL</p>
+      <p>Tracking Suite v1.0 · build v44ZK</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -610,7 +610,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v44ZL</p>
+      <p>Tracking Suite v1.0 · build v44ZK</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -2830,53 +2830,6 @@ function generateZPL(label, batch){
 ^XZ`;
   }
 
-  // ── PVC / PRE-PRINTED STOCK — VALUES ONLY ───────────────────
-  // v_pvc3: Calibrated against actual pre-printed BOPP/PVC stock. Uses ^FB field blocks (width +
-  // left-justify) so each value is clipped/wrapped to its physical box instead of overflowing onto
-  // neighbouring pre-printed text, and a distinct font size per row to fit each box's printed height.
-  // Do NOT draw any ^GB borders or header/field-name text here — the stock already has them.
-  // Customer is ALWAYS skipped on PVC stock (not printed here regardless of value). Every other
-  // field is only emitted if it actually has a non-empty value for this label — an empty field
-  // emits NO ^FO/^FD/^FS at all, rather than printing a blank ^FD^FS placeholder.
-  if (isPvcMode()) {
-    // Indian-style comma grouping for pieces, e.g. 125000 -> "1,25,000"
-    const _piecesStr = String(pieces).replace(/(\d)(?=(\d\d)+\d$)/g, '$1,');
-    // PVC stock shows container as zero-padded "NN / TT" (matches calibrated sample "02 / 40").
-    // Excess labels keep their E-n/total format since there's no fixed box number to pad.
-    const _containerPvc = label.isExcess
-      ? containerNo
-      : (normTot !== '?' ? `${String(_num).padStart(2,'0')} / ${normTot}` : String(_num).padStart(2,'0'));
-    const _pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
-
-    // Each entry: [value, ^FO x,y, ^FB width, font size/lineheight]. Skipped entirely if value is
-    // empty/falsy — no ^FD^FS line is emitted for it. Customer intentionally not in this list.
-    const _fields = [
-      [_piecesStr,            248, 326, 170, 'A0N,42,38'],   // Quantity
-      [batchNo,               613, 318, 170, 'A0N,52,46'],   // Batch No.
-      [label.size,            248, 441, 170, 'A0N,42,38'],   // Size
-      [_containerPvc,         613, 441, 170, 'A0N,42,38'],   // Container
-      [colourCap,             248, 560, 170, 'A0N,38,34'],   // Colour Cap
-      [colourBody,            248, 685, 170, 'A0N,38,34'],   // Colour Body
-      [_pcCode,               248, 852, 170, 'A0N,32,28'],   // PC Code
-      [mfgDate,               613, 816, 170, 'A0N,42,38'],   // Mfg Date
-    ];
-    const _fieldZpl = _fields
-      .filter(([val]) => val !== null && val !== undefined && String(val).trim() !== '')
-      .map(([val,x,y,w,font]) => `^FO${x},${y}^FB${w},1,0,L^${font}^FD${val}^FS`)
-      .join('\n');
-
-    return `^XA
-^CI28
-^PW800
-^LL1200
-^MMT
-^PON
-^LH0,0
-${_fieldZpl}
-^FO80,974^BQN,2,4^FDLA,${label.qrData}^FS
-^XZ`;
-  }
-
   // ── MAIN WHITE LABEL ──────────────────────────────────────────
   // PW=800 (100mm), LL=1200 (150mm) — matches label stock
   // Content fills Y=50 to Y=1180 (full label height)
@@ -2905,24 +2858,65 @@ ${_fieldZpl}
   // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
   const pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
 
-  return `^^XA
+  return `^XA
 ^CI28
 ^PW800
 ^LL1200
 ^MMT
 ^PON
 ^LH0,0
-^FO264,212^FB519,1,0,L^A0N,30,28^FDOMRON PHARMA PRIVATE LTD^FS
-^FO248,326^FB170,1,0,L^A0N,42,38^FD1,00,000^FS
-^FO613,318^FB170,1,0,L^A0N,52,46^FD26ZD081^FS
-^FO248,441^FB170,1,0,L^A0N,42,38^FD0^FS
-^FO613,441^FB170,1,0,L^A0N,42,38^FD02 / 30^FS
-^FO248,560^FB170,1,0,L^A0N,38,34^FDCLEAR^FS
-^FO248,685^FB170,1,0,L^A0N,38,34^FDCLEAR^FS
-^FO248,852^FB170,1,0,L^A0N,32,28^FD2090^FS
-^FO613,816^FB170,1,0,L^A0N,42,38^FDMAY 2026^FS
-^FO80,974^BQN,2,4^FDLA,SUNLOC|26ZD081|2|0|1|test^FS
-^XZ;
+${oBorder}
+^CF0,46
+^FO10,50^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
+^CF0,30
+^FO10,102^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
+^FO10,${136+D}^GB780,2,2^FS
+${hBand}
+^CF0,26
+^FO10,${custY}^FDCUSTOMER NAME :  ${customerText}^FS
+^FO10,${tTop-4}^GB780,2,2^FS
+
+^FO10,${tTop}^GB390,${RH*6+2},2^FS
+^FO404,${tTop}^GB386,${RH*6+2},2^FS
+^FO10,${tTop+RH}^GB390,2,2^FS
+^FO10,${tTop+RH*2}^GB390,2,2^FS
+^FO10,${tTop+RH*3}^GB390,2,2^FS
+^FO10,${tTop+RH*4}^GB390,2,2^FS
+^FO10,${tTop+RH*5}^GB390,2,2^FS
+^FO404,${tTop+RH}^GB386,2,2^FS
+^FO404,${tTop+RH*2}^GB386,2,2^FS
+^FO404,${tTop+RH*3}^GB386,2,2^FS
+^FO404,${tTop+RH*4}^GB386,2,2^FS
+^FO404,${tTop+RH*5}^GB386,2,2^FS
+
+^CF0,26
+^FO18,${tTop+10}^FDQUANTITY    :  ${pieces}^FS
+^FO18,${tTop+RH+10}^FDSIZE              :  ${label.size}^FS
+^FO18,${tTop+RH*2+10}^FDCOLOUR CAP :  ${colourCap}^FS
+^FO18,${tTop+RH*3+10}^FDCOLOUR BODY:  ${colourBody}^FS
+^FO18,${tTop+RH*4+10}^FDPRINTED       :^FS
+^FO18,${tTop+RH*5+10}^FDPC CODE    :  ${pcCode}^FS
+
+^FO412,${tTop+10}^FDBATCH NO.  :  ${batchNo}^FS
+^FO412,${tTop+RH+10}^FDCONTAINER:  ${containerNo}^FS
+^FO412,${tTop+RH*2+10}^FDGROSS WT.:^FS
+^FO412,${tTop+RH*3+10}^FDNETT WT.  :^FS
+^FO412,${tTop+RH*4+10}^FDMFG DATE:  ${mfgDate}^FS
+
+^FO10,${tBot}^GB780,2,2^FS
+^CF0,20
+^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
+^FO10,${ruleY}^GB780,2,2^FS
+
+^FO10,${qrY}^BQN,2,9^FDLA,${label.qrData}^FS
+^CF0,28
+^FO260,${qRelY}^FB300,1,0,C^FDQ RELEASED^FS
+^FO580,${sigY}^GB200,2,2^FS
+^CF0,22
+^FO580,${sigY+10}^FB200,1,0,C^FDSIGNATURE^FS
+
+^FO10,${botY}^GB780,3,3^FS
+^XZ`;
 }
 
 
@@ -12748,13 +12742,6 @@ function renderSettings(){
       </div>
       <div class="text-sm text-muted mb-8">Leave blank to download ZPL files. Install Zebra Browser Print for direct printing.</div>
       <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
-      <div class="form-group" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="s-pvc-mode" ${localStorage.getItem('sunloc_pvc_mode')==='1'?'checked':''} onchange="savePvcMode()">
-          <span>📦 PVC / Pre-printed stock mode</span>
-        </label>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">When ON, labels print ONLY the variable data (values) — no borders, headers, or field names. Use this when loading pre-printed BOPP/PVC label stock that already has the SUNLOC layout and field labels printed on it.</div>
-      </div>
     </div>
     <div class="card">
       <div class="card-title">📦 Pack Size Master</div>
@@ -12973,17 +12960,6 @@ function savePrinterUrl(){
   const url=document.getElementById('s-printer')?.value.trim()||'';
   localStorage.setItem('sunloc_printer_url',url);
   alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
-}
-
-// v_pvc1: PVC / pre-printed stock mode. Persisted globally (not per-label, not per-batch) since it
-// describes which physical label stock is currently loaded in the printer, not a property of the
-// data being printed. generateZPL() reads this via isPvcMode() to decide whether to draw the
-// borders/headers/field-labels (blank stock) or skip them (pre-printed stock).
-function isPvcMode(){ return localStorage.getItem('sunloc_pvc_mode')==='1'; }
-function savePvcMode(){
-  const on = !!document.getElementById('s-pvc-mode')?.checked;
-  localStorage.setItem('sunloc_pvc_mode', on?'1':'0');
-  toast(on?'📦 PVC pre-printed mode ON — labels will print values only':'📦 PVC mode OFF — labels will print full layout','var(--accent)',3000);
 }
 
 // v37I.1: Settings persistence for FG Stock Aging thresholds.

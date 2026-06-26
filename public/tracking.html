@@ -2905,65 +2905,24 @@ ${_fieldZpl}
   // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
   const pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
 
-  return `^XA
+  return `^^XA
 ^CI28
 ^PW800
 ^LL1200
 ^MMT
 ^PON
 ^LH0,0
-${oBorder}
-^CF0,46
-^FO10,50^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
-^CF0,30
-^FO10,102^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
-^FO10,${136+D}^GB780,2,2^FS
-${hBand}
-^CF0,26
-^FO10,${custY}^FDCUSTOMER NAME :  ${customerText}^FS
-^FO10,${tTop-4}^GB780,2,2^FS
-
-^FO10,${tTop}^GB390,${RH*6+2},2^FS
-^FO404,${tTop}^GB386,${RH*6+2},2^FS
-^FO10,${tTop+RH}^GB390,2,2^FS
-^FO10,${tTop+RH*2}^GB390,2,2^FS
-^FO10,${tTop+RH*3}^GB390,2,2^FS
-^FO10,${tTop+RH*4}^GB390,2,2^FS
-^FO10,${tTop+RH*5}^GB390,2,2^FS
-^FO404,${tTop+RH}^GB386,2,2^FS
-^FO404,${tTop+RH*2}^GB386,2,2^FS
-^FO404,${tTop+RH*3}^GB386,2,2^FS
-^FO404,${tTop+RH*4}^GB386,2,2^FS
-^FO404,${tTop+RH*5}^GB386,2,2^FS
-
-^CF0,26
-^FO18,${tTop+10}^FDQUANTITY    :  ${pieces}^FS
-^FO18,${tTop+RH+10}^FDSIZE              :  ${label.size}^FS
-^FO18,${tTop+RH*2+10}^FDCOLOUR CAP :  ${colourCap}^FS
-^FO18,${tTop+RH*3+10}^FDCOLOUR BODY:  ${colourBody}^FS
-^FO18,${tTop+RH*4+10}^FDPRINTED       :^FS
-^FO18,${tTop+RH*5+10}^FDPC CODE    :  ${pcCode}^FS
-
-^FO412,${tTop+10}^FDBATCH NO.  :  ${batchNo}^FS
-^FO412,${tTop+RH+10}^FDCONTAINER:  ${containerNo}^FS
-^FO412,${tTop+RH*2+10}^FDGROSS WT.:^FS
-^FO412,${tTop+RH*3+10}^FDNETT WT.  :^FS
-^FO412,${tTop+RH*4+10}^FDMFG DATE:  ${mfgDate}^FS
-
-^FO10,${tBot}^GB780,2,2^FS
-^CF0,20
-^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
-^FO10,${ruleY}^GB780,2,2^FS
-
-^FO10,${qrY}^BQN,2,9^FDLA,${label.qrData}^FS
-^CF0,28
-^FO260,${qRelY}^FB300,1,0,C^FDQ RELEASED^FS
-^FO580,${sigY}^GB200,2,2^FS
-^CF0,22
-^FO580,${sigY+10}^FB200,1,0,C^FDSIGNATURE^FS
-
-^FO10,${botY}^GB780,3,3^FS
-^XZ`;
+^FO264,212^FB519,1,0,L^A0N,30,28^FDOMRON PHARMA PRIVATE LTD^FS
+^FO248,326^FB170,1,0,L^A0N,42,38^FD1,00,000^FS
+^FO613,318^FB170,1,0,L^A0N,52,46^FD26ZD081^FS
+^FO248,441^FB170,1,0,L^A0N,42,38^FD0^FS
+^FO613,441^FB170,1,0,L^A0N,42,38^FD02 / 30^FS
+^FO248,560^FB170,1,0,L^A0N,38,34^FDCLEAR^FS
+^FO248,685^FB170,1,0,L^A0N,38,34^FDCLEAR^FS
+^FO248,852^FB170,1,0,L^A0N,32,28^FD2090^FS
+^FO613,816^FB170,1,0,L^A0N,42,38^FDMAY 2026^FS
+^FO80,974^BQN,2,4^FDLA,SUNLOC|26ZD081|2|0|1|test^FS
+^XZ;
 }
 
 

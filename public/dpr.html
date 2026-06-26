@@ -474,7 +474,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v44ZL</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v44ZRD1</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -1878,6 +1878,14 @@ async function closeBatchInDPR(orderId, batchNumber){
   if(!dprUser){ alert('Please log in to close a batch.'); return; }
   if(dprClosedBatches[orderId]){ alert(`Batch ${batchNumber} is already closed in DPR.`); return; }
   if(!confirm(`Close batch ${batchNumber} in DPR?\n\nThis marks production as complete. Planning will then be able to close this order.\n\nThis action can only be undone by Admin.`)) return;
+  // v44ZL DPR fix: persist the current grid BEFORE registering the close. /api/dpr/save always writes
+  // the grid to data_json (so a run shows "[saved]"), but the production_actuals insert — which feeds
+  // the cumulative total — is GATED and silently rejected once the batch is closed. Any production just
+  // entered for this batch that hasn't yet reached production_actuals would therefore be dropped from
+  // the cumulative the moment we close (the intermittent "production not added when I mark batch closed"
+  // loss). Saving first commits that production while the batch is still OPEN, so the gate accepts it;
+  // the v43 #1 snapshot/restore then preserves it across any later same-day re-saves.
+  try { await saveToServer(); } catch(e) { /* save errors are surfaced inside saveToServer; proceed */ }
   if(serverUrl){
     try{
       const r=await fetch(serverUrl+'/api/dpr/batch-close',{

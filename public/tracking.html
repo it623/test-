@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v44ZK</title>
+<title>Sunloc Tracking Suite v1.0 · build v44ZRD1</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -579,7 +579,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v44ZK</p>
+      <p>Tracking Suite v1.0 · build v44ZRD1</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -610,7 +610,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v44ZK</p>
+      <p>Tracking Suite v1.0 · build v44ZRD1</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -1106,7 +1106,7 @@ function getNextStage(dept, batchNo){
 }
 
 function getLabelsByBatch(batchNo){ return state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided) }
-function getPrintedLabelCount(batchNo){ return state.labels.filter(l=>l.batchNumber===batchNo&&l.printed&&!l.voided).length }
+function getPrintedLabelCount(batchNo){ return state.labels.filter(l=>l.batchNumber===batchNo&&l.printed&&!l.voided&&!_isSpecimenLabel(l)).length }
 // v41ZH #2: CANONICAL per-batch label count — the single source of truth for every batch/report
 // render (collapsed batch card, Report A screen+export, search results) so the displayed "Labels"
 // count can never disagree across views. The client label cache (non-voided) stays authoritative
@@ -2056,6 +2056,9 @@ function recordScan(labelId, dept, type, operator, parsed){
   }
   if(!label) return {ok:false,msg:'Label not found'};
   if(label.voided) return {ok:false,msg:'Label has been voided'};
+  // v44ZN Req 2: the specimen/master (BPR) label is not a production box — it must never be scanned
+  // into any department (doing so would inflate that dept's box IN/OUT counts).
+  if(_isSpecimenLabel(label)) return {ok:false, msg:'📄 Specimen / BPR master label — not a production box, cannot be scanned'};
 
   // v43A #4: ORANGE LABEL = PI INSPECTION CONFIRMATION ONLY.
   // Scanning an orange label records that PI inspected/verified this box's printed matter. It is
@@ -2248,6 +2251,43 @@ function generateQRData(label){
 // LABEL GENERATION
 // ═══════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════
+// v44ZN Req 2: SPECIMEN / MASTER (BPR) LABEL
+// Every NEW batch (startDate on/after the cutoff below) gets ONE extra "specimen" label so the
+// batch's label count is n+1. The specimen is the FIRST label in the print sequence, uses the
+// identical white-label format EXCEPT the QUANTITY and CONTAINER (box-number) fields are blank
+// (per the BPR spec), and is retained as the QA specimen in the Batch Production Record.
+// It is NOT a production box: it is excluded from every box-count / cap, and is rejected at scan.
+//
+// Identity: the specimen is the unique non-orange label with labelNumber === 0. Normal box labels
+// are 1..n, excess labels are negative, orange labels live on is_orange=1 — so 0 is free and
+// round-trips through every existing insert/select with NO schema change (no migration needed).
+//
+// Cutoff note: startDate is stored as a UTC date (today() = new Date().toISOString().slice(0,10)).
+// The intended go-live is 00:00 IST 26-Jun-2026. A batch dated '2026-06-26' (UTC) definitely
+// started after that IST moment; the only ambiguous sliver is the 00:00–05:29 IST cutover night,
+// which date-only UTC storage cannot resolve. IT can adjust the one constant below if needed.
+const SPECIMEN_FROM = '2026-06-26';
+function _isSpecimenLabel(l){
+  // v44ZO: robust against the falsy-0 sentinel. A specimen is a non-orange, non-excess label whose
+  // box number is the 0 sentinel — which after a server round-trip may arrive as 0, null, or (from
+  // an older falsy-insert) NULL→null. Match camelCase or snake_case; never match a real box (>=1) or
+  // excess (negative). isSpecimen survives only pre-push, so it is an OR, not the sole signal.
+  if(!l || l.isOrange || l.isExcess) return false;
+  if(l.isSpecimen === true) return true;
+  const n = (l.labelNumber !== undefined && l.labelNumber !== null) ? l.labelNumber
+          : (l.label_number !== undefined && l.label_number !== null) ? l.label_number : 0;
+  return Number(n) === 0;
+}
+function _batchNeedsSpecimen(batch){
+  if(!batch) return false;
+  const sd = String(batch.startDate||'').slice(0,10);
+  return !!sd && sd >= SPECIMEN_FROM;
+}
+function _hasSpecimen(batchNo){
+  return state.labels.some(l=>l.batchNumber===batchNo && _isSpecimenLabel(l) && !l.voided);
+}
+
 function canGenerateLabels(batchNo, requestedBoxes){
   const batch = getBatch(batchNo);
   if(!batch) return {ok:false,msg:'Batch not found'};
@@ -2266,8 +2306,9 @@ function canGenerateLabels(batchNo, requestedBoxes){
   if(!ps) return {ok:false,msg:'Unknown pack size'};
 
   const maxTotalBoxes = lakhToBox(batch.qty, batch.size);
-  const normalLabels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&!l.isExcess);
-  const excessLabels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&l.isExcess);
+  // v44ZN: specimen (labelNumber 0) is not a box — exclude from every count below.
+  const normalLabels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&!l.isExcess&&!_isSpecimenLabel(l));
+  const excessLabels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&l.isExcess&&!_isSpecimenLabel(l));
   const alreadyGenerated = normalLabels.length + excessLabels.length;
   const remainingAllowed = maxTotalBoxes - alreadyGenerated;
 
@@ -2283,7 +2324,7 @@ function canGenerateLabels(batchNo, requestedBoxes){
     const dailyTarget = machine?.dailyTarget || machine?.yTarget || 27;
     const dailyBoxTarget = lakhToBox(dailyTarget, batch.size);
     const todayDate = today();
-    const todayGenerated = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&l.generated?.slice(0,10)===todayDate).length;
+    const todayGenerated = state.labels.filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&!_isSpecimenLabel(l)&&l.generated?.slice(0,10)===todayDate).length;
     const todayRemaining = dailyBoxTarget - todayGenerated;
     if(requestedBoxes > todayRemaining) return {ok:false, msg:`Daily limit: ${dailyBoxTarget} boxes (${fmt(dailyTarget)}L target). ${todayRemaining} more allowed today.`};
   }
@@ -2309,7 +2350,7 @@ function flushPendingLabelPush(){try{const s=JSON.parse(localStorage.getItem('su
 function originalNormalBoxMax(batchNo, batch){
   const b = batch || getBatch(batchNo);
   const totals = state.labels
-    .filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&!l.isExcess)
+    .filter(l=>l.batchNumber===batchNo&&!l.voided&&!l.isOrange&&!l.isExcess&&!_isSpecimenLabel(l))
     .map(l=>+l.normalTotal).filter(n=>Number.isFinite(n)&&n>0);
   return totals.length ? Math.min(...totals) : lakhToBox(b.qty, b.size);
 }
@@ -2324,8 +2365,8 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
   const newLabels = [];
   // Determine if this is an excess run
   const normalBoxMax = originalNormalBoxMax(batchNo, batch);  // v43 #3: original planned boxes (anchored, not live qty)
-  const existingNormal = state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange&&!l.isExcess&&!l.voided).length;
-  const existingExcess = state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange&&l.isExcess&&!l.voided).length;
+  const existingNormal = state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange&&!l.isExcess&&!l.voided&&!_isSpecimenLabel(l)).length;
+  const existingExcess = state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange&&l.isExcess&&!l.voided&&!_isSpecimenLabel(l)).length;
   const isExcessRun = check.isExcessRun || existingNormal >= normalBoxMax;
   // For excess: excessTotal = how many excess labels will exist after this run
   const excessTotal = isExcessRun ? existingExcess + count : 0;
@@ -2355,6 +2396,33 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
     };
     label.qrData = generateQRData(label);
     newLabels.push(label);
+  }
+
+  // v44ZN Req 2: prepend the one-time specimen/master (BPR) label for eligible NEW batches.
+  // It is created on the FIRST label-generation run for the batch (so it is physically label #1
+  // in the print sequence) and brings the batch label count to n+1. Same white-label format, but
+  // QUANTITY + CONTAINER are blanked at print time (see generateZPL). labelNumber 0 marks it.
+  // v44ZO: gate on existingNormal===0 && existingExcess===0 (true first run). Without this, the
+  // labels-all reload overwriting un-pushed local labels could transiently hide the specimen from
+  // _hasSpecimen, so a later run re-created it → duplicate specimens (the +2 physical labels). A
+  // batch that already has ANY box/excess label has already had its first run and never gets a 2nd.
+  if(_batchNeedsSpecimen(batch) && existingNormal===0 && existingExcess===0 && !_hasSpecimen(batchNo) && !newLabels.some(_isSpecimenLabel)){
+    const spec = {
+      id:uid(), batchNumber:batchNo,
+      labelNumber:0, isSpecimen:true,
+      isExcess:false, excessNum:null, excessTotal:null,
+      normalTotal:normalBoxMax,
+      size:batch.size, qty:ps, isPartial:false, isOrange:false, parentLabelId:null,
+      customer:batch.customer, shipTo:batch.shipTo||batch.customer, billTo:batch.billTo||'',
+      colour:batch.colour, pcCode:batch.pcCode,
+      poNumber:batch.poNumber, machineId:batch.machineId,
+      startDate:batch.startDate||null, printMatter:batch.printMatter||batch.printingMatter||null,
+      isPrinted:batch.isPrinted||false,
+      generated:now(), printed:false, voided:false, printedAt:null,
+      qrData: ''
+    };
+    spec.qrData = generateQRData(spec);
+    newLabels.unshift(spec);  // specimen first
   }
 
   state.labels.push(...newLabels);
@@ -2806,6 +2874,12 @@ function generateZPL(label, batch){
     ? `E-${label.excessNum}/${_exTotLive || label.excessTotal || 1}`
     : (normTot !== '?' ? `${_num}/${normTot}` : String(_num));
 
+  // v44ZN Req 2: the specimen/master (BPR) label is the identical white label EXCEPT it carries no
+  // box number and no quantity (per spec). Blank those two fields; everything else is unchanged.
+  const _isSpec      = _isSpecimenLabel(label);
+  const piecesTxt    = _isSpec ? '' : pieces;
+  const containerTxt = _isSpec ? '' : containerNo;
+
   const isTemp = batchNo.startsWith('TEMP-');
   const isWO   = label.woStatus === 'wo';
   const lb     = getBatch(batchNo);
@@ -2830,92 +2904,48 @@ function generateZPL(label, batch){
 ^XZ`;
   }
 
-  // ── MAIN WHITE LABEL ──────────────────────────────────────────
-  // PW=800 (100mm), LL=1200 (150mm) — matches label stock
-  // Content fills Y=50 to Y=1180 (full label height)
-  // 5 data rows x 116 dots (14.5mm each) — large, clear text
-
-  const D  = isTemp||isWO ? 42 : 0;
-  const hBand = isTemp
-    ? `^FO10,${136+D}^GB780,42,42^FS\n^CF0,24\n^FR^FO10,${146+D}^FB780,1,0,C^FD** TEMP BATCH - REPLACEMENT REQUIRED **^FS`
-    : isWO
-    ? `^FO10,${136+D}^GB780,42,42^FS\n^CF0,24\n^FR^FO10,${146+D}^FB780,1,0,C^FDWITHOUT ORDER - CUSTOMER TO BE ASSIGNED^FS`
-    : '';
-  const oBorder = isTemp
-    ? `^FO4,4^GB792,1192,5^FS\n^FO9,9^GB782,1182,2^FS\n`
-    : isWO ? `^FO4,4^GB792,1192,4^FS\n` : '';
-
-  const custY = 140 + D;
-  const tTop  = 180 + D;
-  const RH    = 78;             // 6 rows × 78 = 468 — fits with QR space below
-  const tBot  = tTop + RH*6;   // 6 rows
-  const expY  = tBot + 8;
-  const ruleY = tBot + 46;
-  const qrY   = ruleY + 10;    // QR starts here
-  const qRelY = qrY + 180;     // Q RELEASED text Y
-  const sigY  = qrY + 60;      // SIGNATURE line Y
-  const botY  = 1180;          // fixed bottom rule
-  // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
-  const pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
+  // ── MAIN FG LABEL — v7 PRE-PRINTED DESIGN (v44ZRD1 DUMMY) ─────────────────────
+  // The colour background, frames, field key-tabs, Q·RELEASE stamp and footer are PRE-PRINTED on the
+  // BOPP stock by the converter. This ZPL overprints ONLY the variable data in black resin at the
+  // W1–W14 coordinates from the v7 Tech Spec (Sections 15/16); coordinates are dots @ 203 dpi (8/mm).
+  // The SAME ZPL serves both Gelatin (yellow) and HPMC (green) SKUs — only the loaded roll differs.
+  const _b2     = getBatch(batchNo);
+  const pcCode  = (label.pcCode || batch?.pcCode || _b2?.pcCode || '').toString();
+  const qtyTxt  = _isSpec ? '' : Number(pieces).toLocaleString('en-IN');   // 125000 -> 1,25,000
+  const _p2     = n => { const s = String(n); return s.length < 2 ? ('0' + s).slice(-2) : s; };
+  const containerNew = _isSpec ? ''
+    : (label.isExcess ? containerNo
+       : (normTot !== '?' ? `${_p2(_num)} / ${_p2(normTot)}` : String(_num)));
+  // QR: keep the existing SUNLOC|… payload so WIP scan-in keeps working unchanged; only the POSITION
+  // and size follow the new W13 zone. (Switching the encoded data to the spec's
+  // BATCH-SIZECODE-CONTAINER format also requires updating the scan-in parser — left for the
+  // production incorporation step so the dummy stays fully scannable.)
+  const _qr     = label.qrData || generateQRData(label);
+  // Customer block: line 1 = ship-to/customer (≤32 chars), line 2 = bill-to when different.
+  const cName   = (customerText || '').toString();
+  const cL1     = cName.length > 32 ? cName.slice(0, 32) : cName;
+  const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo : '';
 
   return `^XA
-^CI28
-^PW800
-^LL1200
-^MMT
-^PON
+^MTT
+^PR4
+~SD22
+^PW812
+^LL1218
 ^LH0,0
-${oBorder}
-^CF0,46
-^FO10,50^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
-^CF0,30
-^FO10,102^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
-^FO10,${136+D}^GB780,2,2^FS
-${hBand}
-^CF0,26
-^FO10,${custY}^FDCUSTOMER NAME :  ${customerText}^FS
-^FO10,${tTop-4}^GB780,2,2^FS
-
-^FO10,${tTop}^GB390,${RH*6+2},2^FS
-^FO404,${tTop}^GB386,${RH*6+2},2^FS
-^FO10,${tTop+RH}^GB390,2,2^FS
-^FO10,${tTop+RH*2}^GB390,2,2^FS
-^FO10,${tTop+RH*3}^GB390,2,2^FS
-^FO10,${tTop+RH*4}^GB390,2,2^FS
-^FO10,${tTop+RH*5}^GB390,2,2^FS
-^FO404,${tTop+RH}^GB386,2,2^FS
-^FO404,${tTop+RH*2}^GB386,2,2^FS
-^FO404,${tTop+RH*3}^GB386,2,2^FS
-^FO404,${tTop+RH*4}^GB386,2,2^FS
-^FO404,${tTop+RH*5}^GB386,2,2^FS
-
-^CF0,26
-^FO18,${tTop+10}^FDQUANTITY    :  ${pieces}^FS
-^FO18,${tTop+RH+10}^FDSIZE              :  ${label.size}^FS
-^FO18,${tTop+RH*2+10}^FDCOLOUR CAP :  ${colourCap}^FS
-^FO18,${tTop+RH*3+10}^FDCOLOUR BODY:  ${colourBody}^FS
-^FO18,${tTop+RH*4+10}^FDPRINTED       :^FS
-^FO18,${tTop+RH*5+10}^FDPC CODE    :  ${pcCode}^FS
-
-^FO412,${tTop+10}^FDBATCH NO.  :  ${batchNo}^FS
-^FO412,${tTop+RH+10}^FDCONTAINER:  ${containerNo}^FS
-^FO412,${tTop+RH*2+10}^FDGROSS WT.:^FS
-^FO412,${tTop+RH*3+10}^FDNETT WT.  :^FS
-^FO412,${tTop+RH*4+10}^FDMFG DATE:  ${mfgDate}^FS
-
-^FO10,${tBot}^GB780,2,2^FS
-^CF0,20
-^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
-^FO10,${ruleY}^GB780,2,2^FS
-
-^FO10,${qrY}^BQN,2,9^FDLA,${label.qrData}^FS
-^CF0,28
-^FO260,${qRelY}^FB300,1,0,C^FDQ RELEASED^FS
-^FO580,${sigY}^GB200,2,2^FS
-^CF0,22
-^FO580,${sigY+10}^FB200,1,0,C^FDSIGNATURE^FS
-
-^FO10,${botY}^GB780,3,3^FS
+^MNY
+^CI28
+^FO274,260^A0N,26,24^FD${cL1}^FS
+^FO274,290^A0N,22,20^FD${cL2}^FS
+^FO240,385^A0N,30,28^FD${qtyTxt}^FS
+^FO640,385^A0N,34,32^FD${batchNo}^FS
+^FO240,460^A0N,30,28^FD${label.size}^FS
+^FO640,460^A0N,30,28^FD${containerNew}^FS
+^FO240,530^A0N,30,28^FD${colourCap}^FS
+^FO240,600^A0N,30,28^FD${colourBody}^FS
+^FO240,692^A0N,26,24^FD${pcCode}^FS
+^FO640,672^A0N,30,28^FD${mfgDate}^FS
+^FO96,930^BQN,2,5^FDLA,${_qr}^FS
 ^XZ`;
 }
 
@@ -2946,7 +2976,19 @@ function downloadZPL(zpl,label){
 }
 
 function printBatchLabels(batchNo){
-  const labels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.printed&&!l.voided&&!l.isOrange);
+  let labels = state.labels.filter(l=>l.batchNumber===batchNo&&!l.printed&&!l.voided&&!l.isOrange)
+    // v44ZN Req 2: specimen (labelNumber 0) prints FIRST; stable sort keeps existing order otherwise.
+    .sort((a,b)=>(_isSpecimenLabel(a)?0:1)-(_isSpecimenLabel(b)?0:1));
+  // v44ZO: collapse any DUPLICATE specimens to a single physical print. A stale falsy-0 round-trip
+  // could have persisted >1 specimen for a batch; print only the first and mark the redundant copies
+  // printed so they neither print nor linger forever as "unprinted".
+  const _dupSpecimens=[];
+  { let _seenSpec=false; labels = labels.filter(l=>{ if(_isSpecimenLabel(l)){ if(_seenSpec){ _dupSpecimens.push(l); return false; } _seenSpec=true; } return true; }); }
+  if(_dupSpecimens.length){
+    _dupSpecimens.forEach(l=>{ l.printed=true; l.printedAt=now(); });
+    saveLocal();
+    _dupSpecimens.forEach(l=>pushToServer('/api/tracking/label-update',{labelId:l.id,printed:true,printedAt:l.printedAt}));
+  }
   if(!labels.length){alert('No unprinted labels for this batch.');return;}
   const batch = getBatch(batchNo);
   // Concatenate all ZPL — each ^XA...^XZ is one label, printer handles sequence
@@ -3538,7 +3580,11 @@ function selectLabelBatch(batchNo){
 function renderPrintQueue(selBatch){
   if(!selBatch) return '<div style="padding:40px;text-align:center;color:var(--text3)">← Select a batch to view its print queue</div>';
   const batch=getBatch(selBatch);
-  const labels=state.labels.filter(l=>l.batchNumber===selBatch&&!l.isOrange).sort((a,b)=>a.labelNumber-b.labelNumber);
+  const labels=state.labels.filter(l=>l.batchNumber===selBatch&&!l.isOrange).sort((a,b)=>{
+    const sa=_isSpecimenLabel(a)?1:0, sb=_isSpecimenLabel(b)?1:0;  // v44ZN: specimen first
+    if(sa!==sb) return sb-sa;
+    return a.labelNumber-b.labelNumber;
+  });
   const unprintedCount=labels.filter(l=>!l.printed&&!l.voided).length;
   return `
   <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:8px">
@@ -3560,8 +3606,8 @@ function renderPrintQueue(selBatch){
     <tbody>
     ${labels.map(l=>`
       <tr style="border-bottom:1px solid var(--border);${l.voided?'opacity:0.4':''}${!l.printed&&!l.voided?'background:rgba(240,192,96,0.05)':''}">
-        <td style="padding:6px;font-weight:700;color:${l.voided?'#ef4444':'var(--accent)'};font-family:monospace">${l.isExcess?`<span style="color:#C55A11">E-${l.excessNum}</span>`:`<span style="${l.voided?'text-decoration:line-through;opacity:0.7':''}">${Math.abs(l.labelNumber||0)}</span>`}${l.voided?'<span style="font-size:8px;background:#ef4444;color:#fff;border-radius:3px;padding:1px 3px;margin-left:3px;letter-spacing:0.5px">VOID</span>':''}${l.isPartial?'<span style="font-size:9px;background:var(--accent2);color:#fff;border-radius:3px;padding:1px 3px;margin-left:2px">P</span>':''}</td>
-        <td style="padding:6px;font-family:monospace">${fmt(l.qty)}</td>
+        <td style="padding:6px;font-weight:700;color:${l.voided?'#ef4444':'var(--accent)'};font-family:monospace">${_isSpecimenLabel(l)?`<span style="color:#2563eb">SPEC</span>`:l.isExcess?`<span style="color:#C55A11">E-${l.excessNum}</span>`:`<span style="${l.voided?'text-decoration:line-through;opacity:0.7':''}">${Math.abs(l.labelNumber||0)}</span>`}${l.voided?'<span style="font-size:8px;background:#ef4444;color:#fff;border-radius:3px;padding:1px 3px;margin-left:3px;letter-spacing:0.5px">VOID</span>':''}${l.isPartial?'<span style="font-size:9px;background:var(--accent2);color:#fff;border-radius:3px;padding:1px 3px;margin-left:2px">P</span>':''}</td>
+        <td style="padding:6px;font-family:monospace">${_isSpecimenLabel(l)?'—':fmt(l.qty)}</td>
         <td style="padding:6px">${l.voided?'<span style="background:#ef444422;color:#ef4444;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Voided</span>':l.printed?'<span style="background:#22c55e22;color:#22c55e;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">✅ Printed</span>':'<span style="background:rgba(240,192,96,0.2);color:var(--accent2);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600">Pending</span>'}</td>
         <td style="padding:6px;font-size:10px;color:var(--text3);white-space:nowrap">${fmtDateTime(l.generated)}</td>
         <td style="padding:6px"><div style="display:flex;gap:3px;flex-wrap:nowrap;align-items:center">
@@ -3630,8 +3676,8 @@ function renderLabels(){
         const filtered=srch?activeBatches.filter(b=>(b.batchNumber||'').toLowerCase().includes(srch)||(b.customer||'').toLowerCase().includes(srch)||(b.colour||'').toLowerCase().includes(srch)||(b.pcCode||'').toLowerCase().includes(srch)||String(b.size||'').includes(srch)):activeBatches;
         return filtered.map(b=>{
         const maxLabels=lakhToBox(b.qty,b.size);
-        const generated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange).length;
-        const printed=state.labels.filter(l=>l.batchNumber===b.batchNumber&&l.printed&&!l.voided&&!l.isOrange).length;
+        const generated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&!_isSpecimenLabel(l)).length;
+        const printed=state.labels.filter(l=>l.batchNumber===b.batchNumber&&l.printed&&!l.voided&&!l.isOrange&&!_isSpecimenLabel(l)).length;
         const normalBoxMax2=lakhToBox(b.qty,b.size);
         const excessGenerated=state.labels.filter(l=>l.batchNumber===b.batchNumber&&!l.voided&&!l.isOrange&&l.isExcess).length;
         const normalGenerated=generated-excessGenerated;
@@ -3975,14 +4021,18 @@ function confirmLabelGen(){
 
 function viewBatchLabels(batchNo){
   const batch=getBatch(batchNo);
-  const labels=state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange).sort((a,b)=>a.labelNumber-b.labelNumber);
+  const labels=state.labels.filter(l=>l.batchNumber===batchNo&&!l.isOrange).sort((a,b)=>{
+    const sa=_isSpecimenLabel(a)?1:0, sb=_isSpecimenLabel(b)?1:0;  // v44ZN: specimen first
+    if(sa!==sb) return sb-sa;
+    return a.labelNumber-b.labelNumber;
+  });
   openModal(`Labels — ${batchNo}`,`${labels.length} labels | ${batch?.customer||''} | Size ${batch?.size}`,`
     <div class="tbl-wrap"><table>
       <thead><tr><th>#</th><th>Qty (L)</th><th>Status</th><th>Generated</th><th>Printed</th><th>Actions</th></tr></thead>
       <tbody>
       ${labels.map(l=>`<tr>
-        <td class="td-mono fw-bold">${l.isExcess?`<span style="color:#C55A11">E-${l.excessNum}/${state.labels.filter(x=>x.batchNumber===l.batchNumber&&!x.voided&&!x.isOrange&&x.isExcess).length||l.excessTotal||1}</span>`:`${Math.abs(l.labelNumber||0)}/${l.normalTotal||'?'}`}${l.isPartial?' <span class="badge badge-amber">PARTIAL</span>':''}${l.batchNumber&&l.batchNumber.startsWith('TEMP-')?'<span class="badge" style="background:rgba(255,64,96,0.12);color:#ff4060;border:1px solid rgba(255,64,96,0.35);font-size:9px;margin-left:3px">⚠️ TEMP</span>':l.woStatus&&l.woStatus==='wo'?'<span class="badge" style="background:rgba(255,171,0,0.12);color:#C55A11;border:1px solid rgba(255,171,0,0.35);font-size:9px;margin-left:3px">🔶 W/O</span>':''}</td>
-        <td class="td-mono">${fmt(l.qty)}</td>
+        <td class="td-mono fw-bold">${_isSpecimenLabel(l)?`<span style="color:#2563eb">SPECIMEN</span>`:l.isExcess?`<span style="color:#C55A11">E-${l.excessNum}/${state.labels.filter(x=>x.batchNumber===l.batchNumber&&!x.voided&&!x.isOrange&&x.isExcess).length||l.excessTotal||1}</span>`:`${Math.abs(l.labelNumber||0)}/${l.normalTotal||'?'}`}${l.isPartial?' <span class="badge badge-amber">PARTIAL</span>':''}${l.batchNumber&&l.batchNumber.startsWith('TEMP-')?'<span class="badge" style="background:rgba(255,64,96,0.12);color:#ff4060;border:1px solid rgba(255,64,96,0.35);font-size:9px;margin-left:3px">⚠️ TEMP</span>':l.woStatus&&l.woStatus==='wo'?'<span class="badge" style="background:rgba(255,171,0,0.12);color:#C55A11;border:1px solid rgba(255,171,0,0.35);font-size:9px;margin-left:3px">🔶 W/O</span>':''}</td>
+        <td class="td-mono">${_isSpecimenLabel(l)?'—':fmt(l.qty)}</td>
         <td>${l.voided?'<span class="badge badge-red">VOIDED</span>':l.printed?'<span class="badge badge-green">Printed</span>':'<span class="badge badge-gray">Not Printed</span>'}</td>
         <td class="td-mono text-sm">${fmtDateTime(l.generated)}</td>
         <td class="td-mono text-sm">${l.printedAt?fmtDateTime(l.printedAt):'-'}</td>
@@ -4070,7 +4120,7 @@ function confirmDamagedReprint(labelId){
   if(batch){
     const newLabel = {
       ...label, id:uid(),
-      labelNumber: state.labels.filter(l=>l.batchNumber===label.batchNumber&&!l.isOrange).length + 1,
+      labelNumber: state.labels.filter(l=>l.batchNumber===label.batchNumber&&!l.isOrange&&!_isSpecimenLabel(l)).length + 1,
       generated:now(), printed:false, voided:false, printedAt:null,
       isReplacement:true, replacedLabelId:labelId, reprintReason:reason
     };
@@ -4815,7 +4865,7 @@ function openRecustomer(preBatch){
   ]);
   _rcInfo();
 }
-function _rcBoxCount(bn){ return state.labels.filter(l=>l.batchNumber===bn&&!l.voided&&!l.isOrange).length; }
+function _rcBoxCount(bn){ return state.labels.filter(l=>l.batchNumber===bn&&!l.voided&&!l.isOrange&&!_isSpecimenLabel(l)).length; }
 function _rcInfo(){
   const bn=document.getElementById('rc-batch')?.value; if(!bn) return;
   const b=getBatch(bn); const n=_rcBoxCount(bn);
@@ -12378,8 +12428,14 @@ function exportReportA(){
   exportToExcel(rows,`Sunloc_Batch_Tracking_${today()}.xlsx`,'Batch Tracking');
 }
 
+// v44ZN Req 1: Report B Excel export is now a faithful mirror of the on-screen report — one SHEET
+// per department, each using that department's exact on-screen column layout (rich AIM layout vs.
+// the lean std layout for Printing / PI), the same computed values (WIP boxes, status), and the
+// same active dropdown filters INCLUDING the status filter (_rptBStatus) which the old single-flat
+// export ignored. The previous export diverged on two counts: (a) it always subtracted AIM wastage
+// boxes from WIP (the screen, since v41ZB, does NOT for AIM — that wastage lives in Production WIP),
+// and (b) its column set/order/headers didn't match the screen. Both are fixed here.
 function exportReportB(){
-  const rows=[];
   const depts=['aim','printing','pi'];  // v44P #9: Packing WIP removed from Report B (now in Report G)
   // v44ZJ Issue 1: honour the on-screen dropdown so the export scopes to the selected department
   // and AIM floor (GF / FF-SF), plus the batch/colour/PC filters — i.e. its own summable export.
@@ -12390,10 +12446,27 @@ function exportReportB(){
   const _fBatch = window._rptBBatch || '';
   const _fColour = (window._rptBColour || '').toLowerCase();
   const _fPC = (window._rptBPC || '').toLowerCase();
+  const _fStatus = window._rptBStatus || '';   // v44ZN: '', 'indept', 'leftdept', 'closed' — mirror screen
   const _ffsfM = new Set([...(FLOORS.FF?.machines || []), ...(FLOORS.SF?.machines || [])].map(normMcId));
   const _aimFloorOf = bn => _ffsfM.has(normMcId(getBatch(bn)?.machineId)) ? 'ffsf' : 'gf';
   const monthBatchNos = new Set(getTrkMonthBatches(true).map(b=>b.batchNumber).filter(Boolean));
+  const _n2 = v => (v==null||isNaN(v)) ? 0 : Math.round((+v)*100)/100; // numeric cells so Excel can SUM
+  const wb = XLSX.utils.book_new();
+  // v44ZN: AIM Inspection is emitted as TWO sheets — "AIM Inspection GF" and "AIM Inspection FF-SF"
+  // — exactly as the on-screen report groups it by floor. A floor dropdown filter narrows AIM to
+  // just that one floor's sheet. Printing / PI remain one sheet each.
+  const sheetSpecs = [];
   _activeDepts.forEach(dept=>{
+    if (dept==='aim') {
+      const floors = _floorFilter ? [_floorFilter] : ['gf','ffsf'];
+      floors.forEach(fl => sheetSpecs.push({dept:'aim', floor:fl, name:'AIM Inspection '+(fl==='gf'?'GF':'FF-SF')}));
+    } else {
+      sheetSpecs.push({dept, floor:null, name:DEPT_LABELS[dept]||dept});
+    }
+  });
+
+  const buildRows = (dept, floorOnly) => {
+    const isAim = dept==='aim';
     const hasWastage=dept==='aim'||dept==='printing'||dept==='pi';
     // Build batch list from scanSummary (full) when available
     let batchNos;
@@ -12405,8 +12478,9 @@ function exportReportB(){
     if(_fBatch)  batchNos = batchNos.filter(bn=>bn===_fBatch);
     if(_fColour) batchNos = batchNos.filter(bn=>(getBatch(bn)?.colour||'').toLowerCase().includes(_fColour));
     if(_fPC)     batchNos = batchNos.filter(bn=>String(getBatch(bn)?.pcCode||'').toLowerCase().includes(_fPC));
-    if(dept==='aim' && _floorFilter) batchNos = batchNos.filter(bn=>_aimFloorOf(bn)===_floorFilter);
+    if(isAim && floorOnly) batchNos = batchNos.filter(bn=>_aimFloorOf(bn)===floorOnly);
     batchNos = batchNos.slice().sort(_v44zk_batchCmp); // v44ZK Issue 2: batch-wise chronological
+    const rows=[];
     batchNos.forEach(batchNo=>{
       const b=getBatch(batchNo);
       const localIn  = state.scans.filter(sc=>sc.batchNumber===batchNo&&sc.dept===dept&&sc.type==='in'&&sc._local).length;
@@ -12416,40 +12490,59 @@ function exportReportB(){
       const w=hasWastage?getTotalWastage(batchNo,dept):{total:0,salvage:0,remelt:0};
       const ps=PACK_SIZES[String(b?.size||'0')]||1;
       const wastageBoxes=hasWastage?Math.round(w.total/ps):0;
-      const wip=Math.max(0,inn-out-wastageBoxes);
+      // v44ZN: mirror the on-screen WIP-boxes formula EXACTLY — AIM does not subtract wastage boxes
+      // (v41ZB moved AIM wastage into Production WIP); Printing/PI still subtract wastage boxes.
+      const wip=Math.max(0, inn - out - (isAim ? 0 : wastageBoxes));
       const wipQty=boxToLakh(wip,b?.size||'0');
       const firstIn=state.scans.filter(s=>s.batchNumber===batchNo&&s.dept===dept&&s.type==='in').sort((a,c)=>new Date(a.ts)-new Date(c.ts))[0];
       const hrs=firstIn?hoursAgo(firstIn.ts):0;
-      const alerts=state.alerts.filter(a=>a.batchNumber===batchNo&&a.dept===dept).length;
-      const stageStatus=isStageComplete(batchNo,dept)?'Closed':wip>0?'In Dept':'—';
-      const grossProdEx=_reconGross(b);
-      const aimInBoxesEx = hasScanSummary()
+      const grossProd=_reconGross(b);
+      const aimInBoxes = hasScanSummary()
         ? (_ss(batchNo,'aim').in + state.scans.filter(sc=>sc.batchNumber===batchNo&&sc.dept==='aim'&&sc.type==='in'&&sc._local).length)
         : state.scans.filter(s=>s.batchNumber===batchNo&&s.dept==='aim'&&s.type==='in').length;
-      const aimInQtyEx=boxToLakh(aimInBoxesEx,b?.size||'0');
-      // v41ZH #0: bring the Report B EXPORT Prod WIP in line with the on-screen / canonical v41ZB
-      // formula. The export path was still on the old (Gross − AIM Scan In) definition while the
-      // screen (line ~8309) and getBatchWIPBreakdown.preAIM both deduct AIM-stage salvage+remelt.
-      //   Production WIP = (Gross − AIM Salvage − AIM Remelt) − AIM Scan In
-      const aimWasteEx=getTotalWastage(batchNo,'aim');
-      const prodWipEx=_isRetired(batchNo)?0:Math.max(0,grossProdEx-aimWasteEx.salvage-aimWasteEx.remelt-aimInQtyEx);
-      // v44ZG Issue 3: write NUMBERS (not fmt() strings) for the numeric columns so SheetJS emits
-      // numeric cells and Excel can SUM them. fmt() returns a string, which Excel treats as text.
-      const _n2 = v => (v==null||isNaN(v)) ? 0 : Math.round((+v)*100)/100;
-      rows.push({
-        'Department':DEPT_LABELS[dept]||dept,'Floor':dept==='aim'?(_aimFloorOf(batchNo)==='gf'?'GF':'FF/SF'):'','Batch':batchNo,'Customer':b?.customer||'',
-        'Prod WIP (L)':_n2(prodWipEx),
-        'Boxes IN':inn,'Boxes OUT':out,
-        'Wastage (L)':hasWastage?_n2(w.total):'',
-        'Salvage (L)':hasWastage?_n2(w.salvage):'',
-        'Remelt (L)':hasWastage?_n2(w.remelt):'',
-        'WIP Boxes':wip,'WIP Qty (L)':_n2(wipQty),
-        'Time in Dept (h)':Math.round(hrs),
-        'Alert':alerts>0?'YES':'','Stage Status':stageStatus
-      });
+      const aimInQty=boxToLakh(aimInBoxes,b?.size||'0');
+      const aimWaste=getTotalWastage(batchNo,'aim');
+      // Production WIP = (Gross − AIM Salvage − AIM Remelt) − AIM Scan In  (canonical v41ZB; unchanged)
+      const prodWip=_isRetired(batchNo)?0:Math.max(0,grossProd-aimWaste.salvage-aimWaste.remelt-aimInQty);
+      const _avail = Math.max(0, grossProd - aimWaste.salvage - aimWaste.remelt); // Available to Scan In
+      // v44ZN: status mirrors the on-screen badge logic (Closed / In Dept / Left Dept / —) and the
+      // same statusKey is used to honour the on-screen status filter.
+      const _closed = isStageComplete(batchNo,dept);
+      const statusKey = _closed ? 'closed' : (wip>0 ? 'indept' : (out>0 ? 'leftdept' : ''));
+      if (_fStatus && statusKey !== _fStatus) return;   // skip rows not matching status filter (screen parity)
+      const statusText = _closed ? 'Closed' : (wip>0 ? 'In Dept' : (out>0 ? 'Left Dept' : '—'));
+      const timeText = `${Math.round(hrs)}h`;
+      if (isAim) {
+        rows.push({
+          'Batch':batchNo,'Customer':b?.customer||'','Colour':b?.colour||'','PC':b?.pcCode||'',
+          'Gross Prod (L)':_n2(grossProd),
+          'Wastage (L)':_n2(aimWaste.salvage+aimWaste.remelt),
+          'Avail. to Scan In (L)':_n2(_avail),
+          'Boxes IN':inn,'Production WIP (L)':_n2(prodWip),'Boxes OUT':out,
+          'WIP Boxes':wip,'WIP Qty (L)':_n2(wipQty),
+          'Time in Dept':timeText,'Status':statusText
+        });
+      } else {
+        const row={
+          'Batch':batchNo,'Customer':b?.customer||'','Prod WIP (L)':_n2(prodWip),
+          'Boxes IN':inn,'Boxes OUT':out
+        };
+        if (hasWastage) row['Wastage (L)']=_n2(w.total);
+        row['WIP Boxes']=wip; row['WIP Qty (L)']=_n2(wipQty);
+        row['Time in Dept']=timeText; row['Status']=statusText;
+        rows.push(row);
+      }
     });
+    return rows;
+  };
+
+  sheetSpecs.forEach(spec=>{
+    const rows = buildRows(spec.dept, spec.floor);
+    if (!rows.length) return;  // skip empty sheets (e.g. a floor with no AIM activity)
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), spec.name.slice(0,31));
   });
-  exportToExcel(rows,`Sunloc_DeptWIP_${today()}.xlsx`,'Dept WIP');
+  if (!wb.SheetNames.length){ alert('No Report B data to export for the current filters.'); return; }
+  XLSX.writeFile(wb,`Sunloc_DeptWIP_${today()}.xlsx`);
 }
 
 function exportReportC(){

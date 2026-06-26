@@ -3042,7 +3042,7 @@ async function _doRefreshSapInvoices() {
   const cfg = await sap.getConfig();
   const lookback = (cfg && cfg.invoice_poll_lookback_days) || 7;
   const r = await sap.fetchRecentInvoices({ lookbackDays: lookback });
-  if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded, fetched: 0, upserted: 0, serverBuild: 'v44ZL' };
+  if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded, fetched: 0, upserted: 0, serverBuild: 'v44ZRD1' };
   const invoices = r.invoices || [];
   let upserted = 0;
   for (const inv of invoices) {
@@ -3523,7 +3523,7 @@ async function _doRefreshSapInvoices() {
     }
   } catch (e) { console.warn('[SAP] v44P line-enrich pass error:', e.message); }
 
-  return { ok: true, fetched: invoices.length, upserted, serverBuild: 'v44ZL' };
+  return { ok: true, fetched: invoices.length, upserted, serverBuild: 'v44ZRD1' };
 }
 
 // v39 Phase 9a helper: for each dispatch_plans row matching the batch, merge
@@ -9417,12 +9417,19 @@ app.post('/api/wo/split/propose', async (req, res) => {
     let totalBoxesInBatch = 0;
     try {
       if (pgPool) {
-        const r = await pgPool.query(`SELECT COUNT(*)::int AS c FROM tracking_labels WHERE batch_number=$1 AND (voided IS NULL OR voided=0)`, [sourceOrd.batchNumber]);
+        const r = await pgPool.query(`SELECT COUNT(*)::int AS c FROM tracking_labels WHERE batch_number=$1 AND (voided IS NULL OR voided=0) AND (label_number <> 0 OR label_number IS NULL)`, [sourceOrd.batchNumber]);
         totalBoxesInBatch = r.rows[0]?.c || 0;
       } else {
-        totalBoxesInBatch = db.prepare(`SELECT COUNT(*) c FROM tracking_labels WHERE batch_number=? AND (voided IS NULL OR voided=0)`).get(sourceOrd.batchNumber)?.c || 0;
+        totalBoxesInBatch = db.prepare(`SELECT COUNT(*) c FROM tracking_labels WHERE batch_number=? AND (voided IS NULL OR voided=0) AND (label_number <> 0 OR label_number IS NULL)`).get(sourceOrd.batchNumber)?.c || 0;
       }
     } catch(e) {}
+
+    // v44ZP: a W/O batch typically has NO per-box labels yet, so the COUNT above is 0/tiny — which
+    // made the cap collapse to 0/1 and the per-child qty (line below) compute as boxes×full-qty.
+    // Derive box capacity from the gross qty via pack size (mirrors tracking.html lakhToBox), and use
+    // the LARGER of (labels present, qty-derived, stored totalBoxes) so the full ordered qty can split.
+    const _woBoxesFromQty = _v44zj_lakhToBox(sourceOrd.qty, sourceOrd.size);
+    totalBoxesInBatch = Math.max(totalBoxesInBatch || 0, _woBoxesFromQty || 0, parseInt(sourceOrd.totalBoxes) || 0);
 
     const conflicts = [];
     const lineNorm = [];
@@ -9447,7 +9454,14 @@ app.post('/api/wo/split/propose', async (req, res) => {
       const boxEnd = nextBoxStart + boxes - 1;
       nextBoxStart = boxEnd + 1;
 
-      const sizeQty = boxes * (sourceOrd.qty / Math.max(1, totalBoxesInBatch || (parseInt(sourceOrd.totalBoxes)||0) || 1));
+      // v44ZQ: boxes are FULL at the pack size (Lakhs/box); only the batch's LAST box holds the
+      // remainder. Child qty = cumulative-min, so a range of full boxes = boxes × packSize and the
+      // partial tail lands only in whichever range covers the final box. (20 boxes of size 3 =
+      // 20 × 2.25 = 45L, NOT 51/23 averaged.) Falls back to the average only if pack size is unknown.
+      const _psLakh = _V44ZJ_PACK_SIZES[String(sourceOrd.size)] || (totalBoxesInBatch > 0 ? sourceOrd.qty / totalBoxesInBatch : 0);
+      const _cumEnd   = Math.min(boxEnd * _psLakh, sourceOrd.qty);
+      const _cumStart = Math.min((boxStart - 1) * _psLakh, sourceOrd.qty);
+      const sizeQty = Math.max(0, +(_cumEnd - _cumStart).toFixed(3));
       const qtyLakhs = parseFloat(L.qtyLakhs) || sizeQty;
       const childBatchNumber = `${sourceOrd.batchNumber}-${suffix}`;
       lineNorm.push({
@@ -9589,9 +9603,20 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
     const parentActual = parseFloat(parent.actualProd || 0);
     const totalBoxesSplit = lines.reduce((s,l) => s + (l.boxes||0), 0);
     const now = new Date().toISOString();
+    // v44ZQ: split ACTUAL produced the same full-box way as planned qty — each child gets full boxes
+    // filled from the actual (cumulative-min, partial only in the tail), so children + residual
+    // conserve to parentActual instead of crediting one customer the whole production. Box ranges are
+    // recomputed sequentially here (independent of stored box_start/box_end). If pack size is somehow
+    // unknown, fall back to distributing actual by each child's planned-qty share (also conserves).
+    const _psLakhAct = _V44ZJ_PACK_SIZES[String(parent.size)] || 0;
+    const _plannedTot = lines.reduce((s,l)=>s+(parseFloat(l.qty_lakhs)||0),0);
+    let _actBoxStart = 1;
     const childOrders = [];
     for (const L of lines) {
-      const proportional = totalBoxesSplit > 0 ? (parentActual * L.boxes / totalBoxesSplit) : 0;
+      const _abs = _actBoxStart, _abe = _actBoxStart + (L.boxes||0) - 1; _actBoxStart = _abe + 1;
+      const proportional = _psLakhAct > 0
+        ? Math.max(0, Math.min(_abe*_psLakhAct, parentActual) - Math.min((_abs-1)*_psLakhAct, parentActual))
+        : (_plannedTot > 0 ? parentActual * (parseFloat(L.qty_lakhs)||0) / _plannedTot : 0);
       const childId = `${parent.id}-${L.child_batch_suffix}`;
       const child = {
         ...parent,
@@ -9624,13 +9649,24 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
       for (const c of childOrders) planState.orders.push(c.child);
       const residualBoxes = request.residual_boxes || 0;
       if (residualBoxes > 0) {
-        const cap = parseInt(parent.totalBoxes) || (totalBoxesSplit + residualBoxes);
-        parent.qty = parent.qty * (residualBoxes / cap);
+        // v44ZQ: residual planned qty = batch qty − Σ(assigned child qty), so planned conserves
+        // exactly (children + residual = batch). The old boxes-ratio averaged the partial box and
+        // could break conservation against the pack-size child quantities computed above.
+        const _assignedQty = childOrders.reduce((s,c)=>s+(parseFloat(c.child.qty)||0),0);
+        parent.qty = Math.max(0, +(parseFloat(parent.qty||0) - _assignedQty).toFixed(3));
         parent.totalBoxes = residualBoxes;
+        // v44ZQ: residual also keeps the remaining ACTUAL produced (parentActual − Σ assigned), so
+        // actual conserves too (children + residual = parentActual).
+        const _assignedActual = childOrders.reduce((s,c)=>s+(parseFloat(c.child.actualProd)||0),0);
+        parent.actualProd = Math.max(0, +(parentActual - _assignedActual).toFixed(3));
+        parent.actualQty = parent.actualProd;
         parent.woStatus = 'wo-split-partial';
         parent._localEditedAt = Date.now();
       } else {
         parent.qty = 0;
+        // v44ZQ: full split — all actual produced is distributed to children; parent retains none.
+        parent.actualProd = 0;
+        parent.actualQty = 0;
         parent.woStatus = 'wo-split';
         parent.deleted = false;
         parent.status = 'closed';
@@ -10355,7 +10391,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
-      build: 'v44ZL',
+      build: 'v44ZRD1',
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -10364,7 +10400,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v44ZL', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v44ZRD1', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -11688,7 +11724,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
-      build: 'v44ZL',
+      build: 'v44ZRD1',
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -11697,7 +11733,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v44ZL', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v44ZRD1', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -12658,7 +12694,7 @@ app.post('/api/tracking/labels', async (req, res) => {
     const accepted = [];
     if (pgPool) {
       for (const l of labels) {
-        const lnum = parseLabelNum(l.labelNumber || l.label_number);
+        const lnum = parseLabelNum(l.labelNumber ?? l.label_number);
         const bn = l.batchNumber || l.batch_number;
         if (!bn || lnum == null) { accepted.push(l); continue; }
         const r = await pgPool.query(
@@ -12677,7 +12713,7 @@ app.post('/api/tracking/labels', async (req, res) => {
       }
     } else {
       for (const l of labels) {
-        const lnum = parseLabelNum(l.labelNumber || l.label_number);
+        const lnum = parseLabelNum(l.labelNumber ?? l.label_number);
         const bn = l.batchNumber || l.batch_number;
         if (!bn || lnum == null) { accepted.push(l); continue; }
         const ex = db.prepare(
@@ -12721,7 +12757,7 @@ app.post('/api/tracking/labels', async (req, res) => {
             excess_total=EXCLUDED.excess_total, normal_total=EXCLUDED.normal_total`,
           [l.id, l.batchNumber||l.batch_number,
            // labelNumber may be "OL-15" (orange) or a number — always store as integer
-           (()=>{ const n=l.labelNumber||l.label_number; if(n==null) return null; const s=String(n).replace(/^OL-/i,''); return parseInt(s)||null; })(),
+           (()=>{ const n=l.labelNumber??l.label_number; if(n==null) return null; const s=String(n).replace(/^OL-/i,''); const p=parseInt(s); return isNaN(p)?null:p; })(),
            l.size, l.qty, l.isPartial?1:0, l.isOrange?1:0, l.parentLabelId||null,
            l.customer||null, l.colour||null, l.pcCode||null, l.poNumber||null,
            l.machineId||null, l.printingMatter||l.printMatter||null,
@@ -12739,7 +12775,7 @@ app.post('/api/tracking/labels', async (req, res) => {
          is_excess,excess_num,excess_total,normal_total)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       labelsToWrite.forEach(l => stmt.run(
-        l.id, l.batchNumber||l.batch_number, parseLabelNum(l.labelNumber||l.label_number),
+        l.id, l.batchNumber||l.batch_number, parseLabelNum(l.labelNumber??l.label_number),
         l.size, l.qty, l.isPartial?1:0, l.isOrange?1:0, l.parentLabelId||null,
         l.customer||null, l.colour||null, l.pcCode||null, l.poNumber||null,
         l.machineId||null, l.printingMatter||l.printMatter||null,

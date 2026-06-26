@@ -531,7 +531,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v44ZL</p>
+      <p>Planning Suite v3.0 · build v44ZRD1</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -12260,9 +12260,13 @@ function deletePcCode(size, code) {
 function openAssignCustomerModal(orderId) {
   const ord = state.orders.find(o => o.id === orderId);
   if (!ord) return;
-  // Box count: prefer label-count if known, else order's totalBoxes, else derive from qty
-  const labelBoxes = parseInt(ord.totalBoxes) || null;
-  const totalBoxes = labelBoxes || Math.max(1, Math.round((ord.qty||0) / Math.max(0.01, (ord.qty||1)/Math.max(1,parseInt(ord.totalBoxes)||1))));
+  // v44ZP: derive box capacity from gross qty via pack size. A W/O batch has no per-box labels yet,
+  // so the old fallback `round(qty/(qty/totalBoxes))` collapsed to 1 whenever totalBoxes was unset →
+  // "exceeds boxes in batch (1)". Use the canonical ceil(qty*100000/packSize) (mirrors line ~2779),
+  // and the LARGER of (qty-derived, stored totalBoxes) so the full ordered qty can always be split.
+  const _ps = (state.packSizes && state.packSizes[ord.size]) || 100000;
+  const _boxesFromQty = Math.ceil((Number(ord.qty)||0) * 100000 / _ps);
+  const totalBoxes = Math.max(1, _boxesFromQty, parseInt(ord.totalBoxes) || 0);
 
   // Initialise a single empty line to start
   window._v40_woSplitLines = [{ customer: '', billTo: '', poNumber: '', zone: '', boxes: '', suffix: 'A', sapDocEntry: '', sapDocNum: '' }];

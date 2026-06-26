@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sunloc Tracking Suite v1.0 · build v44ZRD2</title>
+<title>Sunloc Tracking Suite v1.0 · build v44ZRD3</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
@@ -579,7 +579,7 @@ input[type=number]{font-family:var(--mono)}
   <div class="login-card">
     <div class="login-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v44ZRD2</p>
+      <p>Tracking Suite v1.0 · build v44ZRD3</p>
     </div>
     <div class="form-group">
       <label>Select Department / Role</label>
@@ -610,7 +610,7 @@ input[type=number]{font-family:var(--mono)}
 <div id="sidebar">
     <div class="sb-logo">
       <h1>SUNLOC</h1>
-      <p>Tracking Suite v1.0 · build v44ZRD2</p>
+      <p>Tracking Suite v1.0 · build v44ZRD3</p>
     </div>
     <div class="sb-user">
       <div class="sb-avatar" id="sb-avatar">A</div>
@@ -2904,7 +2904,7 @@ function generateZPL(label, batch){
 ^XZ`;
   }
 
-  // ── MAIN FG LABEL — v7 PRE-PRINTED DESIGN (v44ZRD2) ─────────────────────
+  // ── MAIN FG LABEL — v7 PRE-PRINTED DESIGN (v44ZRD3) ─────────────────────
   // The colour background, frames, field key-tabs, Q·RELEASE stamp and footer are PRE-PRINTED on the
   // BOPP stock by the converter. This ZPL overprints ONLY the variable data in black resin at the
   // W1–W14 coordinates from the v7 Tech Spec (Sections 15/16); coordinates are dots @ 203 dpi (8/mm).
@@ -2931,8 +2931,9 @@ function generateZPL(label, batch){
   // (y_top = 150 − specY − boxH) is now applied consistently and each value is vertically
   // centred in its white box. ^LL corrected 1218→1200 (150 mm die). Font kept as built-in ^A0N.
   // SHIFT_Y nudges ALL overprinted fields together (dots; + = down, − = up) so IT can fine-
-  // register to the pre-printed stock after one test print without editing individual rows.
-  const SHIFT_Y = 0;
+  // register to the pre-printed stock without editing individual rows. 8 dots = 1 mm.
+  // v44ZRD3: calibrated to −88 (−11 mm) — the v44ZRD2 print landed one band low across the board.
+  const SHIFT_Y = -88;
   const _y = n => n + SHIFT_Y;
 
   return `^XA

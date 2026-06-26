@@ -2932,9 +2932,12 @@ function generateZPL(label, batch){
   // centred in its white box. ^LL corrected 1218→1200 (150 mm die). Font kept as built-in ^A0N.
   // SHIFT_Y nudges ALL overprinted fields together (dots; + = down, − = up) so IT can fine-
   // register to the pre-printed stock without editing individual rows. 8 dots = 1 mm.
-  // v44ZRD3: calibrated to −88 (−11 mm) — the v44ZRD2 print landed one band low across the board.
-  const SHIFT_Y = -88;
-  const _y = n => n + SHIFT_Y;
+  // SHIFT_X nudges ALL fields left/right (+= right, -= left). Both are user-calibratable via Settings.
+  // v44ZRD3: calibrated to −88 Y (−11 mm). v44ZRD4: added SHIFT_X for horizontal registration.
+  const SHIFT_Y = parseInt(localStorage.getItem('sunloc_label_shift_y') || '-88', 10);
+  const SHIFT_X = parseInt(localStorage.getItem('sunloc_label_shift_x') || '0', 10);
+  const _y = n => Math.max(0, n + SHIFT_Y);
+  const _x = n => Math.max(0, n + SHIFT_X);
 
   return `^XA
 ^MTT
@@ -2945,17 +2948,17 @@ function generateZPL(label, batch){
 ^LH0,0
 ^MNY
 ^CI28
-^FO280,${_y(292)}^A0N,26,24^FD${cL1}^FS
-^FO280,${_y(326)}^A0N,22,20^FD${cL2}^FS
-^FO248,${_y(473)}^A0N,30,28^FD${qtyTxt}^FS
-^FO648,${_y(472)}^A0N,32,30^FD${batchNo}^FS
-^FO248,${_y(553)}^A0N,30,28^FD${label.size}^FS
-^FO648,${_y(553)}^A0N,30,28^FD${containerNew}^FS
-^FO248,${_y(633)}^A0N,30,28^FD${colourCap}^FS
-^FO248,${_y(713)}^A0N,30,28^FD${colourBody}^FS
-^FO248,${_y(836)}^A0N,24,22^FD${pcCode}^FS
-^FO648,${_y(793)}^A0N,30,28^FD${mfgDate}^FS
-^FO96,${_y(912)}^BQN,2,5^FDLA,${_qr}^FS
+^FO${_x(280)},${_y(292)}^A0N,26,24^FD${cL1}^FS
+^FO${_x(280)},${_y(326)}^A0N,22,20^FD${cL2}^FS
+^FO${_x(248)},${_y(473)}^A0N,30,28^FD${qtyTxt}^FS
+^FO${_x(648)},${_y(472)}^A0N,32,30^FD${batchNo}^FS
+^FO${_x(248)},${_y(553)}^A0N,30,28^FD${label.size}^FS
+^FO${_x(648)},${_y(553)}^A0N,30,28^FD${containerNew}^FS
+^FO${_x(248)},${_y(633)}^A0N,30,28^FD${colourCap}^FS
+^FO${_x(248)},${_y(713)}^A0N,30,28^FD${colourBody}^FS
+^FO${_x(248)},${_y(836)}^A0N,24,22^FD${pcCode}^FS
+^FO${_x(648)},${_y(793)}^A0N,30,28^FD${mfgDate}^FS
+^FO${_x(96)},${_y(912)}^BQN,2,5^FDLA,${_qr}^FS
 ^XZ`;
 }
 
@@ -12847,6 +12850,28 @@ function renderSettings(){
       <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
     </div>
     <div class="card">
+      <div class="card-title">🎯 Label Print Calibration</div>
+      <div class="text-sm text-muted mb-8">Adjust where overprinted data lands on the pre-printed BOPP stock. 8 dots = 1 mm. Save, then reprint a test label.</div>
+      <div class="form-row cols-2">
+        <div class="form-group">
+          <label>Vertical Shift — SHIFT_Y (dots)</label>
+          <input type="number" id="s-shift-y" value="${localStorage.getItem('sunloc_label_shift_y')||'-88'}" step="8" style="font-family:var(--mono)">
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">+ = move DOWN &nbsp;·&nbsp; − = move UP &nbsp;·&nbsp; 8 dots = 1 mm</div>
+        </div>
+        <div class="form-group">
+          <label>Horizontal Shift — SHIFT_X (dots)</label>
+          <input type="number" id="s-shift-x" value="${localStorage.getItem('sunloc_label_shift_x')||'0'}" step="8" style="font-family:var(--mono)">
+          <div style="font-size:11px;color:var(--text3);margin-top:4px">+ = move RIGHT &nbsp;·&nbsp; − = move LEFT &nbsp;·&nbsp; 8 dots = 1 mm</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="saveLabelCalibration()">💾 Save Calibration</button>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('s-shift-y').value='-88';document.getElementById('s-shift-x').value='0';saveLabelCalibration()">↩ Reset to Default</button>
+        <span id="label-cal-msg" style="font-size:11px;color:var(--green)"></span>
+      </div>
+      <div class="alert alert-info" style="font-size:11px;margin-top:10px">Current: SHIFT_Y = <b>${localStorage.getItem('sunloc_label_shift_y')||'-88'}</b> &nbsp;·&nbsp; SHIFT_X = <b>${localStorage.getItem('sunloc_label_shift_x')||'0'}</b></div>
+    </div>
+    <div class="card">
       <div class="card-title">📦 Pack Size Master</div>
       <div class="tbl-wrap tbl-sticky"><table>
         <thead><tr><th>Size</th><th>Qty per Box (Lakhs)</th></tr></thead>
@@ -13063,6 +13088,15 @@ function savePrinterUrl(){
   const url=document.getElementById('s-printer')?.value.trim()||'';
   localStorage.setItem('sunloc_printer_url',url);
   alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
+}
+
+function saveLabelCalibration(){
+  const sy = parseInt(document.getElementById('s-shift-y')?.value||'-88',10);
+  const sx = parseInt(document.getElementById('s-shift-x')?.value||'0',10);
+  localStorage.setItem('sunloc_label_shift_y', sy);
+  localStorage.setItem('sunloc_label_shift_x', sx);
+  const msg = document.getElementById('label-cal-msg');
+  if(msg){ msg.textContent = `✅ Saved — Y:${sy}  X:${sx}`; setTimeout(()=>{ msg.textContent=''; renderSettings(); },2000); }
 }
 
 // v37I.1: Settings persistence for FG Stock Aging thresholds.

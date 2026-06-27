@@ -2923,8 +2923,24 @@ function generateZPL(label, batch){
   const _qr     = label.qrData || generateQRData(label);
   // Customer block: line 1 = ship-to/customer (≤32 chars), line 2 = bill-to when different.
   const cName   = (customerText || '').toString();
-  const cL1     = cName.length > 32 ? cName.slice(0, 32) : cName;
-  const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo : '';
+  const cL1     = cName.length > 38 ? cName.slice(0, 38) : cName;
+  const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo.slice(0,38) : '';
+
+  // Field max-char limits to prevent overflow into adjacent black zones
+  const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
+
+  // Auto font-size: shrink for long text to fit white box
+  // Customer box width ~530 dots; Colour box ~200 dots
+  const _custFont = cL1.length > 28 ? '28,26' : '38,36';
+  const _capFont  = (colourCap||'').length  > 12 ? '28,26' : '38,36';
+  const _bodyFont = (colourBody||'').length > 12 ? '28,26' : '38,36';
+  // Auto font size: shrink font for long values to fit white box
+  const _font = (val, normalSize, normalWidth, threshold, smallSize, smallWidth) => {
+    return String(val||'').length > threshold ? `${smallSize},${smallWidth}` : `${normalSize},${normalWidth}`;
+  };
+  const cL1Font  = _font(cL1,  38, 36, 22, 28, 26);  // Customer: shrink if >22 chars
+  const capFont  = _font(colourCap,  38, 36, 12, 28, 26);  // Colour Cap: shrink if >12 chars
+  const bodyFont = _font(colourBody, 38, 36, 12, 28, 26);  // Colour Body: shrink if >12 chars
 
   // v44ZRD5: Coordinates remeasured from blank label photo.
   // Label: 102mm W x 150mm H, 203dpi (8 dots/mm). ^PW816 = 102mm, ^LL1200 = 150mm.
@@ -2956,16 +2972,16 @@ function generateZPL(label, batch){
 ^MNY
 ^PON
 ^CI28
-^FO${_x(280)},${_y(169)}^A0N,38,36^FD${cL1}^FS
-^FO${_x(280)},${_y(200)}^A0N,30,28^FD${cL2}^FS
-^FO${_x(283)},${_y(303)}^A0N,38,36^FD${qtyTxt}^FS
-^FO${_x(634)},${_y(303)}^A0N,38,36^FD${batchNo}^FS
-^FO${_x(287)},${_y(407)}^A0N,38,36^FD${label.size}^FS
-^FO${_x(632)},${_y(406)}^A0N,38,36^FD${containerNew}^FS
-^FO${_x(279)},${_y(534)}^A0N,38,36^FD${colourCap}^FS
-^FO${_x(283)},${_y(632)}^A0N,38,36^FD${colourBody}^FS
-^FO${_x(293)},${_y(780)}^A0N,38,36^FD${pcCode}^FS
-^FO${_x(631)},${_y(766)}^A0N,38,36^FD${mfgDate}^FS
+^FO${_x(280)},${_y(169)}^A0N,${_custFont}^FD${_t(cL1,38)}^FS
+^FO${_x(280)},${_y(200)}^A0N,30,28^FD${_t(cL2,38)}^FS
+^FO${_x(283)},${_y(303)}^A0N,38,36^FD${_t(qtyTxt,12)}^FS
+^FO${_x(634)},${_y(303)}^A0N,38,36^FD${_t(batchNo,10)}^FS
+^FO${_x(287)},${_y(407)}^A0N,38,36^FD${_t(label.size,10)}^FS
+^FO${_x(632)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
+^FO${_x(279)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
+^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
+^FO${_x(293)},${_y(780)}^A0N,38,36^FD${_t(pcCode,10)}^FS
+^FO${_x(631)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
 ^FO${_x(70)},${_y(888)}^BQN,2,5^FDLA,${_qr}^FS
 ^XZ`;
 }

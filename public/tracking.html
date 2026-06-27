@@ -2930,8 +2930,8 @@ function generateZPL(label, batch){
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
 
   // Auto font-size: shrink for long text to fit white box
-  // Customer box width ~530 dots; Colour box ~200 dots
-  const _custFont = cL1.length > 28 ? '28,26' : '38,36';
+  // Customer box width ~530 dots at 203dpi
+  const _custFont = cL1.length > 30 ? (cL1.length > 36 ? '22,20' : '28,26') : '38,36';
   const _capFont  = (colourCap||'').length  > 12 ? '28,26' : '38,36';
   const _bodyFont = (colourBody||'').length > 12 ? '28,26' : '38,36';
   // Auto font size: shrink font for long values to fit white box

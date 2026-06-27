@@ -2923,15 +2923,15 @@ function generateZPL(label, batch){
   const _qr     = label.qrData || generateQRData(label);
   // Customer block: line 1 = ship-to/customer (≤32 chars), line 2 = bill-to when different.
   const cName   = (customerText || '').toString();
-  const cL1     = cName.length > 38 ? cName.slice(0, 38) : cName;
-  const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo.slice(0,38) : '';
+  const cL1     = cName.length > 42 ? cName.slice(0, 42) : cName;
+  const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo.slice(0,42) : '';
 
   // Field max-char limits to prevent overflow into adjacent black zones
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
 
   // Auto font-size: shrink for long text to fit white box
   // Customer box width ~530 dots at 203dpi
-  const _custFont = cL1.length > 34 ? (cL1.length > 38 ? '22,20' : '26,24') : '32,30';
+  const _custFont = cL1.length > 34 ? (cL1.length > 40 ? '24,22' : '28,26') : '34,32';
   const _capFont  = (colourCap||'').length  > 12 ? '28,26' : '38,36';
   const _bodyFont = (colourBody||'').length > 12 ? '28,26' : '38,36';
   // Auto font size: shrink font for long values to fit white box
@@ -2972,8 +2972,8 @@ function generateZPL(label, batch){
 ^MNY
 ^PON
 ^CI28
-^FO${_x(280)},${_y(169)}^A0N,${_custFont}^FD${_t(cL1,38)}^FS
-^FO${_x(280)},${_y(200)}^A0N,30,28^FD${_t(cL2,38)}^FS
+^FO${_x(280)},${_y(169)}^A0N,${_custFont}^FD${_t(cL1,42)}^FS
+^FO${_x(280)},${_y(200)}^A0N,30,28^FD${_t(cL2,42)}^FS
 ^FO${_x(283)},${_y(303)}^A0N,38,36^FD${_t(qtyTxt,12)}^FS
 ^FO${_x(634)},${_y(303)}^A0N,38,36^FD${_t(batchNo,10)}^FS
 ^FO${_x(287)},${_y(407)}^A0N,38,36^FD${_t(label.size,10)}^FS

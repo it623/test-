@@ -2535,7 +2535,7 @@ function generateLabels(batchNo, count, isPartialLast, partialQty, grossWt='', n
       poNumber:batch.poNumber, machineId:batch.machineId,
       startDate:batch.startDate||null, printMatter:batch.printMatter||batch.printingMatter||null,
       isPrinted:batch.isPrinted||false,
-      grossWt:grossWt||'', nettWt:nettWt||'',
+      grossWt:grossWt||batch?.grossWt||'', nettWt:nettWt||batch?.nettWt||'',
       generated:now(), printed:false, voided:false, printedAt:null,
       qrData: '' // filled after
     };
@@ -3122,8 +3122,9 @@ function generateZPL(label, batch){
   const botY  = 1180;          // fixed bottom rule
   // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
   const pcCode   = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
-  const grossWt  = label.grossWt ? String(label.grossWt) : '';
-  const nettWt   = label.nettWt  ? String(label.nettWt)  : '';
+  // grossWt/nettWt: label-level first, then batch-level fallback
+  const grossWt  = String(label.grossWt || batch?.grossWt || _b?.grossWt || '');
+  const nettWt   = String(label.nettWt  || batch?.nettWt  || _b?.nettWt  || '');
 
   // ── PRE-PRINTED BOPP STOCK ZPL (102mm x 150mm, 203dpi) ──────────────
   // Calibrated coordinates for HPRT HT800 on pre-printed BOPP label stock.
@@ -3137,7 +3138,7 @@ function generateZPL(label, batch){
   const _x = n => Math.max(0, n + SHIFT_X);
 
   // Auto font-size for customer name — 3 tiers based on char count
-  const _custFont = cL1.length > 24 ? (cL1.length > 32 ? '28,26' : '32,30') : '38,36';
+  const _custFont = cL1.length > 26 ? (cL1.length > 34 ? '30,28' : '34,32') : '40,38';
   const _capFont  = (colourCap||'').length  > 8 ? (colourCap.length > 14 ? '24,22' : '28,26') : '38,36';
   const _bodyFont = (colourBody||'').length > 8 ? (colourBody.length > 14 ? '24,22' : '28,26') : '38,36';
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
@@ -3161,11 +3162,11 @@ function generateZPL(label, batch){
 ^FO${_x(315)},${_y(409)}^A0N,38,36^FD${_t(label.size,10)}^FS
 ^FO${_x(660)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
 ^FO${_x(283)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
-^FO${_x(655)},${_y(534)}^A0N,38,36^FD${_t(grossWt,10)}^FS
+^FO${_x(670)},${_y(534)}^A0N,38,36^FD${_t(grossWt,10)}^FS
 ^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
-^FO${_x(655)},${_y(632)}^A0N,38,36^FD${_t(nettWt,10)}^FS
+^FO${_x(670)},${_y(632)}^A0N,38,36^FD${_t(nettWt,10)}^FS
 ^FO${_x(299)},${_y(785)}^A0N,38,36^FD${_t(pcCode,10)}^FS
-^FO${_x(639)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
+^FO${_x(638)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
 ^FO${_x(80)},${_y(896)}^BQN,2,5^FDLA,${label.qrData}^FS
 ^XZ`;
 }
@@ -4183,11 +4184,21 @@ function viewLabel(labelId){
 function editLabelQty(labelId){
   const l = state.labels.find(x=>x.id===labelId);
   if(!l) return;
-  openModal('Edit Label Qty — #'+Math.abs(l.labelNumber||0), 'Change qty only. Updated qty will print on the label when reprinted.', `
+  openModal('Edit Label — #'+Math.abs(l.labelNumber||0), 'Updated values will print on the label when reprinted.', `
     <div class="form-group">
       <label>Current Qty: <strong>${fmt(l.qty)}L</strong></label>
       <input type="number" id="edit-qty-input" value="${l.qty}" min="0.01" step="0.01" style="font-size:16px;font-weight:700;margin-top:8px" />
       <div style="font-size:11px;color:var(--text3);margin-top:4px">Enter new quantity in Lakhs</div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label>Gross Wt (kg)</label>
+        <input type="number" id="edit-gross-wt" value="${l.grossWt||''}" step="0.01" placeholder="e.g. 12.50" />
+      </div>
+      <div class="form-group">
+        <label>Nett Wt (kg)</label>
+        <input type="number" id="edit-nett-wt" value="${l.nettWt||''}" step="0.01" placeholder="e.g. 11.00" />
+      </div>
     </div>
   `, [
     {label:'Cancel', cls:'btn-secondary', fn:'closeModal()'},
@@ -4201,12 +4212,23 @@ function saveLabelQtyEdit(labelId){
   const l = state.labels.find(x=>x.id===labelId);
   if(!l) return;
   l.qty = newQty;
+  const newGrossWt = document.getElementById('edit-gross-wt')?.value || '';
+  const newNettWt  = document.getElementById('edit-nett-wt')?.value  || '';
+  l.grossWt = newGrossWt || l.grossWt || '';
+  l.nettWt  = newNettWt  || l.nettWt  || '';
   l.printed = false;
+  // Apply same WT to ALL labels of this batch (all boxes same weight)
+  if(newGrossWt || newNettWt){
+    state.labels.filter(x=>x.batchNumber===l.batchNumber&&!x.voided&&!x.isOrange).forEach(x=>{
+      if(newGrossWt) x.grossWt = newGrossWt;
+      if(newNettWt)  x.nettWt  = newNettWt;
+    });
+  }
   saveLocal();
-  pushToServer('/api/tracking/label-update', {labelId, qty: newQty});
+  pushToServer('/api/tracking/label-update', {labelId, qty: newQty, grossWt: l.grossWt, nettWt: l.nettWt});
   closeModal();
   renderLabels();
-  toast('✅ Qty updated — label marked for reprint', 'var(--green)', 3000);
+  toast('✅ Label updated — WT applied to all boxes of this batch', 'var(--green)', 3000);
 }
 
 function unprintedOrangeBatch(batchNumber){

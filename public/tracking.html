@@ -3138,7 +3138,7 @@ function generateZPL(label, batch){
   const _x = n => Math.max(0, n + SHIFT_X);
 
   // Auto font-size for customer name — 3 tiers based on char count
-  const _custFont = cL1.length > 20 ? (cL1.length > 30 ? '30,28' : '34,32') : '40,38';
+  const _custFont = cL1.length > 20 ? (cL1.length > 30 ? '32,30' : '36,34') : '40,38';
   const _capFont  = (colourCap||'').length  > 8 ? (colourCap.length > 14 ? '24,22' : '28,26') : '38,36';
   const _bodyFont = (colourBody||'').length > 8 ? (colourBody.length > 14 ? '24,22' : '28,26') : '38,36';
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };

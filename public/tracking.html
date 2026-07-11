@@ -2925,43 +2925,27 @@ function generateZPL(label, batch){
   const cName   = (customerText || '').toString();
   const cL1     = cName.length > 42 ? cName.slice(0, 42) : cName;
   const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo.slice(0,42) : '';
+  const cL2     = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo : '';
 
-  // Field max-char limits to prevent overflow into adjacent black zones
-  const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
+  // v44ZRD2: W1–W14 overprint coordinates rebuilt from the v7 Tech Spec white-zone table.
+  // Spec measures from the BOTTOM-LEFT corner (Y-up); ZPL ^FO is TOP-LEFT (Y-down). The flip
+  // (y_top = 150 − specY − boxH) is now applied consistently and each value is vertically
+  // centred in its white box. ^LL corrected 1218→1200 (150 mm die). Font kept as built-in ^A0N.
+  // SHIFT_Y nudges ALL overprinted fields together (dots; + = down, − = up) so IT can fine-
+  // register to the pre-printed stock without editing individual rows. 8 dots = 1 mm.
+  // v44ZRD3: calibrated to −88 (−11 mm) — the v44ZRD2 print landed one band low across the board.
+  const SHIFT_Y = -88;
+  const _y = n => n + SHIFT_Y;
 
-  // Auto font-size: shrink for long text to fit white box
-  // Customer box width ~530 dots at 203dpi
+  // Auto font-size for customer name
   const _custFont = cL1.length > 34 ? (cL1.length > 40 ? '24,22' : '28,26') : '34,32';
   const _capFont  = (colourCap||'').length  > 12 ? '28,26' : '38,36';
   const _bodyFont = (colourBody||'').length > 12 ? '28,26' : '38,36';
-  // Auto font size: shrink font for long values to fit white box
-  const _font = (val, normalSize, normalWidth, threshold, smallSize, smallWidth) => {
-    return String(val||'').length > threshold ? `${smallSize},${smallWidth}` : `${normalSize},${normalWidth}`;
-  };
-  const cL1Font  = _font(cL1,  38, 36, 22, 28, 26);  // Customer: shrink if >22 chars
-  const capFont  = _font(colourCap,  38, 36, 12, 28, 26);  // Colour Cap: shrink if >12 chars
-  const bodyFont = _font(colourBody, 38, 36, 12, 28, 26);  // Colour Body: shrink if >12 chars
-
-  // v44ZRD5: Coordinates remeasured from blank label photo.
-  // Label: 102mm W x 150mm H, 203dpi (8 dots/mm). ^PW816 = 102mm, ^LL1200 = 150mm.
-  // All ^FO values are absolute dots from top-left of print head.
-  // SHIFT_X / SHIFT_Y allow fine registration per-printer via Settings (8 dots = 1mm).
+  const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
   const SHIFT_Y = parseInt(localStorage.getItem('sunloc_label_shift_y') || '0', 10);
   const SHIFT_X = parseInt(localStorage.getItem('sunloc_label_shift_x') || '0', 10);
   const _y = n => Math.max(0, n + SHIFT_Y);
   const _x = n => Math.max(0, n + SHIFT_X);
-
-  // Field positions measured from blank label (dots @ 203dpi):
-  // Left data column white boxes start at X≈200, right column at X≈560
-  // Row Y centres (top of text, accounting for font height ~28dots):
-  //   Customer  : Y=175  (tall double-row box)
-  //   Quantity  : Y=315  / Batch No : Y=315
-  //   Size      : Y=400  / Container: Y=400 (also Y=435 for second line)
-  //   ColourCap : Y=490  / GrossWt  : (blank, not printed)
-  //   ColourBody: Y=575  / NettWt   : (blank, not printed)
-  //   Printed   : Y=655  / MfgDate  : Y=670
-  //   PcCode    : Y=720
-  //   QR        : Y=790  X=50
 
   return `^XA
 ^PR4
@@ -2976,13 +2960,13 @@ function generateZPL(label, batch){
 ^FO${_x(280)},${_y(200)}^A0N,30,28^FD${_t(cL2,42)}^FS
 ^FO${_x(283)},${_y(303)}^A0N,38,36^FD${_t(qtyTxt,12)}^FS
 ^FO${_x(634)},${_y(303)}^A0N,38,36^FD${_t(batchNo,10)}^FS
-^FO${_x(287)},${_y(407)}^A0N,38,36^FD${_t(label.size,10)}^FS
-^FO${_x(632)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
-^FO${_x(279)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
+^FO${_x(287)},${_y(409)}^A0N,38,36^FD${_t(label.size,10)}^FS
+^FO${_x(637)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
+^FO${_x(281)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
 ^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
-^FO${_x(293)},${_y(780)}^A0N,38,36^FD${_t(pcCode,10)}^FS
-^FO${_x(631)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
-^FO${_x(70)},${_y(888)}^BQN,2,5^FDLA,${_qr}^FS
+^FO${_x(293)},${_y(782)}^A0N,38,36^FD${_t(pcCode,10)}^FS
+^FO${_x(634)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
+^FO${_x(73)},${_y(891)}^BQN,2,5^FDLA,${_qr}^FS
 ^XZ`;
 }
 
@@ -12874,28 +12858,6 @@ function renderSettings(){
       <button class="btn btn-primary btn-sm" onclick="savePrinterUrl()">Save</button>
     </div>
     <div class="card">
-      <div class="card-title">🎯 Label Print Calibration</div>
-      <div class="text-sm text-muted mb-8">Adjust where overprinted data lands on the pre-printed BOPP stock. 8 dots = 1 mm. Save, then reprint a test label.</div>
-      <div class="form-row cols-2">
-        <div class="form-group">
-          <label>Vertical Shift — SHIFT_Y (dots)</label>
-          <input type="number" id="s-shift-y" value="${localStorage.getItem('sunloc_label_shift_y')||'-88'}" step="8" style="font-family:var(--mono)">
-          <div style="font-size:11px;color:var(--text3);margin-top:4px">+ = move DOWN &nbsp;·&nbsp; − = move UP &nbsp;·&nbsp; 8 dots = 1 mm</div>
-        </div>
-        <div class="form-group">
-          <label>Horizontal Shift — SHIFT_X (dots)</label>
-          <input type="number" id="s-shift-x" value="${localStorage.getItem('sunloc_label_shift_x')||'0'}" step="8" style="font-family:var(--mono)">
-          <div style="font-size:11px;color:var(--text3);margin-top:4px">+ = move RIGHT &nbsp;·&nbsp; − = move LEFT &nbsp;·&nbsp; 8 dots = 1 mm</div>
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-primary btn-sm" onclick="saveLabelCalibration()">💾 Save Calibration</button>
-        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('s-shift-y').value='-88';document.getElementById('s-shift-x').value='0';saveLabelCalibration()">↩ Reset to Default</button>
-        <span id="label-cal-msg" style="font-size:11px;color:var(--green)"></span>
-      </div>
-      <div class="alert alert-info" style="font-size:11px;margin-top:10px">Current: SHIFT_Y = <b>${localStorage.getItem('sunloc_label_shift_y')||'-88'}</b> &nbsp;·&nbsp; SHIFT_X = <b>${localStorage.getItem('sunloc_label_shift_x')||'0'}</b></div>
-    </div>
-    <div class="card">
       <div class="card-title">📦 Pack Size Master</div>
       <div class="tbl-wrap tbl-sticky"><table>
         <thead><tr><th>Size</th><th>Qty per Box (Lakhs)</th></tr></thead>
@@ -13112,15 +13074,6 @@ function savePrinterUrl(){
   const url=document.getElementById('s-printer')?.value.trim()||'';
   localStorage.setItem('sunloc_printer_url',url);
   alert(url?'✅ Printer URL saved.':'✅ ZPL download mode activated.');
-}
-
-function saveLabelCalibration(){
-  const sy = parseInt(document.getElementById('s-shift-y')?.value||'-88',10);
-  const sx = parseInt(document.getElementById('s-shift-x')?.value||'0',10);
-  localStorage.setItem('sunloc_label_shift_y', sy);
-  localStorage.setItem('sunloc_label_shift_x', sx);
-  const msg = document.getElementById('label-cal-msg');
-  if(msg){ msg.textContent = `✅ Saved — Y:${sy}  X:${sx}`; setTimeout(()=>{ msg.textContent=''; renderSettings(); },2000); }
 }
 
 // v37I.1: Settings persistence for FG Stock Aging thresholds.

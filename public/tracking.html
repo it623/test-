@@ -3122,8 +3122,8 @@ function generateZPL(label, batch){
   const botY  = 1180;          // fixed bottom rule
   // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
   const pcCode   = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
-  const grossWt  = label.grossWt ? String(label.grossWt)+' kg' : '';
-  const nettWt   = label.nettWt  ? String(label.nettWt)+' kg'  : '';
+  const grossWt  = label.grossWt ? String(label.grossWt) : '';
+  const nettWt   = label.nettWt  ? String(label.nettWt)  : '';
 
   // ── PRE-PRINTED BOPP STOCK ZPL (102mm x 150mm, 203dpi) ──────────────
   // Calibrated coordinates for HPRT HT800 on pre-printed BOPP label stock.
@@ -3137,7 +3137,7 @@ function generateZPL(label, batch){
   const _x = n => Math.max(0, n + SHIFT_X);
 
   // Auto font-size for customer name — 3 tiers based on char count
-  const _custFont = cL1.length > 24 ? (cL1.length > 32 ? '24,22' : '28,26') : '34,32';
+  const _custFont = cL1.length > 24 ? (cL1.length > 32 ? '28,26' : '32,30') : '38,36';
   const _capFont  = (colourCap||'').length  > 8 ? (colourCap.length > 14 ? '24,22' : '28,26') : '38,36';
   const _bodyFont = (colourBody||'').length > 8 ? (colourBody.length > 14 ? '24,22' : '28,26') : '38,36';
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
@@ -3161,11 +3161,11 @@ function generateZPL(label, batch){
 ^FO${_x(315)},${_y(409)}^A0N,38,36^FD${_t(label.size,10)}^FS
 ^FO${_x(660)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
 ^FO${_x(283)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
-^FO${_x(640)},${_y(534)}^A0N,32,30^FD${_t(grossWt,10)}^FS
+^FO${_x(655)},${_y(534)}^A0N,38,36^FD${_t(grossWt,10)}^FS
 ^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
-^FO${_x(640)},${_y(632)}^A0N,32,30^FD${_t(nettWt,10)}^FS
+^FO${_x(655)},${_y(632)}^A0N,38,36^FD${_t(nettWt,10)}^FS
 ^FO${_x(299)},${_y(785)}^A0N,38,36^FD${_t(pcCode,10)}^FS
-^FO${_x(640)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
+^FO${_x(639)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
 ^FO${_x(80)},${_y(896)}^BQN,2,5^FDLA,${label.qrData}^FS
 ^XZ`;
 }

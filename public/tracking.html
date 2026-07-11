@@ -3138,7 +3138,7 @@ function generateZPL(label, batch){
   const _x = n => Math.max(0, n + SHIFT_X);
 
   // Auto font-size for customer name — 3 tiers based on char count
-  const _custFont = cL1.length > 35 ? '26,24' : cL1.length > 28 ? '32,30' : cL1.length > 20 ? '36,34' : '40,38';
+  const _custFont = cL1.length > 35 ? '28,26' : cL1.length > 28 ? '32,30' : cL1.length > 20 ? '36,34' : '40,38';
   const _capFont  = (colourCap||'').length  > 8 ? (colourCap.length > 14 ? '24,22' : '28,26') : '38,36';
   const _bodyFont = (colourBody||'').length > 8 ? (colourBody.length > 14 ? '24,22' : '28,26') : '38,36';
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
@@ -3162,7 +3162,7 @@ function generateZPL(label, batch){
 ^FO${_x(315)},${_y(409)}^A0N,38,36^FD${_t(label.size,10)}^FS
 ^FO${_x(660)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
 ^FO${_x(283)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
-^FO${_x(668)},${_y(534)}^A0N,38,36^FD${_t(grossWt,10)}^FS
+^FO${_x(668)},${_y(530)}^A0N,38,36^FD${_t(grossWt,10)}^FS
 ^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
 ^FO${_x(668)},${_y(632)}^A0N,38,36^FD${_t(nettWt,10)}^FS
 ^FO${_x(299)},${_y(785)}^A0N,38,36^FD${_t(pcCode,10)}^FS

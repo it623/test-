@@ -182,17 +182,38 @@ async function check_qty_reconciliation(ctx) {
     (!o.endDate || String(o.endDate).slice(0,10) >= cutoff)
   );
 
+  // v45T root fix (Rahul, 2-Jul): a Closed-Batches gross override supersedes the raw
+  // production_actuals sum EVERYWHERE gross is consumed — including these integrity checks.
+  // Without this, a batch corrected via the DPR Closed Batches editor kept re-firing
+  // qty_mismatch_plan_dpr against the stale raw sum (e.g. 26ZC086: overridden 22.15→28.65,
+  // plan matched at 28.65, yet the alert still said "vs DPR 22.15"). One preload per sweep.
+  const _ovMap45t = {};
+  try {
+    const _ovRows = await _query(ctx, `SELECT batch_number, gross_lakhs FROM batch_gross_override`, []);
+    for (const r of (_ovRows || [])) { if (r.batch_number != null) _ovMap45t[r.batch_number] = parseFloat(r.gross_lakhs) || 0; }
+  } catch (e) { /* table absent on very first boot — raw sums apply */ }
+
   for (const ord of orders) {
     const batchNumber = ord.batchNumber;
     const planQty  = parseFloat(ord.qty || 0);
     const grossQty = parseFloat(ord.grossQty || (planQty * 1.07 * 1.01 * 1.01));
 
     // DPR sum for this batch
+    // v45A: batch-keyed DPR sum — match the figure the DPR screen, Reports D/E, and the reconcile
+    // toggle all use (_grossByBatch attribution). The prior `OR order_id=?` pulled in rows logged
+    // under a DIFFERENT explicit batch_number after a renumber/split (same order_id), inflating DPR
+    // above the true batch sum — so a batch reconciled to its batch sum still showed gross != DPR and
+    // the qty_mismatch_plan_dpr finding never resolved. Now: rows that carry this batch_number, PLUS
+    // null-batch rows logged against this order (which effectively belong to this batch). Rows bearing
+    // a different explicit batch are excluded, exactly as _grossByBatch attributes them elsewhere.
     const dprRows = await _query(ctx,
-      `SELECT COALESCE(SUM(qty_lakhs),0) AS total FROM production_actuals WHERE batch_number=? OR order_id=?`,
+      `SELECT COALESCE(SUM(qty_lakhs),0) AS total FROM production_actuals WHERE batch_number=? OR (batch_number IS NULL AND order_id=?)`,
       [batchNumber, ord.id]
     );
-    const dprQty = parseFloat(dprRows[0]?.total || 0);
+    // v45T: explicit override (even 0) beats the raw sum — same precedence as effectiveGross().
+    const dprQty = Object.prototype.hasOwnProperty.call(_ovMap45t, batchNumber)
+      ? _ovMap45t[batchNumber]
+      : parseFloat(dprRows[0]?.total || 0);
 
     // AIM scan-in sum (qty per label, no double-count)
     const aimRows = await _query(ctx,
@@ -229,7 +250,11 @@ async function check_qty_reconciliation(ctx) {
     };
 
     // Pair 1: planned vs DPR
-    if (dprQty > 0 && grossQty > 0) {
+    // v46D (confirmed by Ishan): only flag CLOSED batches. A running batch legitimately has DPR <
+    // gross-planned (production isn't finished yet), so firing this on running batches produced a flood
+    // of false criticals (26ZD105/26ZC093/26ZE105... all mid-production). DPR-vs-AIM and the other
+    // actuals-vs-actuals pairs below still run for any batch (those compare same-stage physical qty).
+    if (isClosed && dprQty > 0 && grossQty > 0) {
       const gap = Math.abs(dprQty - grossQty);
       const pct = gap / Math.max(grossQty, dprQty);
       const s = sev(pct);

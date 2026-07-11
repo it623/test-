@@ -531,7 +531,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v44ZRD1</p>
+      <p>Planning Suite v3.0 · build v46D</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -1186,9 +1186,21 @@ const SYNC = (() => {
             // this, a renumbered batch or a moved machine snapped back to the old value on next sync.
             const _editTs = _localOrderChanges[o.id];
             const _protd  = _editTs && (Date.now() - _editTs) < _ORDER_PROTECT_MS;
+            // v44ZZ: a planner gross-override (excess→DPR reconcile) is explicit intent and MUST survive
+            // the 30s dedicated-table merge. grossQty/grossOverride were NOT in the protected list, so
+            // every auto-sync reverted the override back to the auto-calc gross. Take the override from
+            // whichever copy holds it (recent local edit wins inside the 5-min protect window) and FORCE
+            // grossQty to it — exactly as calcOrderSchedule does — so the displayed gross can't snap back
+            // to the formula. Number() guards string-typed blob values.
+            const _ovL = Number(o.grossOverride), _ovD = Number(dbOrd.grossOverride);
+            const _ovLok = Number.isFinite(_ovL) && _ovL > 0, _ovDok = Number.isFinite(_ovD) && _ovD > 0;
+            const _ovEff = _protd ? (_ovLok ? _ovL : null) : (_ovDok ? _ovD : (_ovLok ? _ovL : null));
             // FIX 2: DB status always wins — user set it explicitly
             return {
               ...dbOrd,
+              // v44ZZ: override-aware gross (see above) — never reverted by a stale dedicated-table copy
+              grossOverride: _ovEff,
+              grossQty:      (_ovEff != null) ? _ovEff : (_protd ? o.grossQty : dbOrd.grossQty),
               // v41ZW: preserve recent local batch/machine/zone edits against stale server data
               batchNumber: _protd ? o.batchNumber : dbOrd.batchNumber,
               machineId:   _protd ? o.machineId   : dbOrd.machineId,
@@ -1199,6 +1211,8 @@ const SYNC = (() => {
               closedDate:   dbOrd.closedDate  || o.closedDate,
               remarks:      dbOrd.remarks     || o.remarks,
               actualProd:   (dbOrd.actualProd != null ? dbOrd.actualProd : o.actualProd),
+              dprFirstDate: (dbOrd.dprFirstDate != null ? dbOrd.dprFirstDate : o.dprFirstDate), // v45W
+              dprLastDate:  (dbOrd.dprLastDate  != null ? dbOrd.dprLastDate  : o.dprLastDate),  // v45X
               mismatchFlag: dbOrd.mismatchFlag !== undefined ? dbOrd.mismatchFlag : o.mismatchFlag,
               // Keep manual dates from either source
               startDate:       (o.manualStartDate || o.manualEndDate) ? o.startDate   : dbOrd.startDate,
@@ -1217,7 +1231,11 @@ const SYNC = (() => {
             if (!existingIds.has(dbO.id)) {
               // Mark as coming from DB — these already have print orders in dedicated table
               // so auto-create should NOT run for them
-              state.orders.push({...dbO, _skipAutoPrintOrder: true});
+              // v44ZZ: if this DB order carries a gross-override, force grossQty to it (the blob's
+              // grossQty can be a stale auto-calc value) so it renders consistently from first paint.
+              const _ovAdd = Number(dbO.grossOverride);
+              state.orders.push({...dbO, _skipAutoPrintOrder: true,
+                ...((Number.isFinite(_ovAdd) && _ovAdd > 0) ? { grossQty: _ovAdd } : {})});
               existingIds.add(dbO.id);
               ordersChanged = true;
               console.log('[Orders] Added missing order from DB:', dbO.batchNumber, dbO.machineId);
@@ -1800,6 +1818,14 @@ async function saveState() {
 // HELPERS
 // =============================
 function fmt(n, dec=2) { if (n==null) return '-'; const v=+n; if (!isFinite(v) || isNaN(v)) return '-'; return v.toFixed(dec); }
+// v45T #1.1.2/#1.1.4 → v45U #1: open the SAME in-app batch-tracking modal the Dispatch/Truck Plan
+// uses (showBatchTrackingModal), instead of deep-linking to tracking.html — the deep link landed on
+// the Tracking Suite's login/role screen for anyone without an active tracking session.
+function openBatchTracking(bn){
+  if(!bn) return;
+  try { showBatchTrackingModal(String(bn).trim().toUpperCase()); }
+  catch(e) { window.open('tracking.html#batch=' + encodeURIComponent(String(bn).trim().toUpperCase()), '_blank'); }
+}
 function fmtColour(colour){
   if(!colour) return '-';
   const parts = colour.split('/');
@@ -2422,7 +2448,9 @@ function recalcMachineScheduleQuiet(machineId) {
       ord.startDate = cursor ? new Date(cursor) : histStart; // v41ZM #5: anchor to predecessor end — no gaps/overlaps
     } else if (cursor) {
       // Downstream of an earlier order — start right after it (this is the cascade).
-      ord.startDate = new Date(cursor);
+      // v45X: floor at today — dprLastDate-anchored ends can sit in the past; an UNSTARTED
+      // order can't be planned into the past (started orders keep real starts elsewhere).
+      ord.startDate = new Date(Math.max(new Date(cursor).getTime(), todayD.getTime()));
     } else {
       // First order on the machine, not yet started. Use its saved start, but never schedule
       // into the past with no production behind it.
@@ -2430,10 +2458,41 @@ function recalcMachineScheduleQuiet(machineId) {
       ord.startDate = (savedStart && savedStart >= todayD) ? savedStart : todayD;
     }
 
-    // Determine end date — start + full run duration; the current open order can never be planned to
-    // finish before today (v41ZO #1).
-    ord.endDate = calcEndDate(ord.startDate, fullDays);
-    if (ord.endDate && new Date(ord.endDate) < todayD) ord.endDate = new Date(todayD);
+    // v45W (confirmed by Ishan): a STARTED order's start date anchors to its FIRST actual DPR
+    // production date — planning shows when production really began, not where the plan cursor
+    // happened to sit (26ZG131: DPR 29-Jun vs the cascade's 03-Jul). Manual dates stay untouched.
+    if (hasProduction && ord.dprFirstDate && !ord.manualStartDate) {
+      const _fd45w = new Date(String(ord.dprFirstDate).slice(0,10) + 'T00:00:00');
+      if (!isNaN(_fd45w)) ord.startDate = _fd45w;
+    }
+    // Determine end date (v45T #1.1.1, rule confirmed by Ishan — DPR actuals drive the end date):
+    //   • actual ≥ planned gross → order is effectively complete: the end date pulls back to the
+    //     last production day planning can observe (today at the latest) instead of coasting to
+    //     start + full span — the defect where DPR-complete orders still showed 4th/5th/6th July.
+    //     (Planning holds cumulative DPR actuals, not per-day entries, so "last DPR production
+    //     date" resolves to today at the moment completion is observed — never a future date.)
+    //   • partially produced → end = today + remaining work at the ACTUAL daily rate
+    //     (sc.daysNeeded = remainingGross / effectiveCap; DPR rate with machine-cap fallback).
+    //   • no production yet → unchanged v41ZO behaviour: start + full run duration.
+    const _acts45t = (ord.actualProd || ord.actualQty || 0);
+    // v45X (confirmed by Ishan): a DPR-complete order's end anchors to its LAST actual DPR
+    // production date — reality-driven, mirroring the v45W start anchor. today() survives only
+    // when the server hasn't exposed dprLastDate (cold cache / no DPR rows). The below-today
+    // clamp is skipped for the anchored end: pulling a finished order's end into the past is the
+    // point — downstream orders recalibrate off the real end via the cursor. The +ceil end-date
+    // convention for projections is unchanged (durations are hours-scoped, per Ishan 4-Jul).
+    let _endAnchored45x = false;
+    if (hasProduction && sc.grossQty > 0 && _acts45t >= sc.grossQty - 1e-9) {
+      const _ld45x = ord.dprLastDate ? new Date(String(ord.dprLastDate).slice(0,10) + 'T00:00:00') : null;
+      if (_ld45x && !isNaN(_ld45x)) { ord.endDate = _ld45x; _endAnchored45x = true; }
+      else ord.endDate = new Date(todayD);
+    } else if (hasProduction && sc.daysNeeded != null && isFinite(sc.daysNeeded)) {
+      ord.endDate = calcEndDate(todayD, Math.max(1, Math.ceil(sc.daysNeeded)));
+    } else {
+      ord.endDate = calcEndDate(ord.startDate, fullDays);
+    }
+    if (!_endAnchored45x && ord.endDate && new Date(ord.endDate) < todayD) ord.endDate = new Date(todayD);
+    if (_endAnchored45x && ord.startDate && new Date(ord.endDate) < new Date(ord.startDate)) ord.endDate = new Date(ord.startDate);
     if (ord.endDate && !isNaN(new Date(ord.endDate))) {
       cursor = new Date(ord.endDate);
     }
@@ -2493,16 +2552,48 @@ function recalcMachineSchedule(machineId) {
       const histStart = new Date(ord.startDate);
       ord.startDate = cursor ? new Date(cursor) : histStart; // v41ZM #5: anchor to predecessor end — no gaps/overlaps
     } else if (cursor) {
-      ord.startDate = new Date(cursor);
+      // v45X: today-floor — see recalcMachineScheduleQuiet note (past cursors from anchored ends).
+      ord.startDate = new Date(Math.max(new Date(cursor).getTime(), todayD.getTime()));
     } else {
       const savedStart = ord.startDate ? new Date(ord.startDate) : null;
       ord.startDate = (savedStart && savedStart >= todayD) ? savedStart : todayD;
     }
 
-    // Determine end date — start + full run duration; the current open order can never be planned to
-    // finish before today (v41ZO #1).
-    ord.endDate = calcEndDate(ord.startDate, fullDays);
-    if (ord.endDate && new Date(ord.endDate) < todayD) ord.endDate = new Date(todayD);
+    // v45W (confirmed by Ishan): a STARTED order's start date anchors to its FIRST actual DPR
+    // production date — planning shows when production really began, not where the plan cursor
+    // happened to sit (26ZG131: DPR 29-Jun vs the cascade's 03-Jul). Manual dates stay untouched.
+    if (hasProduction && ord.dprFirstDate && !ord.manualStartDate) {
+      const _fd45w = new Date(String(ord.dprFirstDate).slice(0,10) + 'T00:00:00');
+      if (!isNaN(_fd45w)) ord.startDate = _fd45w;
+    }
+    // Determine end date (v45T #1.1.1, rule confirmed by Ishan — DPR actuals drive the end date):
+    //   • actual ≥ planned gross → order is effectively complete: the end date pulls back to the
+    //     last production day planning can observe (today at the latest) instead of coasting to
+    //     start + full span — the defect where DPR-complete orders still showed 4th/5th/6th July.
+    //     (Planning holds cumulative DPR actuals, not per-day entries, so "last DPR production
+    //     date" resolves to today at the moment completion is observed — never a future date.)
+    //   • partially produced → end = today + remaining work at the ACTUAL daily rate
+    //     (sc.daysNeeded = remainingGross / effectiveCap; DPR rate with machine-cap fallback).
+    //   • no production yet → unchanged v41ZO behaviour: start + full run duration.
+    const _acts45t = (ord.actualProd || ord.actualQty || 0);
+    // v45X (confirmed by Ishan): a DPR-complete order's end anchors to its LAST actual DPR
+    // production date — reality-driven, mirroring the v45W start anchor. today() survives only
+    // when the server hasn't exposed dprLastDate (cold cache / no DPR rows). The below-today
+    // clamp is skipped for the anchored end: pulling a finished order's end into the past is the
+    // point — downstream orders recalibrate off the real end via the cursor. The +ceil end-date
+    // convention for projections is unchanged (durations are hours-scoped, per Ishan 4-Jul).
+    let _endAnchored45x = false;
+    if (hasProduction && sc.grossQty > 0 && _acts45t >= sc.grossQty - 1e-9) {
+      const _ld45x = ord.dprLastDate ? new Date(String(ord.dprLastDate).slice(0,10) + 'T00:00:00') : null;
+      if (_ld45x && !isNaN(_ld45x)) { ord.endDate = _ld45x; _endAnchored45x = true; }
+      else ord.endDate = new Date(todayD);
+    } else if (hasProduction && sc.daysNeeded != null && isFinite(sc.daysNeeded)) {
+      ord.endDate = calcEndDate(todayD, Math.max(1, Math.ceil(sc.daysNeeded)));
+    } else {
+      ord.endDate = calcEndDate(ord.startDate, fullDays);
+    }
+    if (!_endAnchored45x && ord.endDate && new Date(ord.endDate) < todayD) ord.endDate = new Date(todayD);
+    if (_endAnchored45x && ord.startDate && new Date(ord.endDate) < new Date(ord.startDate)) ord.endDate = new Date(ord.startDate);
     if (ord.endDate && !isNaN(new Date(ord.endDate))) {
       cursor = new Date(ord.endDate);
     }
@@ -2586,22 +2677,55 @@ function recalcPrintScheduleQuiet() {
     // v37E: Pass OPM machineId so the adaptive Print/PI factor uses THIS OPM's cumulative
     // A-Grade history, not just the global default.
     const { qtyToPrint, printStart } = calcPrintQtyAndStart(ord, existing.machineId);
-    existing.startDate = printStart;
+    // v45X (confirmed by Ishan): startDate is only written for UNSTARTED print orders. The old
+    // unconditional `existing.startDate = printStart` stomped every started order's start to
+    // today() each recalc (printStart pins to today whenever AIM outpaces Print — i.e. almost
+    // always), so the v45T sequencer's keep-historical-start rule preserved an already-destroyed
+    // value and whole OPMs showed one shared start date. Started orders now anchor to their FIRST
+    // Daily Printing Log date — the print-side analogue of the v45W dprFirstDate anchor — which
+    // also RECOVERS the true starts that earlier builds overwrote (the log keeps dated entries).
+    const alreadyStarted = (existing.printedToDate || 0) > 0;
+    if (!alreadyStarted) {
+      existing.startDate = printStart;
+    } else {
+      const _firstLog45x = (state.dailyPrinting || [])
+        .filter(l => l.printOrderId === existing.id && l.date)
+        .map(l => String(l.date).slice(0, 10)).sort()[0];
+      if (_firstLog45x) existing.startDate = new Date(_firstLog45x + 'T00:00:00');
+    }
     // v37E: Only adjust qtyToPrint for orders that have NOT started printing yet
     // (printedToDate === 0). Running/in-progress orders keep their committed plan to avoid
     // disrupting active production. Per user spec: "auto adjusts for all subsequent
     // planned printed orders on that OPM" — subsequent planned, not already running.
-    const alreadyStarted = (existing.printedToDate || 0) > 0;
     if (!alreadyStarted && !existing.printedToDateManual) {
       existing.qtyToPrint = parseFloat(qtyToPrint.toFixed(3));
     }
-    // End date always recomputed from latest qty/start for scheduling visibility
-    existing.endDate = calcEndDate(printStart, (existing.qtyToPrint || qtyToPrint) / pm.cap);
+    // End date always recomputed from latest qty/start for scheduling visibility.
+    // v45X: a COMPLETE print order (log total ≥ plan) anchors its end to the LAST Daily Printing
+    // Log date — the sequencer excludes status='completed' rows, so without this a completed row
+    // kept a projected future end (OPM05 showed Completed with end 09-Jul on 4-Jul).
+    const _planQty45x = existing.qtyToPrint || qtyToPrint || 0;
+    if (alreadyStarted && _planQty45x > 0 && (existing.printedToDate || 0) >= _planQty45x - 1e-9) {
+      const _lastLog45x = (state.dailyPrinting || [])
+        .filter(l => l.printOrderId === existing.id && l.date)
+        .map(l => String(l.date).slice(0, 10)).sort().pop();
+      existing.endDate = _lastLog45x ? new Date(_lastLog45x + 'T00:00:00') : new Date(today());
+    } else {
+      existing.endDate = calcEndDate(existing.startDate || printStart, _planQty45x / pm.cap);
+    }
   }
   recalcPrintMachineSequence();
 }
 
 // Re-sequence print orders per OPM machine
+// v45T #1.2.2 (rule confirmed by Ishan): fixes the "multiple orders share one start date on the
+// same OPM" defect — the old cursor only advanced when qtyToPrint AND the machine cap were both
+// present, so one gap pinned every later order to the same date. Now:
+//   • the cursor ALWAYS advances (min 1 day when qty/cap can't be computed);
+//   • an order that has started printing (printedToDate > 0) keeps its historical start;
+//   • printedToDate ≥ qtyToPrint → effectively complete: end pulls back to today, never future;
+//   • partially printed → end = today + remaining at the OPM's daily cap;
+//   • unstarted orders anchor to the cursor and can't be planned into the past.
 function recalcPrintMachineSequence() {
   const assignedPOs = state.printOrders.filter(p => p.machineId && p.status !== 'completed');
   const byMachine = {};
@@ -2609,19 +2733,42 @@ function recalcPrintMachineSequence() {
     if (!byMachine[p.machineId]) byMachine[p.machineId] = [];
     byMachine[p.machineId].push(p);
   });
+  const todayD = new Date(today());
   Object.values(byMachine).forEach(pos => {
     pos.sort((a,b) => new Date(a.startDate) - new Date(b.startDate));
     let cursor = null;
     for (const po of pos) {
-      if (!cursor) { cursor = new Date(po.startDate || today()); }
-      else { po.startDate = new Date(cursor); }
       const pm = getPrintMachine(po.machineId);
-      if (pm && po.qtyToPrint) {
-        po.endDate = calcEndDate(po.startDate, po.qtyToPrint / pm.cap);
-        if (po.endDate && !isNaN(new Date(po.endDate))) {
-          cursor = new Date(po.endDate);
-        }
+      const cap = pm && pm.cap > 0 ? pm.cap : null;
+      const printed = po.printedToDate || 0;
+      const qty = po.qtyToPrint || 0;
+      if (printed > 0 && po.startDate && !isNaN(new Date(po.startDate))) {
+        // started — keep historical start (printing happened then)
+        po.startDate = new Date(po.startDate);
+      } else {
+        // unstarted — anchor to cursor, never into the past
+        const anchor = cursor ? new Date(cursor) : (po.startDate ? new Date(po.startDate) : todayD);
+        po.startDate = anchor >= todayD ? anchor : new Date(todayD);
       }
+      if (qty > 0 && printed >= qty - 1e-9) {
+        // v45X (confirmed by Ishan): reality-driven end — a complete print order's end anchors to
+        // its LAST Daily Printing Log date (the print-side dprLastDate analogue); today() only
+        // when no dated log entries exist. The cursor then advances from the real end.
+        const _lastLog45x = (state.dailyPrinting || [])
+          .filter(l => l.printOrderId === po.id && l.date)
+          .map(l => String(l.date).slice(0, 10)).sort().pop();
+        po.endDate = _lastLog45x ? new Date(_lastLog45x + 'T00:00:00') : new Date(todayD);
+      } else if (printed > 0 && cap) {
+        po.endDate = calcEndDate(todayD, Math.max(1, Math.ceil((qty - printed) / cap))); // remaining at cap
+      } else if (qty > 0 && cap) {
+        po.endDate = calcEndDate(po.startDate, qty / cap);     // unstarted — full span from start
+      } else {
+        po.endDate = calcEndDate(po.startDate, 1);             // no qty/cap — 1-day placeholder
+      }
+      if (po.endDate && new Date(po.endDate) < new Date(po.startDate)) po.endDate = new Date(po.startDate);
+      // Cursor ALWAYS advances past this order (the old stall was here)
+      const advTo = po.endDate && !isNaN(new Date(po.endDate)) ? new Date(po.endDate) : new Date(po.startDate);
+      if (!cursor || advTo > cursor) cursor = advTo;
     }
   });
 }
@@ -2635,14 +2782,32 @@ function recalcPrintSchedule() {
     const pm = getPrintMachine(existing.machineId);
     if (!pm) continue;
     const { qtyToPrint, printStart } = calcPrintQtyAndStart(ord, existing.machineId);
-    existing.startDate = printStart;
+    // v45X: startDate only for UNSTARTED print orders; started ones anchor to their first Daily
+    // Printing Log date — see the full rationale in recalcPrintScheduleQuiet.
+    const alreadyStarted = (existing.printedToDate || 0) > 0;
+    if (!alreadyStarted) {
+      existing.startDate = printStart;
+    } else {
+      const _firstLog45x = (state.dailyPrinting || [])
+        .filter(l => l.printOrderId === existing.id && l.date)
+        .map(l => String(l.date).slice(0, 10)).sort()[0];
+      if (_firstLog45x) existing.startDate = new Date(_firstLog45x + 'T00:00:00');
+    }
     // v37E: Only adjust qtyToPrint for orders that have NOT started printing yet — see note in
     // recalcPrintScheduleQuiet. "auto adjusts for all subsequent planned printed orders on that OPM"
-    const alreadyStarted = (existing.printedToDate || 0) > 0;
     if (!alreadyStarted && !existing.printedToDateManual) {
       existing.qtyToPrint = parseFloat(qtyToPrint.toFixed(3));
     }
-    existing.endDate = calcEndDate(printStart, (existing.qtyToPrint || qtyToPrint) / pm.cap);
+    const _planQty45x = existing.qtyToPrint || qtyToPrint || 0;
+    if (alreadyStarted && _planQty45x > 0 && (existing.printedToDate || 0) >= _planQty45x - 1e-9) {
+      // v45X: completed print order — end anchors to last Daily Printing Log date (see Quiet loop).
+      const _lastLog45x = (state.dailyPrinting || [])
+        .filter(l => l.printOrderId === existing.id && l.date)
+        .map(l => String(l.date).slice(0, 10)).sort().pop();
+      existing.endDate = _lastLog45x ? new Date(_lastLog45x + 'T00:00:00') : new Date(today());
+    } else {
+      existing.endDate = calcEndDate(existing.startDate || printStart, _planQty45x / pm.cap);
+    }
   }
   // Recalc dispatch
   recalcDispatch();
@@ -2748,6 +2913,20 @@ function recalcDispatch() {
       dp.plannedDate = addDays(T, offset);
       dp.exportPending = false;
       dp.tentative = (ord.status !== 'closed');
+    }
+  }
+  // v45T #1.3.1 (confirmed by Ishan): stale planned dates — a NOT-dispatched plan can never keep a
+  // planned date in the past (previous-month SOs planned in the current month were still showing
+  // their original May/June dates). Universal floor: anything pending with a past plannedDate moves
+  // to tomorrow (earliest dispatchable day) and is marked tentative. Manual dates + dispatched rows
+  // stay untouched, and plans whose production order is missing are floored too (the main loop
+  // `continue`s past those, which is exactly how they went stale).
+  const _v45tTomorrow = addDays(todayDate, 1);
+  for (const dp of state.dispatchPlans) {
+    if (dp.dateManuallySet || dp.status === 'dispatched') continue;
+    if (dp.plannedDate && new Date(dp.plannedDate) < todayDate) {
+      dp.plannedDate = _v45tTomorrow;
+      dp.tentative = true;
     }
   }
   saveState();
@@ -3436,7 +3615,7 @@ function renderOrderRow(ord, idx, mc) {
   // the strength of their PO number alone. Manual orders carrying only a PO number must behave the
   // same way — otherwise they keep nagging "🔗 SAP?" despite being linkable exactly like the auto ones.
   const _isSapLinked = !!(ord.sapDocNum || ord.sapDocEntry || (ord.poNumber && String(ord.poNumber).trim()));
-  const needsSapLink = !isClosed && ord.qty > 0 && !isWO &&
+  const needsSapLink = !isClosed && ord.qty > 0 && !isWO && !ord.legacyClosed &&
     !_isSapLinked && (
       isWOReconciled ||
       ord.poType === 'indent' ||
@@ -3453,7 +3632,7 @@ function renderOrderRow(ord, idx, mc) {
     <td class="text-mono" style="position:sticky;left:28px;z-index:2;background:var(--surface2,#0f2a20);white-space:nowrap;box-shadow:2px 0 4px rgba(0,0,0,0.1)">
       ${woBadge}${sapLinkBadge}
       ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}${ord.poNumber||'-'}
-      ${ord.batchNumber?`<br><span class="text-dim text-sm">${ord.batchNumber}</span>`:''}
+      ${ord.batchNumber?`<br><span class="text-dim text-sm" style="cursor:pointer;text-decoration:underline dotted" title="Open batch tracking" onclick="event.stopPropagation();openBatchTracking('${(ord.batchNumber||'').replace(/'/g,'')}')">${ord.batchNumber}</span>`:''}
     </td>
     <td style="position:sticky;left:128px;z-index:2;background:var(--surface2,#0f2a20);font-weight:500;box-shadow:2px 0 4px rgba(0,0,0,0.1)">${isWO
       ? '<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>'
@@ -3976,6 +4155,15 @@ function showAddOrderModal(machineId, existingOrder) {
   // Get PC codes for size
   const pcList = ord.size ? (state.pcCodes[ord.size] || []) : [];
 
+  // v44ZY: stash the order so updateGrossCalc shows the SAME gross the table stores.
+  window._foEditingOrder = ord;
+  // v44ZY (Option B): one-click reconcile of GROSS PLANNED to the actual DPR produced. Apply sets the
+  // Gross Override (the existing "excess production" field) to the actual produced qty, so gross planned
+  // lands EXACTLY on the actual for any order — printed/unprinted, open/closed — unlocking labels for the
+  // produced quantity. No formula is changed; it only auto-fills the override. Shown for every order
+  // below the gross field; actionable once DPR actuals exist. (Order qty is left unchanged.)
+  const _actualDPR = parseFloat(ord.actualProd || ord.actualQty || 0);
+
   openModal(isEdit ? 'Edit Order' : 'New Production Order', `
     <div style="margin-bottom:12px;padding:10px 14px;background:rgba(255,171,0,0.08);border:1px solid rgba(255,171,0,0.3);border-radius:6px;display:flex;align-items:center;gap:12px">
       <label style="font-size:13px;font-weight:600;color:var(--text)">Order Type:</label>
@@ -4086,6 +4274,19 @@ function showAddOrderModal(machineId, existingOrder) {
         <label>Gross Override (Lakhs) <span style="color:var(--text3);font-size:10px">— for excess production only</span></label>
         <input class="form-control" id="fo-gross-override" type="number" step="0.001" value="${ord.grossOverride||''}" placeholder="leave blank = auto-calc" oninput="updateGrossCalc()">
         <div style="font-size:10px;color:var(--text3);margin-top:3px">Blank → gross auto-calculates (Order × 1.07 × 1.01 × 1.01). Set a higher value to allow EXCESS production / extra labels; it will not be overwritten on refresh.</div>
+      </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label>🎯 Reconcile Gross Planned to DPR Actual</label>
+        ${(_actualDPR > 0) ? `
+          <div style="background:rgba(8,145,178,0.06);border:1px solid rgba(8,145,178,0.3);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text2);line-height:1.55">
+            DPR has produced <strong>${fmt(_actualDPR)}L</strong> on this batch. Click below to set <strong>gross planned = ${fmt(_actualDPR)}L</strong> — this fills the Gross Override above with the actual produced quantity, so labels unlock for exactly what was made. Order qty is unchanged, and the manual override stays editable.
+            <button type="button" class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="document.getElementById('fo-gross-override').value='${(+_actualDPR).toFixed(3)}';updateGrossCalc();">Apply — set gross planned = ${fmt(_actualDPR)}L</button>
+          </div>
+        ` : `
+          <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--text3);line-height:1.5">
+            Once DPR actuals exist for this batch, a one-click button appears here to set gross planned to the produced quantity (via the Gross Override above), unlocking labels for the actual produced. The manual Gross Override always remains the final say.
+          </div>
+        `}
       </div>
       <div class="form-group">
         <label>Start Date</label>
@@ -4230,19 +4431,22 @@ function updateGrossCalc() {
   const isPtd = document.getElementById('fo-printed')?.value === '1';
   const infoEl = document.getElementById('fo-calc-info');
   if (!infoEl || qty === 0) return;
-  let gross, unprinted, days;
   const mcId = document.getElementById('fo-machine')?.value;
   const mc = getMachine(mcId);
-  if (isPtd) {
-    gross = qty * 1.07 * 1.02;
-    unprinted = gross / 1.07;
-    days = gross / (mc?.cap||20);
-    infoEl.innerHTML = `📊 <strong>Gross to Manufacture:</strong> ${fmt(gross)}L &nbsp;|&nbsp; <strong>Unprinted after Mfg:</strong> ${fmt(unprinted)}L &nbsp;|&nbsp; <strong>After Printing (${(100/1.02).toFixed(1)}%):</strong> ${fmt(qty)}L &nbsp;|&nbsp; <strong>Days on Machine:</strong> ${fmt(days,1)}d`;
-  } else {
-    gross = qty / (ag/100);
-    days = gross / (mc?.cap||20);
-    infoEl.innerHTML = `📊 <strong>Gross to Manufacture:</strong> ${fmt(gross)}L &nbsp;|&nbsp; <strong>Net A-Grade @ ${ag}%:</strong> ${fmt(qty)}L &nbsp;|&nbsp; <strong>Days on Machine:</strong> ${fmt(days,1)}d`;
-  }
+  const _ovRaw = parseFloat(document.getElementById('fo-gross-override')?.value);
+  const _ov = (Number.isFinite(_ovRaw) && _ovRaw > 0) ? _ovRaw : null;
+  const batchVal = (document.getElementById('fo-batch')?.value||'').trim().toUpperCase();
+  // v44ZY: preview the SAME gross the table will store — via calcOrderSchedule, which uses the LIVE
+  // AIM A-grade (and DPR rate). Previously this preview used the planned A-grade (qty/(ag/100)) while
+  // the table used the live A-grade, so the form disagreed with the saved gross when amending.
+  const ordObj = { ...(window._foEditingOrder||{}), qty, isPrinted: isPtd, aGrade: ag,
+                   grossOverride: _ov, batchNumber: batchVal, machineId: mcId };
+  let sc = null; try { sc = calcOrderSchedule(ordObj, mc); } catch(e) {}
+  if (!sc || !(sc.grossQty > 0)) { infoEl.innerHTML = 'Enter quantity and A-grade to see calculated values.'; return; }
+  const gross = sc.grossQty, agUsed = sc.aGradePct, days = sc.daysNeeded;
+  const agNote = (agUsed != null && Math.abs(agUsed - ag) > 0.5) ? ` <span style="color:var(--accent)">(live)</span>` : '';
+  const ovNote = _ov ? ` <span style="color:var(--accent3)">· manual override</span>` : '';
+  infoEl.innerHTML = `📊 <strong>Gross planned:</strong> ${fmt(gross)}L${ovNote} &nbsp;|&nbsp; <strong>A-Grade used:</strong> ${fmt(agUsed,1)}%${agNote} &nbsp;|&nbsp; <strong>Net @ A-Grade:</strong> ${fmt(qty)}L${days!=null?` &nbsp;|&nbsp; <strong>Days on Machine:</strong> ${fmt(days,1)}d`:''}`;
 }
 
 function saveOrderModal(existingId, defaultMachine) {
@@ -4693,26 +4897,75 @@ function saveOrderModal(existingId, defaultMachine) {
 }
 
 // Save a single order to the dedicated production_orders table permanently
+// =============================
+// v45: DURABLE order-upsert queue. production_orders is the SOLE store for orders (the planning-state
+// blob carries none). upsertOrderToDB previously made 4 in-memory attempts then gave up SILENTLY, so a
+// server hiccup during a save — e.g. a reconcile that sets grossOverride — dropped the order PERMANENTLY
+// and the override read back as null after refresh (confirmed on 26ZD097 / 26ZH073). We now persist every
+// upsert to a localStorage queue (latest-wins per order id) and keep flushing it until the server
+// confirms, so a flaky save can never silently lose an order/override again.
+// =============================
+const _PENDING_ORDERS_KEY = 'sunloc_pending_order_upserts';
+function _loadPendingOrders(){ try { return JSON.parse(localStorage.getItem(_PENDING_ORDERS_KEY) || '{}') || {}; } catch(e){ return {}; } }
+function _savePendingOrders(q){ try { localStorage.setItem(_PENDING_ORDERS_KEY, JSON.stringify(q)); } catch(e){} }
+function _enqueuePendingOrder(ord, token){
+  if(!ord || !ord.id) return;
+  const q = _loadPendingOrders();
+  const keys = Object.keys(q);
+  // defensive cap so a long server outage can't grow localStorage without bound
+  if(keys.length > 250 && !q[ord.id]){ delete q[keys[0]]; }
+  q[ord.id] = { ord, t: token };
+  _savePendingOrders(q);
+}
+function _dequeuePendingOrder(id, token){
+  const q = _loadPendingOrders();
+  // only remove if not superseded by a newer enqueue (a newer edit) for the same order — latest-wins
+  if(q[id] && q[id].t === token){ delete q[id]; _savePendingOrders(q); }
+}
+async function _pushOrderOnce(ord){
+  const _url = SYNC._url || localStorage.getItem('sunloc_server_url');
+  if(!_url) return false;
+  try {
+    const r = await fetch(_url + '/api/orders/upsert', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(ord), signal: AbortSignal.timeout(8000)
+    });
+    return !!(r && r.ok);
+  } catch(e){ return false; }
+}
+let _flushingPendingOrders = false;
+async function flushPendingOrders(){
+  if(_flushingPendingOrders) return;
+  const _url = SYNC._url || localStorage.getItem('sunloc_server_url');
+  if(!_url) return;
+  const q = _loadPendingOrders();
+  const ids = Object.keys(q);
+  if(!ids.length) return;
+  _flushingPendingOrders = true;
+  try {
+    for(const id of ids){
+      const entry = q[id];
+      if(!entry || !entry.ord){ _dequeuePendingOrder(id, entry && entry.t); continue; }
+      const ok = await _pushOrderOnce(entry.ord);
+      if(ok) _dequeuePendingOrder(id, entry.t);
+    }
+  } finally { _flushingPendingOrders = false; }
+}
+
 async function upsertOrderToDB(ord) {
   if (!ord || !ord.id) return;
-  try {
-    const _url = SYNC._url || localStorage.getItem('sunloc_server_url');
-    if (!_url) return;
-    const _tryUpsert = async (attempt) => {
-      try {
-        const r = await fetch(_url + '/api/orders/upsert', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(ord),
-          signal: AbortSignal.timeout(8000)
-        });
-        if (!r.ok && attempt < 3) setTimeout(() => _tryUpsert(attempt+1), 3000);
-      } catch(e) {
-        if (attempt < 3) setTimeout(() => _tryUpsert(attempt+1), 3000);
-      }
-    };
-    _tryUpsert(1);
-  } catch(e) {}
+  // queue the LATEST version FIRST (latest-wins) so a failed save is never lost
+  const _token = Date.now() + ':' + Math.random().toString(36).slice(2,8);
+  _enqueuePendingOrder(ord, _token);
+  const _url = SYNC._url || localStorage.getItem('sunloc_server_url');
+  if (!_url) return; // offline — stays queued, flushed once a server URL is known
+  const _tryUpsert = async (attempt) => {
+    const ok = await _pushOrderOnce(ord);
+    if (ok) { _dequeuePendingOrder(ord.id, _token); return; }
+    if (attempt < 3) { setTimeout(() => _tryUpsert(attempt+1), 3000); return; }
+    // all in-memory attempts failed — leave it queued; flushPendingOrders() keeps retrying until it lands
+  };
+  _tryUpsert(1);
 }
 
 // =============================
@@ -5605,6 +5858,7 @@ function _v39_showSapLinkList() {
   const needs = (state.orders || []).filter(o => {
     if (o.deleted) return false;
     if (o.status === 'completed') return false;
+    if (o.legacyClosed) return false; // v45T #1.1.3: SAP-link requirement waived by the one-time bulk close
     if (o.sapDocEntry || o.sapDocNum || (o.poNumber && String(o.poNumber).trim())) return false; // v41ZE #1: SO#, DocEntry, OR PO/Reference = linked
     if (o.woStatus === 'wo') return false;
     return (o.qty > 0) && (
@@ -5657,6 +5911,13 @@ function _v39_showSapLinkList() {
       • Use the <strong>📥 Unplanned Orders</strong> page in the sidebar to auto-fill SAP refs from the SAP indent list.<br>
       • Until linked, the order cannot be invoiced or dispatched in v39.
     </div>
+    ${(currentUser?.role==='admin'||currentUser?.role==='planning_manager')?`
+    <div style="background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.25);border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px;line-height:1.5">
+      <strong>🧹 One-time legacy cleanup (Planning Manager):</strong> waive the SAP-link requirement for ALL ${needs.length} orders above.
+      They leave this pendency list and lose the 🔗 SAP? badge; any physical removal from Dispatch/Truck Plan stays a manual
+      step for the Dispatch Manager (green dispatch icon). This does not invoice, dispatch, or delete anything.<br>
+      <button onclick="_v45t_bulkCloseLegacySap()" style="margin-top:6px;background:#dc2626;color:#fff;border:none;padding:5px 14px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer">✅ Bulk Close All ${needs.length} (waive SAP link)</button>
+    </div>`:''}
     <div style="max-height:420px;overflow:auto">
       <table style="width:100%;font-size:12px;border-collapse:collapse">
         <thead style="background:var(--surface2);position:sticky;top:0;z-index:5">
@@ -5679,6 +5940,38 @@ function _v39_showSapLinkList() {
 
 // Backward-compat alias — older code paths may still call the previous name
 function _v39_showLegacyMissingSapList() { _v39_showSapLinkList(); }
+
+// v45T #1.1.3 (flow confirmed by Ishan): one-time bulk waiver of the SAP-link requirement for
+// legacy pending orders. Recomputes the SAME `needs` predicate at click time (never a stale list),
+// stamps legacyClosed/At/By on each, saves, and re-opens the (now empty) pendency list. Deliberately
+// does NOT invoice, dispatch, close production, or delete — physical Dispatch/Truck-Plan removal
+// remains the Dispatch Manager's manual green-dispatch-icon step.
+function _v45t_bulkCloseLegacySap() {
+  if (!(currentUser?.role==='admin' || currentUser?.role==='planning_manager')) { toast('Planning Manager or Admin only', 'var(--red)'); return; }
+  const needs = (state.orders || []).filter(o => {
+    if (o.deleted) return false;
+    if (o.status === 'completed') return false;
+    if (o.legacyClosed) return false;
+    if (o.sapDocEntry || o.sapDocNum || (o.poNumber && String(o.poNumber).trim())) return false;
+    if (o.woStatus === 'wo') return false;
+    return (o.qty > 0) && (
+      o.woStatus === 'wo-reconciled' ||
+      o.poType === 'indent' ||
+      o.poType === 'verbal' ||
+      o.poType === 'po' ||
+      (o.batchNumber || '').startsWith('TEMP-')
+    );
+  });
+  if (!needs.length) { toast('Nothing left to close — list is already clean.', 'var(--accent3)'); return; }
+  if (!confirm(`Waive SAP linking for ${needs.length} legacy order(s)?\n\nThey will leave the pendency list permanently. This cannot be bulk-undone (individual orders can still be SAP-linked later via Edit Order).`)) return;
+  const _now = new Date().toISOString();
+  const _by  = currentUser?.username || currentUser?.role || 'planning';
+  needs.forEach(o => { o.legacyClosed = true; o.legacyClosedAt = _now; o.legacyClosedBy = _by; });
+  saveState();
+  toast(`✅ ${needs.length} legacy order(s) closed without SAP link`, 'var(--accent3)');
+  closeModal();
+  _v39_showSapLinkList();
+}
 
 // Helper: jump to a specific order for backfill editing.
 function _v39_jumpToOrderForBackfill(orderId) {
@@ -6561,7 +6854,7 @@ function renderProdSummary() {
               const woRows = orders.filter(o=>o.customer===c)
                 .sort((a,b)=>(a.batchNumber||a.id||'').localeCompare(b.batchNumber||b.id||''))
                 .map(o=>`<tr class="wo-row wo-grp-${ci}" style="display:none;font-size:12px;background:var(--surface)">
-                  <td style="padding-left:30px;color:var(--text3)">${o.batchNumber||o.id||'—'}</td>
+                  <td style="padding-left:30px;color:var(--text3)">${o.batchNumber?`<span style="cursor:pointer;text-decoration:underline dotted" title="Open batch tracking" onclick="openBatchTracking('${(o.batchNumber||'').replace(/'/g,'')}')">${o.batchNumber}</span>`:(o.id||'—')}</td>
                   ${sizesWithData.map(sz=>`<td>${(o.size===sz && o.qty)?`<span style="color:var(--text2)">${fmt(o.qty)}</span>`:'-'}</td>`).join('')}
                   <td class="text-mono" style="color:var(--text3)">${fmt(o.qty||0)}</td>
                 </tr>`).join('');
@@ -6698,7 +6991,27 @@ function renderPrinting() {
     // pref may be missing when loaded from server state — fall back to constant
     const pmConst = PRINT_MACHINES.find(m=>m.id===pm.id);
     const pref = pm.pref || pmConst?.pref || '';
-    const orders = printOrders.filter(p=>p.machineId===pm.id);
+    // v45U #2 (confirmed by Ishan): print-specific month membership. orderInMonth couldn't scope
+    // this view — the auto-computed end date of every unclosed order is always ≥ today, so stale
+    // Apr/May orders "overlapped" the current month and passed the spanning test.
+    // v45Y (confirmed by Ishan, 4-Jul): rule revised. The v45X start-date recovery (true first-log
+    // starts, no longer stomped to today) re-activated the old "started in M−1 and not completed"
+    // carry-forward for June orders that printed less than plan and will NEVER flip to completed —
+    // zombie rows cluttering July. New rule: for month M show orders that STARTED in M, or that
+    // have Daily Printing Log activity in M. A June-start order genuinely printing in July stays
+    // visible; finished prior-month orders live only in their own month's view.
+    const _pIso = d => { if(!d) return ''; const dd = new Date(d); return isNaN(dd) ? '' : `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`; };
+    const _pYm = _selectedPlanMonth;
+    const _pLogActive = new Set((state.dailyPrinting || [])
+      .filter(l => l && l.printOrderId && l.date && String(l.date).slice(0,7) === _pYm)
+      .map(l => l.printOrderId));
+    const orders = printOrders.filter(p => {
+      if (p.machineId !== pm.id) return false;
+      const sYm = _pIso(p.startDate).slice(0,7);
+      if (sYm === _pYm) return true;                 // starts (or was sequenced to start) in the month
+      if (_pLogActive.has(p.id)) return true;        // real printing activity logged in the month
+      return false;
+    });
     html += `
       <div class="card mb-4">
         <div class="card-title">
@@ -8117,7 +8430,107 @@ function _buildLockedTrucks(activeLocks, zone, cap) {
   });
 }
 
-function buildTruckPlans(zone) {
+// ── v45H: quarter-scoped truck plan ───────────────────────────────────────────────
+// Fiscal quarters (Indian FY): Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar. A lot is pinned to a
+// quarter by its production START month (getPlanProdMonth → order.startDate = option A). Quarters are
+// keyed by their START month ('YYYY-MM') so they sort chronologically across the FY boundary. FLOOR is
+// the v45H clean-start quarter (Q2 = Jul 2026); anything produced before it is the "Prior to Q2"
+// historical bucket (no month sub-filter; cleans toward 0 as it's regularised/retired/dispatched).
+const _TRUCK_FLOOR_Q = '2026-07';
+function _truckQStart(ym){ if(!ym) return ''; const [y,m]=ym.split('-').map(Number); const s=(m>=4&&m<=6)?4:(m>=7&&m<=9)?7:(m>=10&&m<=12)?10:1; return `${y}-${String(s).padStart(2,'0')}`; }
+function _truckQuarterMonths(qStart){ const [y,m]=qStart.split('-').map(Number); return [0,1,2].map(i=>`${y}-${String(m+i).padStart(2,'0')}`); }
+function _truckQNum(qStart){ const m=+qStart.split('-')[1]; return m===4?1:m===7?2:m===10?3:4; }
+function _truckQuarterLabel(qStart){ if(qStart==='prior') return 'Prior to Q2 (historical)'; const ms=_truckQuarterMonths(qStart); return `Q${_truckQNum(qStart)} · ${prodMonthLabel(ms[0])} – ${prodMonthLabel(ms[2])}`; }
+function _truckCurrentQuarter(){ return _truckQStart(currentYM()); }
+function _truckActiveQuarter(){ return window._truckProdQuarter || (window._truckProdQuarter = _truckCurrentQuarter()); } // default = current quarter
+// Lot-level scope test used by buildTruckPlans (and the truck views).
+function _truckPlanScopeTest(p, q, mo){                  // pure: test plan p against an EXPLICIT quarter/month scope
+  const ym = getPlanProdMonth(p);                       // production START month (option A)
+  if (q === 'prior') return !!ym && _truckQStart(ym) < _TRUCK_FLOOR_Q;   // historical bucket: produced before Q2
+  if (!ym) return q === _truckCurrentQuarter();          // no production date → show only in the current quarter
+  if (_truckQStart(ym) !== q) return false;              // wrong quarter
+  if (mo && mo !== 'all' && ym !== mo) return false;     // month-within-quarter narrow
+  return true;
+}
+function _truckPlanInScope(p){ return _truckPlanScopeTest(p, _truckActiveQuarter(), window._truckProdMonth || 'all'); }
+// Quarter dropdown options: current quarter (always) + any quarter ≥ FLOOR present in the data, desc.
+function _truckQuarterOptions(){
+  const present = new Set();
+  (state.dispatchPlans||[]).forEach(p=>{ if(p.status==='dispatched') return; const ym=getPlanProdMonth(p); if(ym) present.add(_truckQStart(ym)); });
+  present.add(_truckCurrentQuarter());
+  return [...present].filter(q=> q && q>=_TRUCK_FLOOR_Q).sort().reverse();
+}
+function setTruckProdQuarter(q){
+  window._truckProdQuarter = q;
+  window._truckProdMonth = 'all';                        // months differ per quarter → reset the month narrow
+  try { _renderImmediate(); } catch { try { renderDispatch(); } catch {} }
+}
+
+// ── v45H: quarter scope for the Dispatch Plan ORDER VIEW (independent of the truck view's scope) ──────
+// Reuses the truck-plan quarter math (option A: production START month) but applied at RENDER time to the
+// order-view source (zPlans), so the rows, the "X of Y" count, AND the TOTAL row all reflect the active
+// quarter. "Prior to Q2" is the historical bucket (no month sub-filter); it empties to 0 as its orders are
+// dispatched/closed and age out of the active-dispatch set.
+function _povActiveQuarter(){ return window._povProdQuarter || (window._povProdQuarter = _truckCurrentQuarter()); }
+function _povPlanInScope(p){
+  const ym = getPlanProdMonth(p);                        // production START month (option A)
+  const q  = _povActiveQuarter();
+  const mo = window._povProdMonth || 'all';
+  if (q === 'prior') return !!ym && _truckQStart(ym) < _TRUCK_FLOOR_Q;   // historical: produced before Q2
+  if (!ym) return q === _truckCurrentQuarter();          // no production date → current quarter only
+  if (_truckQStart(ym) !== q) return false;
+  if (mo !== 'all' && ym !== mo) return false;           // month-within-quarter narrow
+  return true;
+}
+function _povQuarterOptions(){
+  const present = new Set();
+  (state.dispatchPlans||[]).forEach(p=>{ const ym=getPlanProdMonth(p); if(ym) present.add(_truckQStart(ym)); });
+  present.add(_truckCurrentQuarter());
+  return [...present].filter(q=> q && q>=_TRUCK_FLOOR_Q).sort().reverse();
+}
+function setPovProdQuarter(q){ window._povProdQuarter=q; window._povProdMonth='all'; try{_renderImmediate();}catch{try{renderDispatch();}catch{}} }
+function setPovProdMonth(m){ window._povProdMonth=m; try{_renderImmediate();}catch{try{renderDispatch();}catch{}} }
+
+// Shared quarter <select> builder (used by Calendar + Customer View headers).
+function _truckQuarterDropdownHtml(activeQ, onchangeFn){
+  const opts = _truckQuarterOptions()
+    .map(q=>`<option value="${q}"${activeQ===q?' selected':''}>${_truckQuarterLabel(q)}</option>`).join('')
+    + `<option value="prior"${activeQ==='prior'?' selected':''}>Prior to Q2 (historical)</option>`;
+  return `<select onchange="${onchangeFn}(this.value)" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text1)">${opts}</select>`;
+}
+// Scoped truck collector — builds the truck plan filtered to an EXPLICIT quarter scope (option A on
+// production START month). Used by the Calendar's grid/day-detail DISPLAY. NOTE: getAllTruckPlans()
+// stays unscoped on purpose — it powers per-order ETD lookups that must find a truck regardless of the
+// view's quarter, so we never route those through a scoped build.
+function getScopedTruckPlans(scope){
+  autoGenerateDispatchPlans();
+  const zones = [...new Set(state.dispatchPlans.map(p=>p.zone||'Unassigned'))].sort();
+  const all = [];
+  for (const z of zones) buildTruckPlans(z, scope).forEach(t=>all.push(t));
+  return all;
+}
+// Calendar + Customer View each carry their own quarter scope (independent of the Truck/Order views),
+// default = current quarter. The calendar scopes by PRODUCTION quarter but displays by ETD, so a quarter's
+// residual dispatch naturally lands in the next quarter's first month (Q2 residual shows in October, etc.).
+function _calActiveQuarter(){ return window._calProdQuarter || (window._calProdQuarter = _truckCurrentQuarter()); }
+function setCalProdQuarter(q){
+  window._calProdQuarter = q;
+  if (q !== 'prior') {   // jump the calendar to the quarter's first month so its ETD-dated trucks are visible
+    const [fy, fmo] = _truckQuarterMonths(q)[0].split('-').map(Number);
+    const now = new Date();
+    state._calOffset = (fy - now.getFullYear()) * 12 + (fmo - 1 - now.getMonth());
+    window._calNavActive = true;                 // preserve the offset (don't reset to _selectedPlanMonth)
+    window._calMonthContext = _selectedPlanMonth;
+  }
+  try { navigate('dispatch-calendar'); } catch { try { renderDispatchCalendar(); } catch {} }
+}
+function _custActiveQuarter(){ return window._custProdQuarter || (window._custProdQuarter = _truckCurrentQuarter()); }
+function setCustProdQuarter(q){ window._custProdQuarter = q; try { renderDispatchCustomer(); } catch {} }
+
+function buildTruckPlans(zone, scope = true) {
+  // scope: true = Truck-View global (window._truckProdQuarter/_truckProdMonth) ·
+  //        false = NO quarter scoping (full schedule — used by getAllTruckPlans for ETD lookups) ·
+  //        {quarter[,month]} = explicit scope (calendar / customer view, each with its own quarter)
   const cap = getTruckCapacity(zone);
   const minCap = getTruckMinCapacity(zone);
   const isExport = isExportZone(zone);
@@ -8139,8 +8552,11 @@ function buildTruckPlans(zone) {
   // (planned − dispatched − committed-to-active-lock). Lots with no free remainder drop out — this
   // is what makes a short-scanned truck's leftover roll into the next truck on the next render, and
   // what drops a (partial-)regularised lot out of the plan.
+  const _bp_inScope = (p) => (scope === false) ? true
+                          : (scope === true)  ? _truckPlanInScope(p)
+                          : _truckPlanScopeTest(p, scope.quarter || _truckCurrentQuarter(), scope.month || 'all');
   const _rawPlans = state.dispatchPlans
-    .filter(p => (p.zone||'Unassigned') === zone && p.status !== 'dispatched');
+    .filter(p => (p.zone||'Unassigned') === zone && p.status !== 'dispatched' && _bp_inScope(p));
   const plans = [];
   _rawPlans.forEach(p => {
     const plannedBoxes = parseInt(p.boxes||0, 10);
@@ -8512,7 +8928,7 @@ function autoGenerateDispatchPlans() {
         zone: ord.zone || '',
         size: ord.size || '',
         colour: ord.colour || '',
-        ptdUp: ord.isPrinted ? 'PTD' : 'UP',
+        packing: ord.isPrinted ? 'PTD' : 'UP',
         pcCode: ord.pcCode || '',
         qty: orderQty,
         boxes: orderQty > 0 ? Math.ceil(orderQty * 100000 / packSize) : 1,
@@ -8537,7 +8953,7 @@ function autoGenerateDispatchPlans() {
         zone: ord.zone || '',
         size: ord.size || '',
         colour: ord.colour || '',
-        ptdUp: ord.isPrinted ? 'PTD' : 'UP',
+        packing: ord.isPrinted ? 'PTD' : 'UP',
         pcCode: ord.pcCode || '',
         qty: orderQty,
         boxes: orderQty > 0 ? Math.ceil(orderQty * 100000 / packSize) : 1,
@@ -8565,7 +8981,7 @@ function autoGenerateDispatchPlans() {
         zone: ord.zone || '',
         size: ord.size || '',
         colour: ord.colour || '',
-        ptdUp: ord.isPrinted ? 'PTD' : 'UP',
+        packing: ord.isPrinted ? 'PTD' : 'UP',
         pcCode: ord.pcCode || '',
         qty: lot1Qty,
         boxes: Math.ceil(lot1Qty * 100000 / packSize),
@@ -8585,7 +9001,7 @@ function autoGenerateDispatchPlans() {
           zone: ord.zone || '',
           size: ord.size || '',
           colour: ord.colour || '',
-          ptdUp: ord.isPrinted ? 'PTD' : 'UP',
+          packing: ord.isPrinted ? 'PTD' : 'UP',
           pcCode: ord.pcCode || '',
           qty: lot2Qty,
           boxes: Math.ceil(lot2Qty * 100000 / packSize),
@@ -8640,7 +9056,7 @@ function getAllTruckPlans() {
   const zones = [...new Set(state.dispatchPlans.map(p=>p.zone||'Unassigned'))].sort();
   const all = [];
   for (const z of zones) {
-    const trucks = buildTruckPlans(z);
+    const trucks = buildTruckPlans(z, false); // full schedule across ALL quarters — getAllTruckPlans is used ONLY for per-order ETD lookups, which must find a truck regardless of any view's quarter scope. Scoped DISPLAY uses getScopedTruckPlans().
     trucks.forEach(t => all.push(t));
   }
   return all;
@@ -8772,9 +9188,13 @@ function renderDispatch() {
   const zones = [...new Set(plans.map(p=>p.zone||'Unassigned'))].sort();
 
   // Box readiness analysis
+  // v45U #3 (confirmed by Ishan): the Zone Readiness bubbles now respect the SAME quarter/month
+  // scope as the Truck View below them (_truckPlanInScope — production-month attribution). With
+  // July selected, the bubbles flip to July's boxes/orders/trucks instead of staying stale on the
+  // all-months totals.
   const readyByZone = {};
   for (const z of ZONES) {
-    const zPlans = plans.filter(p=>p.zone===z && p.status!=='dispatched');
+    const zPlans = plans.filter(p=>p.zone===z && p.status!=='dispatched' && _truckPlanInScope(p));
     const readyBoxes = zPlans.filter(p=>{
       const ord = state.orders.find(o=>o.id===p.productionOrderId);
       return !ord || ord.status==='closed';
@@ -8845,7 +9265,7 @@ function renderDispatch() {
   const _povActiveZone = window._dispatchActiveZone || 'all';
 
   for (const z of ['all', ...zones]) {
-    const zPlans = z==='all' ? plans : plans.filter(p=>(p.zone||'Unassigned')===z);
+    const zPlans = (z==='all' ? plans : plans.filter(p=>(p.zone||'Unassigned')===z)).filter(_povPlanInScope);
     window._dispatchZonePlans[z] = zPlans;
     const totalQty = zPlans.reduce((s,p)=>s+p.qty,0);
     const dispatched = zPlans.reduce((s,p)=>s+(p.actualDispatched||0),0);
@@ -8896,12 +9316,17 @@ function renderDispatch() {
               <option value="">All Months</option>
               ${distinctMonths.map(m=>`<option value="${m}" ${((window._planningOrderViewFilters||{}).month===m)?'selected':''}>${m}</option>`).join('')}
             </select>
-            <!-- v41y Item 3: Production Month filter — uses prodMonth derived from linked production order startDate -->
-            <select onchange="window._planningOrderViewFilters=window._planningOrderViewFilters||{};window._planningOrderViewFilters.prodMonth=this.value;filterPlanningOrderView('${z}')"
-                    style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px" title="Filter by Month of Production">
-              <option value="">All Prod Months</option>
-              ${distinctProdMonths.map(m=>`<option value="${m}" ${((window._planningOrderViewFilters||{}).prodMonth===m)?'selected':''}>${prodMonthLabel(m)}</option>`).join('')}
+            <!-- v45H: quarter scope (render-time) + month-within-quarter. Replaces the flat prod-month filter. -->
+            <select onchange="setPovProdQuarter(this.value)"
+                    style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;font-weight:600" title="Production quarter (Indian FY: Q1 Apr–Jun, Q2 Jul–Sep, Q3 Oct–Dec, Q4 Jan–Mar)">
+              ${_povQuarterOptions().map(q=>`<option value="${q}"${_povActiveQuarter()===q?' selected':''}>${_truckQuarterLabel(q)}</option>`).join('')}
+              <option value="prior"${_povActiveQuarter()==='prior'?' selected':''}>Prior to Q2 (historical)</option>
             </select>
+            ${_povActiveQuarter()!=='prior' ? `<select onchange="setPovProdMonth(this.value)"
+                    style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px" title="Month within the selected quarter">
+              <option value="all"${(window._povProdMonth||'all')==='all'?' selected':''}>All months (whole quarter)</option>
+              ${_truckQuarterMonths(_povActiveQuarter()).map(m=>`<option value="${m}"${window._povProdMonth===m?' selected':''}>${prodMonthLabel(m)}</option>`).join('')}
+            </select>` : ''}
             <select onchange="window._planningOrderViewFilters=window._planningOrderViewFilters||{};window._planningOrderViewFilters.colour=this.value;filterPlanningOrderView('${z}')"
                     style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px">
               <option value="">All Colours</option>
@@ -9084,6 +9509,12 @@ function renderDispatchRow(p) {
                         : isExportPend ? 'export_pending'
                         : (_povElig.state || 'pending');
 
+  // v44ZT: PTD/UP must reflect the LIVE production order's printed flag — the same source of truth
+  // Production Planning uses (ord.isPrinted) — not the dispatch-plan snapshot. (Auto-generated plans
+  // historically wrote this into `ptdUp` while every consumer read `packing`, so PTD orders such as
+  // 26X074 mis-rendered as UP.) Fall back to the snapshot only when the order can't be resolved.
+  const _isPtd = ord ? !!ord.isPrinted : (p.packing === 'PTD');
+
   // v37I B6: data-attrs for sticky filter bar (filterPlanningOrderView matches against these)
   const dataAttrs = [
     `data-customer="${(p.customer||'').replace(/"/g,'&quot;').toLowerCase()}"`,
@@ -9093,7 +9524,7 @@ function renderDispatchRow(p) {
     `data-prodmonth="${prodMonthYm||''}"`,
     `data-colour="${(p.colour||'').toLowerCase()}"`,
     `data-size="${(p.size||'').toLowerCase()}"`,
-    `data-ptdup="${p.packing==='PTD'?'PTD':'UP'}"`,
+    `data-ptdup="${_isPtd?'PTD':'UP'}"`,
     `data-zone="${(p.zone||'').replace(/"/g,'&quot;')}"`,
     `data-planneddate="${p.plannedDate||''}"`,
     `data-status="${p.status||'pending'}"`,
@@ -9107,7 +9538,7 @@ function renderDispatchRow(p) {
     <td class="freeze-col-4 text-mono text-dim">${month}</td>
     <td class="freeze-col-5">${fmtColour(p.colour)}</td>
     <td class="freeze-col-6 text-mono">${p.size||'-'}</td>
-    <td class="freeze-col-7">${p.packing==='PTD'?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
+    <td class="freeze-col-7">${_isPtd?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
     <td class="freeze-col-8 text-sm">${p.zone||'-'}</td>
     <td class="text-mono text-dim" title="Month of production">${prodMonth}</td>
     <td class="text-mono fw-bold">${fmt(p.qty)}</td>
@@ -9484,23 +9915,23 @@ function renderTruckViewHTML(zones) {
 
   // v41d: production-month filter. Collect all production months present across every truck so the
   // planner can see, e.g., "which April capsules ship when". Default 'all'.
+  const _activeQ = _truckActiveQuarter();
   const selMonth = window._truckProdMonth || 'all';
-  const monthSet = new Set();
-  for (const zone of allZones) {
-    buildTruckPlans(zone).forEach(t => (t.orders||[]).forEach(o => {
-      const ym = getPlanProdMonth(o); if (ym) monthSet.add(ym);
-    }));
-  }
-  const monthsSorted = [...monthSet].sort(); // ascending YYYY-MM
-  const monthOptions = ['<option value="all"' + (selMonth==='all'?' selected':'') + '>All production months</option>']
-    .concat(monthsSorted.map(ym => `<option value="${ym}"${selMonth===ym?' selected':''}>${prodMonthLabel(ym)}</option>`))
+  const quarterOptions = _truckQuarterOptions()
+    .map(q => `<option value="${q}"${_activeQ===q?' selected':''}>${_truckQuarterLabel(q)}</option>`)
+    .join('') + `<option value="prior"${_activeQ==='prior'?' selected':''}>Prior to Q2 (historical)</option>`;
+  const _qMonths = (_activeQ!=='prior') ? _truckQuarterMonths(_activeQ) : [];
+  const monthOptions = ['<option value="all"'+(selMonth==='all'?' selected':'')+'>All months (whole quarter)</option>']
+    .concat(_qMonths.map(ym => `<option value="${ym}"${selMonth===ym?' selected':''}>${prodMonthLabel(ym)}</option>`))
     .join('');
 
   let html = `<div class="alert alert-info mb-4" style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
     <span>🚚 Trucks are built automatically by filling up to <strong>${cap} boxes</strong> per truck per zone. ETD = date when the last box in the truck is expected to be packed.</span>
-    <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">
-      <label style="font-size:12px;color:var(--text2)">Production month:</label>
-      <select onchange="setTruckProdMonth(this.value)" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text1)">${monthOptions}</select>
+    <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--text2)">Quarter:</label>
+      <select onchange="setTruckProdQuarter(this.value)" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text1)">${quarterOptions}</select>
+      ${_activeQ!=='prior' ? `<label style="font-size:12px;color:var(--text2);margin-left:6px">Month:</label>
+      <select onchange="setTruckProdMonth(this.value)" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface2);color:var(--text1)">${monthOptions}</select>` : ''}
     </span>
   </div>`;
 
@@ -9535,7 +9966,7 @@ function renderTruckViewHTML(zones) {
       </div>`;
   }
   if (!anyShown) {
-    html += `<div class="empty-state"><div class="icon">📅</div><p>No trucks for ${prodMonthLabel(selMonth)} production. <a href="#" onclick="setTruckProdMonth('all');return false;" style="color:var(--accent)">Show all months</a></p></div>`;
+    html += `<div class="empty-state"><div class="icon">📅</div><p>No trucks in ${_truckQuarterLabel(_truckActiveQuarter())}${(selMonth&&selMonth!=='all')?(' · '+prodMonthLabel(selMonth)):''}. <a href="#" onclick="setTruckProdMonth('all');return false;" style="color:var(--accent)">Show whole quarter</a></p></div>`;
   }
   return html;
 }
@@ -9842,17 +10273,25 @@ function renderTruckOrdersTable(truck) {
             }
           }
           // Determine ready date and its source
+          // v45T #1.3.2 (confirmed by Ishan): a batch inside a truck can't show a ready date AFTER
+          // the truck's planned ETD — display clamps to the ETD (the bottleneck marker still flags
+          // the true driver of the ETD, so nothing is hidden operationally).
+          const _v45tClamp = d => {
+            if (!d || !truck.etd) return d;
+            const dd = new Date(d);
+            return (!isNaN(dd) && dd > new Date(truck.etd)) ? new Date(truck.etd) : d;
+          };
           let readyDate, readySource;
           if (p.packingReadyDate) {
-            readyDate = fmtDate(new Date(p.packingReadyDate));
+            readyDate = fmtDate(_v45tClamp(new Date(p.packingReadyDate)));
             readySource = '<span style="color:var(--accent2);font-size:10px">✓ Tracking</span>';
           } else {
             const prodOrder = state.orders.find(o => o.id === p.productionOrderId);
             if (prodOrder && prodOrder.actualQty > 0 && prodOrder.qty > 0 && prodOrder.actualQty < prodOrder.qty) {
-              readyDate = fmtDate(getOrderReadyDate(p));
+              readyDate = fmtDate(_v45tClamp(getOrderReadyDate(p)));
               readySource = '<span style="color:var(--accent);font-size:10px">~ DPR Est.</span>';
             } else {
-              readyDate = fmtDate(p.plannedDate) || '—';
+              readyDate = fmtDate(_v45tClamp(p.plannedDate)) || '—';
               readySource = '<span style="color:var(--text3);font-size:10px">Planned</span>';
             }
           }
@@ -9952,7 +10391,21 @@ function updateDispatchActual(id, val) {
 
 function markDispatched(id) {
   const dp = state.dispatchPlans.find(d=>d.id===id);
-  if (dp) { dp.status='dispatched'; dp.actualDispatched=dp.qty; dp.manuallyDispatched=true; saveState(); render(); }
+  if (!dp) return;
+  dp.status='dispatched'; dp.actualDispatched=dp.qty; dp.manuallyDispatched=true; saveState(); render();
+  // v45H: also record a tracking-side dispatch so the order exits Report G (its invoice never came
+  // through the software). Skipped for batch-less plans — nothing to record against (still drops from
+  // the truck plan via status='dispatched', just not from Report G).
+  if (dp.batchNumber) {
+    const _u = SYNC._url || localStorage.getItem('sunloc_server_url');
+    if (_u) {
+      fetch(_u + '/api/tracking/manual-dispatch', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ planId: dp.id, batchNumber: dp.batchNumber, customer: dp.customer||'', qty: dp.qty||0, boxes: dp.boxes||0, by: (currentUser?.username)||'planning' }),
+        signal: AbortSignal.timeout(8000)
+      }).catch(()=>{});
+    }
+  }
 }
 
 function updateDispatchRemark(id, val) {
@@ -10347,6 +10800,8 @@ function renderDispatchCalendar() {
   const monthName = baseDate.toLocaleString('en-IN',{month:'long',year:'numeric'});
 
   topActions.innerHTML = `
+    <span style="font-size:12px;color:var(--text2)">Quarter:</span>
+    ${_truckQuarterDropdownHtml(_calActiveQuarter(),'setCalProdQuarter')}
     <button class="btn btn-ghost btn-sm" onclick="calendarNav(-1)">◀ Prev</button>
     <span style="font-family:var(--mono);font-size:13px;color:var(--text)">${monthName}</span>
     <button class="btn btn-ghost btn-sm" onclick="calendarNav(1)">Next ▶</button>
@@ -10357,7 +10812,7 @@ function renderDispatchCalendar() {
   const cap = getTruckCapacity();
 
   // Build truck plans and map to calendar dates by ETD
-  const allTrucks = getAllTruckPlans();
+  const allTrucks = getScopedTruckPlans({ quarter: _calActiveQuarter() });
   const trucksByDate = {};
   for (const truck of allTrucks) {
     if (!truck.etd) continue;
@@ -10411,7 +10866,7 @@ function calendarNav(dir) {
 
 function showDayDispatch(day, month, year) {
   const cap = getTruckCapacity();
-  const allTrucks = getAllTruckPlans();
+  const allTrucks = getScopedTruckPlans({ quarter: _calActiveQuarter() });
   const dayTrucks = allTrucks.filter(truck=>{
     if (!truck.etd) return false;
     const d = new Date(truck.etd);
@@ -10565,12 +11020,11 @@ function renderDispatchCustomer() {
   topActions.innerHTML = '';
   const now = new Date();
 
-  // Use selected month filter (consistent with other dispatch views)
-  const monthOrdIds = new Set(getMonthOrders().map(o => o.id));
+  // v45H: quarter scope (production START month, option A) — consistent with the other dispatch views.
+  const _custScopeOk = (p) => _truckPlanScopeTest(p, _custActiveQuarter(), 'all');
 
   const activePlans = state.dispatchPlans.filter(p =>
-    p.customer &&
-    (!p.productionOrderId || monthOrdIds.has(p.productionOrderId))
+    p.customer && _custScopeOk(p)
   );
   const customers = [...new Set(activePlans.map(p=>p.customer).filter(Boolean))].sort();
 
@@ -10589,14 +11043,16 @@ function renderDispatchCustomer() {
       <select id="cust-dropdown" class="form-control" style="max-width:320px;font-weight:700" onchange="switchCustDropdown(this.value)">
         ${customers.map(c=>`<option value="${c}" ${c===selectedCust?'selected':''}>${c}</option>`).join('')}
       </select>
-      <span style="font-size:12px;color:var(--text3);font-weight:600">${customers.length} customers · ${now.toLocaleString('default',{month:'long',year:'numeric'})}</span>
+      <label style="font-size:12px;color:var(--text2)">Quarter:</label>
+      ${_truckQuarterDropdownHtml(_custActiveQuarter(),'setCustProdQuarter')}
+      <span style="font-size:12px;color:var(--text3);font-weight:600">${customers.length} customers · ${_truckQuarterLabel(_custActiveQuarter())}</span>
     </div>
   `;
 
   for (const cust of customers) {
     // All plans for this customer in current month
     const cPlans = state.dispatchPlans
-      .filter(p => p.customer === cust && (!p.productionOrderId || monthOrdIds.has(p.productionOrderId)))
+      .filter(p => p.customer === cust && _custScopeOk(p))
       .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
     const totalQty   = cPlans.reduce((s,p)=>s+p.qty,0);
     const dispatched = cPlans.filter(p=>p.status==='dispatched').reduce((s,p)=>s+(p.actualDispatched||p.qty),0);
@@ -10625,6 +11081,9 @@ function renderDispatchCustomer() {
               <tbody>
                 ${cPlans.map(p=>{
                   const balance = p.qty - (p.actualDispatched||0);
+                  // v44ZU: PTD/UP from the live production order (source of truth), snapshot only as fallback.
+                  const _povOrd = state.orders.find(o=>o.id===p.productionOrderId);
+                  const _isPtd = _povOrd ? !!_povOrd.isPrinted : (p.packing==='PTD');
                   const allTrucks = getAllTruckPlans();
                   const myTruck = allTrucks.find(t=>t.orders.some(o=>o.id===p.id));
                   const etdLabel = myTruck?.etd
@@ -10635,14 +11094,14 @@ function renderDispatchCustomer() {
                     <td class="text-mono text-accent">${p.pcCode||'-'}</td>
                     <td class="text-mono">${p.size||'-'}</td>
                     <td>${fmtColour(p.colour)}</td>
-                    <td>${p.packing==='PTD'?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
+                    <td>${_isPtd?'<span class="badge badge-ptd">PTD</span>':'<span class="badge badge-up">UP</span>'}</td>
                     <td class="text-sm">${p.zone||'-'}</td>
                     <td class="text-mono fw-bold">${fmt(p.qty)}</td>
                     <td class="text-mono">${p.boxes||'-'}</td>
                     <td class="text-mono" style="white-space:nowrap">${etdLabel}</td>
                     <td class="text-mono text-green">${fmt(p.actualDispatched||0)}</td>
                     <td class="text-mono ${balance>0?'text-accent':balance<0?'text-red':'text-green'}">${fmt(balance)}</td>
-                    <td>${p.status==='dispatched'?'<span class="badge badge-completed">Dispatched</span>':
+                    <td>${p.status==='dispatched'?('<span class="badge badge-completed">Dispatched</span>'+(p.manuallyDispatched?' <span class="badge" style="background:#6d28d9;color:#fff" title="Manually dispatched — no invoice came through the software; exited the system on manual marking">🖐 Manual</span>':'')):
                       p.status==='partial'?'<span class="badge badge-running">Partial</span>':
                       '<span class="badge badge-pending">Pending</span>'}</td>
                     <td class="text-sm">${p.remarks||'-'}</td>
@@ -12837,7 +13296,51 @@ async function renderReconciliation() {
       </div>
     </div>
     ` : ''}
+
+    ${woSplitHistory.length > 0 ? `
+    <div class="card" id="wo-split-log">
+      <div class="card-title">📋 W/O Split — Approval / Rejection Log</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">Every W/O split decision (latest first) — who proposed it, who approved or rejected it and when, the box split, and the full customer breakdown.</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        ${woSplitHistory.map(r=>`
+          <div style="border:1px solid var(--border);border-radius:6px;padding:12px 14px">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:8px">
+              <span class="badge ${r.status==='approved'?'badge-completed':r.status==='rejected'?'badge-red':'badge-pending'}">${(r.status||'').toUpperCase()}</span>
+              <span class="text-mono fw-bold">${r.source_batch_number||r.source_order_id||'—'}</span>
+              <span class="text-mono text-sm" style="color:var(--text3)">${r.id}</span>
+              <span style="flex:1"></span>
+              <span class="text-sm" style="color:var(--text3)">${r.total_boxes_split||0} box${(r.total_boxes_split==1)?'':'es'} split${(r.residual_boxes||0)>0?` · ${r.residual_boxes} residual`:''}</span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:18px;font-size:12px;color:var(--text2);margin-bottom:${(r.lines&&r.lines.length)?'8px':'0'}">
+              <span>Proposed by <strong style="color:var(--accent)">${r.proposed_by||'—'}</strong>${r.proposed_at?` · ${(r.proposed_at||'').replace('T',' ').slice(0,16)}`:''}</span>
+              <span>${r.status==='rejected'?'Rejected':'Approved'} by <strong style="color:var(--accent)">${r.approved_by||'—'}</strong>${r.approved_at?` · ${(r.approved_at||'').replace('T',' ').slice(0,16)}`:''}</span>
+            </div>
+            ${(r.lines&&r.lines.length)?`
+            <div style="overflow-x:auto">
+              <table class="summary-table" style="font-size:12px">
+                <thead><tr><th>Customer</th><th>Child Batch</th><th>Boxes</th><th>Qty (L)</th><th>Zone</th><th>PO</th></tr></thead>
+                <tbody>${r.lines.map(L=>`<tr>
+                  <td>${L.customer||'—'}</td>
+                  <td class="text-mono">${L.child_batch_number||'—'}</td>
+                  <td class="text-mono">${L.boxes??'—'}</td>
+                  <td class="text-mono">${L.qty_lakhs??'—'}</td>
+                  <td>${L.zone||'—'}</td>
+                  <td class="text-mono">${L.po_number||'—'}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </div>`:''}
+            ${(r.status==='rejected'&&r.rejection_reason)?`<div style="font-size:12px;color:var(--accent4);margin-top:6px">✕ Reason: ${r.rejection_reason}</div>`:''}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+    ` : ''}
   `;
+  // v44ZX: quick-jump button at the top of the reconciliation screen → scrolls to the split log,
+  // so the log is easy to reach without scrolling to the bottom. Only shown when entries exist.
+  document.getElementById('topbar-actions').innerHTML = woSplitHistory.length > 0
+    ? `<button class="btn btn-secondary btn-sm" onclick="document.getElementById('wo-split-log')?.scrollIntoView({behavior:'smooth',block:'start'})">📋 Split Log (${woSplitHistory.length})</button>`
+    : '';
 }
 
 function toggleTempSelection(tbId) {
@@ -13348,6 +13851,9 @@ setInterval(async()=>{try{await SYNC.loadTrackingStatus();}catch(e){}},60000); /
 // Auto-sync planning state every 30s — all devices stay in sync automatically
 let _planningAutoSyncTimer = null;
 async function _planningAutoSync(){
+  // v45: always try to drain any orders whose save failed earlier (durable override persistence),
+  // regardless of the save-throttle / active-user branches below.
+  try { flushPendingOrders(); } catch(e) {}
   // Skip auto-sync if we saved within last 60s — prevents overwriting recent changes
   if(_lastServerSaveTime > 0 && (Date.now()-_lastServerSaveTime) < 60000) return;
   if(!document.hidden){
@@ -13390,6 +13896,8 @@ async function _planningAutoSync(){
   }
 }
 _planningAutoSyncTimer = setInterval(_planningAutoSync, 30000);
+// v45: one-shot early flush so a save that failed in a previous session lands promptly on load
+setTimeout(() => { try { flushPendingOrders(); } catch(e) {} }, 5000);
 
 // v44ZD Issue 2A: deep-link routing so "Open in new tab" (planning.html#dispatch) lands directly on
 // the requested page. Retries briefly until the app is authed/ready and the target nav item exists
@@ -14226,6 +14734,7 @@ async function _v40_loadIntegrityFindings() {
     _v40_integritySummary = j.summary || { critical: 0, warning: 0, info: 0 };
     _v40_integrityTotalMatching = (typeof j.totalMatching === 'number') ? j.totalMatching : _v40_integrityFindings.length;
     _v40_integrityCapped = !!j.capped;
+    window._v40_lastRunAt = j.lastRunAt; window._v40_isRunning = j.isRunning; // v45U #8a
     _v40_renderIntegritySummary(j.lastRunAt, j.isRunning);
     _v40_renderIntegrityFindings();
   } catch(e) {
@@ -14258,6 +14767,31 @@ function _v40_renderIntegrityFindings() {
   // v41ZC: severity + check_type are now filtered SERVER-SIDE (so the 500-row LIMIT applies after
   // filtering). Only the free-text search remains client-side, over the already-filtered set.
   let filtered = _v40_integrityFindings;
+  // v45U #8a (confirmed by Ishan): findings are MONTH-SCOPED to the selected plan month. A finding
+  // belongs to a month via its batch's production-start month (order lookup); findings without a
+  // batch, or whose batch is unknown to planning, always show. Stale prior-month alerts stop
+  // flooding the current view — flip the month selector to audit any earlier month.
+  const _imYm = _selectedPlanMonth;
+  const _imMonthOf = bn => {
+    const o = (state.orders||[]).find(x => x.batchNumber === bn);
+    if (!o || !o.startDate) return '';
+    const d = new Date(o.startDate);
+    return isNaN(d) ? '' : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  };
+  filtered = filtered.filter(f => {
+    if (!f.batch_number) return true;
+    const m = _imMonthOf(f.batch_number);
+    return m === '' || m === _imYm;
+  });
+  // Recompute the severity cards from the month-scoped set so cards and list always agree.
+  try {
+    _v40_integritySummary = {
+      critical: filtered.filter(f=>f.severity==='critical').length,
+      warning:  filtered.filter(f=>f.severity==='warning').length,
+      info:     filtered.filter(f=>f.severity==='info').length,
+    };
+    _v40_renderIntegritySummary(window._v40_lastRunAt, window._v40_isRunning);
+  } catch(e) {}
   const q = (_v40_integritySearch || '').trim().toLowerCase();
   if (q) filtered = filtered.filter(f =>
     (f.batch_number||'').toLowerCase().includes(q) ||
@@ -14326,6 +14860,8 @@ function _v40_renderIntegrityFindings() {
       <td style="vertical-align:top;padding:8px;white-space:nowrap">
         <button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490" onclick="_v40_openFindingDetail('${f.id}')">Investigate</button>
         <button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(148,163,184,0.15);color:#475569;margin-left:4px" onclick="_v40_ackFinding('${f.id}')">Ack 24h</button>
+        ${(currentUser?.role==='admin' && f.batch_number && (f.check_type==='over_production' || f.check_type==='qty_mismatch_plan_dpr'))
+          ? `<button class="btn btn-sm" style="padding:3px 10px;font-size:11px;background:rgba(34,197,94,0.15);color:#15803d;margin-left:4px;font-weight:700" title="Regularise: set planning gross to the authoritative DPR figure" onclick="_v45u_autoFix('${f.id}','${(f.batch_number||'').replace(/'/g,'')}')">⚡ Auto-fix</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -14335,6 +14871,29 @@ function _v40_renderIntegrityFindings() {
       <tbody>${rowsHtml}</tbody>
     </table>
   </div>`;
+}
+
+// v45U #8b (confirmed by Ishan): one-click admin regularisation for Over-production and
+// Plan-vs-DPR mismatch findings. Sets the batch's planner gross override to the authoritative DPR
+// figure server-side (production_orders.data_json.grossOverride — the v44ZZ override-aware merge
+// then carries it into the client on the next sync), so plan gross ≡ DPR and the finding
+// auto-resolves on the next integrity scan. Other check types (scan gaps, wastage, packing) have
+// no safe deterministic fix, so they deliberately get no button.
+async function _v45u_autoFix(findingId, batchNumber){
+  if (currentUser?.role !== 'admin') { toast('Admin only', 'var(--red)'); return; }
+  if (!confirm(`Auto-fix ${batchNumber}?\n\nThis sets the planning gross override to the authoritative DPR figure. The finding auto-resolves on the next integrity scan (within 60 min). Reversible by editing the order's gross.`)) return;
+  try {
+    const r = await fetch(serverUrl + '/api/integrity/autofix', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ batchNumber, findingId, by: currentUser?.username || currentUser?.role || 'admin' }),
+      signal: AbortSignal.timeout(15000)
+    });
+    const j = await r.json();
+    if (j && j.ok) {
+      toast(`✅ ${batchNumber}: planning gross regularised to DPR ${fmt(j.gross)}L`, 'var(--accent3)');
+      _v40_loadIntegrityFindings();
+    } else toast('Auto-fix failed: ' + ((j && j.error) || 'unknown'), 'var(--red)');
+  } catch(e) { toast('Auto-fix failed: ' + (e?.message || e), 'var(--red)'); }
 }
 
 function _v40_openFindingDetail(findingId) {

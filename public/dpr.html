@@ -474,7 +474,7 @@ input[type=number] { -moz-appearance:textfield; appearance:textfield; }
   </div>
 </div>
 <div id="nav">
-  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v44ZRD1</small></div>
+  <div class="nbrand"><b>DPR</b>.tracker <small>v7 · build v46D</small></div>
   <div class="ntabs">
     <div class="ntab on" onclick="go('entry')">✏ Data Entry</div>
     <div class="ntab" onclick="go('analytics')">📊 Analytics</div>
@@ -3999,7 +3999,7 @@ async function renderPerf(){
 // Build plant report rows from a map of { GF: dayData|null, '1F': dayData|null, '2F': dayData|null }
 // floorDataMap values are the same structure as loadDay() returns, or null if no data.
 // allDates is used for cumulative calculation — passed in so caller controls the range.
-function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
+function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap, serverCum) {
   // allDatesMap: { GF: [dates...], '1F': [dates...], '2F': [dates...] }
   // v41ZD #3: averages use ELAPSED DAYS in the selected scope (not per-machine days-with-production,
   // not a fixed 30). "This Month" → from the 1st of the month through the selected date;
@@ -4051,8 +4051,20 @@ function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
     });
   });
   // Active-day counts (days WITH production) — denominator for averages.
+  // v45X: with server cum present, floor/plant active days are the UNION of each machine's
+  // production dates from production_actuals (per-floor via the FLOORS master), not the local grid.
   const floorProdDays = {};
   const _plantDates = new Set();
+  if (serverCum) {
+    Object.entries(FLOORS).forEach(([fl, flData]) => {
+      const _flDates = new Set();
+      (flData.machines || []).forEach(mc => {
+        const sc = serverCum[mc.id];
+        ((sc && sc.dates) || []).forEach(d => { _flDates.add(d); _plantDates.add(d); });
+      });
+      floorProdDays[fl] = _flDates.size;
+    });
+  } else
   Object.keys(FLOORS).forEach(fl => {
     let cnt = 0;
     Object.entries(floorDateProd[fl]).forEach(([d, v]) => {
@@ -4090,8 +4102,15 @@ function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
     const vsTarget  = parseFloat((dayTotal - dailyTgt).toFixed(2));
 
     // Cumulative: scope based on _dprCumulativeMode
-    const flDates = (allDatesMap[fl] || []).filter(_scopeFilter);
+    // v45X: authoritative path — per-machine cumulative straight from production_actuals
+    // (server), matching Report B's month gross. Grid-blob loop kept as offline fallback.
     let cumTotal=0, cumDays=0;
+    if (serverCum) {
+      const _sc45x = serverCum[mc.id];
+      cumTotal = _sc45x ? (parseFloat(_sc45x.total) || 0) : 0;
+      cumDays  = _sc45x ? (parseInt(_sc45x.days, 10) || 0) : 0;
+    } else {
+    const flDates = (allDatesMap[fl] || []).filter(_scopeFilter);
     flDates.forEach(d => {
       // v41ZG #3: use the pre-parsed cache (read once above) instead of re-reading localStorage.
       const dd = parsedCache[fl]?.[d];
@@ -4104,6 +4123,7 @@ function buildPlantReportRows(selectedDate, floorDataMap, allDatesMap) {
       dayProd = parseFloat(dayProd.toFixed(2));
       if (dayProd > 0) { cumTotal += dayProd; cumDays++; }
     });
+    }
     cumTotal = parseFloat(cumTotal.toFixed(2));
     // v41ZG #3: average over days this machine ACTUALLY produced (days-with-data), not elapsed
     // calendar days. "Average production" = mean output on the days the machine ran. cumDays is the
@@ -4209,10 +4229,25 @@ async function renderPlantReport(){
     }
   });
 
+  // v45X (confirmed by Ishan): cumulative comes from production_actuals via the server — the same
+  // store Report B's month gross reads — so DPR plant totals and Tracking Report B agree by
+  // construction. The grid-blob path below survives ONLY as the offline/failed-fetch fallback
+  // (it diverges when the DPR-closed restore rule preserves actuals rows the grid dropped, when a
+  // floor-date blob was never synced to this device, or when a machine sits outside FLOORS).
+  let _serverCum45x = null;
+  if (serverUrl) {
+    try {
+      const _scopeFrom45x = _dprCumulativeMode ? '' : (_dprSelectedMonth + '-01');
+      const cr = await fetch(serverUrl + '/api/dpr/plant-cum?to=' + selectedDate + (_scopeFrom45x ? ('&from=' + _scopeFrom45x) : ''), { signal: AbortSignal.timeout(8000) });
+      if (cr.ok) { const cj = await cr.json(); if (cj && cj.ok && cj.machines) _serverCum45x = cj.machines; }
+    } catch(e) { console.warn('[plant-report] server cum unavailable — falling back to local grid:', e?.message); }
+  }
+
   // v41ZD #3: cumulative totals were built only from days already in localStorage, so on a fresh
   // session (or a different device) prior days were missing and the cumulative per-machine values
   // under-counted. Sync the full scope range from the server first so the cumulative is complete.
-  if (serverUrl) {
+  // v45X: only needed for the FALLBACK path — with server cum in hand, skip the heavy range sync.
+  if (serverUrl && !_serverCum45x) {
     const _scopeFrom = _dprCumulativeMode ? '2000-01-01' : (_dprSelectedMonth + '-01');
     // v41ZF #1: wrap with a hard timeout. If syncDateRangeFromServer hangs (slow/large range), the
     // report previously could sit on "Loading" indefinitely — which presents exactly as "doesn't
@@ -4238,7 +4273,7 @@ async function renderPlantReport(){
 
   // ── Step 4: Build rows and render ──
   try {
-  const { rows, totals, floorTotals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
+  const { rows, totals, floorTotals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap, _serverCum45x);
 
   const allDates = [...new Set(Object.values(allDatesMap).flat())].filter(d => d <= selectedDate).sort();
   // v41ZG #3: the DAYS column / averages now divide by days that actually had production (active
@@ -4384,7 +4419,17 @@ async function exportPlantReport(){
     allDatesMap[fl] = [...new Set(Object.keys(localStorage).filter(k=>k.startsWith(`dpr3_${fl}_`)).map(k=>k.split('_')[2]).filter(d=>d&&d<=selectedDate))].sort();
   });
 
-  const { rows, totals, floorTotals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap);
+  // v45X: same server cumulative as renderPlantReport — the Excel export must match the display.
+  let _serverCum45x = null;
+  if (serverUrl) {
+    try {
+      const _scopeFrom45x = _dprCumulativeMode ? '' : (_dprSelectedMonth + '-01');
+      const cr = await fetch(serverUrl + '/api/dpr/plant-cum?to=' + selectedDate + (_scopeFrom45x ? ('&from=' + _scopeFrom45x) : ''), { signal: AbortSignal.timeout(8000) });
+      if (cr.ok) { const cj = await cr.json(); if (cj && cj.ok && cj.machines) _serverCum45x = cj.machines; }
+    } catch(e) {}
+  }
+
+  const { rows, totals, floorTotals } = buildPlantReportRows(selectedDate, floorDataMap, allDatesMap, _serverCum45x);
   const fmt2 = n => parseFloat((+n).toFixed(2));
 
   // v41ZC #3: build with FLOOR TOTAL subtotal rows after each floor's machines, then PLANT TOTAL.
@@ -4993,9 +5038,9 @@ function renderDprSearch(){
       <td class="mono">${o.pcCode||'-'}</td>
       <td class="mono">${o.size||'-'}</td>
       <td class="mono">${o.machineId||'-'}</td>
-      <td class="mono">${o.qty||0}</td>
-      <td class="mono">${o.actualProd||o.actualQty||0}</td>
-      <td class="mono" style="color:${rem>0?'var(--amber)':'var(--green)'}">${rem}</td>
+      <td class="mono">${(parseFloat(o.qty)||0).toFixed(2)}</td>
+      <td class="mono">${(parseFloat(o.actualProd||o.actualQty)||0).toFixed(2)}</td>
+      <td class="mono" style="color:${rem>0?'var(--amber)':'var(--green)'}">${rem.toFixed(2)}</td>
       <td><span class="pill ${o.status==='closed'?'g':o.status==='running'?'a':'r'}">${o.status||'-'}</span></td>
     </tr>`;
   });
@@ -5271,35 +5316,73 @@ async function _v40_taskBannerTick() {
   } catch(e) {}
 }
 
+// v45C #1: batch-wise chronological comparator — identical to Report B's _v44zk_batchCmp in tracking
+// (year ↑, then letter-series shortest-first then alphabetical, then numeric sequence). Kept inline
+// here because dpr.html has no access to tracking's copy.
+function _v44zk_batchCmp(a, b) {
+  const re = /^(\d+)([A-Z]+)(\d+)$/i;
+  const ma = String(a).match(re), mb = String(b).match(re);
+  if (!ma || !mb) return String(a).localeCompare(String(b));
+  const ya = parseInt(ma[1], 10), yb = parseInt(mb[1], 10);
+  if (ya !== yb) return ya - yb;
+  const la = ma[2].toUpperCase(), lb = mb[2].toUpperCase();
+  if (la.length !== lb.length) return la.length - lb.length;
+  if (la !== lb) return la < lb ? -1 : 1;
+  return parseInt(ma[3], 10) - parseInt(mb[3], 10);
+}
+let _v40_taskSev = 'all';
+let _v40_taskBatchQ = '';
+function _v40_taskCmp(a, b){
+  const ba = a.batch_number||'', bb = b.batch_number||'';
+  if (!ba && !bb) return 0; if (!ba) return 1; if (!bb) return -1; // batch-less tasks sort last
+  return _v44zk_batchCmp(ba, bb);
+}
+function _v40_taskRowHtml(t){
+  const sevBadge = ({
+    critical: '<span style="background:rgba(239,68,68,0.15);color:#dc2626;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔴 CRITICAL</span>',
+    warning:  '<span style="background:rgba(245,158,11,0.15);color:#b45309;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🟡 WARNING</span>',
+    info:     '<span style="background:rgba(59,130,246,0.15);color:#1d4ed8;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔵 INFO</span>',
+  })[t.severity] || '';
+  const desc = _v40_esc(t.description || '(No finding details — free-form task)');
+  const action = t.suggested_action ? `<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:4px;padding:8px 12px;margin-top:8px;font-size:12px;line-height:1.5"><strong style="color:#15803d">What to do:</strong> ${_v40_esc(t.suggested_action)}${t.suggested_app ? `<div style="font-size:11px;color:var(--t3);margin-top:4px">Where: <strong>${_v40_esc(t.suggested_app)}</strong> app → <strong>${_v40_esc(t.suggested_page||'?')}</strong> page</div>` : ''}</div>` : '';
+  const noteHtml = t.note ? `<div style="font-size:11px;color:var(--t2);margin-top:6px;font-style:italic">Note from ${_v40_esc(t.assigned_by)}: ${_v40_esc(t.note)}</div>` : '';
+  const seenBtn = t.status === 'seen'
+    ? '<span style="font-size:11px;color:var(--t3);font-style:italic">✓ Marked seen</span>'
+    : `<button style="padding:3px 12px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3);border-radius:3px;cursor:pointer" onclick="_v40_markTaskSeen('${_v40_esc(t.id)}')">Mark seen</button>`;
+  return `<div style="border:1px solid var(--b);border-radius:6px;padding:12px;margin-bottom:10px;background:var(--s2)">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:8px">${sevBadge}${t.batch_number ? `<span style="font-family:var(--fm);font-size:11px;color:var(--ac2)">${_v40_esc(t.batch_number)}</span>` : ''}${t.machine_id ? `<span style="font-family:var(--fm);font-size:11px;color:var(--t3)">${_v40_esc(t.machine_id)}</span>` : ''}</div>
+      ${seenBtn}
+    </div>
+    <div style="font-size:12px;line-height:1.5">${desc}</div>
+    ${action}${noteHtml}
+  </div>`;
+}
+function _v40_renderTaskRows(){
+  const box = document.getElementById('v40-task-list'); if (!box) return;
+  const q = (_v40_taskBatchQ||'').trim().toUpperCase();
+  let list = _v40_myTasks.slice().sort(_v40_taskCmp);
+  if (_v40_taskSev !== 'all') list = list.filter(t => t.severity === _v40_taskSev);
+  if (q) list = list.filter(t => String(t.batch_number||'').toUpperCase().includes(q));
+  box.innerHTML = list.length
+    ? list.map(_v40_taskRowHtml).join('')
+    : '<div style="font-size:12px;color:var(--t3);padding:18px;text-align:center">No tasks match the current filter.</div>';
+}
 function _v40_showMyTasks() {
   if (_v40_myTasks.length === 0) { alert('No tasks pending.'); return; }
-  const rowsHtml = _v40_myTasks.map(t => {
-    const sevBadge = ({
-      critical: '<span style="background:rgba(239,68,68,0.15);color:#dc2626;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔴 CRITICAL</span>',
-      warning:  '<span style="background:rgba(245,158,11,0.15);color:#b45309;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🟡 WARNING</span>',
-      info:     '<span style="background:rgba(59,130,246,0.15);color:#1d4ed8;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">🔵 INFO</span>',
-    })[t.severity] || '';
-    const desc = _v40_esc(t.description || '(No finding details — free-form task)');
-    const action = t.suggested_action ? `<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:4px;padding:8px 12px;margin-top:8px;font-size:12px;line-height:1.5"><strong style="color:#15803d">What to do:</strong> ${_v40_esc(t.suggested_action)}${t.suggested_app ? `<div style="font-size:11px;color:var(--t3);margin-top:4px">Where: <strong>${_v40_esc(t.suggested_app)}</strong> app → <strong>${_v40_esc(t.suggested_page||'?')}</strong> page</div>` : ''}</div>` : '';
-    const noteHtml = t.note ? `<div style="font-size:11px;color:var(--t2);margin-top:6px;font-style:italic">Note from ${_v40_esc(t.assigned_by)}: ${_v40_esc(t.note)}</div>` : '';
-    const seenBtn = t.status === 'seen'
-      ? '<span style="font-size:11px;color:var(--t3);font-style:italic">✓ Marked seen</span>'
-      : `<button style="padding:3px 12px;font-size:11px;background:rgba(8,145,178,0.15);color:#0e7490;border:1px solid rgba(8,145,178,0.3);border-radius:3px;cursor:pointer" onclick="_v40_markTaskSeen('${_v40_esc(t.id)}')">Mark seen</button>`;
-    return `<div style="border:1px solid var(--b);border-radius:6px;padding:12px;margin-bottom:10px;background:var(--s2)">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-        <div style="display:flex;align-items:center;gap:8px">${sevBadge}${t.batch_number ? `<span style="font-family:var(--fm);font-size:11px;color:var(--ac2)">${_v40_esc(t.batch_number)}</span>` : ''}${t.machine_id ? `<span style="font-family:var(--fm);font-size:11px;color:var(--t3)">${_v40_esc(t.machine_id)}</span>` : ''}</div>
-        ${seenBtn}
-      </div>
-      <div style="font-size:12px;line-height:1.5">${desc}</div>
-      ${action}${noteHtml}
-    </div>`;
-  }).join('');
+  const sevOpts = [['all','All severities'],['critical','🔴 Critical'],['warning','🟡 Warning'],['info','🔵 Info']]
+    .map(([v,l])=>`<option value="${v}"${v===_v40_taskSev?' selected':''}>${l}</option>`).join('');
   openModal('🩺 Your Integrity Tasks',
     `<div style="padding:8px 0">
-      <div style="font-size:11px;color:var(--t3);margin-bottom:12px;line-height:1.5">Admin has flagged the following data integrity issues that need your attention. Fix them via the suggested app/page; the next scan (within 60 min) will auto-clear tasks whose underlying issue is resolved.</div>
-      ${rowsHtml}
+      <div style="font-size:11px;color:var(--t3);margin-bottom:10px;line-height:1.5">Admin has flagged the following data integrity issues that need your attention. Fix them via the suggested app/page; the next scan (within 60 min) will auto-clear tasks whose underlying issue is resolved.</div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <input id="v40-task-batchq" placeholder="Filter by batch…" value="${_v40_esc(_v40_taskBatchQ)}" oninput="_v40_taskBatchQ=this.value;_v40_renderTaskRows()" style="flex:1;min-width:140px;padding:6px 8px;border:1px solid var(--b);border-radius:6px;font-size:12px;font-family:var(--fm)">
+        <select onchange="_v40_taskSev=this.value;_v40_renderTaskRows()" style="padding:6px 8px;border:1px solid var(--b);border-radius:6px;font-size:12px">${sevOpts}</select>
+      </div>
+      <div id="v40-task-list"></div>
     </div>`,
     [{label:'Close', cls:'btn-secondary', fn:'closeModal()'}]);
+  setTimeout(_v40_renderTaskRows, 0);
 }
 
 async function _v40_markTaskSeen(taskId) {

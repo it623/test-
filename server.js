@@ -12,6 +12,13 @@ const cors    = require('cors');
 const path    = require('path');
 const fs      = require('fs');
 
+// v46C: SINGLE source of truth for the build version. /api/health and the SAP serverBuild responses
+// all read this — so the reported version can never again drift from the deployed code (the v46B
+// deploy confusion was a stale hardcoded 'v45ZV' health stamp masquerading as a failed deploy). A
+// validator check (sunloc_validate.py) fails the build if this does not match the HTML build markers.
+const APP_BUILD = 'v46D';
+
+
 // ── v44Y: PC Master fallback resolver ──────────────────────────────────────────
 // Invoice enrichment derives size/colour from an ItemCode. The server `pc_codes`
 // table (admin-saved + hand-edited + future PC-Master additions) is the authoritative
@@ -1169,6 +1176,62 @@ const MIGRATIONS = [
     sql: `ALTER TABLE invoice_requests ADD COLUMN so_doc_num TEXT;
           ALTER TABLE invoices_received ADD COLUMN base_so_doc_num TEXT;`
   },
+  {
+    // v45D #2b: shift dimension (A/B/C) on salvage/remelt wastage. WIP sums qty per dept regardless of
+    // shift, so the frozen WIP total is unchanged — this only tags each entry with its shift so the AIM
+    // wastage tab can be entered + audited shift-wise and missing-shift data is visible. Nullable:
+    // pre-existing rows stay unassigned.
+    version: 46,
+    name: 'wastage_shift',
+    sql: `ALTER TABLE tracking_wastage ADD COLUMN shift TEXT;`
+  },
+  {
+    // v45I #1: explicit production-day scoping for AIM wastage, mirroring DPR's production_actuals.date.
+    // Wastage was attributed to the production day DERIVED from the insert timestamp (ts) via the 6 AM
+    // boundary, so a C-shift entry made after 6 AM the next morning landed on the wrong day. prod_date
+    // stores the operator-chosen production day (YYYY-MM-DD); readers prefer it, falling back to the
+    // ts-derived day only for legacy rows that predate this column.
+    version: 47,
+    name: 'wastage_prod_date',
+    sql: `ALTER TABLE tracking_wastage ADD COLUMN prod_date TEXT;`
+  },
+  {
+    // v45I #1 backfill: one-time month-rollover correction. At deploy (morning of 1 Jul) the 1 Jul
+    // B and C shifts had not started, so any legacy wastage row (no explicit prod_date) tagged to the
+    // 1 Jul production day with shift B or C is necessarily a LATE-entered 30 Jun B/C entry whose ts
+    // crossed the 6 AM boundary — reallocate it to 30 Jun. Shift A (which had started) is untouched.
+    // ts window = 1 Jul production day = [1 Jul 06:00 IST, 2 Jul 06:00 IST) = [00:30Z, next-day 00:30Z).
+    // Idempotent (prod_date IS NULL guard); runs once via schema_migrations, on Postgres and SQLite.
+    version: 48,
+    name: 'wastage_reallocate_jul1_bc_to_jun30',
+    sql: `UPDATE tracking_wastage SET prod_date = '2026-06-30'
+          WHERE prod_date IS NULL AND shift IN ('B','C')
+            AND ts >= '2026-07-01T00:30:00' AND ts < '2026-07-02T00:30:00';`
+  },
+  {
+    // v45S: production_orders was keyed on the unstable `id` alone, with NO identity on
+    // (batch_number, machine_id). A batch's blob id can change; the id-keyed sync (ON CONFLICT(id))
+    // then spawned a DUPLICATE row and the id-keyed close (WHERE id=$1) orphaned the old-id row at
+    // 'running' forever. Those orphans, being the OLDEST running rows on a machine, stole the two
+    // enforcement slots in upsert-bulk and got the real current batches downgraded to pending.
+    // This index backs the duplicate-collapse queries (one-time boot repair + post-sync collapse)
+    // that keep exactly one live row per (batch_number, machine_id). Non-unique on purpose: existing
+    // duplicates must be collapsed first, and a hard unique constraint is scoped separately once the
+    // data is proven stable in production.
+    version: 49,
+    name: 'idx_production_orders_batch_machine',
+    sql: `CREATE INDEX IF NOT EXISTS idx_po_batch_machine ON production_orders (batch_number, machine_id);`
+  },
+  {
+    // v45ZF (confirmed by Ishan): the v45ZE scan INSERT referenced is_admin_override on
+    // tracking_scans, but the column never existed on that table in ANY dialect — the build-time
+    // grep matched the dispatch-requests table's same-named column. Every scan insert threw, which
+    // forced the v45ZE rollback. Same defect class (and fix pattern) as migration 10 / the
+    // label_number boot repair.
+    version: 50,
+    name: 'tracking_scans_admin_override',
+    sql: `ALTER TABLE tracking_scans ADD COLUMN is_admin_override INTEGER NOT NULL DEFAULT 0;`
+  },
 ];
 
 function runMigrations() {
@@ -1189,6 +1252,89 @@ function runMigrations() {
 }
 
 runMigrations();
+
+// ─── v45S: production_orders identity repair ──────────────────────────────────
+// Root cause of the phantom ">2 running per machine": production_orders carried no identity
+// on (batch_number, machine_id) — only the unstable `id`. When a batch's blob id changed, the
+// id-keyed sync (ON CONFLICT(id)) inserted a DUPLICATE row and the id-keyed close (WHERE id=$1)
+// left the old-id row 'running' forever. Those orphans, being the OLDEST running rows, then stole
+// the machine's two enforcement slots in upsert-bulk and downgraded the real current batches.
+// These helpers keep exactly one live row per (batch_number, machine_id) and close true orphans.
+// Both are IDEMPOTENT and SOFT (deleted / status='closed' only): safe to run every boot, never a
+// hard delete, and NEVER close a batch the planning blob still considers running.
+
+async function _v45s_collapseDuplicateOrders() {
+  // Soft-delete every non-newest row within a (batch_number, machine_id) group, keeping the single
+  // row with the greatest updated_at (id as a deterministic tiebreak). Returns rows affected.
+  try {
+    if (pgPool) {
+      const r = await pgPool.query(`
+        UPDATE production_orders p SET deleted = true, updated_at = NOW()::TEXT
+        WHERE p.deleted = false
+          AND p.batch_number IS NOT NULL AND p.machine_id IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM production_orders q
+            WHERE q.batch_number = p.batch_number AND q.machine_id = p.machine_id
+              AND q.deleted = false AND q.id <> p.id
+              AND (q.updated_at > p.updated_at
+                   OR (q.updated_at = p.updated_at AND q.id > p.id)))`);
+      return r.rowCount || 0;
+    }
+    const info = db.prepare(`
+      UPDATE production_orders SET deleted = 1, updated_at = datetime('now')
+      WHERE deleted = 0
+        AND batch_number IS NOT NULL AND machine_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM production_orders q
+          WHERE q.batch_number = production_orders.batch_number
+            AND q.machine_id = production_orders.machine_id
+            AND q.deleted = 0 AND q.id <> production_orders.id
+            AND (q.updated_at > production_orders.updated_at
+                 OR (q.updated_at = production_orders.updated_at AND q.id > production_orders.id)))`).run();
+    return info.changes || 0;
+  } catch (e) {
+    console.warn('[v45S collapse] duplicate-collapse failed:', e.message);
+    return 0;
+  }
+}
+
+async function _v45s_repairProductionOrders() {
+  // Boot repair (idempotent): collapse duplicates, then close 'running' DB rows the planning blob
+  // explicitly marks 'closed' — true orphans an id-keyed close could never reach. Rows the blob
+  // still considers running are LEFT ALONE; closing those is an operator decision, never inferred.
+  try {
+    const collapsed = await _v45s_collapseDuplicateOrders();
+    const blobClosed = new Set();
+    try {
+      const state = await getPlanningStateAsync();
+      const orders = (state && Array.isArray(state.orders)) ? state.orders : [];
+      for (const o of orders) {
+        const bn = ((o && o.batchNumber) || '').toString().trim();
+        if (bn && o.status === 'closed') blobClosed.add(bn);
+      }
+    } catch (e) {
+      console.warn('[v45S repair] blob read failed — skipping ghost-close:', e.message);
+    }
+    let closed = 0;
+    if (blobClosed.size) {
+      const arr = Array.from(blobClosed);
+      if (pgPool) {
+        const r = await pgPool.query(
+          `UPDATE production_orders SET status='closed', updated_at=NOW()::TEXT
+           WHERE status='running' AND deleted=false AND batch_number = ANY($1)`, [arr]);
+        closed = r.rowCount || 0;
+      } else {
+        const stmt = db.prepare(`UPDATE production_orders SET status='closed', updated_at=datetime('now')
+                                 WHERE status='running' AND deleted=0 AND batch_number=?`);
+        const tx = db.transaction((list) => { let n = 0; for (const b of list) n += stmt.run(b).changes; return n; });
+        closed = tx(arr);
+      }
+    }
+    console.log(`[v45S repair] production_orders identity repair: ${collapsed} duplicate row(s) soft-deleted, ${closed} blob-closed ghost(s) closed`);
+  } catch (e) {
+    console.warn('[v45S repair] failed:', e.message);
+  }
+}
 
 // ─── Seed default users if none exist ─────────────────────────
 function hashPin(pin) { return crypto.createHash('sha256').update(pin + 'sunloc_salt').digest('hex'); }
@@ -1247,6 +1393,50 @@ async function getPlanningStateAsync() {
     try { return JSON.parse(r.rows[0].state_json); } catch { return {}; }
   }
   return getPlanningState();
+}
+
+// v46D (confirmed by Ishan): SINGLE canonical planning-state writer. Root cause of the "saves then
+// reverts on refresh" bugs (26N031 qty edit, W/O→customer not reflecting) and a contributor to the
+// 26ZC094 churn: reads use the NEWEST row (ORDER BY id DESC — see getPlanningStateAsync above) but a
+// dozen writers hardcoded `INSERT ... VALUES (1,...)` → wrote to id=1 while the app read a newer row =
+// split-brain. This helper UPDATEs the SAME newest row the reads use (inserting only when the table is
+// empty) and refreshes the cache — mirroring the proven merge-guard save. ALL planning_state writers
+// now route through it, so the pattern can never drift again.
+async function savePlanningState(planState) {
+  const json = JSON.stringify(planState);
+  if (pgPool) {
+    const r = await pgPool.query('SELECT id FROM planning_state ORDER BY id DESC LIMIT 1');
+    if (r.rows[0]) await pgPool.query('UPDATE planning_state SET state_json=$1, saved_at=NOW()::TEXT WHERE id=$2', [json, r.rows[0].id]);
+    else await pgPool.query('INSERT INTO planning_state (state_json) VALUES ($1)', [json]);
+  } else {
+    const row = db.prepare('SELECT id FROM planning_state ORDER BY id DESC LIMIT 1').get();
+    if (row) db.prepare("UPDATE planning_state SET state_json=?, saved_at=datetime('now') WHERE id=?").run(json, row.id);
+    else db.prepare("INSERT INTO planning_state (state_json) VALUES (?)").run(json);
+  }
+  _planningStateCache = planState;
+  _planningStateCacheTime = Date.now();
+}
+
+// v46D: one-time (idempotent) collapse of planning_state to its single newest row. Reads already use
+// the newest row, so keeping it preserves exactly the data the app currently serves; deleting the
+// stale older rows removes any chance a leftover id=1 row resurfaces. Guarded + logged; only acts when
+// more than one row exists.
+async function _consolidatePlanningStateRows() {
+  try {
+    if (pgPool) {
+      const c = await pgPool.query('SELECT COUNT(*)::int AS n FROM planning_state');
+      if ((c.rows[0]?.n || 0) > 1) {
+        const d = await pgPool.query('DELETE FROM planning_state WHERE id NOT IN (SELECT id FROM planning_state ORDER BY id DESC LIMIT 1)');
+        console.log(`[v46D] planning_state consolidated: removed ${d.rowCount} stale row(s), kept newest`);
+      }
+    } else {
+      const c = db.prepare('SELECT COUNT(*) AS n FROM planning_state').get();
+      if ((c?.n || 0) > 1) {
+        const d = db.prepare('DELETE FROM planning_state WHERE id NOT IN (SELECT id FROM planning_state ORDER BY id DESC LIMIT 1)').run();
+        console.log(`[v46D] planning_state consolidated: removed ${d.changes} stale row(s), kept newest`);
+      }
+    }
+  } catch (e) { console.warn('[v46D] planning_state consolidation skipped:', e.message); }
 }
 
 function getPlanningState() {
@@ -1328,6 +1518,7 @@ async function ensurePostgresTables() {
     `);
     // CRITICAL: ensure label_number column exists — missing column causes all scans to fail with 500
     await pgPool.query(`ALTER TABLE tracking_scans ADD COLUMN IF NOT EXISTS label_number INTEGER`);
+    await pgPool.query(`ALTER TABLE tracking_scans ADD COLUMN IF NOT EXISTS is_admin_override INTEGER NOT NULL DEFAULT 0`); // v45ZF: amber-trail flag — see migration 50 note
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_scans_dept_ts ON tracking_scans(dept, ts DESC)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_scans_batch ON tracking_scans(batch_number, dept)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_labels_batch ON tracking_labels(batch_number)`);
@@ -1344,6 +1535,8 @@ async function ensurePostgresTables() {
         note TEXT
       )
     `);
+    try { await pgPool.query(`ALTER TABLE tracking_wastage ADD COLUMN IF NOT EXISTS shift TEXT`); } catch(e){} // v45D #2b: shift A/B/C tag
+    try { await pgPool.query(`ALTER TABLE tracking_wastage ADD COLUMN IF NOT EXISTS prod_date TEXT`); } catch(e){} // v45I #1: explicit production-day
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS tracking_stage_closure (
         id TEXT PRIMARY KEY,
@@ -1722,6 +1915,7 @@ async function ensurePostgresTables() {
     `);
     // CRITICAL: ensure label_number column exists — missing column causes all scans to fail with 500
     await pgPool.query(`ALTER TABLE tracking_scans ADD COLUMN IF NOT EXISTS label_number INTEGER`);
+    await pgPool.query(`ALTER TABLE tracking_scans ADD COLUMN IF NOT EXISTS is_admin_override INTEGER NOT NULL DEFAULT 0`); // v45ZF: amber-trail flag — see migration 50 note
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_scans_dept_ts ON tracking_scans(dept, ts DESC)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_scans_batch ON tracking_scans(batch_number, dept)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_labels_batch ON tracking_labels(batch_number)`);
@@ -1738,6 +1932,8 @@ async function ensurePostgresTables() {
         note TEXT
       )
     `);
+    try { await pgPool.query(`ALTER TABLE tracking_wastage ADD COLUMN IF NOT EXISTS shift TEXT`); } catch(e){} // v45D #2b: shift A/B/C tag
+    try { await pgPool.query(`ALTER TABLE tracking_wastage ADD COLUMN IF NOT EXISTS prod_date TEXT`); } catch(e){} // v45I #1: explicit production-day
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS tracking_stage_closure (
         id TEXT PRIMARY KEY,
@@ -2663,13 +2859,48 @@ let _actualsCacheTime = 0;
 // batch-keyed total ends up holding only the LAST group's partial sum — surfacing as blank/under-
 // counted Gross Prod in Reports D & E. This map is the single source of truth for per-batch gross.
 let _grossByBatch = null;
+let _firstProdByBatch = null; // v45W: batch → first DPR production date (YYYY-MM-DD)
+let _lastProdByBatch  = null; // v45X (confirmed by Ishan): batch → LAST DPR production date — anchors a complete order's end date to production reality instead of today()
 // v41ZI Item 6: per-batch admin/PM override of the DPR gross. When present it supersedes _grossByBatch.
 let _grossOverride = {};
+// v45: PERSISTENT order_id -> batchNumber map. Built across warms (update-not-reset). Was a local
+// const inside warmActualsCache rebuilt each run from _planningStateCache.orders; when that cache was
+// thin/stale at warm time, production_actuals rows with a NULL batch_number got no mapping and were
+// SKIPPED from _grossByBatch, leaving that batch absent -> the planning/state actualProd injection
+// fell through to the order-keyed legacy cache (which mis-totals across order_id|batch groups). Making
+// this persistent means a learned order->batch mapping survives a thin warm, so null-batch rows are
+// always attributed and _grossByBatch is reliably the true per-batch sum. Latest batch wins on renumber.
+let _orderBatch = {};
+// v45X (confirmed by Ishan): enforcement must NEVER downgrade an order that has real production.
+// The DPR gate only lets running orders receive actuals, so actuals>0 proves the order legitimately
+// ran — demoting it to pending hides it from the Tracking label view mid-production (26ZF104).
+// Checks the warmed caches first (authoritative), then the order's own stored fields.
+// v45Z (confirmed by Ishan): per-line SAP UoM → Lakhs multiplier, ported from the Planning indent
+// import (_uomScaleForLine). Export lines use UoM "THOUSAND" → ×0.01 to Lakhs; anything not clearly
+// THOUSAND is domestic (already Lakhs) → ×1, the safe default. Checks every UoM-ish field because
+// SAP B1 may put a numeric UoMEntry in one field while the human name sits in another.
+function _sapUomScale(line) {
+  const candidates = [
+    line.UoMCode, line.UnitsOfMeasurement, line.MeasureUnit, line.InventoryUoM,
+    line.UoMName, line.UnitOfMeasure
+  ].map(v => String(v == null ? '' : v).toUpperCase().trim());
+  const isThousand = candidates.some(u => /THOUSAND|THOUSND|THOUS|THOU|\bTHO\b|^000$|^'000$|PER\s*THOUSAND/.test(u));
+  return isThousand ? 0.01 : 1;
+}
+
+function _orderHasActuals(o) {
+  if (!o) return false;
+  const b = o.batchNumber;
+  if (b != null && _grossOverride && Object.prototype.hasOwnProperty.call(_grossOverride, b)) return (_grossOverride[b] || 0) > 0;
+  if (b != null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, b)) return (_grossByBatch[b] || 0) > 0;
+  return ((parseFloat(o.actualProd) || 0) > 0) || ((parseFloat(o.actualQty) || 0) > 0);
+}
 // v41ZY: one-time idempotent backfill — fill batch_number on existing production_actuals rows saved
 // as NULL before the explicit-batch fix, from their order's batch in production_orders. This
 // retroactively repairs batches whose cumulative DPR gross collapsed after close (NULL-batch rows
 // were dropped once the order left active planning state). Cheap no-op once no NULL rows remain.
 let _poBatchBackfillDone = false;
+let _v45iInvBatchBackfillDone = false; // v45I #6: one-shot repopulate of blank invoice batches from stored payload
 async function backfillProductionActualsBatch() {
   if (pgPool) {
     await pgPool.query(`
@@ -2699,11 +2930,16 @@ async function warmActualsCache() {
   _actualsCacheTime = Date.now();
   if (pgPool) {
     try {
-      const r = await pgPool.query('SELECT order_id, batch_number, SUM(qty_lakhs) as total FROM production_actuals GROUP BY order_id, batch_number');
+      const r = await pgPool.query('SELECT order_id, batch_number, SUM(qty_lakhs) as total, MIN(date) as first_date, MAX(date) as last_date FROM production_actuals GROUP BY order_id, batch_number');
       _actualsCache = {};
       for (const row of r.rows) {
-        if (row.order_id) _actualsCache[row.order_id] = parseFloat(row.total) || 0;
-        if (row.batch_number) _actualsCache[row.batch_number] = parseFloat(row.total) || 0;
+        const _t = parseFloat(row.total) || 0;
+        if (row.order_id) _actualsCache[row.order_id] = _t;
+        // v45: ACCUMULATE the batch-keyed total (was an overwrite). A single batch_number can appear
+        // in multiple (order_id,batch_number) groups (split logs / renumbers), and the overwrite kept
+        // only the last group's partial — making _actualsCache[batch] an under-count. The injection's
+        // legacy fallback now prefers this batch-keyed value, so it must be the full batch sum.
+        if (row.batch_number) _actualsCache[row.batch_number] = (_actualsCache[row.batch_number] || 0) + _t;
       }
       // v41ZL #4 / v41ZN: authoritative per-batch DPR gross, attributing every production_actuals
       // group to its EFFECTIVE batch — the row's own batch_number when present, otherwise the batch
@@ -2712,16 +2948,48 @@ async function warmActualsCache() {
       // background merge, so that join+expression-group contended on the DB and timed out closed-batches
       // and made the apps go offline (v41ZM). We now do the same attribution IN MEMORY from the rows
       // already fetched above plus the warmed order cache — no extra query, no join on the hot table.
-      const _orderBatch = {};
+      // v45: update (do NOT reset) the PERSISTENT _orderBatch map. Reset-each-warm meant a thin
+      // _planningStateCache.orders dropped all mappings for that run, skipping null-batch rows.
       try {
         const _co = (_planningStateCache && _planningStateCache.orders) || [];
         for (const o of _co) { if (o && o.id && o.batchNumber) _orderBatch[o.id] = o.batchNumber; }
       } catch(_) {}
+      // v45Z (confirmed by Ishan): the blob cache only maps CURRENT orders — archived (month-rolled)
+      // orders vanished from it, so their NULL-batch actuals rows stayed unattributed and Report B
+      // under-counted vs Report E/DPR. Two extra sources close that: (a) production_orders retains
+      // rows for archived orders; (b) production_actuals itself — an order whose OTHER rows carry a
+      // batch stamps its stampless siblings. Both are cheap keyed reads; the map only ever grows.
+      try {
+        let _poRows;
+        if (pgPool) _poRows = (await pgPool.query(`SELECT id, batch_number FROM production_orders WHERE batch_number IS NOT NULL AND batch_number <> ''`)).rows;
+        else _poRows = db.prepare(`SELECT id, batch_number FROM production_orders WHERE batch_number IS NOT NULL AND batch_number <> ''`).all();
+        for (const r of (_poRows||[])) { if (r.id && r.batch_number && !_orderBatch[r.id]) _orderBatch[r.id] = r.batch_number; }
+      } catch(_e1) {}
+      try {
+        let _saRows;
+        if (pgPool) _saRows = (await pgPool.query(`SELECT order_id, MAX(batch_number) AS bn FROM production_actuals WHERE batch_number IS NOT NULL AND batch_number <> '' AND order_id IS NOT NULL GROUP BY order_id`)).rows;
+        else _saRows = db.prepare(`SELECT order_id, MAX(batch_number) AS bn FROM production_actuals WHERE batch_number IS NOT NULL AND batch_number <> '' AND order_id IS NOT NULL GROUP BY order_id`).all();
+        for (const r of (_saRows||[])) { if (r.order_id && r.bn && !_orderBatch[r.order_id]) _orderBatch[r.order_id] = r.bn; }
+      } catch(_e2) {}
       _grossByBatch = {};
+      _firstProdByBatch = {};
+      _lastProdByBatch = {};
       for (const row of r.rows) {
         const batch = (row.batch_number && String(row.batch_number).trim()) ? row.batch_number : _orderBatch[row.order_id];
         if (!batch) continue;
         _grossByBatch[batch] = (_grossByBatch[batch] || 0) + (parseFloat(row.total) || 0);
+        // v45W (confirmed by Ishan): first actual DPR production date per batch — anchors planning
+        // start dates to when production really began (26ZG131: DPR 29-Jun vs the cascade's 03-Jul).
+        if (row.first_date) {
+          const fd = String(row.first_date).slice(0,10);
+          if (!_firstProdByBatch[batch] || fd < _firstProdByBatch[batch]) _firstProdByBatch[batch] = fd;
+        }
+        // v45X (confirmed by Ishan): last actual DPR production date per batch — a DPR-complete
+        // order's end date pulls back to the day production actually finished, not today().
+        if (row.last_date) {
+          const ld = String(row.last_date).slice(0,10);
+          if (!_lastProdByBatch[batch] || ld > _lastProdByBatch[batch]) _lastProdByBatch[batch] = ld;
+        }
       }
       console.log('[DB] Actuals cache warmed:', r.rows.length, 'entries;', Object.keys(_grossByBatch).length, 'batches');
     } catch(e) { console.error('[DB] Actuals cache error:', e.message); }
@@ -3038,11 +3306,89 @@ async function _doRefreshSapIndents() {
 // On successful reconcile:
 //   1. invoice_requests row → status='reconciled', reconciled_at, reconciled_with_invoice_id
 //   2. sales_order_consumption ledger updated (UPSERT, increment dispatched qty + value)
+// v45I #6: robust batch extractor for pulled SAP invoices. The displayed batch was previously
+// taken ONLY from the header UDF U_SunlocBatch, which is empty on SAP-direct invoices — so their
+// batch rendered blank even though SAP carries it per LINE. This reads every explicit SAP batch
+// field (no inference from context): header UDF, the standard BatchNumbers[] allocation array, and
+// line-level batch UDFs (U_Batch seen in the SAP export, plus any U_*batch* UDF). Distinct values
+// are comma-joined for multi-batch invoices (same render as Sunloc multi-batch, e.g. "26X076, 26U122").
+// Returns { batch, source } where source names the field that matched (logged for IT verification).
+function _extractSapInvoiceBatch(inv, headerUdf) {
+  const set = [];
+  let matchedFrom = '';
+  const push = (v, from) => {
+    const s = (v == null ? '' : String(v)).trim();
+    if (s && !set.includes(s)) { set.push(s); if (!matchedFrom) matchedFrom = from; }
+  };
+  push(headerUdf != null ? headerUdf : (inv && inv.U_SunlocBatch), 'U_SunlocBatch(header)');
+  for (const l of ((inv && inv.DocumentLines) || [])) {
+    if (!l || typeof l !== 'object') continue;
+    if (Array.isArray(l.BatchNumbers)) for (const b of l.BatchNumbers) push(b && (b.BatchNumber || b.Batch), 'DocumentLines.BatchNumbers');
+    push(l.U_Batch, 'line.U_Batch');
+    push(l.U_SunlocBatch, 'line.U_SunlocBatch');
+    push(l.U_BatchNo, 'line.U_BatchNo');
+    push(l.U_BatchNum, 'line.U_BatchNum');
+    for (const k of Object.keys(l)) { if (/^U_.*batch/i.test(k)) push(l[k], 'line.' + k); }
+  }
+  return { batch: set.join(', '), source: matchedFrom };
+}
+
+// v45ZJ (confirmed by Ishan): resolve a single dispatch batch's SHIPPED Lakhs from the invoice
+// payload — the Quantity of the DocumentLine whose batch identifier matches, times the same UoM
+// scale (_sapUomScale) the header uses. Matches on the same explicit fields as _extractSapInvoiceBatch
+// (line.U_Batch / U_SunlocBatch / U_BatchNo / U_BatchNum / BatchNumbers[] / any U_*batch key). Returns
+// null when no line carries that batch — the caller FLAGS such records, it never guesses a value.
+function _lineQtyForBatch(inv, batchNo) {
+  const target = String(batchNo == null ? '' : batchNo).trim();
+  if (!target) return null;
+  for (const l of ((inv && inv.DocumentLines) || [])) {
+    if (!l || typeof l !== 'object') continue;
+    const cands = [];
+    const push = v => { const s = (v == null ? '' : String(v)).trim(); if (s) cands.push(s); };
+    push(l.U_Batch); push(l.U_SunlocBatch); push(l.U_BatchNo); push(l.U_BatchNum);
+    if (Array.isArray(l.BatchNumbers)) for (const b of l.BatchNumbers) push(b && (b.BatchNumber || b.Batch));
+    for (const k of Object.keys(l)) { if (/^U_.*batch/i.test(k)) push(l[k]); }
+    if (cands.includes(target)) {
+      return parseFloat((((parseFloat(l.Quantity) || 0) * _sapUomScale(l))).toFixed(3));
+    }
+  }
+  return null;
+}
+
+// v45I #6: repopulate batch_number for already-pulled invoices that rendered blank because only the
+// header UDF was read at ingest time. Reads each blank row's STORED payload_json (no new SAP call)
+// and applies the same explicit-field extractor. One-shot (retried until it succeeds), then skipped.
+async function backfillInvoiceBatchFromPayload() {
+  let rows;
+  if (pgPool) {
+    rows = (await pgPool.query(`SELECT id, payload_json FROM invoices_received WHERE (batch_number IS NULL OR batch_number = '') AND payload_json IS NOT NULL`)).rows;
+  } else {
+    rows = db.prepare(`SELECT id, payload_json FROM invoices_received WHERE (batch_number IS NULL OR batch_number = '') AND payload_json IS NOT NULL`).all();
+  }
+  let fixed = 0;
+  for (const r of (rows || [])) {
+    let inv;
+    try { inv = JSON.parse(r.payload_json); } catch { continue; }
+    const b = _extractSapInvoiceBatch(inv, inv && inv.U_SunlocBatch).batch;
+    if (!b) continue;
+    if (pgPool) await pgPool.query(`UPDATE invoices_received SET batch_number=$1 WHERE id=$2 AND (batch_number IS NULL OR batch_number='')`, [b, r.id]);
+    else db.prepare(`UPDATE invoices_received SET batch_number=? WHERE id=? AND (batch_number IS NULL OR batch_number='')`).run(b, r.id);
+    fixed++;
+  }
+  if (fixed > 0) console.log(`[SAP v45I] invoice-batch backfill repopulated ${fixed} blank invoice(s) from stored payload`);
+}
+
 async function _doRefreshSapInvoices() {
+  // v45I #6: one-shot repopulate of blank batches from stored payloads (fixes invoices pulled before
+  // the line-level extractor existed). Guarded so it runs at most once per process, on the poller.
+  if (!_v45iInvBatchBackfillDone) {
+    try { await backfillInvoiceBatchFromPayload(); _v45iInvBatchBackfillDone = true; }
+    catch (e) { console.warn('[SAP v45I] invoice-batch backfill failed (will retry next poll):', e.message); }
+  }
   const cfg = await sap.getConfig();
   const lookback = (cfg && cfg.invoice_poll_lookback_days) || 7;
   const r = await sap.fetchRecentInvoices({ lookbackDays: lookback });
-  if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded, fetched: 0, upserted: 0, serverBuild: 'v44ZRD1' };
+  if (!r.ok) return { ok: false, error: r.error, degraded: r.degraded, fetched: 0, upserted: 0, serverBuild: APP_BUILD };
   const invoices = r.invoices || [];
   let upserted = 0;
   for (const inv of invoices) {
@@ -3086,6 +3432,14 @@ async function _doRefreshSapInvoices() {
         } catch (e) { console.warn('[SAP] direct-invoice line enrich failed for DocEntry', inv.DocEntry, '-', e.message); }
       }
     }
+    // v45I #6: derive the batch to STORE from every explicit SAP field (header UDF + line-level
+    // U_Batch / BatchNumbers). Header-only U_SunlocBatch left direct-SAP invoices blank; this fills
+    // them from the line batch SAP actually carries. Keep batchUdf (header) for the Sunloc-request
+    // match above unchanged.
+    const _batchExtract = _extractSapInvoiceBatch(inv, batchUdf);
+    const batchForStore = _batchExtract.batch;
+    if (batchForStore && !batchUdf) console.log(`[SAP v45I] direct invoice DocEntry ${inv.DocEntry} batch '${batchForStore}' from ${_batchExtract.source}`);
+
     // v41 fix: total_boxes is an INTEGER column. SAP DocumentLines.Quantity can be decimal
     // (e.g. 31.35 Lakhs), which PostgreSQL rejects for an integer column ("invalid input syntax
     // for type integer: 31.35"). Round to nearest whole unit for the box-count column.
@@ -3097,7 +3451,11 @@ async function _doRefreshSapInvoices() {
     // leave totalBoxes at 0 for direct-SAP (SAP carries no Sunloc box count); the Qty column now fills
     // from the real summed Lakhs. Sunloc-linked invoices still get authoritative boxes below.
     let totalBoxes = 0;
-    let totalQtyLakhs = (inv.DocumentLines || []).reduce((sum, l) => sum + (parseFloat(l.Quantity) || 0), 0);
+    // v45Z (confirmed by Ishan): EXPORT invoice lines carry Quantity in THOUSANDS (UoM "THOUSAND"),
+    // exactly like export indents — the Planning SAP import already scales them ×0.01 to Lakhs
+    // (1 lakh = 100 thousand). The raw sum here assumed Lakhs, so export dispatches landed ~100×
+    // too big (Report D "Dispatched 586,326L"). Same per-line rule, ported verbatim.
+    let totalQtyLakhs = (inv.DocumentLines || []).reduce((sum, l) => sum + ((parseFloat(l.Quantity) || 0) * _sapUomScale(l)), 0);
     const docTotal = parseFloat(inv.DocTotal) || 0;
     const vatSum = parseFloat(inv.VatSum) || 0;
     const taxable = docTotal - vatSum;
@@ -3187,7 +3545,7 @@ async function _doRefreshSapInvoices() {
             taxable_amount=$14, igst_amount=$15, total_amount=$16, irn=$17,
             payload_json=$20, total_qty_lakhs=CASE WHEN $21>0 THEN $21 ELSE invoices_received.total_qty_lakhs END, fetched_at=NOW()::TEXT
         `, [recId, inv.DocEntry, String(inv.DocNum || ''), String(inv.DocNum || ''),
-            inv.DocDate || null, inv.CardName || '', inv.CardCode || '', poUdf, batchUdf,
+            inv.DocDate || null, inv.CardName || '', inv.CardCode || '', poUdf, batchForStore,
             pcCode, size, colour,
             totalBoxes, taxable, vatSum, docTotal, inv.U_IRN || null, source, invReqId, payload, totalQtyLakhs]);
       } else {
@@ -3210,7 +3568,7 @@ async function _doRefreshSapInvoices() {
             total_amount=excluded.total_amount, irn=excluded.irn,
             payload_json=excluded.payload_json, total_qty_lakhs=CASE WHEN excluded.total_qty_lakhs>0 THEN excluded.total_qty_lakhs ELSE invoices_received.total_qty_lakhs END, fetched_at=datetime('now')
         `).run(recId, inv.DocEntry, String(inv.DocNum || ''), String(inv.DocNum || ''),
-            inv.DocDate || null, inv.CardName || '', inv.CardCode || '', poUdf, batchUdf,
+            inv.DocDate || null, inv.CardName || '', inv.CardCode || '', poUdf, batchForStore,
             pcCode, size, colour,
             totalBoxes, taxable, vatSum, docTotal, inv.U_IRN || null, source, invReqId, payload, totalQtyLakhs);
       }
@@ -3523,7 +3881,7 @@ async function _doRefreshSapInvoices() {
     }
   } catch (e) { console.warn('[SAP] v44P line-enrich pass error:', e.message); }
 
-  return { ok: true, fetched: invoices.length, upserted, serverBuild: 'v44ZRD1' };
+  return { ok: true, fetched: invoices.length, upserted, serverBuild: APP_BUILD };
 }
 
 // v39 Phase 9a helper: for each dispatch_plans row matching the batch, merge
@@ -5743,7 +6101,21 @@ app.post('/api/orders/upsert', async (req, res) => {
         }
       }
       if (exData.deleted || existing.deleted) finalDeleted = true;
-      finalActualProd = Math.max(ord.actualProd || 0, exData.actualProd || 0);
+      // v45T root fix (Rahul, 2-Jul): actualProd is OWNED by DPR (production_actuals sum +
+      // batch_gross_override), not by whichever blob copy is larger. The old Math.max() compared two
+      // CACHED copies — after a downward DPR correction (entry fix or Closed-Batches override) the
+      // stale higher copy always won and Planning "flipped back to original". Now: when the server
+      // can compute a DPR-side gross for this batch (override present, or batch in the warmed
+      // actuals cache), that value IS actualProd — BOTH directions. Only with no DPR data at all
+      // does the old max() guard apply (protects carried actuals on batches with no DPR rows).
+      {
+        const _bn45t = ord.batchNumber;
+        const _hasOv45t  = _bn45t != null && Object.prototype.hasOwnProperty.call(_grossOverride, _bn45t);
+        const _hasSum45t = _bn45t != null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, _bn45t);
+        if (_hasOv45t)       finalActualProd = _grossOverride[_bn45t] || 0;
+        else if (_hasSum45t) finalActualProd = _grossByBatch[_bn45t] || 0;
+        else                 finalActualProd = Math.max(ord.actualProd || 0, exData.actualProd || 0);
+      }
       const hasManualDate = exData.manualEndDate || exData.manualStartDate;
       mergedOrd = {
         ...ord,
@@ -5903,11 +6275,7 @@ app.post('/api/planning/rebatch-machine', async (req, res) => {
     }
 
     // Persist planning_state JSON
-    if (pgPool) {
-      await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
-    } else {
-      db.prepare(`INSERT INTO planning_state (id,state_json,saved_at) VALUES (1,?,datetime('now')) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json, saved_at=datetime('now')`).run(JSON.stringify(planState));
-    }
+    await savePlanningState(planState); // v46D: single canonical writer (newest row)
     _planningStateCache = planState; _planningStateCacheTime = Date.now();
 
     // Update production_orders table rows + print_orders table rows
@@ -6203,8 +6571,16 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
         } else if (exData.deleted || existing.deleted) {
           finalDeleted = true;
         }
-        // Take max of actualProd (DPR can write higher value independently)
-        finalActualProd = Math.max(ord.actualProd || 0, exData.actualProd || 0);
+        // v45T root fix (Rahul, 2-Jul): DPR owns actualProd — see the single-order upsert for the
+        // full rationale. Override → batch-sum cache → legacy max() fallback (no DPR data only).
+        {
+          const _bn45t = ord.batchNumber;
+          const _hasOv45t  = _bn45t != null && Object.prototype.hasOwnProperty.call(_grossOverride, _bn45t);
+          const _hasSum45t = _bn45t != null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, _bn45t);
+          if (_hasOv45t)       finalActualProd = _grossOverride[_bn45t] || 0;
+          else if (_hasSum45t) finalActualProd = _grossByBatch[_bn45t] || 0;
+          else                 finalActualProd = Math.max(ord.actualProd || 0, exData.actualProd || 0);
+        }
         // Preserve manual date flags from DB if set
         const hasManualDate = exData.manualEndDate || exData.manualStartDate;
         mergedOrd = {
@@ -6271,6 +6647,11 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
       });
       tx(mergedList);
     }
+    // v45S: after syncing the blob into production_orders, collapse any (batch_number, machine_id)
+    // duplicate the id-keyed upsert may have just created (blob id churn → new row + old orphan).
+    // Keeps exactly one live row per batch+machine so the 2-per-machine enforcement above can never
+    // again protect a stale orphan over the real current batch. Idempotent; soft-delete only.
+    await _v45s_collapseDuplicateOrders();
     if (preservedCount > 0) {
       console.log(`[v41w upsert-bulk] Preserved DB status on ${preservedCount}/${orders.length} orders (stale client write blocked)`);
     }
@@ -6288,6 +6669,20 @@ app.get('/api/orders/all', async (req, res) => {
     } else {
       rows = db.prepare('SELECT data_json FROM production_orders ORDER BY updated_at DESC').all()
                .map(r => JSON.parse(r.data_json));
+    }
+    // v45T root fix (Rahul, 2-Jul): serve DPR-authoritative actualProd. This endpoint fed the
+    // client's 30-second dedicated-table merge with the STORED blob actualProd, so a corrected
+    // value injected by /api/planning/state was reverted on the next 30s cycle — the visible
+    // "flips back to original" after a DPR closed-batch correction. Same precedence as
+    // planning/state injection: override → warmed batch-sum cache → stored value (cold cache or
+    // no DPR data only). In-memory maps only — nothing added to this endpoint's hot path.
+    for (const o of rows) {
+      const bn = o && o.batchNumber;
+      if (bn == null) continue;
+      if (Object.prototype.hasOwnProperty.call(_grossOverride, bn)) o.actualProd = _grossOverride[bn] || 0;
+      else if (_grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, bn)) o.actualProd = _grossByBatch[bn] || 0;
+      if (_firstProdByBatch && _firstProdByBatch[bn]) o.dprFirstDate = _firstProdByBatch[bn]; // v45W
+      if (_lastProdByBatch  && _lastProdByBatch[bn])  o.dprLastDate  = _lastProdByBatch[bn];  // v45X
     }
     res.json({ ok: true, orders: rows });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -6407,6 +6802,13 @@ app.post('/api/machines/master', async (req, res) => {
 // GET full planning state — uses direct pg pool for large JSON
 app.get('/api/planning/state', async (req, res) => {
   try {
+    // v45N: the tracking app requests ?reconcile=1 so blob status is reconciled DB-authoritatively
+    // even when the blob was re-saved with a stale 'pending' AFTER the DB went 'running' (the v45
+    // month-rollover case — batches active in DPR/production_orders but sitting 'pending' in the blob,
+    // so Label Generation, which filters status==='running', dropped them). This drops ONLY the v41z
+    // timestamp guard for pending→running-type flips; the running/closed protection below still stands,
+    // and the planning app (no flag) keeps the exact prior v41z behaviour untouched.
+    const _trkReconcile = req.query.reconcile === '1';
     const rawState = await getPlanningStateAsync();
     // CRITICAL: deep clone before mutating — never modify the cached object directly
     // Direct mutation corrupts the cache and causes order count drops (194→175 bug)
@@ -6484,8 +6886,24 @@ app.get('/api/planning/state', async (req, res) => {
           // Without the grace, normal sync timing where DB is written just after blob would always win.
           // CRITICAL: Never auto-revert running or closed — real physical actions
           const blobStatusIsProtected = o.status === 'running' || o.status === 'closed';
-          if (dbO._dbStatus && o.status && dbO._dbStatus !== o.status && dbUpd > blobSavedAt + 30000 && !blobStatusIsProtected) {
+          // v45N: tracking (reconcile=1) skips the timestamp guard so a blob 'pending' that the DB
+          // has flipped to 'running' surfaces even if the blob was saved later — the running/closed
+          // protection still prevents any auto-revert of a real physical status.
+          const _passTsGuard = _trkReconcile ? true : (dbUpd > blobSavedAt + 30000);
+          if (dbO._dbStatus && o.status && dbO._dbStatus !== o.status && _passTsGuard && !blobStatusIsProtected) {
             o.status = dbO._dbStatus;
+            reconciledCount++;
+          }
+          // v45B: production_orders is authoritative for the reconciled gross. The reconcile toggle
+          // writes grossOverride/grossQty there durably (v45 queue), but the blob's copy can lag —
+          // leaving Tracking's label cap and the DPR planned-gross display on a STALE planned gross.
+          // The override is a deliberate durable action (like status), so the DB value wins whenever
+          // it is set and differs from the blob. No timestamp gate: the override's home is the table,
+          // so the table is its freshest source by design.
+          const _dbOv = Number(dbO.grossOverride);
+          if (Number.isFinite(_dbOv) && _dbOv > 0 && Number(o.grossOverride) !== _dbOv) {
+            o.grossOverride = dbO.grossOverride;
+            if (dbO.grossQty != null) o.grossQty = dbO.grossQty;
             reconciledCount++;
           }
         });
@@ -6495,15 +6913,21 @@ app.get('/api/planning/state', async (req, res) => {
           // Without this, every GET re-does the same reconciliation forever. The setImmediate
           // ensures the response goes out first; the rewrite uses the already-reconciled state.
           if (pgPool) {
-            const stateForBlobWrite = state;
+            // v45X FIX: serialize NOW, not inside setImmediate. The deferred callback captured the
+            // live `state` object, which this handler keeps mutating AFTER scheduling the write —
+            // notably the v45R tracking-only running-force pass. Deferred stringify persisted those
+            // label-view-only mutations into the blob (observed as 3 running orders on one machine).
+            // Freezing the JSON here persists exactly the v41z status corrections and nothing later.
+            const jsonForBlobWrite = JSON.stringify(state);
             setImmediate(async () => {
               try {
-                const json = JSON.stringify(stateForBlobWrite);
-                const existing = await pgPool.query('SELECT id FROM planning_state LIMIT 1');
+                const json = jsonForBlobWrite;
+                const existing = await pgPool.query('SELECT id FROM planning_state ORDER BY id DESC LIMIT 1') /* v46B: newest row — match GET */;
                 if (existing.rows[0]) {
                   await pgPool.query('UPDATE planning_state SET state_json = $1, saved_at = NOW() WHERE id = $2', [json, existing.rows[0].id]);
-                  // Update cache so subsequent reads see the corrected state
-                  _planningStateCache = stateForBlobWrite;
+                  // Update cache so subsequent reads see the corrected state (parse the frozen
+                  // snapshot — do NOT reference the live, later-mutated `state` object)
+                  _planningStateCache = JSON.parse(jsonForBlobWrite);
                   _planningStateCacheTime = Date.now();
                   console.log(`[v41z GET reconcile] Persisted ${reconciledCount} status correction(s) back to blob — won't re-reconcile`);
                 }
@@ -6527,9 +6951,12 @@ app.get('/api/planning/state', async (req, res) => {
           state.orders = state.orders || [];
           const { _dbStatus, _dbUpdatedAt, ...cleanOrd } = dbOrd;
           // CRITICAL: Enforce max 2 IN PRODUCTION per machine
+          // v45X (confirmed by Ishan): the limit gates NEW promotions only — never demote an order
+          // with real production (actuals>0). Demotion hid a mid-production batch from the Tracking
+          // label view (26ZF104) after the June→July carry-forward spike.
           if (cleanOrd.status === 'running' && cleanOrd.machineId) {
             const runningOnMachine = state.orders.filter(o => o.machineId === cleanOrd.machineId && o.status === 'running' && !o.deleted).length;
-            if (runningOnMachine >= 2) {
+            if (runningOnMachine >= 2 && !_orderHasActuals(cleanOrd)) {
               cleanOrd.status = 'pending';
               console.log(`[State] Recovered ${cleanOrd.batchNumber} on ${cleanOrd.machineId} — downgraded to pending (2-order limit)`);
             } else {
@@ -6542,6 +6969,38 @@ app.get('/api/planning/state', async (req, res) => {
           stateOrderById.set(dbOrd.id, cleanOrd);
           if (dbOrd.batchNumber && dbOrd.machineId) stateOrderByBatchMc.set(bmKey, cleanOrd);
         });
+      }
+
+      // v45R: for the tracking label view (?reconcile=1), guarantee every genuinely-running DB order
+      // surfaces as running. Earlier fixes each targeted one lever (v41z timestamp guard; the
+      // 2-per-machine recovery downgrade) but the real blocker is blob↔DB id mismatch: a batch can sit
+      // 'pending' in the blob under one id while production_orders holds it 'running' under a different
+      // id — so the id-keyed reconcile never flipped it and the batch+machine dedup skipped recovery.
+      // This pass matches by id AND by batchNumber+machineId, forces running unless the blob explicitly
+      // has that batch closed (never resurrect a closed batch), and folds in any running DB order still
+      // absent — no timestamp gate and no 2-per-machine downgrade, since those are planning constraints
+      // not label-view filters. Gated on _trkReconcile, so the planning app (no flag) is untouched.
+      if (_trkReconcile && Array.isArray(dbOrders) && dbOrders.length > 0) {
+        const _byId = new Map((state.orders||[]).map(o => [o.id, o]));
+        const _byBm = new Map();
+        (state.orders||[]).forEach(o => { if (o.batchNumber && o.machineId) _byBm.set(`${o.batchNumber}__${o.machineId}`, o); });
+        let _trkFixed = 0;
+        dbOrders.forEach(dbO => {
+          if (!dbO || dbO.deleted || dbO._dbStatus !== 'running') return;
+          let o = _byId.get(dbO.id);
+          if (!o && dbO.batchNumber && dbO.machineId) o = _byBm.get(`${dbO.batchNumber}__${dbO.machineId}`);
+          if (o) {
+            if (o.status !== 'running' && o.status !== 'closed') { o.status = 'running'; _trkFixed++; }
+          } else {
+            const { _dbStatus, _dbUpdatedAt, ...cleanOrd } = dbO;
+            cleanOrd.status = 'running';
+            state.orders = state.orders || [];
+            state.orders.push(cleanOrd);
+            if (cleanOrd.batchNumber && cleanOrd.machineId) _byBm.set(`${cleanOrd.batchNumber}__${cleanOrd.machineId}`, cleanOrd);
+            _trkFixed++;
+          }
+        });
+        if (_trkFixed > 0) console.log(`[v45R trk-reconcile] surfaced ${_trkFixed} running batch(es) for tracking label view`);
       }
     } catch(e) { console.warn('[State] Order recovery failed:', e.message); }
 
@@ -6573,8 +7032,22 @@ app.get('/api/planning/state', async (req, res) => {
         let eff = 0;
         if (hasOverride) eff = _grossOverride[bn] || 0;
         else if (bn != null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, bn)) eff = _grossByBatch[bn] || 0;
-        const legacy = (_actualsCache[ord.id] || _actualsCache[ord.batchNumber] || 0);
+        // v45: legacy fallback now prefers the BATCH-keyed cache over the order-keyed one. The order-
+        // keyed entry is a single (order_id,batch) group total that can belong to a *different* batch
+        // after a renumber/split — that is exactly how Planning's actualProd showed 57.9 while the true
+        // batch sum (and the DPR screen) was 54. The batch-keyed cache is now the accumulated per-batch
+        // sum; with the persistent _orderBatch, _grossByBatch is reliably present so eff>0 usually wins
+        // outright, but this keeps the rare fallback correct too.
+        const legacy = (bn != null && Object.prototype.hasOwnProperty.call(_actualsCache, bn))
+          ? (_actualsCache[bn] || 0)
+          : (_actualsCache[ord.id] || 0);
         ord.actualProd = (hasOverride || eff > 0) ? eff : legacy;
+        // v45W: expose the first actual DPR production date so the client cascade can anchor a
+        // started order's start date to production reality instead of the plan cursor.
+        if (bn != null && _firstProdByBatch && _firstProdByBatch[bn]) ord.dprFirstDate = _firstProdByBatch[bn];
+        // v45X: expose the LAST actual DPR production date — the cascade anchors a complete
+        // order's end date to it (reality-driven ends; +ceil day convention unchanged).
+        if (bn != null && _lastProdByBatch && _lastProdByBatch[bn]) ord.dprLastDate = _lastProdByBatch[bn];
       }
     }
 
@@ -6596,7 +7069,7 @@ app.post('/api/planning/restore', async (req, res) => {
     if (!state || !state.orders) return res.status(400).json({ ok: false, error: 'Invalid backup format' });
     const json = JSON.stringify(state);
     if (pgPool) {
-      const existing = await pgPool.query('SELECT id FROM planning_state LIMIT 1');
+      const existing = await pgPool.query('SELECT id FROM planning_state ORDER BY id DESC LIMIT 1') /* v46B: newest row — match GET */;
       if (existing.rows.length > 0) {
         await pgPool.query('UPDATE planning_state SET state_json = $1, saved_at = NOW() WHERE id = $2', [json, existing.rows[0].id]);
       } else {
@@ -6658,10 +7131,16 @@ app.post('/api/planning/state', async (req, res) => {
             _bgRunningOrderIds[o.machineId].push(id);
           });
           // ACTIVE ENFORCEMENT: downgrade newest orders on machines already over limit
+          // v45X (confirmed by Ishan): skip orders with real production — the limit gates NEW
+          // promotions, not batches that already ran (DPR gate ⇒ actuals imply it WAS running).
           const _bgForcePendingIds = new Set();
           Object.entries(_bgRunningOrderIds).forEach(([machineId, ids]) => {
             if (ids.length > 2) {
               ids.slice(2).forEach(id => {
+                if (_orderHasActuals(existingMap[id])) {
+                  console.log('[v41z bg-merge] MC ' + machineId + ' over limit but ' + id + ' has actuals — NOT downgrading (v45X guard)');
+                  return;
+                }
                 _bgForcePendingIds.add(id);
                 console.log('[v41z bg-merge] MC ' + machineId + ' has ' + ids.length + ' running — downgrading ' + id + ' to pending (2-order limit)');
               });
@@ -6704,7 +7183,9 @@ app.post('/api/planning/state', async (req, res) => {
               } else if (_bgForcePendingIds.has(ord.id) && ord.status === 'running' && ex.status !== 'closed') {
                 finalStatus = 'pending';
               } else {
-              const wouldExceedLimit = ord.status === 'running' && !alreadyRunningInDB && machineRunCount >= 2;
+              // v45X (confirmed by Ishan): an order with actuals already ran — re-promotion is not a
+              // "new" start and must not be blocked/demoted by the 2-order limit.
+              const wouldExceedLimit = ord.status === 'running' && !alreadyRunningInDB && machineRunCount >= 2 && !_orderHasActuals(ord);
               if (wouldExceedLimit) {
                 finalStatus = 'pending';
               } else if (ex.status && ord.status && ex.status !== ord.status) {
@@ -6735,7 +7216,12 @@ app.post('/api/planning/state', async (req, res) => {
                 manualEndDate:   ex.manualEndDate   || ord.manualEndDate,
                 manualStartDate: ex.manualStartDate || ord.manualStartDate,
                 status: finalStatus,
-                actualProd: Math.max(ord.actualProd||0, ex.actualProd||0),
+                // v45W: third blob-vs-stored max() site brought in line with the v45T root fix —
+                // DPR owns actualProd; the max() guard survives only when the server has no DPR data.
+                actualProd: (()=>{ const _b=ord.batchNumber;
+                  if (_b!=null && Object.prototype.hasOwnProperty.call(_grossOverride,_b)) return _grossOverride[_b]||0;
+                  if (_b!=null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch,_b)) return _grossByBatch[_b]||0;
+                  return Math.max(ord.actualProd||0, ex.actualProd||0); })(),
                 // v41z: protect SAP refs and PO number — DB wins if set; client cannot blank them via stale tab
                 sapDocEntry: ex.sapDocEntry || ord.sapDocEntry || null,
                 sapDocNum:   ex.sapDocNum   || ord.sapDocNum   || '',
@@ -6774,6 +7260,8 @@ app.post('/api/planning/state', async (req, res) => {
             `, params);
           }
           console.log(`[State] Background merged ${orders.length} orders into production_orders (batched)`);
+          // v45S: collapse any (batch_number, machine_id) duplicate this id-keyed merge may have created.
+          await _v45s_collapseDuplicateOrders();
         } catch(e) { console.warn('[State] Background order merge failed:', e.message); }
       });
     }
@@ -6914,9 +7402,48 @@ app.post('/api/planning/state', async (req, res) => {
       }
     }
 
+    // v46A merge-guard (confirmed by Ishan; root cause of the 26ZC094/095 churn): the planning blob is
+    // full-state last-write-wins, so a stale client session saving after another session created new
+    // orders silently WIPED those orders. Before saving, restore any stored order that is missing from
+    // the incoming blob — but ONLY unclosed ones: the month-change archive legitimately removes CLOSED
+    // prior-month orders without tombstones (restoring those would resurrect the whole archive), while
+    // unclosed orders are never removed legitimately except via deleteOrder, which tombstones
+    // (deleted:true) in production_orders — checked below. Wrapped in try: the save is never blocked.
+    try {
+      if (state && Array.isArray(state.orders)) {
+        let _storedBlob = null;
+        if (pgPool) {
+          const _r = await pgPool.query('SELECT state_json FROM planning_state ORDER BY id DESC LIMIT 1') /* v46B: newest row — match GET */;
+          if (_r.rows[0]) _storedBlob = typeof _r.rows[0].state_json === 'string' ? JSON.parse(_r.rows[0].state_json) : _r.rows[0].state_json;
+        } else {
+          const _r = db.prepare('SELECT state_json FROM planning_state ORDER BY id DESC LIMIT 1').get() /* v46B: newest row — match GET */;
+          if (_r) _storedBlob = JSON.parse(_r.state_json);
+        }
+        if (_storedBlob && Array.isArray(_storedBlob.orders)) {
+          const _incIds = new Set(state.orders.map(o => o && o.id).filter(Boolean));
+          const _missing = _storedBlob.orders.filter(o => o && o.id && !_incIds.has(o.id) && !o.deleted && o.status !== 'closed');
+          if (_missing.length) {
+            const _delMap = {};
+            try {
+              if (pgPool) {
+                const _dr = await pgPool.query('SELECT id, data_json FROM production_orders WHERE id = ANY($1)', [_missing.map(o => o.id)]);
+                _dr.rows.forEach(r => { try { const d = typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r.data_json; _delMap[r.id] = !!(d && d.deleted); } catch (e) {} });
+              } else {
+                const _sel = db.prepare('SELECT data_json FROM production_orders WHERE id = ?');
+                _missing.forEach(o => { const r = _sel.get(o.id); if (r) { try { const d = JSON.parse(r.data_json); _delMap[o.id] = !!(d && d.deleted); } catch (e) {} } });
+              }
+            } catch (e) { /* production_orders absent (old sqlite) — treat as not tombstoned */ }
+            let _restored = 0;
+            _missing.forEach(o => { if (_delMap[o.id]) return; state.orders.push(o); _restored++; });
+            if (_restored) console.log(`[v46A merge-guard] restored ${_restored} unclosed order(s) missing from incoming blob (stale-client overwrite protection): ${_missing.filter(o=>!_delMap[o.id]).map(o=>o.batchNumber||o.id).join(', ')}`);
+          }
+        }
+      }
+    } catch (_mgErr) { console.warn('[v46A merge-guard] skipped:', _mgErr.message); }
+
     const json = JSON.stringify(state);
     if (pgPool) {
-      const existing = await pgPool.query('SELECT id FROM planning_state LIMIT 1');
+      const existing = await pgPool.query('SELECT id FROM planning_state ORDER BY id DESC LIMIT 1') /* v46B: newest row — match GET */;
       if (existing.rows[0]) {
         await pgPool.query('UPDATE planning_state SET state_json = $1, saved_at = NOW() WHERE id = $2', [json, existing.rows[0].id]);
       } else {
@@ -6925,7 +7452,7 @@ app.post('/api/planning/state', async (req, res) => {
       _planningStateCache = state;
       _planningStateCacheTime = Date.now();
     } else {
-      const existing = db.prepare('SELECT id FROM planning_state LIMIT 1').get();
+      const existing = db.prepare('SELECT id FROM planning_state ORDER BY id DESC LIMIT 1').get() /* v46B: newest row — match GET */;
       if (existing) {
         db.prepare('UPDATE planning_state SET state_json = ?, saved_at = NOW() WHERE id = ?').run(json, existing.id);
       } else {
@@ -6939,6 +7466,107 @@ app.post('/api/planning/state', async (req, res) => {
 });
 
 // GET active orders for a machine (used by DPR dropdown)
+
+// v46A issue 1 (confirmed by Ishan): retroactive orange-label backfill for one batch. Creates an
+// orange label for every non-voided, non-orange box of the batch that has a non-reversed PI scan-IN
+// but no live orange child. Idempotent: id = 'ol-'+parent id, ON CONFLICT/OR IGNORE. Matches the
+// client autoGenerateOrangeLabel field convention; qr_data left NULL (labels-all rebuilds it client-side, v41b).
+app.post('/api/tracking/orange-backfill', async (req, res) => {
+  try {
+    const { batchNumber } = req.body || {};
+    if (!batchNumber) return res.status(400).json({ ok: false, error: 'batchNumber required' });
+    const ts = new Date().toISOString();
+    let created = 0;
+    if (pgPool) {
+      const r = await pgPool.query(
+        `INSERT INTO tracking_labels (id, batch_number, label_number, size, qty, is_orange, parent_label_id,
+                                      customer, colour, pc_code, printing_matter, generated, printed, voided)
+         SELECT 'ol-'||p.id, p.batch_number, p.label_number, p.size, p.qty, 1, p.id,
+                p.customer, p.colour, p.pc_code, p.printing_matter, $2, 0, 0
+         FROM tracking_labels p
+         WHERE p.batch_number = $1 AND COALESCE(p.is_orange,0)=0 AND COALESCE(p.voided,0)=0
+           AND EXISTS (SELECT 1 FROM tracking_scans s
+                        WHERE s.label_id = p.id AND s.dept='pi' AND s.type='in'
+                          AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals rv WHERE rv.reversed_scan_id = s.id))
+           AND NOT EXISTS (SELECT 1 FROM tracking_labels o
+                            WHERE o.parent_label_id = p.id AND o.is_orange=1 AND COALESCE(o.voided,0)=0)
+         ON CONFLICT (id) DO NOTHING
+         RETURNING id`, [batchNumber, ts]);
+      created = r.rows.length;
+    } else {
+      const parents = db.prepare(
+        `SELECT p.* FROM tracking_labels p
+         WHERE p.batch_number = ? AND COALESCE(p.is_orange,0)=0 AND COALESCE(p.voided,0)=0
+           AND EXISTS (SELECT 1 FROM tracking_scans s
+                        WHERE s.label_id = p.id AND s.dept='pi' AND s.type='in'
+                          AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals rv WHERE rv.reversed_scan_id = s.id))
+           AND NOT EXISTS (SELECT 1 FROM tracking_labels o
+                            WHERE o.parent_label_id = p.id AND o.is_orange=1 AND COALESCE(o.voided,0)=0)`).all(batchNumber);
+      const ins = db.prepare(
+        `INSERT OR IGNORE INTO tracking_labels (id, batch_number, label_number, size, qty, is_orange, parent_label_id,
+                                                customer, colour, pc_code, printing_matter, generated, printed, voided)
+         VALUES (?,?,?,?,?,1,?,?,?,?,?,?,0,0)`);
+      parents.forEach(p => { const info = ins.run('ol-'+p.id, p.batch_number, p.label_number, p.size, p.qty, p.id, p.customer, p.colour, p.pc_code, p.printing_matter, ts); created += info.changes; });
+    }
+    res.json({ ok: true, created, batchNumber });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v46A issue 2 data repair (confirmed by Ishan): one-time repair for the 26ZC094/095 lost-update churn.
+// Physical truth: 26ZC094 = GREEN Tr / UCHIMI (already manufactured); 26ZC095 = CLEAR Tr (now in
+// production). System state after churn: the GREEN order was wiped from the blob (possibly still in
+// production_orders) and the CLEAR order wears 26ZC094. Repair: rename the current CLEAR 26ZC094 →
+// 26ZC095 (blob orders + linked printOrders/dispatchPlans + production_orders row), then restore the
+// GREEN order as 26ZC094 (from production_orders if found — else the planner re-creates it manually
+// typing 26ZC094 in the batch field of the order form). Optional moveDprFromDate migrates
+// production_actuals rows dated >= that date from 26ZC094 → 26ZC095 (Clear's DPR recorded during the
+// churn window). dryRun=true by default: reports what WOULD happen, changes nothing. PG only.
+app.post('/api/admin/repair-26zc094', async (req, res) => {
+  try {
+    if (!pgPool) return res.json({ ok: false, error: 'PG only — run against the Railway Postgres deployment' });
+    const { dryRun = true, moveDprFromDate = null } = req.body || {};
+    const report = { dryRun, actions: [] };
+    const br = await pgPool.query('SELECT id, state_json FROM planning_state ORDER BY id DESC LIMIT 1') /* v46B: newest row — match GET */;
+    if (!br.rows[0]) return res.json({ ok: false, error: 'planning_state empty' });
+    const blob = typeof br.rows[0].state_json === 'string' ? JSON.parse(br.rows[0].state_json) : br.rows[0].state_json;
+    blob.orders = blob.orders || []; blob.printOrders = blob.printOrders || []; blob.dispatchPlans = blob.dispatchPlans || [];
+    const clearOrd = blob.orders.find(o => o && o.batchNumber === '26ZC094' && !o.deleted);
+    report.currentBlob26ZC094 = clearOrd ? { id: clearOrd.id, colour: clearOrd.colour, customer: clearOrd.customer || clearOrd.shipTo, status: clearOrd.status } : null;
+    const dup095 = blob.orders.find(o => o && o.batchNumber === '26ZC095' && !o.deleted);
+    if (dup095) return res.json({ ok: false, error: '26ZC095 already exists in blob — manual review needed', existing095: { id: dup095.id, colour: dup095.colour } });
+    // locate the lost GREEN order in production_orders
+    const pr = await pgPool.query(`SELECT id, data_json FROM production_orders`);
+    const candidates = [];
+    pr.rows.forEach(r => { try { const d = typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r.data_json; if (d && d.batchNumber === '26ZC094' && (!clearOrd || d.id !== clearOrd.id)) candidates.push(d); } catch (e) {} });
+    const green = candidates.find(d => !d.deleted && /green/i.test(d.colour || '')) || candidates.find(d => !d.deleted) || null;
+    report.lostGreenFound = green ? { id: green.id, colour: green.colour, customer: green.customer || green.shipTo, status: green.status } : null;
+    let dprCount = 0;
+    if (moveDprFromDate) {
+      const dc = await pgPool.query(`SELECT COUNT(*)::int AS n FROM production_actuals WHERE batch_number='26ZC094' AND date >= $1`, [moveDprFromDate]);
+      dprCount = dc.rows[0].n;
+    }
+    report.dprRowsToMove = moveDprFromDate ? dprCount : 'not requested';
+    if (dryRun) { report.actions.push('DRY RUN — nothing changed'); return res.json({ ok: true, report }); }
+    if (!clearOrd) return res.json({ ok: false, error: 'No live 26ZC094 order in blob to rename', report });
+    // 1) rename CLEAR 26ZC094 → 26ZC095 in blob + linkages + production_orders
+    clearOrd.batchNumber = '26ZC095';
+    blob.printOrders.forEach(p => { if (p && p.productionOrderId === clearOrd.id) p.batchNumber = '26ZC095'; });
+    blob.dispatchPlans.forEach(p => { if (p && p.productionOrderId === clearOrd.id) p.batchNumber = '26ZC095'; });
+    await pgPool.query(`UPDATE production_orders SET data_json = jsonb_set(data_json::jsonb, '{batchNumber}', '"26ZC095"')::text WHERE id = $1`, [clearOrd.id]);
+    report.actions.push(`Renamed CLEAR order ${clearOrd.id} 26ZC094 → 26ZC095`);
+    // 2) restore GREEN as 26ZC094 into the blob (if found)
+    if (green) { blob.orders.push(green); report.actions.push(`Restored GREEN order ${green.id} as 26ZC094 into blob`); }
+    else report.actions.push('GREEN order NOT found in production_orders — planner must re-create it manually with batch 26ZC094');
+    await pgPool.query('UPDATE planning_state SET state_json = $1, saved_at = NOW() WHERE id = $2', [JSON.stringify(blob), br.rows[0].id]);
+    // 3) optional DPR migration for Clear's churn-window entries
+    if (moveDprFromDate && dprCount > 0) {
+      await pgPool.query(`UPDATE production_actuals SET batch_number='26ZC095' WHERE batch_number='26ZC094' AND date >= $1`, [moveDprFromDate]);
+      report.actions.push(`Moved ${dprCount} production_actuals row(s) dated >= ${moveDprFromDate} from 26ZC094 to 26ZC095`);
+    }
+    res.json({ ok: true, report });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 app.get('/api/orders/machine/:machineId', (req, res) => {
   try {
     const orders = getActiveOrdersForMachine(req.params.machineId);
@@ -6958,9 +7586,45 @@ app.get('/api/orders/active', async (req, res) => {
     // can mark non-running orders visually + warn before entering data against them.
     // Triggered by ?includeAll=1 query param OR X-User-Role: admin header.
     const _isAdmin = req.query.includeAll === '1' || req.headers['x-user-role'] === 'admin';
+
+    // v45I #3: reconcile the blob orders against the authoritative production_orders DB before
+    // filtering. The planning blob's status can lag (a saveState after a successful upsertOrderToDB
+    // may not have landed), so an order the planner marked 'running' can still read stale here —
+    // hiding it from the non-admin DPR feed's status filter even though Planning/Tracking (which read
+    // the DB) show it In Production. This is the month-rollover "batch not shown in DPR" case. Same
+    // reconciliation as /api/planning/overlimit-machines: DB status wins when its row is newer than
+    // the blob save, and any non-deleted DB order the blob is missing entirely is folded in from
+    // data_json. Falls back to the raw blob on any error — never worse than before.
+    let reconciledOrders = state.orders || [];
+    try {
+      // v45L #3: production_orders is the AUTHORITATIVE status store (written by upsertOrderToDB on
+      // every change); the planning blob can get stuck with a stale status or miss an order entirely.
+      // Confirmed live on 1 Jul: 26ZG132 sat 'pending' in the blob while the DB had 'running', and
+      // 26ZF104 was absent from the blob though the DB had it 'running' — the blob even held
+      // inconsistent status for orders the DB updated in the same write. So take status straight from
+      // the DB for any order it knows, and fold in non-deleted DB orders the blob is missing (rebuilt
+      // from data_json). Deleted is sticky. Falls back to the raw blob on any error — never worse.
+      let dbRows = [];
+      if (pgPool) dbRows = (await pgPool.query('SELECT id, data_json, status, deleted, updated_at FROM production_orders')).rows;
+      else dbRows = db.prepare('SELECT id, data_json, status, deleted, updated_at FROM production_orders').all();
+      const byId = {};
+      for (const o of reconciledOrders) if (o && o.id) byId[o.id] = { ...o };
+      for (const row of dbRows) {
+        const existing = byId[row.id];
+        if (existing) {
+          if (row.deleted) { existing.deleted = true; continue; }
+          if (row.status) existing.status = row.status; // DB wins — authoritative status store
+        } else if (!row.deleted) {
+          let obj = null; try { obj = JSON.parse(row.data_json); } catch {}
+          if (obj && obj.id) { obj.status = row.status || obj.status; byId[obj.id] = obj; }
+        }
+      }
+      reconciledOrders = Object.values(byId);
+    } catch (e) { console.warn('[v45L #3] order status reconcile failed, using blob as-is:', e.message); reconciledOrders = state.orders || []; }
+
     const baseSet = _isAdmin
-      ? (state.orders || []).filter(o => !o.deleted)
-      : (state.orders || []).filter(o => o.status === 'running' && !o.deleted);
+      ? reconciledOrders.filter(o => !o.deleted)
+      : reconciledOrders.filter(o => o.status === 'running' && !o.deleted);
 
     // Helper: extract YYYY-MM-DD from any startDate format (Date object, ISO string, etc.)
     const getDateStr = (d) => {
@@ -7830,6 +8494,430 @@ app.get('/api/dpr/plant-report/:date', async (req, res) => {
   }
 });
 
+// v45X (confirmed by Ishan): server-side cumulative for the DPR Plant Report, summed from
+// production_actuals — the same store Report B's month gross uses — so the two reports agree by
+// construction. The client previously summed locally-cached day blobs (grid), which diverges when
+// (a) the DPR-closed restore rule preserves actuals rows the grid no longer shows, (b) a floor-date
+// blob was never synced to this device, or (c) a machine produced outside the FLOORS master.
+// Returns per-machine { total, days, dates[] } for date-range [from..to] (from optional = all-time);
+// only days with production count. The client derives floor/plant day-unions from the dates arrays.
+app.get('/api/dpr/plant-cum', async (req, res) => {
+  try {
+    const to = String(req.query.to || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ ok: false, error: 'to=YYYY-MM-DD required' });
+    const fromRaw = String(req.query.from || '');
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw.slice(0, 10) : null;
+    let rows;
+    if (pgPool) {
+      rows = (await pgPool.query(
+        `SELECT machine_id, date, COALESCE(SUM(qty_lakhs),0) AS day_total
+           FROM production_actuals
+          WHERE date <= $1 AND ($2::text IS NULL OR date >= $2)
+          GROUP BY machine_id, date`, [to, from])).rows;
+    } else {
+      rows = from
+        ? db.prepare(`SELECT machine_id, date, COALESCE(SUM(qty_lakhs),0) AS day_total FROM production_actuals WHERE date <= ? AND date >= ? GROUP BY machine_id, date`).all(to, from)
+        : db.prepare(`SELECT machine_id, date, COALESCE(SUM(qty_lakhs),0) AS day_total FROM production_actuals WHERE date <= ? GROUP BY machine_id, date`).all(to);
+    }
+    const machines = {};
+    for (const r of rows) {
+      const mid = r.machine_id; if (!mid) continue;
+      const v = parseFloat(r.day_total) || 0;
+      if (v <= 0) continue; // days-with-production only — mirrors the client's cumDays rule
+      if (!machines[mid]) machines[mid] = { total: 0, days: 0, dates: [] };
+      machines[mid].total = parseFloat((machines[mid].total + v).toFixed(2));
+      machines[mid].days += 1;
+      machines[mid].dates.push(String(r.date).slice(0, 10));
+    }
+    res.json({ ok: true, from, to, machines });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v45Y (confirmed by Ishan): REBUILD production_actuals from dpr_records day blobs for a date
+// range. Purpose: restore months (e.g. June 2026) whose per-day actuals rows are missing while the
+// DPR grid blobs still hold the data — without them, month-gross for that month can never be
+// computed. Idempotent: same upsert + conflict key as the batch-close flush; existing rows are
+// simply overwritten with the same grid values, nothing is deleted. Dry-run by default — pass
+// {"confirm":true} to write. Body: { from:'YYYY-MM-DD', to:'YYYY-MM-DD', confirm?:boolean }.
+app.post('/api/admin/rebuild-actuals-from-dpr', async (req, res) => {
+  try {
+    if (!pgPool) return res.status(400).json({ ok: false, error: 'PostgreSQL only' });
+    const { from, to, confirm } = req.body || {};
+    const isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+    if (!isDate(from) || !isDate(to) || from > to) {
+      return res.status(400).json({ ok: false, error: 'from/to must be YYYY-MM-DD with from <= to' });
+    }
+    const recs = await pgPool.query(
+      `SELECT floor, date, data_json FROM dpr_records WHERE date >= $1 AND date <= $2 ORDER BY date, floor`,
+      [from, to]);
+    let scanned = 0, wouldWrite = 0, written = 0;
+    const perDate = {};
+    for (const rec of recs.rows) {
+      const data = typeof rec.data_json === 'string' ? JSON.parse(rec.data_json) : rec.data_json;
+      const shifts = (data && data.shifts) || {};
+      for (const [shiftName, shiftData] of Object.entries(shifts)) {
+        if (!shiftData || !shiftData.machines) continue;
+        for (const [machineId, machineData] of Object.entries(shiftData.machines)) {
+          const runs = (machineData && machineData.runs) || [];
+          for (let ri = 0; ri < runs.length; ri++) {
+            const run = runs[ri];
+            const qty = parseFloat(run && run.qty) || 0;
+            scanned++;
+            if (qty <= 0) continue;
+            wouldWrite++;
+            perDate[rec.date] = (perDate[rec.date] || 0) + 1;
+            if (confirm === true) {
+              await pgPool.query(
+                `INSERT INTO production_actuals (order_id, batch_number, machine_id, date, shift, run_index, qty_lakhs, floor)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                 ON CONFLICT(machine_id, date, shift, run_index) DO UPDATE SET
+                 order_id=EXCLUDED.order_id, batch_number=EXCLUDED.batch_number, qty_lakhs=EXCLUDED.qty_lakhs`,
+                [run.orderId || null, run.batchNumber || null, machineId, rec.date, shiftName, ri, qty, rec.floor]);
+              written++;
+            }
+          }
+        }
+      }
+    }
+    res.json({ ok: true, dryRun: confirm !== true, dprDays: recs.rows.length,
+               runsScanned: scanned, rowsToWrite: wouldWrite, rowsWritten: written, perDate });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v45Z (confirmed by Ishan): REPAIR existing export-invoice quantities written before the UoM fix.
+// For every invoices_received row whose payload_json lines include a THOUSAND-UoM line, recompute
+// total_qty_lakhs with the per-line scale; where the linked tracking_dispatch_records row still
+// carries the OLD raw total (±0.01), rewrite it to the corrected Lakhs. Dry-run by default —
+// {"confirm":true} writes. Idempotent: a corrected invoice recomputes to the same value; a dispatch
+// record that no longer matches the old raw value is left untouched (manual edits are respected).
+app.post('/api/admin/repair-export-invoice-qty', async (req, res) => {
+  try {
+    if (!pgPool) return res.status(400).json({ ok: false, error: 'PostgreSQL only' });
+    const confirm = req.body && req.body.confirm === true;
+    const rows = (await pgPool.query(
+      `SELECT id, sap_doc_num, total_qty_lakhs, payload_json FROM invoices_received WHERE payload_json IS NOT NULL`)).rows;
+    let scanned = 0, exportInvs = 0, invUpdated = 0, recUpdated = 0;
+    const changes = [];
+    for (const r of rows) {
+      scanned++;
+      let inv; try { inv = typeof r.payload_json === 'string' ? JSON.parse(r.payload_json) : r.payload_json; } catch { continue; }
+      const lines = (inv && inv.DocumentLines) || [];
+      if (!lines.length || !lines.some(l => _sapUomScale(l) < 1)) continue; // no THOUSAND line → not export
+      exportInvs++;
+      const rawSum    = lines.reduce((s, l) => s + (parseFloat(l.Quantity) || 0), 0);
+      const scaledSum = parseFloat(lines.reduce((s, l) => s + ((parseFloat(l.Quantity) || 0) * _sapUomScale(l)), 0).toFixed(3));
+      const cur = parseFloat(r.total_qty_lakhs) || 0;
+      if (Math.abs(cur - scaledSum) < 0.005) continue; // already correct
+      changes.push({ invoice: r.sap_doc_num || r.id, from: cur, to: scaledSum });
+      if (confirm) {
+        await pgPool.query(`UPDATE invoices_received SET total_qty_lakhs=$1 WHERE id=$2`, [scaledSum, r.id]);
+        invUpdated++;
+        // Fix linked dispatch records still carrying the OLD raw value (either the stale
+        // total_qty_lakhs or the raw line sum) — anything else was hand-set, leave it.
+        const upd = await pgPool.query(
+          `UPDATE tracking_dispatch_records SET qty=$1
+             WHERE invoice_no = $2 AND $2 <> ''
+               AND (ABS(qty - $3) < 0.01 OR ABS(qty - $4) < 0.01)`,
+          [scaledSum, String(r.sap_doc_num || ''), cur, rawSum]);
+        recUpdated += upd.rowCount || 0;
+      }
+    }
+    // v45ZD (confirmed by Ishan): PASS 2 — dispatch records whose invoice exists in
+    // invoices_received but whose qty is grossly off the invoice's (corrected) total: raw-thousands
+    // rows written before the UoM fix whose payloads carry no UoM marker (26ZB074's 9020/9031,
+    // qty 3300 vs true 33L). Aligned to the invoice total when the record is >5x off.
+    const pass2 = [];
+    let pass2Updated = 0;
+    {
+      const dr = (await pgPool.query(
+        `SELECT r.id, r.batch_number, r.invoice_no, r.qty, i.total_qty_lakhs AS inv_qty
+           FROM tracking_dispatch_records r
+           JOIN invoices_received i ON i.sap_doc_num = r.invoice_no
+          WHERE r.invoice_no IS NOT NULL AND r.invoice_no <> ''
+            AND i.total_qty_lakhs > 0
+            AND r.qty > i.total_qty_lakhs * 5
+            -- v45ZJ (confirmed by Ishan): CONSIGNMENT GUARD. Aligning a record to the FULL invoice
+            -- total is only valid when one record == one invoice. On a multi-batch consignment
+            -- (9020/9031: 8 per-batch records) this over-wrote every per-batch qty to the whole
+            -- invoice's Lakhs. Restrict pass-2 to single-record invoices; multi-record ones are
+            -- restored per-batch by pass-4 below from their own payload lines.
+            AND (SELECT COUNT(*) FROM tracking_dispatch_records r2 WHERE r2.invoice_no = r.invoice_no) = 1`)).rows;
+      for (const r of dr) {
+        pass2.push({ record: r.id, batch: r.batch_number, invoice: r.invoice_no,
+                     from: parseFloat(r.qty), to: parseFloat(r.inv_qty) });
+        if (confirm) {
+          await pgPool.query(`UPDATE tracking_dispatch_records SET qty=$1 WHERE id=$2`,
+                             [parseFloat(r.inv_qty), r.id]);
+          pass2Updated++;
+        }
+      }
+    }
+    // PASS 3 — orphan records (no invoices_received match) with implausible qty: scaled x0.01
+    // (thousands -> Lakhs). Threshold overridable via body.orphanThreshold; every candidate is
+    // listed in the dry run for review before confirming.
+    const orphanThreshold = parseFloat((req.body||{}).orphanThreshold) || 200;
+    const pass3 = [];
+    let pass3Updated = 0;
+    {
+      const orows = (await pgPool.query(
+        `SELECT r.id, r.batch_number, r.invoice_no, r.qty
+           FROM tracking_dispatch_records r
+          WHERE r.qty > $1
+            AND NOT EXISTS (SELECT 1 FROM invoices_received i WHERE i.sap_doc_num = r.invoice_no)`,
+        [orphanThreshold])).rows;
+      for (const r of orows) {
+        const to = parseFloat((parseFloat(r.qty) * 0.01).toFixed(3));
+        pass3.push({ record: r.id, batch: r.batch_number, invoice: r.invoice_no || null,
+                     from: parseFloat(r.qty), to });
+        if (confirm) {
+          await pgPool.query(`UPDATE tracking_dispatch_records SET qty=$1 WHERE id=$2`, [to, r.id]);
+          pass3Updated++;
+        }
+      }
+    }
+    // v45ZJ (confirmed by Ishan): PASS 4 — batch-matched CONSIGNMENT restore. Runs DB-wide, not just
+    // 9020/9031: every MULTI-record export invoice whose per-batch dispatch records were flattened to
+    // the invoice total by the un-guarded pass-2. Each record's qty is restored from ITS OWN payload
+    // line (batch-matched Quantity × UoM scale), so 26ZB074→33, 26ZB072→30, 26ZG097→3.75, etc. The
+    // invoice HEADER (176) is already correct per v45Z and is untouched. Records whose batch has NO
+    // matchable payload line (e.g. 26ZB076 — no line, no label, no gross) are FLAGGED in pass4Unmatched
+    // for manual review, never auto-changed. Idempotent: a record already equal to its line value is
+    // skipped, so re-running is a safe no-op. Export-only (invoice must carry a THOUSAND line).
+    const pass4 = [];
+    const pass4Unmatched = [];
+    let pass4Updated = 0;
+    {
+      const drows = (await pgPool.query(
+        `SELECT r.id, r.batch_number, r.invoice_no, r.qty, i.payload_json
+           FROM tracking_dispatch_records r
+           JOIN invoices_received i ON i.sap_doc_num = r.invoice_no
+          WHERE r.invoice_no IS NOT NULL AND r.invoice_no <> ''
+            AND i.payload_json IS NOT NULL
+            AND (SELECT COUNT(*) FROM tracking_dispatch_records r2 WHERE r2.invoice_no = r.invoice_no) > 1`)).rows;
+      for (const r of drows) {
+        let inv; try { inv = typeof r.payload_json === 'string' ? JSON.parse(r.payload_json) : r.payload_json; } catch { continue; }
+        const lines = (inv && inv.DocumentLines) || [];
+        if (!lines.some(l => _sapUomScale(l) < 1)) continue; // export-only (some THOUSAND line)
+        const cur = parseFloat(r.qty) || 0;
+        const target = _lineQtyForBatch(inv, r.batch_number);
+        if (target == null) {
+          pass4Unmatched.push({ record: r.id, batch: r.batch_number, invoice: r.invoice_no, qty: cur });
+          continue;
+        }
+        if (Math.abs(cur - target) < 0.005) continue; // already correct
+        pass4.push({ record: r.id, batch: r.batch_number, invoice: r.invoice_no, from: cur, to: target });
+        if (confirm) {
+          await pgPool.query(`UPDATE tracking_dispatch_records SET qty=$1 WHERE id=$2`, [target, r.id]);
+          pass4Updated++;
+        }
+      }
+    }
+    res.json({ ok: true, dryRun: !confirm, scanned, exportInvoices: exportInvs,
+               invoicesToFix: changes.length, invoicesUpdated: invUpdated,
+               dispatchRecordsUpdated: recUpdated, changes: changes.slice(0, 50),
+               pass2InvoiceAligned: { toFix: pass2.length, updated: pass2Updated, rows: pass2.slice(0, 50) },
+               pass3Orphans: { threshold: orphanThreshold, toFix: pass3.length, updated: pass3Updated, rows: pass3.slice(0, 50) },
+               pass4ConsignmentRestore: { toFix: pass4.length, updated: pass4Updated, rows: pass4.slice(0, 100),
+                                          unmatched: pass4Unmatched.slice(0, 100), unmatchedCount: pass4Unmatched.length } });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v45ZK (confirmed by Ishan): AUDIT + repair EXPORT INVOICE HEADERS (total_qty_lakhs). Complements
+// the dispatch-record repair above by closing the loop on the invoice HEADER value.
+//
+// Scope — DIRECT-SAP ONLY (invoice_request_id IS NULL). This is deliberate and load-bearing: a
+// Sunloc-LINKED invoice's header is set authoritatively from the dispatch manager's
+// invoice_request.qty_lakhs (poller line ~3475), NOT from the payload sum — recomputing those from
+// the payload would OVERWRITE a hand-entered authoritative figure. All observed mis-scales (9020/
+// 9031) are direct_sap, so this scope both fixes the real cases and is safe by construction.
+//
+// Two classes:
+//   • STALE_HEADER — stored total_qty_lakhs ≠ the value the CURRENT resolver computes from the
+//     payload (Σ Quantity × _sapUomScale). The stored value predates the ×0.01 UoM rule; the
+//     recomputed value is the rule applied correctly. Safe to auto-fix on confirm (payload-internal,
+//     no guessing). This is pass-1's logic generalised to every direct-SAP invoice, not only ones
+//     already flagged export.
+//   • SUSPECT_MISSED_MARKER — the resolver finds NO THOUSAND field on any line (scale stays 1), yet
+//     the stored total is ~100× the physical label qty of the invoice's dispatched batches. A
+//     THOUSAND marker may sit in a SAP field the resolver doesn't read. FLAG ONLY — never rescaled
+//     automatically, because a wrong ×0.01 would destroy a correct domestic header. Surfaced for
+//     manual review; if any are real, the fix is a targeted, evidence-driven resolver field add.
+//
+// Dry-run by default; {"confirm":true} writes STALE_HEADER corrections only. tolPct overrides the
+// match tolerance (default 0.5%). Idempotent: a corrected header recomputes to the same value.
+app.post('/api/admin/audit-export-invoice-headers', async (req, res) => {
+  try {
+    if (!pgPool) return res.status(400).json({ ok: false, error: 'PostgreSQL only' });
+    const confirm = req.body && req.body.confirm === true;
+    const tolPct = Math.max(0, parseFloat((req.body || {}).tolPct) || 0.5) / 100;
+    // Physical ground truth: live (non-voided) label qty per batch — unit-unambiguous Lakhs.
+    const labelByBatch = {};
+    for (const r of (await pgPool.query(
+        `SELECT batch_number, COALESCE(SUM(qty),0) AS q
+           FROM tracking_labels WHERE COALESCE(voided,0)=0 GROUP BY batch_number`)).rows) {
+      if (r.batch_number) labelByBatch[String(r.batch_number).trim()] = parseFloat(r.q) || 0;
+    }
+    // Which batches each invoice dispatched (invoice → distinct batches), to sum physical labels.
+    const batchesByInvoice = {};
+    for (const r of (await pgPool.query(
+        `SELECT invoice_no, batch_number FROM tracking_dispatch_records
+          WHERE invoice_no IS NOT NULL AND invoice_no <> '' AND batch_number IS NOT NULL`)).rows) {
+      const k = String(r.invoice_no).trim();
+      (batchesByInvoice[k] = batchesByInvoice[k] || new Set()).add(String(r.batch_number).trim());
+    }
+    const rows = (await pgPool.query(
+      `SELECT id, sap_doc_num, total_qty_lakhs, payload_json
+         FROM invoices_received
+        WHERE payload_json IS NOT NULL
+          AND (invoice_request_id IS NULL OR invoice_request_id = '')`)).rows;
+    let scanned = 0, stale = 0, staleFixed = 0;
+    const staleRows = [], suspectRows = [];
+    for (const r of rows) {
+      scanned++;
+      let inv; try { inv = typeof r.payload_json === 'string' ? JSON.parse(r.payload_json) : r.payload_json; } catch { continue; }
+      const lines = (inv && inv.DocumentLines) || [];
+      if (!lines.length) continue;
+      const recomputed = parseFloat(lines.reduce((s, l) => s + ((parseFloat(l.Quantity) || 0) * _sapUomScale(l)), 0).toFixed(3));
+      const stored = parseFloat(r.total_qty_lakhs) || 0;
+      const hasThou = lines.some(l => _sapUomScale(l) < 1);
+      // physical label magnitude for this invoice's batches (rough; a batch split across invoices
+      // is counted for each — fine for a 100× magnitude sanity flag, not used for auto-fix).
+      let physLbl = 0;
+      const bset = batchesByInvoice[String(r.sap_doc_num || '').trim()];
+      if (bset) for (const b of bset) physLbl += (labelByBatch[b] || 0);
+
+      const tol = Math.max(0.005, Math.abs(recomputed) * tolPct);
+      if (Math.abs(stored - recomputed) > tol) {
+        stale++;
+        staleRows.push({ invoice: r.sap_doc_num || r.id, from: stored, to: recomputed,
+                         hasThousandField: hasThou, physicalLabelLakhs: parseFloat(physLbl.toFixed(2)) });
+        if (confirm) {
+          await pgPool.query(`UPDATE invoices_received SET total_qty_lakhs=$1 WHERE id=$2`, [recomputed, r.id]);
+          staleFixed++;
+        }
+      } else if (!hasThou && physLbl > 0 && stored > physLbl * 50) {
+        // Resolver saw no THOUSAND marker, yet header dwarfs physical by ~2 orders → likely a marker
+        // in an unread field. FLAG only.
+        suspectRows.push({ invoice: r.sap_doc_num || r.id, stored,
+                           physicalLabelLakhs: parseFloat(physLbl.toFixed(2)),
+                           ratio: parseFloat((stored / physLbl).toFixed(1)),
+                           impliedIfThousands: parseFloat((stored * 0.01).toFixed(3)) });
+      }
+    }
+    res.json({ ok: true, dryRun: !confirm, scope: 'direct_sap_only', tolPct: tolPct * 100,
+               scanned, staleHeaders: { toFix: stale, updated: staleFixed, rows: staleRows.slice(0, 100) },
+               suspectMissedMarker: { count: suspectRows.length, rows: suspectRows.slice(0, 100),
+                 note: 'FLAG ONLY — not auto-fixed. Review each; if genuinely thousands, report the UoM field name so the resolver can be extended.' } });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v45ZA (confirmed by Ishan): per-box handover-gap detail for Report F. Returns every label of a
+// batch with a scan-OUT at `from` but NO scan-IN at `to` — so operators see exactly WHICH box
+// numbers are unaccounted, not just the count. Synthetic reconciliation scans (recon-*) excluded;
+// orange labels never enter this flow (they scan on the separate 'orange' channel).
+app.get('/api/tracking/handover-gap-boxes', async (req, res) => {
+  try {
+    const batch = String(req.query.batch || '').trim();
+    const from = String(req.query.from || '').trim();
+    const to = String(req.query.to || '').trim();
+    const okDepts = ['aim', 'printing', 'pi', 'packing', 'dispatch'];
+    if (!batch || !okDepts.includes(from) || !okDepts.includes(to)) {
+      return res.status(400).json({ ok: false, error: 'batch, from, to required (valid depts)' });
+    }
+    const sql = `
+      SELECT s.label_id, MAX(s.ts) AS out_ts,
+             l.label_number, l.is_excess, l.excess_num, l.qty, l.voided
+        FROM tracking_scans s
+        LEFT JOIN tracking_labels l ON l.id = s.label_id
+       WHERE s.batch_number = $1 AND s.dept = $2 AND s.type = 'out'
+         AND s.label_id NOT LIKE 'recon-%'
+         AND NOT EXISTS (
+           SELECT 1 FROM tracking_scans t
+            WHERE t.label_id = s.label_id
+              AND t.dept = $3 AND t.type = 'in')
+       GROUP BY s.label_id, l.label_number, l.is_excess, l.excess_num, l.qty, l.voided
+       ORDER BY l.label_number NULLS LAST`;
+    let rows;
+    if (pgPool) rows = (await pgPool.query(sql, [batch, from, to])).rows;
+    else rows = db.prepare(sql.replace(/\$1/g,'?').replace(/\$2/g,'?').replace(/\$3/g,'?').replace(' NULLS LAST','')).all(batch, from, to);
+    const boxes = (rows || []).map(r => ({
+      labelId: r.label_id,
+      box: (r.is_excess ? ('E-' + (r.excess_num || Math.abs(parseInt(r.label_number) || 0))) : String(Math.abs(parseInt(r.label_number) || 0))),
+      qty: parseFloat(r.qty) || 0,
+      voided: !!(r.voided && Number(r.voided) !== 0),
+      outTs: r.out_ts || null,
+    }));
+    // v45ZB: annotate the offsetting anomalies that make the per-box gap differ from the count-net:
+    // boxes scanned IN at `to` with no OUT at `from`, and synthetic reconciliation INs at `to`.
+    const extraSql = `
+      SELECT COUNT(DISTINCT t.label_id) AS n FROM tracking_scans t
+       WHERE t.batch_number = $1 AND t.dept = $2 AND t.type = 'in' AND t.label_id NOT LIKE 'recon-%'
+         AND NOT EXISTS (SELECT 1 FROM tracking_scans s
+                          WHERE s.label_id = t.label_id
+                            AND s.dept = $3 AND s.type = 'out')`;
+    const reconSql = `
+      SELECT COUNT(*) AS n FROM tracking_scans
+       WHERE batch_number = $1 AND dept = $2 AND type = 'in' AND label_id LIKE 'recon-%'`;
+    let extraIn = 0, reconIn = 0;
+    try {
+      if (pgPool) {
+        extraIn = parseInt((await pgPool.query(extraSql, [batch, to, from])).rows[0]?.n || 0, 10);
+        reconIn = parseInt((await pgPool.query(reconSql, [batch, to])).rows[0]?.n || 0, 10);
+      } else {
+        extraIn = parseInt(db.prepare(extraSql.replace(/\$1/g,'?').replace(/\$2/g,'?').replace(/\$3/g,'?')).get(batch, to, from)?.n || 0, 10);
+        reconIn = parseInt(db.prepare(reconSql.replace(/\$1/g,'?').replace(/\$2/g,'?')).get(batch, to)?.n || 0, 10);
+      }
+    } catch(_) {}
+    res.json({ ok: true, batch, from, to, count: boxes.length, boxes, extraIn, reconIn });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v45ZB (confirmed by Ishan): per-box gap COUNTS per batch per transition, so the Report F header
+// column shows the same truth the expanded detail lists (26ZA047: header said net 3, detail listed
+// 6 — offsetting "in without out" scans and synthetic recon INs cancel inside a count-net). One
+// call returns every scan transition; packing→dispatch stays count-based client-side because
+// Phase-18 truck dispatches have no per-box scans.
+app.get('/api/tracking/handover-gap-counts', async (req, res) => {
+  try {
+    const pairs = [['aim','printing'],['printing','pi'],['pi','packing'],['aim','packing']];
+    const gapSql = `
+      SELECT s.batch_number AS bn, COUNT(DISTINCT s.label_id) AS gap
+        FROM tracking_scans s
+       WHERE s.dept = $1 AND s.type = 'out' AND s.label_id NOT LIKE 'recon-%'
+         AND s.batch_number IS NOT NULL AND s.batch_number <> ''
+         AND NOT EXISTS (SELECT 1 FROM tracking_scans t
+                          WHERE t.label_id = s.label_id AND t.dept = $2 AND t.type = 'in')
+       GROUP BY s.batch_number`;
+    const extraSql = `
+      SELECT t.batch_number AS bn, COUNT(DISTINCT t.label_id) AS extra
+        FROM tracking_scans t
+       WHERE t.dept = $2 AND t.type = 'in' AND t.label_id NOT LIKE 'recon-%'
+         AND t.batch_number IS NOT NULL AND t.batch_number <> ''
+         AND NOT EXISTS (SELECT 1 FROM tracking_scans s
+                          WHERE s.label_id = t.label_id AND s.dept = $1 AND s.type = 'out')
+       GROUP BY t.batch_number`;
+    const transitions = {};
+    for (const [from, to] of pairs) {
+      const key = from + '\u2192' + to; // from→to
+      transitions[key] = {};
+      let gRows, eRows;
+      if (pgPool) {
+        gRows = (await pgPool.query(gapSql, [from, to])).rows;
+        eRows = (await pgPool.query(extraSql, [from, to])).rows;
+      } else {
+        gRows = db.prepare(gapSql.replace(/\$1/g,'?').replace(/\$2/g,'?')).all(from, to);
+        eRows = db.prepare(extraSql.replace(/\$1/g,'?').replace(/\$2/g,'?')).all(to, from); // v45ZG audit: extraSql's $2 precedes $1 — positional order is (to, from)
+      }
+      for (const r of (gRows||[])) transitions[key][r.bn] = { gap: parseInt(r.gap,10)||0, extraIn: 0 };
+      for (const r of (eRows||[])) {
+        if (!transitions[key][r.bn]) transitions[key][r.bn] = { gap: 0, extraIn: 0 };
+        transitions[key][r.bn].extraIn = parseInt(r.extra,10)||0;
+      }
+    }
+    res.json({ ok: true, transitions });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
 // GET all DPR dates (for history navigation)
 app.get('/api/dpr/dates/:floor', async (req, res) => {
   try {
@@ -8033,11 +9121,17 @@ app.post('/api/batch/retire', async (req, res) => {
            ON CONFLICT(batch_number) DO UPDATE SET retired_at=EXCLUDED.retired_at, retired_by=EXCLUDED.retired_by, reason=EXCLUDED.reason, residual_wip=EXCLUDED.residual_wip`,
           [batchNumber, orderId, nowIso, by, reason, prodMonth, residualWip, prevStatus, prevDprClosed]);
         if (orderId) {
-          await pgPool.query(`UPDATE production_orders SET status='closed' WHERE id=$1`, [orderId]);
+          // v45S: close by BATCH identity, not id — closes the current row AND any orphaned old-id
+          // rows for this batch that an id-keyed close (WHERE id=$1) would silently miss. That
+          // id-keyed close was the mechanism leaving ghosts stuck at 'running' for months.
+          await pgPool.query(`UPDATE production_orders SET status='closed', updated_at=NOW()::TEXT WHERE batch_number=$1 AND status<>'closed'`, [batchNumber]);
           if (!prevDprClosed) await pgPool.query(
             `INSERT INTO dpr_batch_closed (order_id, batch_number, closed_at, closed_by, notes)
              VALUES ($1,$2,$3,$4,$5) ON CONFLICT(order_id) DO NOTHING`,
             [orderId, batchNumber, nowIso, by, 'retired (legacy cleanup)']);
+        } else {
+          // No resolved order id, but a batch is always present here — still close every row for it.
+          await pgPool.query(`UPDATE production_orders SET status='closed', updated_at=NOW()::TEXT WHERE batch_number=$1 AND status<>'closed'`, [batchNumber]);
         }
       } else {
         if (orderId) {
@@ -8048,9 +9142,12 @@ app.post('/api/batch/retire', async (req, res) => {
                     VALUES (?,?,?,?,?,?,?,?,?)`)
           .run(batchNumber, orderId, nowIso, by, reason, prodMonth, residualWip, prevStatus, prevDprClosed);
         if (orderId) {
-          db.prepare(`UPDATE production_orders SET status='closed' WHERE id=?`).run(orderId);
+          // v45S: close by BATCH identity, not id (see Postgres branch above).
+          db.prepare(`UPDATE production_orders SET status='closed', updated_at=datetime('now') WHERE batch_number=? AND status<>'closed'`).run(batchNumber);
           if (!prevDprClosed) db.prepare(`INSERT OR IGNORE INTO dpr_batch_closed (order_id, batch_number, closed_at, closed_by, notes) VALUES (?,?,?,?,?)`)
             .run(orderId, batchNumber, nowIso, by, 'retired (legacy cleanup)');
+        } else {
+          db.prepare(`UPDATE production_orders SET status='closed', updated_at=datetime('now') WHERE batch_number=? AND status<>'closed'`).run(batchNumber);
         }
       }
       retired++;
@@ -8752,7 +9849,28 @@ async function _runIntegrityScan(opts = {}) {
   }
   _integrityIsRunning = true;
   try {
-    const planningState = await getPlanningStateAsync();
+    // v45B: deep-clone so the overlay below never mutates the shared planning-state cache.
+    let planningState = await getPlanningStateAsync();
+    planningState = planningState ? JSON.parse(JSON.stringify(planningState)) : planningState;
+    // v45B: production_orders holds the AUTHORITATIVE reconciled gross (the toggle writes it there
+    // durably). The planning_state blob can lag, so without this the engine compares a STALE planned
+    // gross against the (correct) DPR sum and a finding the user already reconciled never resolves —
+    // exactly the 26ZE096 case (Plan read as 54.60 while Planning shows 54.00). Overlay the DB's
+    // grossOverride/grossQty onto the scanned orders so the engine sees what Planning sees.
+    try {
+      if (planningState && Array.isArray(planningState.orders)) {
+        const _gr = pgPool
+          ? (await pgPool.query('SELECT id, data_json FROM production_orders WHERE deleted = false')).rows
+          : db.prepare('SELECT id, data_json FROM production_orders WHERE deleted = 0').all();
+        const _gmap = new Map();
+        _gr.forEach(r => { try { _gmap.set(r.id, typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r.data_json); } catch (e) {} });
+        planningState.orders.forEach(o => {
+          const d = _gmap.get(o.id); if (!d) return;
+          const ov = Number(d.grossOverride);
+          if (Number.isFinite(ov) && ov > 0) { o.grossOverride = d.grossOverride; if (d.grossQty != null) o.grossQty = d.grossQty; }
+        });
+      }
+    } catch (e) { console.warn('[Integrity] gross overlay skipped:', e.message); }
     const ctx = {
       pgPool: pgPool || null,
       db: db,
@@ -8899,6 +10017,42 @@ app.get('/api/integrity/findings', async (req, res) => {
 });
 
 // POST /api/integrity/ack/:id — admin-only — acknowledge a finding for N hours
+// v45U #8b (confirmed by Ishan): admin one-click regularisation for Over-production /
+// Plan-vs-DPR-mismatch findings. Sets the batch's planner gross override to the authoritative
+// DPR figure (effectiveGross: batch_gross_override → warmed batch sum) on the LIVE
+// production_orders row. The v44ZZ override-aware client merge then carries grossOverride into
+// planning on the next sync, plan gross ≡ DPR, and the finding auto-resolves on the next scan.
+// Soft and reversible (a planner can edit the order's gross afterwards); audited in data_json.
+app.post('/api/integrity/autofix', async (req, res) => {
+  try {
+    const bn = ((req.body && req.body.batchNumber) || '').trim();
+    const by = (req.body && req.body.by) || 'admin';
+    if (!bn) return res.status(400).json({ ok:false, error:'batchNumber required' });
+    await warmActualsCache().catch(()=>{});
+    const dpr = effectiveGross(bn);
+    if (!(dpr > 0)) return res.status(400).json({ ok:false, error:'No DPR gross available for ' + bn });
+    let row;
+    if (pgPool) {
+      const r = await pgPool.query(
+        `SELECT id, data_json FROM production_orders WHERE batch_number=$1 AND deleted=false ORDER BY updated_at DESC LIMIT 1`, [bn]);
+      row = r.rows[0];
+    } else {
+      row = db.prepare(`SELECT id, data_json FROM production_orders WHERE batch_number=? AND deleted=0 ORDER BY updated_at DESC LIMIT 1`).get(bn);
+    }
+    if (!row) return res.status(404).json({ ok:false, error:'No live production order for ' + bn });
+    const data = typeof row.data_json === 'string' ? JSON.parse(row.data_json) : (row.data_json || {});
+    data.grossOverride = dpr;
+    data.grossQty = dpr;
+    data._autoFixedAt = new Date().toISOString();
+    data._autoFixedBy = by;
+    const js = JSON.stringify(data);
+    if (pgPool) await pgPool.query(`UPDATE production_orders SET data_json=$1, updated_at=NOW()::TEXT WHERE id=$2`, [js, row.id]);
+    else db.prepare(`UPDATE production_orders SET data_json=?, updated_at=datetime('now') WHERE id=?`).run(js, row.id);
+    console.log(`[v45U autofix] ${bn}: grossOverride=${dpr} set by ${by} (finding ${req.body && req.body.findingId || '-'})`);
+    res.json({ ok:true, batchNumber: bn, gross: dpr });
+  } catch (e) { res.status(500).json({ ok:false, error: e.message }); }
+});
+
 app.post('/api/integrity/ack/:id', async (req, res) => {
   try {
     const token = req.headers['x-session-token'] || req.body.token;
@@ -9221,11 +10375,7 @@ app.post('/api/wo/assign-customer', async (req, res) => {
         d.zone = zone || d.zone;
       }
     });
-    if (pgPool) {
-      await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json,saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
-    } else {
-      db.prepare(`INSERT INTO planning_state (id, state_json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = datetime('now')`).run(JSON.stringify(planState));
-    }
+    await savePlanningState(planState); // v46D: single canonical writer (newest row)
     _planningStateCache = planState;
     logAudit(session.username, session.role, 'planning', 'WO_CUSTOMER_ASSIGNED',
       `W/O order ${orderId} assigned to customer: ${customer}`);
@@ -9318,8 +10468,7 @@ app.post('/api/wo/approve/:id', async (req, res) => {
             d.zone = request.zone || d.zone;
           }
         });
-        if(pgPool){ await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json,saved_at=NOW()::TEXT`,[JSON.stringify(planState)]); _planningStateCache=planState; _planningStateCacheTime=Date.now(); }
-        else { db.prepare(`INSERT INTO planning_state (id,state_json) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json,updated_at=datetime('now')`).run(JSON.stringify(planState)); }
+        await savePlanningState(planState); // v46D: single canonical writer (newest row)
       }
       // 2. Update all tracking labels for this order's batch
       if (ord) {
@@ -9592,16 +10741,26 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
     const planState = await getPlanningStateAsync();
     const parent = (planState.orders || []).find(o => o.id === request.source_order_id);
     if (!parent) return res.status(404).json({ ok: false, error: 'Source parent order no longer exists' });
-    if (parent.woStatus !== 'wo' && parent.woStatus !== 'wo-split-partial') {
+    // v44ZU: a prior approval attempt of THIS request may have already created the child orders and
+    // adjusted the parent (and persisted) but failed before the label rebatch/finalize, leaving the
+    // request 'pending'. performSplit stamps parent.woSplitRequestId = reqId, so that reliably marks
+    // "this exact request already applied". Treat that as RESUMABLE (idempotent re-approval) rather
+    // than erroring on the parent's status or colliding with its own orphan children.
+    const _resuming = (parent.woSplitRequestId === reqId);
+
+    if (!_resuming && parent.woStatus !== 'wo' && parent.woStatus !== 'wo-split-partial') {
       return res.status(400).json({ ok: false, error: `Parent order is no longer a W/O (woStatus=${parent.woStatus||'none'}). Cannot split.` });
     }
     for (const L of lines) {
-      const collision = (planState.orders || []).find(o => o.batchNumber === L.child_batch_number && !o.deleted);
+      const childId = `${parent.id}-${L.child_batch_suffix}`;
+      // An order that IS one of this request's own children (deterministic id) is not a collision —
+      // it's our orphan from a prior failed attempt and will be reused/overwritten below.
+      const collision = (planState.orders || []).find(o => o.batchNumber === L.child_batch_number && !o.deleted && o.id !== childId);
       if (collision) return res.status(409).json({ ok: false, error: `Child batch number ${L.child_batch_number} now collides with order ${collision.id}` });
     }
 
     const parentActual = parseFloat(parent.actualProd || 0);
-    const totalBoxesSplit = lines.reduce((s,l) => s + (l.boxes||0), 0);
+    const totalBoxesSplit = lines.reduce((s,l) => s + (Number(l.boxes)||0), 0);  // v44ZV: coerce (PG cols may be TEXT)
     const now = new Date().toISOString();
     // v44ZQ: split ACTUAL produced the same full-box way as planned qty — each child gets full boxes
     // filled from the actual (cumulative-min, partial only in the tail), so children + residual
@@ -9613,11 +10772,18 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
     let _actBoxStart = 1;
     const childOrders = [];
     for (const L of lines) {
-      const _abs = _actBoxStart, _abe = _actBoxStart + (L.boxes||0) - 1; _actBoxStart = _abe + 1;
+      const _abs = _actBoxStart, _abe = _actBoxStart + (Number(L.boxes)||0) - 1; _actBoxStart = _abe + 1;
+      const childId = `${parent.id}-${L.child_batch_suffix}`;
+      // v44ZU: on a resumed approval the child was already created with the correct qty/actual on the
+      // first attempt — reuse it verbatim. Recomputing here would read the now-depleted
+      // parent.actualProd and overwrite the correct child actual with a wrong (smaller) value.
+      if (_resuming) {
+        const _existingChild = (planState.orders || []).find(o => o.id === childId);
+        if (_existingChild) { childOrders.push({ child: _existingChild, line: L }); continue; }
+      }
       const proportional = _psLakhAct > 0
         ? Math.max(0, Math.min(_abe*_psLakhAct, parentActual) - Math.min((_abs-1)*_psLakhAct, parentActual))
         : (_plannedTot > 0 ? parentActual * (parseFloat(L.qty_lakhs)||0) / _plannedTot : 0);
-      const childId = `${parent.id}-${L.child_batch_suffix}`;
       const child = {
         ...parent,
         id: childId,
@@ -9630,7 +10796,7 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
         qty: L.qty_lakhs,
         actualProd: parseFloat(proportional.toFixed(3)),
         actualQty: parseFloat(proportional.toFixed(3)),
-        totalBoxes: L.boxes,
+        totalBoxes: Number(L.boxes)||0,
         woStatus: 'wo-split-child',
         woSplitParentId: parent.id,
         woSplitFromBatch: parent.batchNumber,
@@ -9646,8 +10812,16 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
     }
 
     const performSplit = async () => {
-      for (const c of childOrders) planState.orders.push(c.child);
-      const residualBoxes = request.residual_boxes || 0;
+      // v44ZU: idempotent child insert — replace an existing orphan (same id) in place instead of
+      // pushing a duplicate into planState.orders on a resumed approval.
+      for (const c of childOrders) {
+        const _i = planState.orders.findIndex(o => o.id === c.child.id);
+        if (_i >= 0) planState.orders[_i] = c.child; else planState.orders.push(c.child);
+      }
+      // v44ZU: parent qty/actual/woStatus were already adjusted + persisted by the first attempt of
+      // this request; re-applying would double-subtract. Only adjust on a fresh approval.
+      if (!_resuming) {
+      const residualBoxes = Number(request.residual_boxes) || 0;  // v44ZV: coerce (PG col may be TEXT)
       if (residualBoxes > 0) {
         // v44ZQ: residual planned qty = batch qty − Σ(assigned child qty), so planned conserves
         // exactly (children + residual = batch). The old boxes-ratio averaged the partial box and
@@ -9674,19 +10848,9 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
         parent._localEditedAt = Date.now();
       }
       parent.woSplitRequestId = reqId;
-
-      if (pgPool) {
-        await pgPool.query(
-          `INSERT INTO planning_state (id, state_json) VALUES (1, $1)
-           ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()::TEXT`,
-          [JSON.stringify(planState)]
-        );
-      } else {
-        db.prepare(`INSERT INTO planning_state (id, state_json, saved_at) VALUES (1, ?, datetime('now'))
-                    ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json, saved_at=datetime('now')`).run(JSON.stringify(planState));
       }
-      _planningStateCache = planState;
-      _planningStateCacheTime = Date.now();
+
+      await savePlanningState(planState); // v46D: single canonical writer (newest row)
 
       for (const c of childOrders) {
         const j = JSON.stringify(c.child);
@@ -9706,24 +10870,34 @@ app.post('/api/wo/split/approve/:id', async (req, res) => {
         }
       }
 
+      // v44ZV: filter/sort the parent's box labels in JS, NOT in SQL. The deployed Postgres
+      // tracking_labels.label_number is stored as TEXT (the table predates the INTEGER schema and
+      // CREATE TABLE IF NOT EXISTS never altered it), so `label_number >= 1` raised
+      // "operator does not exist: text >= integer". Select plainly (batch_number is text=text) and
+      // coerce with Number() in JS — correct whether the column is text or integer — excluding
+      // specimen (0/NULL), excess (negative / is_excess) and orange labels regardless of type.
       let parentLabels = [];
       if (pgPool) {
         const r = await pgPool.query(
-          `SELECT id, batch_number, box_number FROM tracking_labels WHERE batch_number=$1 ORDER BY box_number ASC`,
+          `SELECT id, batch_number, label_number, is_orange, is_excess FROM tracking_labels WHERE batch_number=$1`,
           [parent.batchNumber]
         );
         parentLabels = r.rows;
       } else {
-        parentLabels = db.prepare(`SELECT id, batch_number, box_number FROM tracking_labels WHERE batch_number=? ORDER BY box_number ASC`).all(parent.batchNumber);
+        parentLabels = db.prepare(`SELECT id, batch_number, label_number, is_orange, is_excess FROM tracking_labels WHERE batch_number=?`).all(parent.batchNumber);
       }
+      parentLabels = parentLabels
+        .filter(x => !Number(x.is_orange) && !Number(x.is_excess) && Number(x.label_number) >= 1)
+        .sort((a, b) => Number(a.label_number) - Number(b.label_number));
       const lineByBoxPos = {};
       for (const L of lines) {
-        for (let b = L.box_start; b <= L.box_end; b++) lineByBoxPos[b] = L;
+        const _bs = Number(L.box_start), _be = Number(L.box_end);
+        for (let b = _bs; b <= _be; b++) lineByBoxPos[b] = L;
       }
       let relabeled = 0;
       for (let pos = 0; pos < parentLabels.length; pos++) {
         const lbl = parentLabels[pos];
-        const boxPos = pos + 1;
+        const boxPos = Number(lbl.label_number);   // v44ZV: numeric box position (label_number may be TEXT in PG)
         const L = lineByBoxPos[boxPos];
         if (!L) continue;
         const newBatch = L.child_batch_number;
@@ -9805,6 +10979,16 @@ app.get('/api/wo/split/history', async (req, res) => {
       rows = db.prepare(`SELECT * FROM wo_split_requests WHERE status IN ('approved','rejected') ORDER BY proposed_at DESC LIMIT 50`).all();
     }
     if (session.role !== 'admin') rows = rows.filter(r => r.proposed_by === session.username);
+    // v44ZW: attach the customer lines (customer → child batch, boxes, qty, zone, PO) so the
+    // Split Approval/Rejection Log can show the full breakdown of each decided split, not just headers.
+    for (const row of rows) {
+      if (pgPool) {
+        const lr = await pgPool.query(`SELECT * FROM wo_split_lines WHERE split_request_id=$1 ORDER BY line_index ASC`, [row.id]);
+        row.lines = lr.rows;
+      } else {
+        row.lines = db.prepare(`SELECT * FROM wo_split_lines WHERE split_request_id=? ORDER BY line_index ASC`).all(row.id);
+      }
+    }
     res.json({ ok: true, requests: rows });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -10325,8 +11509,7 @@ app.post('/api/reconciliation/approve/:id', async (req, res) => {
         } else {
           planState.orders.push(orderToSave);
         }
-        await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
-        _planningStateCache = planState; _planningStateCacheTime = Date.now();
+        await savePlanningState(planState); // v46D: single canonical writer (newest row)
       }
 
       // 8. Mark reconciliation request as approved
@@ -10391,7 +11574,7 @@ app.get('/api/health', (req, res) => {
     res.json({
       ok: true,
       server: 'Sunloc Integrated Server v1.0',
-      build: 'v44ZRD1',
+      build: APP_BUILD,
       db: DB_PATH,
       planningSavedAt: planningRow?.saved_at || null,
       dprRecords: dprCount?.c || 0,
@@ -10400,7 +11583,7 @@ app.get('/api/health', (req, res) => {
     });
   } catch(err) {
     // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v44ZRD1', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
+    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: APP_BUILD, db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
   }
 });
 
@@ -11027,11 +12210,7 @@ app.post('/api/wo/assign-customer', async (req, res) => {
         d.zone = zone || d.zone;
       }
     });
-    if (pgPool) {
-      await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json,saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
-    } else {
-      db.prepare(`INSERT INTO planning_state (id, state_json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = datetime('now')`).run(JSON.stringify(planState));
-    }
+    await savePlanningState(planState); // v46D: single canonical writer (newest row)
     _planningStateCache = planState;
     logAudit(session.username, session.role, 'planning', 'WO_CUSTOMER_ASSIGNED',
       `W/O order ${orderId} assigned to customer: ${customer}`);
@@ -11124,8 +12303,7 @@ app.post('/api/wo/approve/:id', async (req, res) => {
             d.zone = request.zone || d.zone;
           }
         });
-        if(pgPool){ await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json,saved_at=NOW()::TEXT`,[JSON.stringify(planState)]); _planningStateCache=planState; _planningStateCacheTime=Date.now(); }
-        else { db.prepare(`INSERT INTO planning_state (id,state_json) VALUES (1,?) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json,updated_at=datetime('now')`).run(JSON.stringify(planState)); }
+        await savePlanningState(planState); // v46D: single canonical writer (newest row)
       }
       // 2. Update all tracking labels for this order's batch
       if (ord) {
@@ -11658,8 +12836,7 @@ app.post('/api/reconciliation/approve/:id', async (req, res) => {
         } else {
           planState.orders.push(orderToSave);
         }
-        await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json, saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
-        _planningStateCache = planState; _planningStateCacheTime = Date.now();
+        await savePlanningState(planState); // v46D: single canonical writer (newest row)
       }
 
       // 8. Mark reconciliation request as approved
@@ -11716,26 +12893,9 @@ app.get('/api/reconciliation/history', async (req, res) => {
   } catch(err) { res.status(500).json({ ok:false, error:err.message }); }
 });
 
-app.get('/api/health', (req, res) => {
-  try {
-    const planningRow  = db.prepare('SELECT saved_at FROM planning_state ORDER BY id DESC LIMIT 1').get();
-    const dprCount     = db.prepare('SELECT COUNT(*) as c FROM dpr_records').get();
-    const actualsCount = db.prepare('SELECT COUNT(*) as c FROM production_actuals').get();
-    res.json({
-      ok: true,
-      server: 'Sunloc Integrated Server v1.0',
-      build: 'v44ZRD1',
-      db: DB_PATH,
-      planningSavedAt: planningRow?.saved_at || null,
-      dprRecords: dprCount?.c || 0,
-      actualsEntries: actualsCount?.c || 0,
-      uptime: Math.floor(process.uptime()) + 's',
-    });
-  } catch(err) {
-    // Server is alive even if DB query fails (e.g. still warming up)
-    res.json({ ok: true, server: 'Sunloc Integrated Server v1.0', build: 'v44ZRD1', db: DB_PATH, uptime: Math.floor(process.uptime())+'s', note: 'DB initialising: '+err.message });
-  }
-});
+// NOTE: duplicate /api/health route removed here (v46C cleanup) — the live
+// definition is earlier in the file (~line 11539); this second block was
+// dead code since Express only dispatches to the first matching route.
 
 // NOTE: catch-all SPA fallback moved to END of file (after all API routes)
 // so that /api/tracking/* routes are not intercepted by the wildcard.
@@ -11762,7 +12922,8 @@ app.get('/api/tracking/label', async (req, res) => {
     }
     if (!label && batchNumber && labelNumber != null) {
       if (pgPool) {
-        label = (await pgPool.query('SELECT * FROM tracking_labels WHERE batch_number=$1 AND ABS(label_number)=ABS($2)',[batchNumber, parseInt(labelNumber)])).rows[0] || null;
+        // v46C: label_number is TEXT on live PG — guard the ABS cast (same fix as the re-customer sort).
+        label = (await pgPool.query(`SELECT * FROM tracking_labels WHERE batch_number=$1 AND ABS(CASE WHEN label_number::text ~ '^-?[0-9]+$' THEN label_number::integer ELSE 0 END)=ABS($2)`,[batchNumber, parseInt(labelNumber)])).rows[0] || null;
       } else {
         label = db.prepare('SELECT * FROM tracking_labels WHERE batch_number=? AND ABS(label_number)=ABS(?)').get(batchNumber, parseInt(labelNumber));
       }
@@ -11862,8 +13023,8 @@ app.post('/api/tracking/state', async (req, res) => {
         }
         if (wastage && wastage.length) {
           for (const w of wastage) {
-            await client.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
-              [w.id,w.batchNumber||w.batch_number,w.dept,w.type,w.qty,w.ts,w.by||null]);
+            await client.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by,shift) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO NOTHING`,
+              [w.id,w.batchNumber||w.batch_number,w.dept,w.type,w.qty,w.ts,w.by||null,w.shift||null]);
           }
         }
         if (dispatchRecs && dispatchRecs.length) {
@@ -11885,7 +13046,7 @@ app.post('/api/tracking/state', async (req, res) => {
       const saveAll = db.transaction(() => {
         if (labels?.length) { const stmt = db.prepare(`INSERT OR REPLACE INTO tracking_labels (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`); labels.forEach(l => stmt.run(l.id,l.batchNumber,l.labelNumber,l.size,l.qty,l.isPartial?1:0,l.isOrange?1:0,l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,l.poNumber||null,l.machineId||null,l.printingMatter||null,l.generated||new Date().toISOString(),l.printed?1:0,l.printedAt||null,l.voided?1:0,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,l.woStatus||null,l.shipTo||null,l.billTo||null,l.isExcess?1:0,l.excessNum||null,l.excessTotal||null,l.normalTotal||null)); }
         if (scans?.length) { const stmt = db.prepare(`INSERT OR IGNORE INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,size,qty) VALUES (?,?,?,?,?,?,?,?,?)`); scans.forEach(s => stmt.run(s.id,s.labelId||s.label_id,s.batchNumber||s.batch_number,s.dept,s.type,s.ts,s.operator||null,s.size||null,s.qty||null)); }
-        if (wastage?.length) { const stmt = db.prepare(`INSERT OR REPLACE INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES (?,?,?,?,?,?,?)`); wastage.forEach(w => stmt.run(w.id,w.batchNumber||w.batch_number,w.dept,w.type,w.qty,w.ts,w.by||null)); }
+        if (wastage?.length) { const stmt = db.prepare(`INSERT OR REPLACE INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by,shift) VALUES (?,?,?,?,?,?,?,?)`); wastage.forEach(w => stmt.run(w.id,w.batchNumber||w.batch_number,w.dept,w.type,w.qty,w.ts,w.by||null,w.shift||null)); }
       });
       saveAll();
     }
@@ -11968,7 +13129,7 @@ app.get('/api/tracking/alerts/detail', async (req, res) => {
     let boxes = [];
     if (pgPool) {
       const r = await pgPool.query(`
-        SELECT s.label_id as "labelId", ABS(l.label_number) as "boxNo",
+        SELECT s.label_id as "labelId", ABS(CASE WHEN l.label_number::text ~ '^-?[0-9]+$' THEN l.label_number::integer ELSE 0 END) as "boxNo",
           s.ts as "scanInTs",
           EXTRACT(EPOCH FROM (NOW() - s.ts::timestamptz))/3600 as "hoursStuck"
         FROM tracking_scans s
@@ -12413,22 +13574,37 @@ if (typeof process !== 'undefined' && !process.env.SUNLOC_DISABLE_BG_JOBS) {
 // down the whole endpoint. Without this, a schema gap on any one table would 500 all reports.
 app.get('/api/tracking/scan-summary', async (req, res) => {
   try {
-    let scanRows, wastageRows, dispatchRows;
+    // v45F: optional as-of-date snapshot (cumulative THROUGH the given IST production day) — powers
+    // Report E's date filter. "Production day" uses a 6 AM IST boundary (matching the A-Grade month
+    // attribution and the shift-wise salvage/remelt grouping), so a C-shift entry logged after midnight
+    // counts toward the day the shift STARTED. ts is stored UTC, so production_day(ts) <= asof  ⟺
+    // ts_instant < 06:00 IST on (asof+1) = 00:30 UTC on (asof+1). LEFT/substr(ts,19) drops the .sssZ so
+    // the cast is format-robust. DPR gross uses production_actuals.date — already the operator-assigned
+    // production date — so it stays a plain date-prefix compare (no ts conversion).
+    const asof = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.asof||'')) ? String(req.query.asof) : null;
+    let scanRows, wastageRows, dispatchRows, grossRows = null;
     if (pgPool) {
-      const safeQuery = async (sql) => {
-        try { return (await pgPool.query(sql)).rows; }
+      const safeQuery = async (sql, params) => {
+        try { return (await pgPool.query(sql, params||[])).rows; }
         catch(e) { console.warn('[scan-summary] query failed:', e.message); return []; }
       };
+      const pgCut = col => `(LEFT(${col},19))::timestamp < ($1::date + interval '1 day' + interval '30 minutes')`;
+      const scanSql = `SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans s WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)${asof?` AND ${pgCut('s.ts')}`:''} GROUP BY batch_number, dept, type`;
+      const wasteSql = `SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage${asof?` WHERE ${pgCut('ts')}`:''} GROUP BY batch_number, dept, type`;
+      const dispSql  = `SELECT batch_number, SUM(qty) as total_qty FROM tracking_dispatch_records${asof?` WHERE ${pgCut('ts')}`:''} GROUP BY batch_number`;
       [scanRows, wastageRows, dispatchRows] = await Promise.all([
-        safeQuery(`SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans s WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id) GROUP BY batch_number, dept, type`),
-        safeQuery('SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage GROUP BY batch_number, dept, type'),
-        safeQuery('SELECT batch_number, SUM(qty) as total_qty FROM tracking_dispatch_records GROUP BY batch_number')
+        safeQuery(scanSql, asof?[asof]:[]),
+        safeQuery(wasteSql, asof?[asof]:[]),
+        safeQuery(dispSql,  asof?[asof]:[])
       ]);
+      if (asof) grossRows = await safeQuery(`SELECT batch_number, SUM(qty_lakhs) as total FROM production_actuals WHERE LEFT(date,10) <= $1 GROUP BY batch_number`, [asof]);
     } else {
-      scanRows     = db.prepare(`SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans s WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id) GROUP BY batch_number, dept, type`).all();
-      wastageRows  = db.prepare('SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage GROUP BY batch_number, dept, type').all();
-      try { dispatchRows = db.prepare('SELECT batch_number, SUM(qty) as total_qty FROM tracking_dispatch_records GROUP BY batch_number').all(); }
-      catch(e) { dispatchRows = []; }
+      const sc = (sql, params) => { try { return db.prepare(sql).all(...(params||[])); } catch(e) { return []; } };
+      const liteCut = col => `datetime(${col}) < datetime(?, '+1 day', '+30 minutes')`;
+      scanRows     = sc(`SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans s WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)${asof?` AND ${liteCut('s.ts')}`:''} GROUP BY batch_number, dept, type`, asof?[asof]:[]);
+      wastageRows  = sc(`SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage${asof?` WHERE ${liteCut('ts')}`:''} GROUP BY batch_number, dept, type`, asof?[asof]:[]);
+      dispatchRows = sc(`SELECT batch_number, SUM(qty) as total_qty FROM tracking_dispatch_records${asof?` WHERE ${liteCut('ts')}`:''} GROUP BY batch_number`, asof?[asof]:[]);
+      if (asof) grossRows = sc(`SELECT batch_number, SUM(qty_lakhs) as total FROM production_actuals WHERE substr(date,1,10) <= ? GROUP BY batch_number`, [asof]);
     }
 
     const summary = {};
@@ -12458,12 +13634,17 @@ app.get('/api/tracking/scan-summary', async (req, res) => {
     // awaited) — this endpoint is on the Tracking sync path (15s timeout) and must stay fast. The
     // gross maps are kept warm by the startup warm + planning/state polling, so they're populated
     // here in practice; on a rare cold read grossByBatch is briefly empty and self-heals next sync.
-    warmActualsCache().catch(()=>{});
     const grossByBatch = {};
-    for (const bn of Object.keys(_grossByBatch || {})) grossByBatch[bn] = effectiveGross(bn);
-    for (const bn of Object.keys(_grossOverride || {})) grossByBatch[bn] = _grossOverride[bn];
+    if (asof) {
+      // as-of gross = SUM(DPR actuals) dated on/before the selected date (NOT the cumulative override)
+      (grossRows||[]).forEach(r => { if (r.batch_number) grossByBatch[r.batch_number] = parseFloat(r.total||0); });
+    } else {
+      warmActualsCache().catch(()=>{});
+      for (const bn of Object.keys(_grossByBatch || {})) grossByBatch[bn] = effectiveGross(bn);
+      for (const bn of Object.keys(_grossOverride || {})) grossByBatch[bn] = _grossOverride[bn];
+    }
 
-    res.json({ ok: true, summary, wastage, dispatched, grossByBatch });
+    res.json({ ok: true, summary, wastage, dispatched, grossByBatch, asof: asof||null });
   } catch(err) {
     console.error('[scan-summary]', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -12579,23 +13760,45 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
     // reconcile with DPR. With this, Report E gross (month mode) = sum of that batch's DPR entries
     // dated within YYYY-MM, matching DPR per-machine totals.
     const monthGross = {};
+    const monthMachine = {};
     try {
+      // v45Y (confirmed by Ishan): attribution parity with warmActualsCache. The old query grouped
+      // by RAW batch_number and dropped NULL-batch rows entirely — but the warm cache (which feeds
+      // Report E / planning actualProd) attributes those rows to their batch via the persistent
+      // order→batch map. Result: batches whose actuals rows ride on order_id alone counted in
+      // Report E and DPR but VANISHED from Report B's month gross (the FF/SF gap, 4-Jul). Same
+      // in-memory attribution here, so the three reports agree by construction. Also returns the
+      // dominant machine per batch (monthMachine) so the client can floor-classify ghost batches.
+      try { await warmActualsCache(); } catch(_) {} // refresh _orderBatch (throttled 60s — cheap)
       let grossRows;
       if (pgPool) {
         grossRows = (await pgPool.query(
-          `SELECT batch_number, COALESCE(SUM(qty_lakhs),0) AS g
-             FROM production_actuals WHERE date LIKE $1 GROUP BY batch_number`, [ym + '%'])).rows;
+          `SELECT order_id, batch_number, machine_id, COALESCE(SUM(qty_lakhs),0) AS g
+             FROM production_actuals WHERE date LIKE $1
+             GROUP BY order_id, batch_number, machine_id`, [ym + '%'])).rows;
       } else {
         grossRows = db.prepare(
-          `SELECT batch_number, COALESCE(SUM(qty_lakhs),0) AS g
-             FROM production_actuals WHERE date LIKE ? GROUP BY batch_number`).all(ym + '%');
+          `SELECT order_id, batch_number, machine_id, COALESCE(SUM(qty_lakhs),0) AS g
+             FROM production_actuals WHERE date LIKE ?
+             GROUP BY order_id, batch_number, machine_id`).all(ym + '%');
       }
+      const _mcAgg = {}; // batch -> { machineId: qty }
       for (const r of (grossRows||[])) {
-        if (r.batch_number) monthGross[r.batch_number] = parseFloat(r.g) || 0;
+        const bn = (r.batch_number && String(r.batch_number).trim()) ? r.batch_number : _orderBatch[r.order_id];
+        if (!bn) continue;
+        const g = parseFloat(r.g) || 0;
+        monthGross[bn] = (monthGross[bn] || 0) + g;
+        if (r.machine_id) {
+          if (!_mcAgg[bn]) _mcAgg[bn] = {};
+          _mcAgg[bn][r.machine_id] = (_mcAgg[bn][r.machine_id] || 0) + g;
+        }
+      }
+      for (const [bn, per] of Object.entries(_mcAgg)) {
+        monthMachine[bn] = Object.entries(per).sort((a,b)=>b[1]-a[1])[0][0];
       }
     } catch(e) { console.warn('[agrade-by-month] monthGross query failed:', e.message); }
 
-    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth, monthGross });
+    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth, monthGross, monthMachine });
   } catch(err) {
     console.error('[agrade-by-month]', err.message);
     res.status(500).json({ ok:false, error: err.message });
@@ -12663,13 +13866,19 @@ app.get('/api/tracking/sync-version', async (req, res) => {
       : "SELECT COUNT(*) AS count, COALESCE(SUM(CASE WHEN COALESCE(voided,0)<>0 THEN 1 ELSE 0 END),0) AS voided, COALESCE(SUM(CASE WHEN COALESCE(printed,0)<>0 THEN 1 ELSE 0 END),0) AS printed FROM tracking_labels";
     const lab = await one(labSql);
     const scn = await one('SELECT COUNT(*) AS count, MAX(ts) AS maxts FROM tracking_scans');
-    const wst = await one('SELECT COUNT(*) AS count FROM tracking_wastage');
+    // v45Z (confirmed by Ishan): edits change qty, not count — a count-only signature meant
+    // edited wastage never re-synced to other devices and reports kept stale values. qtySum
+    // changes on every edit/delete/insert, so the client re-pull fires.
+    const wstSql = pgPool
+      ? 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(qty),0)::numeric, 3) AS qtysum FROM tracking_wastage'
+      : 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(qty),0), 3) AS qtysum FROM tracking_wastage';
+    const wst = await one(wstSql);
     const dsp = await one('SELECT COUNT(*) AS count FROM tracking_dispatch_records');
     res.json({
       ok: true,
       labels:   { count: parseInt(lab.count || 0, 10), voided: parseInt(lab.voided || 0, 10), printed: parseInt(lab.printed || 0, 10) },
       scans:    { count: parseInt(scn.count || 0, 10), maxTs: scn.maxts || scn.maxTs || null },
-      wastage:  { count: parseInt(wst.count || 0, 10) },
+      wastage:  { count: parseInt(wst.count || 0, 10), qtySum: parseFloat(wst.qtysum || wst.qtySum || 0) },
       dispatch: { count: parseInt(dsp.count || 0, 10) }
     });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -13039,9 +14248,19 @@ app.get('/api/tracking/box-stages', async (req, res) => {
     } catch (e) {
       console.warn('[v40 P18.14 box-stages] planning state load failed:', e.message);
     }
+    // v45ZH (confirmed by Ishan): SCAN-EVIDENCE fallback — a batch whose boxes carry ANY printing
+    // or PI scans is a printed batch BY DEFINITION, regardless of what the blob flag says. The
+    // blob-only lookup silently classified printed batches (26ZD102) on the unprinted flow when
+    // the flag didn't resolve, which turned printing-OUT boxes into 'complete' and AIM-OUT boxes
+    // into 'packing' — corrupting Batch Tracker stage tiles and Report D's stage-wise WIP
+    // (the inflated packing bucket). Blob flag still covers printed batches not yet scanned.
+    const _printEvidence = new Set();
+    for (const s of scans) {
+      if ((s.dept === 'printing' || s.dept === 'pi') && s.batch_number) _printEvidence.add(s.batch_number);
+    }
     // Note: 'at_dispatch' and 'dispatched' are pseudo-stages beyond the scan flow.
     // The flow array stops at 'dispatch' (the literal dept used in scans).
-    const flowFor = (batchNo) => isPrintedByBatch[batchNo]
+    const flowFor = (batchNo) => (isPrintedByBatch[batchNo] || _printEvidence.has(batchNo))
       ? ['production', 'aim', 'printing', 'pi', 'packing', 'dispatch']
       : ['production', 'aim', 'packing', 'dispatch'];
 
@@ -13169,13 +14388,40 @@ app.post('/api/tracking/scan', async (req, res) => {
       if (order) isPrintedBatch = !!order.isPrinted;
     } else {
       // For other depts, still determine flow type so packing previous-stage logic is correct.
+      // v45U hotfix (floor report, 3-Jul): the old logic defaulted to PRINTED flow whenever the
+      // blob lookup missed — so every unprinted batch the lookup failed on was blocked at packing
+      // with "must complete PI", a stage that does not exist in its flow. Resolution is now
+      // authoritative and layered: normalized blob match → production_orders fallback (the DB is
+      // the authoritative status store since v45L) → and if the flow is STILL unknown, the gate
+      // below accepts either flow's previous stage instead of guessing.
+      let flowKnown = false;
+      const _bnNorm = String(batchNumber||'').trim().toUpperCase();
       try {
         const planState = await getPlanningStateAsync();
         const order = (planState.orders||[]).find(o =>
-          o.batchNumber === batchNumber || o.id === batchNumber
+          String(o.batchNumber||'').trim().toUpperCase() === _bnNorm || o.id === batchNumber
         );
-        if (order) isPrintedBatch = !!order.isPrinted;
-      } catch (e) { /* assume printed flow if planning state unavailable */ }
+        if (order && order.isPrinted !== undefined && order.isPrinted !== null) {
+          isPrintedBatch = !!order.isPrinted; flowKnown = true;
+        }
+      } catch (e) { /* fall through to DB */ }
+      if (!flowKnown) {
+        try {
+          let row;
+          if (pgPool) {
+            const r = await pgPool.query(
+              `SELECT data_json FROM production_orders WHERE UPPER(TRIM(batch_number))=$1 AND deleted=false ORDER BY updated_at DESC LIMIT 1`, [_bnNorm]);
+            row = r.rows[0];
+          } else {
+            row = db.prepare(`SELECT data_json FROM production_orders WHERE UPPER(TRIM(batch_number))=? AND deleted=0 ORDER BY updated_at DESC LIMIT 1`).get(_bnNorm);
+          }
+          if (row) {
+            const d = typeof row.data_json==='string' ? JSON.parse(row.data_json) : (row.data_json||{});
+            if (d.isPrinted !== undefined && d.isPrinted !== null) { isPrintedBatch = !!d.isPrinted; flowKnown = true; }
+          }
+        } catch (e) { /* unknown flow — dual-accept below */ }
+      }
+      req._sunlocFlowKnown = flowKnown;
     }
 
     // v40 Phase 18.14b: PER-LABEL UPSTREAM PROGRESSION CHECK
@@ -13189,27 +14435,39 @@ app.post('/api/tracking/scan', async (req, res) => {
     if (scan.type === 'in' && scan.dept !== 'aim' && scan.dept !== 'production') {
       // Determine previous scannable stage
       let prevDept = null;
+      let prevDeptAlts = null; // v45U hotfix: candidate list when the flow is unknown
       if (scan.dept === 'printing') prevDept = 'aim';
       else if (scan.dept === 'pi')   prevDept = 'printing';
-      else if (scan.dept === 'packing') prevDept = isPrintedBatch ? 'pi' : 'aim';
+      else if (scan.dept === 'packing') {
+        // v45U hotfix: only demand PI when the batch is AFFIRMATIVELY printed. When the flow could
+        // not be resolved (order missing from blob AND DB), accept EITHER flow's previous stage —
+        // the box still must have completed its real upstream scan, so integrity holds in both flows.
+        if (req._sunlocFlowKnown === false) prevDeptAlts = ['pi','aim'];
+        else prevDept = isPrintedBatch ? 'pi' : 'aim';
+      }
       else if (scan.dept === 'dispatch') prevDept = 'packing';
       // Special case: if packing-in on a printed batch and prev is PI, that's fine.
       // Special case: if packing-in on UNPRINTED batch, prev is AIM, but boxes can be sent
       // straight from AIM to packing if 'manual' inspection bypass was done. For data integrity,
       // we still require AIM-out scan.
-      if (prevDept) {
-        let prevOutScan;
-        if (pgPool) {
-          const r = await pgPool.query(
-            `SELECT id FROM tracking_scans WHERE label_id=$1 AND dept=$2 AND type='out' AND batch_number=$3 LIMIT 1`,
-            [labelId, prevDept, batchNumber]
-          );
-          prevOutScan = r.rows[0];
-        } else {
-          prevOutScan = db.prepare(
-            `SELECT id FROM tracking_scans WHERE label_id=? AND dept=? AND type='out' AND batch_number=? LIMIT 1`
-          ).get(labelId, prevDept, batchNumber);
+      if (prevDept || prevDeptAlts) {
+        const _cands = prevDeptAlts || [prevDept];
+        let prevOutScan = null;
+        for (const _pd of _cands) {
+          if (pgPool) {
+            const r = await pgPool.query(
+              `SELECT id FROM tracking_scans WHERE label_id=$1 AND dept=$2 AND type='out' AND batch_number=$3 LIMIT 1`,
+              [labelId, _pd, batchNumber]
+            );
+            prevOutScan = r.rows[0];
+          } else {
+            prevOutScan = db.prepare(
+              `SELECT id FROM tracking_scans WHERE label_id=? AND dept=? AND type='out' AND batch_number=? LIMIT 1`
+            ).get(labelId, _pd, batchNumber);
+          }
+          if (prevOutScan) { prevDept = _pd; break; }
         }
+        if (!prevDept) prevDept = _cands[_cands.length - 1]; // for the error message: AIM when unknown
         if (!prevOutScan) {
           if (adminOverride) {
             console.warn(`[v40 P18.14b SCAN OVERRIDE] Admin override: label ${labelId} scanned IN at ${scan.dept} without ${prevDept} OUT scan. batch=${batchNumber} operator=${scan.operator||'?'} ts=${scan.ts}`);
@@ -13288,11 +14546,14 @@ app.post('/api/tracking/scan', async (req, res) => {
           error: `Box not yet scanned IN at ${scan.dept.toUpperCase()}. Can't scan OUT before IN.`
         });
       }
+      // v45ZE (confirmed by Ishan): persist the override flag — the column existed but was never
+      // written, so historical overrides are only in the console logs. From this build forward,
+      // override scans carry is_admin_override=1 and render amber in the Batch Tracker trail.
       await pgPool.query(
-        `INSERT INTO tracking_scans (id,label_id,batch_number,label_number,dept,type,ts,operator,size,qty)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO NOTHING`,
+        `INSERT INTO tracking_scans (id,label_id,batch_number,label_number,dept,type,ts,operator,size,qty,is_admin_override)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO NOTHING`,
         [scan.id, labelId, batchNumber, scan.labelNumber||null, scan.dept, scan.type, scan.ts,
-         scan.operator||null, scan.size||null, scan.qty||null]
+         scan.operator||null, scan.size||null, scan.qty||null, adminOverride ? 1 : 0]
       );
     } else {
       // SQLite path: same box-identity dedup + IN-before-OUT check (v43 #5)
@@ -13315,11 +14576,10 @@ app.post('/api/tracking/scan', async (req, res) => {
         });
       }
       db.prepare(`INSERT OR IGNORE INTO tracking_scans
-        (id,label_id,batch_number,label_number,dept,type,ts,operator,size,qty)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+        (id,label_id,batch_number,label_number,dept,type,ts,operator,size,qty,is_admin_override)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
         scan.id, labelId, batchNumber, scan.labelNumber||null, scan.dept, scan.type, scan.ts,
-        scan.operator||null, scan.size||null, scan.qty||null
-      );
+        scan.operator||null, scan.size||null, scan.qty||null, adminOverride ? 1 : 0);
     }
     // v40 P18.14d: Legacy dispatch.out scans count toward total dispatched.
     // Recompute actuals so Planning's "Dispatched %" stays in sync.
@@ -13579,6 +14839,43 @@ app.get('/api/tracking/dispatch-actuals', async (req, res) => {
   } catch(err) { res.status(500).json({ok:false,error:err.message}); }
 });
 
+// v45H — POST /api/tracking/manual-dispatch
+// Planning marks an order dispatched when its invoice never flowed through the software (the suite
+// was built in stages, so some invoices don't reach it). This writes ONE tracking_dispatch_record
+// (keyed MANUAL-<planId> for idempotency — re-marking replaces, never duplicates) so Report G's
+// _v40_dispatchedBoxes nets it and the order's FG exits the system, tagged 'Manually dispatched —
+// no invoice' so manual exits stay distinguishable from invoice/scan dispatches. Recomputes the
+// batch's dispatch actuals so the Planning truck binner nets it too.
+app.post('/api/tracking/manual-dispatch', async (req, res) => {
+  try {
+    const { planId, batchNumber, customer, qty, boxes, by } = req.body || {};
+    if (!planId || !batchNumber) return res.status(400).json({ ok:false, error:'planId and batchNumber required' });
+    const recId   = 'MANUAL-' + planId;
+    const remarks = 'Manually dispatched — no invoice';
+    const q   = parseFloat(qty)   || 0;
+    const b   = parseInt(boxes,10) || 0;
+    const who = by || 'planning';
+    const ts  = new Date().toISOString();
+    if (pgPool) {
+      await pgPool.query(`DELETE FROM tracking_dispatch_records WHERE id=$1`, [recId]);
+      await pgPool.query(
+        `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by")
+         VALUES ($1,$2,$3,$4,$5,'','',$6,$7,$8)`,
+        [recId, batchNumber, customer || '', q, b, remarks, ts, who]
+      );
+    } else {
+      db.prepare(`DELETE FROM tracking_dispatch_records WHERE id=?`).run(recId);
+      db.prepare(
+        `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by)
+         VALUES (?,?,?,?,?,'','',?,?,?)`
+      ).run(recId, batchNumber, customer || '', q, b, remarks, ts, who);
+    }
+    let totalQty = null;
+    try { if (typeof _recomputeDispatchActuals === 'function') totalQty = await _recomputeDispatchActuals(batchNumber, null, null); } catch(e) {}
+    res.json({ ok:true, id: recId, totalQty });
+  } catch(err) { res.status(500).json({ ok:false, error: err.message }); }
+});
+
 // ════════════════════════════════════════════════════════════════════════
 // v44R Phase 2/3 — Stable truck identity (lock-on-activation)
 // ────────────────────────────────────────────────────────────────────────
@@ -13765,15 +15062,40 @@ app.get('/jsqr.min.js', (req, res) => {
 // ── Label void — mark label voided in DB ──────────────────────
 app.post('/api/tracking/label-void', async (req, res) => {
   try {
-    const { labelId, reason, voidedBy } = req.body;
+    const { labelId, reason, voidedBy, reverseScans } = req.body;
     if (!labelId) return res.status(400).json({ ok: false, error: 'labelId required' });
     const ts = new Date().toISOString();
+    // v45ZY item 1 (confirmed by Ishan): admin "Void box" — when reverseScans is set, also reverse
+    // this label's scans so the box leaves WIP. Blocked if already DISPATCHED (mirrors the re-customer
+    // dispatch guard). Plain void (no reverseScans) is UNCHANGED — partial-regeneration and
+    // damaged-reprint call it and must keep their scan history.
+    let reversedScanIds = [];
+    if (reverseScans) {
+      if (pgPool) {
+        const disp = await pgPool.query(`SELECT 1 FROM tracking_scans WHERE label_id=$1 AND dept='dispatch' LIMIT 1`, [labelId]);
+        if (disp.rows[0]) return res.json({ ok:false, dispatch_blocked:true, error:'Box already dispatched — cannot void/reverse. Handle the dispatch first.' });
+        const ins = await pgPool.query(
+          `INSERT INTO tracking_scan_reversals (id, reversed_scan_id, batch_number, label_id, dept, type, reason, by_user, ts)
+           SELECT 'rev-'||s.id, s.id, s.batch_number, s.label_id, s.dept, s.type, $2, $3, $4
+           FROM tracking_scans s
+           WHERE s.label_id=$1 AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)
+           RETURNING reversed_scan_id`,
+          [labelId, `Admin void — ${reason||''}`, voidedBy||'', ts]);
+        reversedScanIds = ins.rows.map(r => r.reversed_scan_id);
+      } else {
+        const disp = db.prepare(`SELECT 1 FROM tracking_scans WHERE label_id=? AND dept='dispatch' LIMIT 1`).get(labelId);
+        if (disp) return res.json({ ok:false, dispatch_blocked:true, error:'Box already dispatched — cannot void/reverse. Handle the dispatch first.' });
+        const toRev = db.prepare(`SELECT s.id, s.batch_number, s.label_id, s.dept, s.type FROM tracking_scans s WHERE s.label_id=? AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)`).all(labelId);
+        const insRev = db.prepare(`INSERT OR IGNORE INTO tracking_scan_reversals (id, reversed_scan_id, batch_number, label_id, dept, type, reason, by_user, ts) VALUES (?,?,?,?,?,?,?,?,?)`);
+        toRev.forEach(s => { insRev.run('rev-'+s.id, s.id, s.batch_number, s.label_id, s.dept, s.type, `Admin void — ${reason||''}`, voidedBy||'', ts); reversedScanIds.push(s.id); });
+      }
+    }
     if (pgPool) {
       await pgPool.query(`UPDATE tracking_labels SET voided=1, void_reason=$1, voided_at=$2, voided_by=$3 WHERE id=$4`, [reason||'', ts, voidedBy||'', labelId]);
     } else {
       db.prepare(`UPDATE tracking_labels SET voided=1, void_reason=?, voided_at=?, voided_by=? WHERE id=?`).run(reason||'', ts, voidedBy||'', labelId);
     }
-    res.json({ ok: true });
+    res.json({ ok: true, reversedScanIds });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -13955,8 +15277,14 @@ app.post('/api/tracking/recustomer', async (req, res) => {
     const ord = (planState.orders||[]).find(o => o.batchNumber===batchNumber && !o.deleted);
 
     // Non-voided, non-orange labels (the customer boxes), ascending box number.
+    // v46C (confirmed by Ishan): the live Postgres tracking_labels.label_number column is TEXT (schema
+    // drift — declared INTEGER but stores 'OL-'-prefixed orange numbers elsewhere), so ORDER BY
+    // ABS(label_number) threw "function abs(text) does not exist" and broke Re-customer. Cast to integer
+    // for the PG sort (this query already excludes orange labels, so values are plain numerics; the
+    // regex guard makes it bulletproof against any stray non-numeric). SQLite is dynamically typed — its
+    // ABS() tolerates the text, so that path is unchanged.
     const labelSel = pgPool
-      ? (await pgPool.query(`SELECT id, label_number, customer, size, colour FROM tracking_labels WHERE batch_number=$1 AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0 ORDER BY ABS(label_number) ASC`,[batchNumber])).rows
+      ? (await pgPool.query(`SELECT id, label_number, customer, size, colour FROM tracking_labels WHERE batch_number=$1 AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0 ORDER BY ABS(CASE WHEN label_number::text ~ '^-?[0-9]+$' THEN label_number::integer ELSE 0 END) ASC`,[batchNumber])).rows
       : db.prepare(`SELECT id, label_number, customer, size, colour FROM tracking_labels WHERE batch_number=? AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0 ORDER BY ABS(label_number) ASC`).all(batchNumber);
     const totalBoxes = labelSel.length;
     let oldCustomer = labelSel.find(l=>l.customer)?.customer || ord?.customer || '';
@@ -14076,8 +15404,7 @@ app.post('/api/tracking/recustomer', async (req, res) => {
 
     // ── Persist planning state + production_orders (parent and/or child).
     try {
-      if (pgPool) await pgPool.query(`INSERT INTO planning_state (id,state_json) VALUES (1,$1) ON CONFLICT(id) DO UPDATE SET state_json=EXCLUDED.state_json,saved_at=NOW()::TEXT`, [JSON.stringify(planState)]);
-      else db.prepare(`INSERT INTO planning_state (id, state_json) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET state_json = excluded.state_json, updated_at = datetime('now')`).run(JSON.stringify(planState));
+      await savePlanningState(planState); // v46D: single canonical writer (newest row)
       _planningStateCache = planState; _planningStateCacheTime = Date.now();
       const writeOrd = async (o) => {
         if (!o) return; const oj = JSON.stringify(o);
@@ -14183,20 +15510,25 @@ app.post('/api/tracking/reconcile-wip', async (req, res) => {
 
 app.post('/api/tracking/wastage', async (req, res) => {
   try {
-    const { batchNumber, dept, salvage, remelt, note } = req.body;
+    const { batchNumber, dept, salvage, remelt, note, shift, prodDate } = req.body;
     if (!batchNumber || !dept) return res.status(400).json({ ok: false, error: 'batchNumber and dept required' });
     const ts = new Date().toISOString();
     const noteVal = (typeof note === 'string' && note.trim()) ? note.trim().slice(0,200) : null;
+    const shiftVal = (['A','B','C'].includes(String(shift||'').trim().toUpperCase())) ? String(shift).trim().toUpperCase() : null; // v45D #2b
+    // v45I #1: explicit production day (mirrors DPR). Prefer the operator-chosen prodDate; fall back to
+    // the 6 AM-IST boundary day derived from ts (matches client _istDayKey) only if none was sent.
+    const _prodDayFromTs = (t) => { const d = new Date(t); if (isNaN(d.getTime())) return String(t||'').slice(0,10); const s = new Date(d.getTime() - 30*60*1000); return `${s.getUTCFullYear()}-${String(s.getUTCMonth()+1).padStart(2,'0')}-${String(s.getUTCDate()).padStart(2,'0')}`; };
+    const prodDateVal = (typeof prodDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(prodDate)) ? prodDate : _prodDayFromTs(ts);
     const genId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     if (pgPool) {
-      if (parseFloat(salvage) > 0) await pgPool.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,note) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`, [genId(),batchNumber,dept,'salvage',parseFloat(salvage),ts,noteVal]);
-      if (parseFloat(remelt)  > 0) await pgPool.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,note) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`, [genId(),batchNumber,dept,'remelt',parseFloat(remelt),ts,noteVal]);
+      if (parseFloat(salvage) > 0) await pgPool.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,note,shift,prod_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO NOTHING`, [genId(),batchNumber,dept,'salvage',parseFloat(salvage),ts,noteVal,shiftVal,prodDateVal]);
+      if (parseFloat(remelt)  > 0) await pgPool.query(`INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,note,shift,prod_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO NOTHING`, [genId(),batchNumber,dept,'remelt',parseFloat(remelt),ts,noteVal,shiftVal,prodDateVal]);
     } else {
-      const insert = db.prepare(`INSERT OR IGNORE INTO tracking_wastage (id,batch_number,dept,type,qty,ts,note) VALUES (?,?,?,?,?,?,?)`);
-      if (parseFloat(salvage) > 0) insert.run(genId(),batchNumber,dept,'salvage',parseFloat(salvage),ts,noteVal);
-      if (parseFloat(remelt)  > 0) insert.run(genId(),batchNumber,dept,'remelt',parseFloat(remelt),ts,noteVal);
+      const insert = db.prepare(`INSERT OR IGNORE INTO tracking_wastage (id,batch_number,dept,type,qty,ts,note,shift,prod_date) VALUES (?,?,?,?,?,?,?,?,?)`);
+      if (parseFloat(salvage) > 0) insert.run(genId(),batchNumber,dept,'salvage',parseFloat(salvage),ts,noteVal,shiftVal,prodDateVal);
+      if (parseFloat(remelt)  > 0) insert.run(genId(),batchNumber,dept,'remelt',parseFloat(remelt),ts,noteVal,shiftVal,prodDateVal);
     }
-    res.json({ ok: true });
+    res.json({ ok: true, prodDate: prodDateVal });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -14550,9 +15882,14 @@ app.listen(PORT, () => {
   // v41ZG #1: run the isolated critical-table creator FIRST so month_archives is guaranteed even if
   // the big ensurePostgresTables() aborts partway through.
   ensureCriticalPostgresTables().then(() => ensurePostgresTables()).then(()=>{
+    _consolidatePlanningStateRows().catch(e => console.warn('[v46D] consolidation boot invocation failed:', e?.message)); // v46D: collapse planning_state to single canonical row
     warmPlanningCache();
     warmActualsCache();
     loadRetiredBatches(); // v41ZZ: populate retired-batch set for WIP exclusion
+    // v45S: repair production_orders identity — collapse (batch_number, machine_id) duplicates and
+    // close blob-closed orphan 'running' rows left behind by the historical id-keyed sync/close.
+    // Idempotent and soft; runs once per boot after tables exist and the blob is reachable.
+    _v45s_repairProductionOrders().catch(e => console.warn('[v45S repair] boot invocation failed:', e?.message));
     // v37I bugfix: one-time backfill — recompute dispatched_qty for ALL batches that have
     // manual records. Fixes data from before the SUM-based recompute was introduced where
     // multiple records overwrote each other and only the last per-record qty was saved.

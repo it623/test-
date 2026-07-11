@@ -2499,7 +2499,7 @@ function originalNormalBoxMax(batchNo, batch){
   return totals.length ? Math.min(...totals) : lakhToBox(b.qty, b.size);
 }
 
-function generateLabels(batchNo, count, isPartialLast, partialQty){
+function generateLabels(batchNo, count, isPartialLast, partialQty, grossWt='', nettWt=''){
   const batch = getBatch(batchNo);
   if(!batch) return [];
   const ps = PACK_SIZES[String(batch.size)] || 1;
@@ -2535,6 +2535,7 @@ function generateLabels(batchNo, count, isPartialLast, partialQty){
       poNumber:batch.poNumber, machineId:batch.machineId,
       startDate:batch.startDate||null, printMatter:batch.printMatter||batch.printingMatter||null,
       isPrinted:batch.isPrinted||false,
+      grossWt:grossWt||'', nettWt:nettWt||'',
       generated:now(), printed:false, voided:false, printedAt:null,
       qrData: '' // filled after
     };
@@ -3120,7 +3121,9 @@ function generateZPL(label, batch){
   const sigY  = qrY + 60;      // SIGNATURE line Y
   const botY  = 1180;          // fixed bottom rule
   // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
-  const pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
+  const pcCode   = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
+  const grossWt  = label.grossWt ? String(label.grossWt)+' kg' : '';
+  const nettWt   = label.nettWt  ? String(label.nettWt)+' kg'  : '';
 
   // ── PRE-PRINTED BOPP STOCK ZPL (102mm x 150mm, 203dpi) ──────────────
   // Calibrated coordinates for HPRT HT800 on pre-printed BOPP label stock.
@@ -3134,7 +3137,7 @@ function generateZPL(label, batch){
   const _x = n => Math.max(0, n + SHIFT_X);
 
   // Auto font-size for customer name — 3 tiers based on char count
-  const _custFont = cL1.length > 28 ? (cL1.length > 36 ? '24,22' : '28,26') : '34,32';
+  const _custFont = cL1.length > 24 ? (cL1.length > 32 ? '24,22' : '28,26') : '34,32';
   const _capFont  = (colourCap||'').length  > 8 ? (colourCap.length > 14 ? '24,22' : '28,26') : '38,36';
   const _bodyFont = (colourBody||'').length > 8 ? (colourBody.length > 14 ? '24,22' : '28,26') : '38,36';
   const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
@@ -3158,9 +3161,11 @@ function generateZPL(label, batch){
 ^FO${_x(315)},${_y(409)}^A0N,38,36^FD${_t(label.size,10)}^FS
 ^FO${_x(660)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
 ^FO${_x(283)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
+^FO${_x(640)},${_y(534)}^A0N,32,30^FD${_t(grossWt,10)}^FS
 ^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
+^FO${_x(640)},${_y(632)}^A0N,32,30^FD${_t(nettWt,10)}^FS
 ^FO${_x(299)},${_y(785)}^A0N,38,36^FD${_t(pcCode,10)}^FS
-^FO${_x(639)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
+^FO${_x(640)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
 ^FO${_x(80)},${_y(896)}^BQN,2,5^FDLA,${label.qrData}^FS
 ^XZ`;
 }
@@ -4284,6 +4289,16 @@ function openLabelGen(preselect){
       <label>Partial Box Qty (Lakhs)</label>
       <input type="number" id="lg-partial-qty" step="0.01" placeholder="e.g. 0.75">
     </div>
+    <div class="form-row cols-2">
+      <div class="form-group">
+        <label>Gross Wt (kg) <span style="color:var(--text3);font-size:11px">optional</span></label>
+        <input type="number" id="lg-gross-wt" step="0.01" placeholder="e.g. 12.50">
+      </div>
+      <div class="form-group">
+        <label>Nett Wt (kg) <span style="color:var(--text3);font-size:11px">optional</span></label>
+        <input type="number" id="lg-nett-wt" step="0.01" placeholder="e.g. 11.00">
+      </div>
+    </div>
   `,[
     {label:'Cancel',cls:'btn-secondary',fn:'closeModal()'},
     {label:'Generate Labels',cls:'btn-primary',fn:'confirmLabelGen()'}
@@ -4329,8 +4344,10 @@ function confirmLabelGen(){
     const count=parseInt(document.getElementById('lg-count')?.value)||0;
     const isPartial=document.getElementById('lg-partial')?.checked;
     const partialQty=parseFloat(document.getElementById('lg-partial-qty')?.value)||0;
+    const grossWt=document.getElementById('lg-gross-wt')?.value||'';
+    const nettWt=document.getElementById('lg-nett-wt')?.value||'';
     if(!batchNo||count<1){alert('Please select a batch and enter quantity.');return;}
-    const labels=generateLabels(batchNo,count,isPartial,partialQty);
+    const labels=generateLabels(batchNo,count,isPartial,partialQty,grossWt,nettWt);
     if(labels.length){
       closeModal();
       alert(`✅ ${labels.length} label(s) generated for batch ${batchNo}.`);

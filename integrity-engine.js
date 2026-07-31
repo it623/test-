@@ -37,17 +37,23 @@ const FIX_CATALOG = {
     role: 'role:gf,role:ff,role:admin',
     action: 'Review DPR entries for this batch — production qty should match planned ±5%. Correct any wrong shift totals.',
   },
-  qty_mismatch_dpr_aim: {
+  qty_mismatch_dpr_inspected: {
     app: 'tracking',
     page: 'aim',
     role: 'role:tracking_aim,role:admin',
-    action: 'AIM scan-in total differs from DPR production. Either AIM missed scanning some boxes (re-scan) or DPR was over-reported. Compare and correct.',
+    action: 'Inspected (AIM Scan-In + Salvage) differs from DPR production. Inspected should equal Gross; if it exceeds Gross, DPR was under-entered or the scans span a month boundary. Compare DPR against AIM scan-in + salvage and correct the DPR / re-scan.',
   },
   qty_mismatch_aim_packed: {
     app: 'tracking',
     page: 'packing',
     role: 'role:tracking_packing,role:admin',
     action: 'Packed quantity differs from AIM scan-in beyond expected wastage. Investigate missing boxes between AIM and Packing.',
+  },
+  invoiced_exceeds_packed: {
+    app: 'tracking',
+    page: 'generated-invoices',
+    role: 'role:admin,role:dispatch_manager',
+    action: 'Received SAP invoices for this batch exceed its packed quantity. Verify the invoices — likely a duplicate/over-invoice, or legacy stock billed beyond packed. Reconcile on the SAP side; legacy over-invoicing is acceptable but should be knowingly acknowledged here. This is an alert only — nothing is blocked.',
   },
   upstream_missing_scan: {
     app: 'tracking',
@@ -120,6 +126,12 @@ const FIX_CATALOG = {
     page: 'dispatch',
     role: 'role:tracking_dispatch,role:admin',
     action: 'SAP invoice received over 48h ago but no scan-out recorded. Complete truck dispatch.',
+  },
+  dispatch_batch_customer_conflict: {
+    app: 'tracking',
+    page: 'generated-invoices',
+    role: 'role:tracking_dispatch,role:admin',
+    action: 'Same batch invoiced to two different customers — one invoice carries the wrong SAP batch tag (U_Batch). Identify the mis-tagged invoice and re-allocate it to its correct batch (or fix U_Batch in SAP).',
   },
   labels_not_printed: {
     app: 'tracking',
@@ -226,6 +238,17 @@ async function check_qty_reconciliation(ctx) {
     );
     const aimInQty = parseFloat(aimRows[0]?.total || 0);
 
+    // AIM salvage sum (v46E, confirmed by Ishan) — for DPR-vs-Inspected.
+    // Inspected = AIM Scan-In + AIM Salvage (salvage is removed pre-boxing, so it's added back to
+    // reconcile against Gross). For a clean batch Inspected == Gross(DPR), so the gap is ~0.
+    const aimSalRows = await _query(ctx,
+      `SELECT COALESCE(SUM(w.qty),0) AS total
+       FROM tracking_wastage w
+       WHERE w.batch_number=? AND w.dept='aim' AND w.type='salvage'`,
+      [batchNumber]
+    );
+    const aimSalvage = parseFloat(aimSalRows[0]?.total || 0);
+
     // Packed scan-in sum
     const packRows = await _query(ctx,
       `SELECT COALESCE(SUM(l.qty),0) AS total
@@ -273,10 +296,17 @@ async function check_qty_reconciliation(ctx) {
       }
     }
 
-    // Pair 2: DPR vs AIM — same physical material, tight tolerance
-    if (dprQty > 0 && aimInQty > 0) {
-      const gap = Math.abs(dprQty - aimInQty);
-      const pct = gap / Math.max(dprQty, aimInQty);
+    // Pair 2: DPR vs Inspected (v46E, confirmed by Ishan — replaces the old DPR-vs-raw-scan-in check).
+    // Inspected = AIM Scan-In + AIM Salvage. Because salvage is removed pre-boxing, a clean batch has
+    // Inspected == Gross(DPR) exactly, so the gap is ~0 and no false critical fires. The old check
+    // compared DPR to raw Scan-In, which is off by ~salvage on EVERY batch (persistent noise). This
+    // fires only on a real DPR/inspection mismatch — in particular when Inspected > Gross, which is
+    // physically impossible (can't inspect more than produced) and signals a month-scoping boundary or
+    // a DPR data-entry error, i.e. the "overshoot" case the WIP formulas clamp rather than absorb.
+    if (dprQty > 0 && (aimInQty > 0 || aimSalvage > 0)) {
+      const inspectedQty = aimInQty + aimSalvage;
+      const gap = Math.abs(dprQty - inspectedQty);
+      const pct = gap / Math.max(dprQty, inspectedQty);
       let s = null;
       if (isClosed && pct > QTY_TOL_TIGHT) s = 'critical';
       else if (pct > 0.10) s = 'critical';
@@ -284,15 +314,15 @@ async function check_qty_reconciliation(ctx) {
       else if (pct > 0.005) s = 'info';
       if (s) {
         findings.push(_enrichFinding({
-          finding_key: _hashKey('qty_mismatch_dpr_aim', batchNumber),
-          check_type: 'qty_mismatch_dpr_aim',
+          finding_key: _hashKey('qty_mismatch_dpr_inspected', batchNumber),
+          check_type: 'qty_mismatch_dpr_inspected',
           severity: s,
           batch_number: batchNumber,
           order_id: ord.id,
           machine_id: ord.machineId,
           day: null,
-          description: `Batch ${batchNumber}: DPR ${dprQty.toFixed(2)}L vs AIM scan-in ${aimInQty.toFixed(2)}L (gap ${(pct*100).toFixed(1)}%, ${(gap).toFixed(2)}L)`,
-          raw_data: { dprQty, aimInQty, gap, pct, status: ord.status, customer: ord.customer },
+          description: `Batch ${batchNumber}: DPR ${dprQty.toFixed(2)}L vs Inspected ${inspectedQty.toFixed(2)}L (Scan-In ${aimInQty.toFixed(2)} + Salvage ${aimSalvage.toFixed(2)}) — gap ${(pct*100).toFixed(1)}%, ${(gap).toFixed(2)}L`,
+          raw_data: { dprQty, inspectedQty, aimInQty, aimSalvage, gap, pct, status: ord.status, customer: ord.customer },
         }));
       }
     }
@@ -698,8 +728,166 @@ async function check_overlimit_running(ctx) {
 // ────────────────────────────────────────────────────────────────
 // Orchestrator
 // ────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+// v46H #5: same batch invoiced to DIFFERENT customers — the SAP-side mis-tag class (the Vivek
+// invoice, really 26ZF107, was tagged 26ZG134 alongside the genuine Protech 26ZG134, so ZG134's
+// dispatch double-counted and ZF107 showed nothing). A production batch belongs to ONE customer;
+// two customers on one batch means an invoice carries the wrong U_Batch. Split comma-joined batch
+// strings so consolidated invoices are handled correctly. W/O-split children are distinct batch
+// numbers (e.g. 26ZC095-A), so legitimate splits do NOT false-positive.
+// ────────────────────────────────────────────────────────────────
+async function check_dispatch_batch_customer_conflict(ctx) {
+  const findings = [];
+  let rows = [];
+  try {
+    rows = await _query(ctx, `SELECT id, sap_doc_num, customer, batch_number FROM invoices_received
+      WHERE batch_number IS NOT NULL AND batch_number <> '' AND customer IS NOT NULL AND customer <> ''`);
+  } catch (e) { return findings; }
+  const byBatch = new Map(); // batch -> Map(customer -> [docs])
+  for (const r of rows) {
+    const cust = String(r.customer).trim();
+    if (!cust) continue;
+    for (const b of String(r.batch_number).split(',').map(s => s.trim()).filter(Boolean)) {
+      if (!byBatch.has(b)) byBatch.set(b, new Map());
+      const cm = byBatch.get(b);
+      if (!cm.has(cust)) cm.set(cust, []);
+      cm.get(cust).push(r.sap_doc_num || r.id);
+    }
+  }
+  for (const [batch, cm] of byBatch) {
+    if (cm.size > 1) {
+      const parts = Array.from(cm.entries()).map(([c, docs]) => `${c} (inv ${docs.join('/')})`);
+      findings.push(_enrichFinding({
+        finding_key: _hashKey('dispatch_batch_customer_conflict', batch),
+        check_type: 'dispatch_batch_customer_conflict',
+        severity: 'critical',
+        batch_number: batch,
+        order_id: null,
+        machine_id: null,
+        day: null,
+        description: `Batch ${batch} is invoiced to ${cm.size} different customers: ${parts.join(' vs ')}. A batch belongs to one customer — one invoice likely carries the wrong SAP batch tag (U_Batch). Re-allocate the mis-tagged invoice.`,
+        raw_data: { batch, customers: Array.from(cm.keys()), count: cm.size },
+      }));
+    }
+  }
+  return findings;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Check: Invoiced exceeds Packed (v48L, Ishan) — detect-only alert.
+//   Basis = packed (packing scan-in sum, same authoritative query as the
+//   reconciliation check). Fires strictly above 100% of packed, no tolerance.
+//   "Invoiced" = ACTUAL received SAP invoices attributed to the batch — NOT
+//   Planning's tally (which trusts the request's ask and can hide over-invoicing).
+//   Single-batch invoices are summed precisely. Multi-batch invoices are recorded
+//   in raw_data as present-but-unattributed (their per-line qty unit isn't verified
+//   here), so they surface for manual review without producing a guessed number.
+//   This check NEVER writes to any invoice / request / dispatch row — it only reads
+//   and raises a finding. Legacy over-invoicing still fires (by design: visible to
+//   all), it is never blocked.
+// ────────────────────────────────────────────────────────────────
+async function check_invoiced_exceeds_packed(ctx) {
+  const findings = [];
+  let invRows = [];
+  try {
+    invRows = await _query(ctx, `
+      SELECT sap_doc_num, batch_number, total_qty_lakhs, source
+      FROM invoices_received
+      WHERE batch_number IS NOT NULL AND batch_number <> ''`);
+  } catch (e) { return findings; } // table absent on older deployments
+
+  const perBatch = {}; // batch → { invoiced, invoices:[], multiBatch:[], needsManual }
+  const _e = (b) => (perBatch[b] || (perBatch[b] = { invoiced: 0, invoices: [], multiBatch: [], needsManual: 0 }));
+
+  // v48V: read the AUTHORITATIVE per-batch attribution. This check previously had to decline the
+  // multi-batch case entirely ("record presence, do not add an unverified number"), which meant a
+  // batch invoiced only through multi-batch invoices could never trigger it, however far over
+  // packed it went. invoice_batch_alloc now records the split per LINE, so those batches are
+  // finally covered. needs_manual lines are excluded — unallocated quantity is credited to no
+  // batch — and counted instead, so a finding can say the figure is still provisional.
+  let allocRows = [];
+  try {
+    allocRows = await _query(ctx, `
+      SELECT batch_number, status, SUM(qty_lakhs) AS qty, COUNT(*) AS n
+      FROM invoice_batch_alloc
+      WHERE batch_number IS NOT NULL AND batch_number <> ''
+      GROUP BY batch_number, status`);
+  } catch (e) { allocRows = []; }   // table absent (pre-v48R) → fall through to the legacy path
+
+  if (allocRows.length) {
+    for (const r of allocRows) {
+      const e = _e(r.batch_number);
+      if (r.status === 'attributed') e.invoiced = Math.round((e.invoiced + (parseFloat(r.qty) || 0)) * 100) / 100;
+      else if (r.status === 'needs_manual') e.needsManual += parseInt(r.n, 10) || 0;
+    }
+    // Keep the document list for the finding's raw_data, from the invoice headers.
+    for (const inv of invRows) {
+      const batches = String(inv.batch_number).split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+      const qty = Math.round((parseFloat(inv.total_qty_lakhs) || 0) * 100) / 100;
+      for (const b of batches) {
+        if (!perBatch[b]) continue;
+        if (batches.length === 1) perBatch[b].invoices.push({ doc: inv.sap_doc_num, qty, source: inv.source });
+        else perBatch[b].multiBatch.push({ doc: inv.sap_doc_num, totalQty: qty, source: inv.source });
+      }
+    }
+  } else {
+    // LEGACY PATH (unchanged): single-batch → full qty; multi-batch → noted only.
+    for (const inv of invRows) {
+      const batches = String(inv.batch_number).split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+      const qty = Math.round((parseFloat(inv.total_qty_lakhs) || 0) * 100) / 100;
+      if (batches.length === 1) {
+        const e = _e(batches[0]);
+        e.invoiced = Math.round((e.invoiced + qty) * 100) / 100;
+        e.invoices.push({ doc: inv.sap_doc_num, qty, source: inv.source });
+      } else if (batches.length > 1) {
+        for (const b of batches) _e(b).multiBatch.push({ doc: inv.sap_doc_num, totalQty: qty, source: inv.source });
+      }
+    }
+  }
+
+  for (const [batch, e] of Object.entries(perBatch)) {
+    if (e.invoiced <= 0) continue; // nothing precisely attributed (e.g. only multi-batch invoices)
+    // Packed = packing scan-in sum (authoritative; identical query to check_qty_reconciliation).
+    let packedQty = 0;
+    try {
+      const packRows = await _query(ctx, `
+        SELECT COALESCE(SUM(l.qty),0) AS total
+        FROM tracking_scans s
+        JOIN tracking_labels l ON l.id = s.label_id
+        WHERE s.batch_number=? AND s.dept='packing' AND s.type='in'
+          AND (l.voided IS NULL OR l.voided=0)`, [batch]);
+      packedQty = Math.round((parseFloat(packRows[0]?.total || 0)) * 100) / 100;
+    } catch (_e) { continue; }
+    if (packedQty <= 0) continue; // no packing basis to compare against (pure-legacy no-pack batch) — stays independent
+    if (e.invoiced > packedQty + 0.001) { // strictly above 100% of packed (epsilon guards float noise)
+      const excess = Math.round((e.invoiced - packedQty) * 100) / 100;
+      findings.push(_enrichFinding({
+        finding_key: _hashKey('invoiced_exceeds_packed', batch),
+        check_type: 'invoiced_exceeds_packed',
+        severity: 'warning',
+        batch_number: batch,
+        order_id: null,
+        machine_id: null,
+        day: null,
+        description: `Batch ${batch}: invoiced ${e.invoiced.toFixed(2)}L exceeds packed ${packedQty.toFixed(2)}L by ${excess.toFixed(2)}L — verify SAP invoices (possible duplicate/over-invoice, or legacy stock billed beyond packed).`,
+        raw_data: {
+          batchNumber: batch,
+          invoicedQty: e.invoiced,
+          packedQty,
+          excess,
+          invoices: e.invoices,
+          multiBatchInvoicesPresent: e.multiBatch,
+          linesAwaitingManualAllocation: e.needsManual || 0,   // v48V: figure may still be provisional
+        },
+      }));
+    }
+  }
+  return findings;
+}
+
 const ALL_CHECKS = [
   { key: 'qty_reconciliation',     fn: check_qty_reconciliation },
+  { key: 'invoiced_exceeds_packed', fn: check_invoiced_exceeds_packed },
   { key: 'upstream_progression',   fn: check_upstream_progression },
   { key: 'wastage_exceeds_input',  fn: check_wastage_exceeds_input },
   { key: 'dpr_missing_day',        fn: check_dpr_missing_day },
@@ -711,6 +899,7 @@ const ALL_CHECKS = [
   { key: 'orphan_tracking_scan',   fn: check_orphan_tracking_scan },
   { key: 'invoice_no_dispatch',    fn: check_invoice_no_dispatch },
   { key: 'overlimit_running',      fn: check_overlimit_running },
+  { key: 'batch_customer_conflict', fn: check_dispatch_batch_customer_conflict },
 ];
 
 async function runAllChecks(ctx) {

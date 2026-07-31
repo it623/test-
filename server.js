@@ -16,7 +16,24 @@ const fs      = require('fs');
 // all read this — so the reported version can never again drift from the deployed code (the v46B
 // deploy confusion was a stale hardcoded 'v45ZV' health stamp masquerading as a failed deploy). A
 // validator check (sunloc_validate.py) fails the build if this does not match the HTML build markers.
-const APP_BUILD = 'v46D';
+const APP_BUILD = 'v49ZK';
+
+// v47G (confirmed by Ishan): authoritative per-box scan quantity in SQL. Every scanned REAL box is
+// valued at its label's actual qty (tracking_labels.qty — partial-aware, the NOT-NULL source of
+// truth), NOT box-count × a uniform pack size. Recon-synthetic scans (label_id 'recon-%', no real
+// label) keep their own stored Lakhs (s.qty). A real box with no matching label falls back to the
+// pack-standard size for its size code (the agreed fallback), using the canonical pack map that
+// mirrors the client PACK_SIZES. Used by scan-summary, agrade-summary and agrade-by-month so that
+// Scan-In / Scan-Out — and the Inspected / A-Grade / WIP legs derived from them — are the true
+// summed quantity across every report and plan. `s` = tracking_scans alias, `l` = tracking_labels.
+function _v47gPackCaseSql(s) {
+  return `CASE ${s}.size WHEN '00' THEN 0.75 WHEN '0' THEN 1.00 WHEN '1' THEN 1.25 `
+       + `WHEN '2' THEN 1.75 WHEN '3' THEN 2.25 WHEN '4' THEN 3.00 ELSE 0 END`;
+}
+function _v47gScanQtySql(s, l) {
+  return `CASE WHEN ${s}.label_id LIKE 'recon-%' THEN COALESCE(${s}.qty,0) `
+       + `ELSE COALESCE(${l}.qty, ${_v47gPackCaseSql(s)}) END`;
+}
 
 
 // ── v44Y: PC Master fallback resolver ──────────────────────────────────────────
@@ -1125,7 +1142,8 @@ const MIGRATIONS = [
     sql: `CREATE TABLE IF NOT EXISTS invoice_scan_sessions (
       invoice_id TEXT PRIMARY KEY,
       scanned_json TEXT NOT NULL DEFAULT '[]',
-      saved_at TEXT DEFAULT (datetime('now'))
+      saved_at TEXT DEFAULT (datetime('now')),
+      batch_number TEXT
     );`
   },
   {
@@ -1231,6 +1249,88 @@ const MIGRATIONS = [
     version: 50,
     name: 'tracking_scans_admin_override',
     sql: `ALTER TABLE tracking_scans ADD COLUMN is_admin_override INTEGER NOT NULL DEFAULT 0;`
+  },
+  {
+    version: 51,
+    name: 'dispatch_records_scanned_labels',
+    sql: `ALTER TABLE tracking_dispatch_records ADD COLUMN scanned_labels_json TEXT;`
+  },
+  {
+    // v48R (confirmed by Ishan): PER-BATCH INVOICE ATTRIBUTION.
+    // invoices_received stores ONE joined batch key ("26W063, 26T081") and ONE total qty, with no
+    // per-batch breakdown. Every consumer that needs "how much of THIS batch is invoiced" therefore
+    // reconstructs it by guesswork, and each reconstruction has needed its own patch (v47L, v47R,
+    // v47U, v48C, v48N, v48P). This table records the answer ONCE, per invoice LINE, so those
+    // consumers can read one authoritative number instead of six reconstructions.
+    // status='attributed'   → batch_number is trustworthy for tallying
+    // status='needs_manual' → line could NOT be attributed unambiguously; qty is NOT counted
+    //                          anywhere until a human allocates it (option (c), Ishan's call:
+    //                          never invent a split — FIFO/proportional both encode an assumption
+    //                          about consumption order that is not guaranteed to hold).
+    version: 52,
+    name: 'invoice_batch_alloc',
+    sql: `CREATE TABLE IF NOT EXISTS invoice_batch_alloc (
+      id TEXT PRIMARY KEY,
+      invoice_id TEXT NOT NULL,
+      sap_doc_entry INTEGER,
+      sap_doc_num TEXT,
+      line_num INTEGER NOT NULL,
+      batch_number TEXT,
+      pc_code TEXT,
+      qty_lakhs REAL NOT NULL DEFAULT 0,
+      boxes INTEGER NOT NULL DEFAULT 0,
+      method TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'attributed',
+      reason TEXT,
+      allocated_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_iba_inv_line ON invoice_batch_alloc(invoice_id, line_num);
+    CREATE INDEX IF NOT EXISTS idx_iba_batch ON invoice_batch_alloc(batch_number);
+    CREATE INDEX IF NOT EXISTS idx_iba_status ON invoice_batch_alloc(status);
+    CREATE INDEX IF NOT EXISTS idx_iba_invoice ON invoice_batch_alloc(invoice_id);`
+  },
+  {
+    // v48X: PER-BATCH REQUEST LINK.
+    // invoices_received.invoice_request_id holds ONE request per invoice, but a multi-batch invoice
+    // legitimately fulfils SEVERAL requests — invoice 1893 covers both 26Z070 (31.5L) and 26Z071
+    // (26.25L), and 1832 covers 26W063 and 26T081. With only one slot, the first request to claim an
+    // invoice locks the others out, so they sit on "Awaiting SAP Invoice" forever even though their
+    // invoice has arrived. The link belongs at the allocation (per-line/per-batch) level.
+    version: 53,
+    name: 'invoice_batch_alloc_request_link',
+    sql: `ALTER TABLE invoice_batch_alloc ADD COLUMN invoice_request_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_iba_req ON invoice_batch_alloc(invoice_request_id);`
+  },
+  {
+    // v49ZG: EXCESS-CAPSULE UNPRINT FLOW (confirmed by Ishan).
+    // AIM over-sends unprinted capsules to Printing on PTD batches (55L sent vs 50L order); the
+    // printing manager prints only the order qty, so the excess must convert to an UNPRINTED child
+    // batch (colour stock, customer optional) instead of blocking inventory as "printed". The
+    // Printing Manager PROPOSES (selecting the physically-unprinted boxes — printing scan-IN, no
+    // scan-OUT); the Planning Manager or Admin APPROVES; approval executes through the proven
+    // re-customer split internals (child order + label/scan rebatch + v44C scan-reversal ledger).
+    version: 54,
+    name: 'excess_unprint_requests',
+    sql: `CREATE TABLE IF NOT EXISTS excess_unprint_requests (
+      id TEXT PRIMARY KEY,
+      batch_number TEXT NOT NULL,
+      selected_labels TEXT NOT NULL,
+      boxes INTEGER NOT NULL DEFAULT 0,
+      qty_lakhs REAL NOT NULL DEFAULT 0,
+      new_customer TEXT,
+      reason TEXT,
+      proposed_by TEXT NOT NULL,
+      proposed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      status TEXT NOT NULL DEFAULT 'pending',
+      decided_by TEXT,
+      decided_at TEXT,
+      decision_reason TEXT,
+      child_batch_number TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_exu_status ON excess_unprint_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_exu_batch ON excess_unprint_requests(batch_number);`
   },
 ];
 
@@ -1437,6 +1537,222 @@ async function _consolidatePlanningStateRows() {
       }
     }
   } catch (e) { console.warn('[v46D] planning_state consolidation skipped:', e.message); }
+}
+
+// ── v49F (confirmed by Ishan — "re-customer is authoritative and sticky") ──────────────────────
+// Root cause of "the re-customer doesn't stick": every production_orders merge writer builds its
+// result as { ...clientOrder, <named guarded fields> }. Two consequences, both live on 26P044/26P045:
+//   A. FIELD LOSS — recustomeredFrom/At/By are on neither the guarded list nor the client blob, so
+//      they were erased on the next sync. Exactly ONE order table-wide still carried the marker.
+//   B. CUSTOMER REVERT — the guard was `_staleWrite = dbUpdated > clientEdit + 5000`, a race. A tab
+//      with a fresh _localEditedAt beat a day-old server write and pushed the OLD customer back.
+//      Both batches were stamped 24-Jul 07:22:40.123485 to the microsecond by one bulk push, ~19h
+//      after their re-customer. tracking_labels — which no client blob touches — stayed correct.
+// The rule now: once an order carries recustomeredAt, `customer` and the re-customer provenance come
+// from the DB unconditionally. No time comparison — that race IS the bug. This removes no planner
+// control: the order modal has no `customer` input (fo-customer writes shipTo), so customer is only
+// ever set by SAP import, W/O approval, Re-customer and the reconcile banner. shipTo/billTo remain
+// freely planner-editable under the existing rules.
+// SAP (option A): a client must not restore the Sales Order the re-customer deliberately retired —
+// `sapDocNum` uses ||-chaining, which reads the cleared '' as absent and falls back to the client's
+// old value, re-attaching the previous customer's SO. Only that exact retired value is rejected; any
+// other SO a planner enters passes through normally.
+// ── v49G (confirmed by Ishan — option B) ─────────────────────────────────────────────────────
+// The status guard has flipped genuine closes back to "running". Root cause, evidenced in the deploy
+// logs (`[v41x upsert] ... client="closed" -> DB="running", stale write blocked`): the guard decides
+// staleness with `dbUpdated > clientEdit + 5000`, comparing two clocks that are NOT comparable.
+// `dbUpdated` (production_orders.updated_at) is bumped by EVERY writer — the DPR poller, the v45R
+// tracking-reconcile sweep, other planners — while `clientEdit` (_localEditedAt) moves only when THIS
+// planner edits. So seconds after any background write, the planner's real close reads as "stale" and
+// the guard restores the DB's running. The close silently vanishes; refresh shows running again. The
+// query proves the wreckage: 26ZB101 had status=running, manualEndDate=true, closedDate set — a
+// self-contradictory row, because status was reverted independently of the fields a close writes.
+//
+// Fix: an EXPLICIT manual status decision by the planner carries intent that a timestamp race must not
+// override. A close is explicit when the incoming order asserts closedDate/manualEndDate; a reopen when
+// it clears them while carrying a fresh edit stamp. When intent is present, the client's status wins and
+// status+closedDate+manualEndDate are written as ONE set, so the record can never again disagree with
+// itself. The timestamp guard stays for everything else (a background path still can't regress a status
+// nobody deliberately changed).
+//
+// Option B (DPR gate preserved): a batch flagged "Close in DPR first" — has production (actualProd>0)
+// and is NOT in dpr_batch_closed — must still be closed THROUGH DPR. An explicit direct close on such a
+// batch is REFUSED (status held) and surfaced, rather than silently reverted. Non-gated batches close
+// normally on explicit intent. _v49gDprClosedSet is warmed once per request (mirrors _grossByBatch).
+let _v49gDprClosedSet = null;
+// v49G option (ii): batches that have a reopen-log row AND are currently open (no dpr_batch_closed row)
+// — i.e. legitimately reopened via the guarded path and awaiting their single round-trip re-close.
+// A direct Planning close on one of THESE is allowed (and cascades to re-close DPR) instead of being
+// refused by the DPR-first gate. Once re-closed it gains a dpr_batch_closed row and drops out of this
+// set, so the exemption covers exactly one re-close, never permanently disarms the gate on the batch.
+let _v49gReopenedOpenSet = null;
+async function _v49gWarmReopenedOpen() {
+  const set = new Set();
+  try {
+    let rows;
+    const q = `SELECT r.order_id, r.batch_number FROM dpr_batch_reopen_log r
+               LEFT JOIN dpr_batch_closed c ON c.order_id = r.order_id
+               WHERE c.order_id IS NULL`;
+    if (pgPool) rows = (await pgPool.query(q)).rows;
+    else rows = db.prepare(`SELECT r.order_id, r.batch_number FROM dpr_batch_reopen_log r
+               LEFT JOIN dpr_batch_closed c ON c.order_id = r.order_id
+               WHERE c.order_id IS NULL`).all();
+    for (const r of (rows || [])) {
+      if (r.order_id)     set.add('id:'    + r.order_id);
+      if (r.batch_number) set.add('batch:' + String(r.batch_number).trim().toLowerCase());
+    }
+  } catch (e) { console.warn('[v49G] reopened-open warm failed:', e && e.message); }
+  _v49gReopenedOpenSet = set;
+  return set;
+}
+// v49K (confirmed by Ishan): the v41z 2-per-machine running limit counts any order whose status field
+// is 'running'. A batch closed in DPR whose closure did not propagate to `status` ("lost in transit")
+// still reads running, inflates the machine count past 2, and makes v41z downgrade a GENUINELY running
+// order to pending — the status flip the planner sees. Fix: an order that is closed in DPR
+// (dpr_batch_closed has a row) must NOT count toward the running limit, regardless of its stale status.
+// Uses the already-warmed _v49gDprClosedSet. Row shape here is {id, batch_number} or an order object.
+function _v49kCountsAsRunning(id, row) {
+  if (!row || row.status !== 'running' || row.deleted) return false;
+  const probe = { id: id != null ? id : row.id, batchNumber: row.batch_number || row.batchNumber };
+  if (_v49gIsDprClosed(probe)) return false;   // DPR-closed ghost — do not count
+  return true;
+}
+function _v49gIsReopenedOpen(ord) {
+  if (!_v49gReopenedOpenSet) return false;
+  if (ord.id && _v49gReopenedOpenSet.has('id:' + ord.id)) return true;
+  if (ord.batchNumber && _v49gReopenedOpenSet.has('batch:' + String(ord.batchNumber).trim().toLowerCase())) return true;
+  return false;
+}
+async function _v49gWarmDprClosed() {
+  const set = new Set();
+  const atMap = new Map();   // v49ZJ: key → closed_at, for the 48h post-close label window anchor
+  try {
+    let rows;
+    if (pgPool) rows = (await pgPool.query('SELECT order_id, batch_number, closed_at FROM dpr_batch_closed')).rows;
+    else rows = db.prepare('SELECT order_id, batch_number, closed_at FROM dpr_batch_closed').all();
+    for (const r of (rows || [])) {
+      if (r.order_id)    set.add('id:'    + r.order_id);
+      if (r.batch_number) set.add('batch:' + String(r.batch_number).trim().toLowerCase());
+      if (r.closed_at) {
+        if (r.order_id)     atMap.set('id:'    + r.order_id, r.closed_at);
+        if (r.batch_number) atMap.set('batch:' + String(r.batch_number).trim().toLowerCase(), r.closed_at);
+      }
+    }
+  } catch (e) { console.warn('[v49G] DPR-closed warm failed:', e && e.message); }
+  _v49gDprClosedSet = set;
+  _v49gDprClosedAt = atMap;
+  return set;
+}
+// v49ZJ: the DPR close moment for an order, if known (null when the map isn't warmed or no row).
+// This is the authoritative "production complete" timestamp — the anchor for the 48h post-close
+// label-generation window (confirmed by Ishan: labels stay generatable for 48h after DPR closes).
+let _v49gDprClosedAt = null;
+function _v49gDprClosedAtFor(ord) {
+  if (!_v49gDprClosedAt || !ord) return null;
+  if (ord.id && _v49gDprClosedAt.has('id:' + ord.id)) return _v49gDprClosedAt.get('id:' + ord.id);
+  if (ord.batchNumber && _v49gDprClosedAt.has('batch:' + String(ord.batchNumber).trim().toLowerCase()))
+    return _v49gDprClosedAt.get('batch:' + String(ord.batchNumber).trim().toLowerCase());
+  return null;
+}
+function _v49gIsDprClosed(ord) {
+  if (!_v49gDprClosedSet) return false;
+  if (ord.id && _v49gDprClosedSet.has('id:' + ord.id)) return true;
+  if (ord.batchNumber && _v49gDprClosedSet.has('batch:' + String(ord.batchNumber).trim().toLowerCase())) return true;
+  return false;
+}
+// Does the incoming client order assert an explicit CLOSE? (planner ticked/closed it)
+// v49P (confirmed by Ishan): an explicit close must be FRESH — the planner clicked it recently.
+// Without this, a stale tab replaying closed+closedDate on every ~30s autosave was treated as a
+// brand-new explicit close forever: the DPR gate refused 26G018/26ZB102 every 30s for 70+ minutes
+// (log-proven), spamming the planner with toasts and churning statuses. A stale replay now has NO
+// intent and falls to the normal preservation guards, silently.
+const _V49P_FRESH_MS = 10 * 60 * 1000;   // 10 minutes
+function _v49pFresh(cli) {
+  const t = parseInt((cli && cli._localEditedAt) || 0);
+  return t > 0 && (Date.now() - t) < _V49P_FRESH_MS;
+}
+function _v49gExplicitClose(cli) {
+  return String(cli && cli.status) === 'closed' && !!(cli.closedDate || cli.manualEndDate) && _v49pFresh(cli);
+}
+// Does it assert an explicit REOPEN? (was closed, planner set it running and stamped the edit)
+// The client's changeOrderStatus sets status=running + closedDate=null + a fresh _localEditedAt but
+// does NOT clear manualEndDate, so we key on those three signals; the override then clears manualEndDate.
+function _v49gExplicitReopen(cli, dbStatus) {
+  return String(cli && cli.status) === 'running' && String(dbStatus) === 'closed'
+      && !cli.closedDate && _v49pFresh(cli);   // v49P: reopen must be fresh too — no stale replays
+}
+// Central decision. Returns { status, override, refusedDprGate } or null when no explicit intent
+// (caller then falls back to the existing timestamp guard, unchanged).
+// override, when true, means "write status + closedDate + manualEndDate together from the client".
+function _v49gStatusIntent(cli, dbStatus) {
+  // v49H: only act on an actual TRANSITION. A batch that is already closed (or already running) and is
+  // merely being re-saved as part of a routine bulk sync sends the same status it already has — that is
+  // NOT a close/reopen action and must never touch the DPR gate. Without this, a normal save of the
+  // whole order set flagged every not-yet-DPR-closed batch at once (the ~200-batch orange banner).
+  if (String(cli && cli.status) === String(dbStatus)) return null;
+  if (_v49gExplicitClose(cli)) {
+    if (_v49gIsDprClosed(cli)) {
+      // already DPR-closed — an explicit close is consistent, let it through
+      return { status: 'closed', override: true, refusedDprGate: false };
+    }
+    // v49G option (ii): a batch reopened via the guarded path and still open may be re-closed from
+    // Planning (its single round-trip). Allow it AND signal the DPR-close cascade so all three apps
+    // re-close together. Not permanent — once re-closed it leaves _v49gReopenedOpenSet.
+    if (_v49gIsReopenedOpen(cli)) {
+      return { status: 'closed', override: true, refusedDprGate: false, cascadeDprClose: true };
+    }
+    const gated = (parseFloat(cli.actualProd || 0) > 0);   // has production but not DPR-closed → gated
+    if (gated) {
+      console.log(`[v49G] DPR-gate: direct close on ${cli.batchNumber||cli.id} refused — close in DPR first`);
+      return { status: dbStatus || 'running', override: false, refusedDprGate: true };
+    }
+    return { status: 'closed', override: true, refusedDprGate: false };
+  }
+  if (_v49gExplicitReopen(cli, dbStatus)) {
+    return { status: 'running', override: true, refusedDprGate: false };
+  }
+  return null;
+}
+
+function _v49f_rcLock(merged, dbData) {
+  try {
+    if (!merged || !dbData || dbData.recustomeredAt == null) return merged;
+    const out = { ...merged };
+    if (dbData.customer != null) {
+      if (String(out.customer||'').trim() !== String(dbData.customer||'').trim()) {
+        console.log(`[v49F] re-customer lock: ${out.batchNumber||out.id} customer "${out.customer}" -> "${dbData.customer}" (client push rejected)`);
+      }
+      out.customer = dbData.customer;
+    }
+    for (const k of ['recustomeredFrom','recustomeredAt','recustomeredBy','recustomerSplitFrom','prevSapDocNum']) {
+      if (dbData[k] != null) out[k] = dbData[k];
+    }
+    const _prevSO = String(dbData.prevSapDocNum == null ? '' : dbData.prevSapDocNum).trim();
+    if (_prevSO && String(out.sapDocNum == null ? '' : out.sapDocNum).trim() === _prevSO) {
+      console.log(`[v49F] re-customer lock: ${out.batchNumber||out.id} retired SO ${_prevSO} restore blocked`);
+      out.sapDocNum   = String(dbData.sapDocNum == null ? '' : dbData.sapDocNum);
+      out.sapDocEntry = dbData.sapDocEntry != null ? dbData.sapDocEntry : null;
+    }
+    // v49S (confirmed by Ishan): shipTo/billTo residue guard. Planning's order modal pre-fills
+    // fo-customer from ord.shipTo || ord.customer, so ANY modal save from a stale tab — even one
+    // editing only a date — re-pushed the OLD customer as shipTo, re-contaminating re-customered
+    // orders (26P044/045, 26Z075) and forcing manual DB cleanup each time. Rule: an incoming
+    // shipTo/billTo equal to recustomeredFrom is rejected back to the DB value — reject-to-DB, not
+    // blank-to-empty, so a DELIBERATE old-party ship-to set via the server-side Re-customer modal
+    // (which bypasses this lock and lands in the DB) survives untouched: incoming matches DB and
+    // nothing changes. All other shipTo/billTo edits remain freely editable (v49F contract).
+    const _rf = String(dbData.recustomeredFrom == null ? '' : dbData.recustomeredFrom).trim().toLowerCase();
+    if (_rf) {
+      for (const k of ['shipTo', 'billTo']) {
+        if (String(out[k] == null ? '' : out[k]).trim().toLowerCase() === _rf
+            && String(dbData[k] == null ? '' : dbData[k]).trim().toLowerCase() !== _rf) {
+          console.log(`[v49S] re-customer lock: ${out.batchNumber||out.id} ${k} "${out[k]}" -> "${dbData[k] != null ? dbData[k] : ''}" (old-party residue rejected)`);
+          out[k] = dbData[k] != null ? dbData[k] : '';
+        }
+      }
+    }
+    return out;
+  } catch (e) { console.warn('[v49F] rcLock skipped:', e && e.message); return merged; }
 }
 
 function getPlanningState() {
@@ -2163,7 +2479,8 @@ async function ensurePostgresTables() {
     // v37G: ensure all columns exist on previously-created tables (idempotent — IF NOT EXISTS)
     const dispatchColumns = [
       'customer TEXT', 'boxes INTEGER', 'vehicle_no TEXT', 'invoice_no TEXT',
-      'remarks TEXT', '"by" TEXT'
+      'remarks TEXT', '"by" TEXT',
+      'scanned_labels_json TEXT'   // v46H #2: per-box dispatch audit trail (box numbers scanned out)
     ];
     for (const col of dispatchColumns) {
       const colName = col.split(' ')[0];
@@ -2324,6 +2641,35 @@ async function ensurePostgresTables() {
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_inv_recv_source ON invoices_received(source)`);
     await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_inv_recv_req ON invoices_received(invoice_request_id)`);
 
+    // v48R: invoice_batch_alloc — per-LINE attribution of a received invoice to a batch.
+    // See MIGRATIONS v52 for the rationale. PG mirror of the same shape.
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS invoice_batch_alloc (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT NOT NULL,
+        sap_doc_entry INTEGER,
+        sap_doc_num TEXT,
+        line_num INTEGER NOT NULL,
+        batch_number TEXT,
+        pc_code TEXT,
+        qty_lakhs DOUBLE PRECISION NOT NULL DEFAULT 0,
+        boxes INTEGER NOT NULL DEFAULT 0,
+        method TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'attributed',
+        reason TEXT,
+        allocated_by TEXT,
+        created_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+        updated_at TEXT NOT NULL DEFAULT NOW()::TEXT
+      )
+    `);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_iba_inv_line ON invoice_batch_alloc(invoice_id, line_num)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_iba_batch ON invoice_batch_alloc(batch_number)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_iba_status ON invoice_batch_alloc(status)`);
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_iba_invoice ON invoice_batch_alloc(invoice_id)`);
+    // v48X: per-batch request link (see MIGRATIONS v53)
+    try { await pgPool.query(`ALTER TABLE invoice_batch_alloc ADD COLUMN IF NOT EXISTS invoice_request_id TEXT`); } catch (e) { console.warn('[v48X PG] add invoice_request_id:', e.message); }
+    await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_iba_req ON invoice_batch_alloc(invoice_request_id)`);
+
     // sap_config — single-row credentials + session state
     await pgPool.query(`
       CREATE TABLE IF NOT EXISTS sap_config (
@@ -2422,6 +2768,8 @@ async function ensurePostgresTables() {
         scanned_json TEXT NOT NULL DEFAULT '[]',
         saved_at TEXT DEFAULT NOW()::TEXT
       )`);
+      try { await pgPool.query(`ALTER TABLE invoice_scan_sessions ADD COLUMN IF NOT EXISTS batch_number TEXT`); } catch {}
+      try { await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_iss_batch ON invoice_scan_sessions(batch_number)`); } catch {}
     } catch (e) { console.warn('[v44Q PG] invoice_scan_sessions:', e.message); }
 
     // v44R Phase 2: dispatched_boxes on tracking_dispatch_actuals (idempotent)
@@ -2490,6 +2838,30 @@ async function ensurePostgresTables() {
       await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_wo_split_lines_child ON wo_split_lines(child_batch_number)`);
     } catch (e) { console.warn('[v40 P18.15 PG] wo_split tables:', e.message); }
     // ─── end v40 Phase 18.15 tables ────────────────────────────────
+
+    // ─── v49ZG: Excess-Unprint requests table (PG) ─────────────────
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS excess_unprint_requests (
+          id TEXT PRIMARY KEY,
+          batch_number TEXT NOT NULL,
+          selected_labels TEXT NOT NULL,
+          boxes INTEGER NOT NULL DEFAULT 0,
+          qty_lakhs REAL NOT NULL DEFAULT 0,
+          new_customer TEXT,
+          reason TEXT,
+          proposed_by TEXT NOT NULL,
+          proposed_at TEXT NOT NULL DEFAULT NOW()::TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          decided_by TEXT,
+          decided_at TEXT,
+          decision_reason TEXT,
+          child_batch_number TEXT
+        );
+      `);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_exu_status ON excess_unprint_requests(status)`);
+      await pgPool.query(`CREATE INDEX IF NOT EXISTS idx_exu_batch ON excess_unprint_requests(batch_number)`);
+    } catch (e) { console.warn('[v49ZG PG] excess_unprint_requests:', e.message); }
 
     // ─── v40 Phase 18.17: Data Integrity Dashboard tables (PG) ───
     try {
@@ -2859,6 +3231,11 @@ let _actualsCacheTime = 0;
 // batch-keyed total ends up holding only the LAST group's partial sum — surfacing as blank/under-
 // counted Gross Prod in Reports D & E. This map is the single source of truth for per-batch gross.
 let _grossByBatch = null;
+// v47M: set of every batch that belongs to a W/O-split family (parent + children). Populated when the
+// actuals cache warms (below). The v47K blob gross-override must SKIP these — their gross is already
+// distributed by _v46k_applyGrossApportionment, and overriding it re-inflated the parent's WIP
+// (regression on ZC095/ZG135/ZH079). Non-split batches (e.g. 26ZC094) still get the override.
+let _splitFamilyBatches = new Set();
 let _firstProdByBatch = null; // v45W: batch → first DPR production date (YYYY-MM-DD)
 let _lastProdByBatch  = null; // v45X (confirmed by Ishan): batch → LAST DPR production date — anchors a complete order's end date to production reality instead of today()
 // v41ZI Item 6: per-batch admin/PM override of the DPR gross. When present it supersedes _grossByBatch.
@@ -2888,6 +3265,14 @@ function _sapUomScale(line) {
   return isThousand ? 0.01 : 1;
 }
 
+// v49P: canonical stringify (sorted keys) for change detection — the bg merge was rewriting ALL
+// ~986 rows with updated_at=NOW() every ~50s even when nothing changed, which made EVERY timestamp
+// guard in the system (v41w 5s, GET-reconcile 30s, upsert staleness) compare against a clock that is
+// always "now" — the systemic enabler behind the status ping-pong. Unchanged rows are now skipped.
+function _v49pStable(o) {
+  return JSON.stringify(o, (k, v) => (v && typeof v === 'object' && !Array.isArray(v))
+    ? Object.keys(v).sort().reduce((a, kk) => { a[kk] = v[kk]; return a; }, {}) : v);
+}
 function _orderHasActuals(o) {
   if (!o) return false;
   const b = o.batchNumber;
@@ -2991,6 +3376,19 @@ async function warmActualsCache() {
           if (!_lastProdByBatch[batch] || ld > _lastProdByBatch[batch]) _lastProdByBatch[batch] = ld;
         }
       }
+      // v46K: apportion each approved W/O-split parent's DPR gross across its children by their
+      // recorded box ranges (residual on the parent) so the whole app's per-batch gross — and thus
+      // the frozen WIP formulas fed by it — stops stranding the migrated boxes' WIP on the parent.
+      // Guarded: any failure leaves the un-apportioned map (prior behaviour), never blocks the warm.
+      try {
+        const _splitFams = await _v46k_loadSplitFamilies();
+        _v46k_applyGrossApportionment(_grossByBatch, _splitFams);
+        // v47M: capture every split-family batch so the v47K blob override skips them (regression fix).
+        const _sfb = new Set();
+        for (const _f of (_splitFams || [])) { if (_f.parentBatch) _sfb.add(_f.parentBatch); for (const _c of (_f.children || [])) if (_c.batch) _sfb.add(_c.batch); }
+        _splitFamilyBatches = _sfb;
+        if (_splitFams.length) console.log('[v46K] split-gross apportioned across', _splitFams.length, 'W/O-split family(ies)');
+      } catch (e) { console.warn('[v46K] split-gross apportionment skipped (cumulative):', e.message); }
       console.log('[DB] Actuals cache warmed:', r.rows.length, 'entries;', Object.keys(_grossByBatch).length, 'batches');
     } catch(e) { console.error('[DB] Actuals cache error:', e.message); }
   }
@@ -3355,6 +3753,494 @@ function _lineQtyForBatch(inv, batchNo) {
   return null;
 }
 
+// v46H #4: per-batch dispatched qty AND boxes from the batch's own DocumentLine. Same batch-matching
+// as _lineQtyForBatch. Returns null when no line carries the batch (caller FLAGS it — never guesses a
+// share). Used to split a consolidated/export invoice into per-batch dispatch records so each batch
+// gets ITS OWN line qty, not the whole invoice total (the "full invoice qty on every batch" bug).
+function _lineDispatchForBatch(inv, batchNo) {
+  const target = String(batchNo == null ? '' : batchNo).trim();
+  if (!target) return null;
+  for (const l of ((inv && inv.DocumentLines) || [])) {
+    if (!l || typeof l !== 'object') continue;
+    const cands = [];
+    const push = v => { const s = (v == null ? '' : String(v)).trim(); if (s) cands.push(s); };
+    push(l.U_Batch); push(l.U_SunlocBatch); push(l.U_BatchNo); push(l.U_BatchNum);
+    if (Array.isArray(l.BatchNumbers)) for (const b of l.BatchNumbers) push(b && (b.BatchNumber || b.Batch));
+    for (const k of Object.keys(l)) { if (/^U_.*batch/i.test(k)) push(l[k]); }
+    if (cands.includes(target)) {
+      const q = parseFloat((((parseFloat(l.Quantity) || 0) * _sapUomScale(l))).toFixed(3));
+      const bx = parseInt(l.U_NO_BOXES, 10);
+      return { qty: q, boxes: Number.isFinite(bx) && bx > 0 ? bx : 0 };
+    }
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v48R (confirmed by Ishan): PER-BATCH INVOICE ATTRIBUTION ENGINE
+//
+// ROOT CAUSE this replaces: invoices_received holds one joined batch key and one
+// total qty. Nothing records how much of a multi-batch invoice belongs to each
+// batch, so six different consumers each reconstruct it by guesswork (v47L, v47R,
+// v47U, v48C, v48N, v48P). This engine computes the answer ONCE, per invoice LINE,
+// and stores it in invoice_batch_alloc.
+//
+// LAYERED MATCHING — most explicit evidence first, never a guess:
+//   L1 line_batch   the LINE itself carries a batch identifier (U_Batch /
+//                   U_SunlocBatch / U_BatchNo / U_BatchNum / BatchNumbers[] / any
+//                   U_*batch UDF). Unambiguous; no tie-break can arise.
+//   L2 single_batch the invoice's batch key has exactly one token — the whole line
+//                   belongs to that batch by construction.
+//   L3 pc_unique    exactly ONE batch on this invoice has a PC equal to the line's
+//                   ItemCode, AND that batch's customer agrees with the invoice's.
+//                   The customer guard is load-bearing: bulk export invoice 9035
+//                   (ASIA NOOR, 8 batches) lists MANCARE's 26V083 in its key, and
+//                   without the guard a PC collision would have credited it.
+//   otherwise       status='needs_manual'. Per Ishan's explicit decision (option c),
+//                   NO proportional split and NO FIFO — both encode an assumption
+//                   about consumption order that is not guaranteed to hold, and a
+//                   silently-wrong allocation is worse than a flagged one. The qty
+//                   is counted NOWHERE until a human allocates it.
+//
+// SAFETY: this engine only ever writes to invoice_batch_alloc. It never touches
+// invoices_received, invoice_requests, tracking_* or any dispatch row. In v48R NO
+// consumer reads it — deploying this changes no user-visible number anywhere.
+// ─────────────────────────────────────────────────────────────────────────────
+function _v48r_norm(s) { return String(s == null ? '' : s).trim().toUpperCase(); }
+
+// Batch identifiers carried by a single DocumentLine. Same explicit fields as
+// _lineQtyForBatch / _lineDispatchForBatch — no inference from context.
+function _v48r_lineBatchTokens(l) {
+  const set = [];
+  if (!l || typeof l !== 'object') return set;
+  const push = v => {
+    const s = (v == null ? '' : String(v)).trim();
+    if (s && !set.some(x => x.toUpperCase() === s.toUpperCase())) set.push(s);
+  };
+  push(l.U_Batch); push(l.U_SunlocBatch); push(l.U_BatchNo); push(l.U_BatchNum);
+  if (Array.isArray(l.BatchNumbers)) for (const b of l.BatchNumbers) push(b && (b.BatchNumber || b.Batch));
+  for (const k of Object.keys(l)) { if (/^U_.*batch/i.test(k)) push(l[k]); }
+  return set;
+}
+
+// batch → { pc, customer, cardCode }. invoice_requests carries the card code (the
+// strongest customer key); tracking_labels is the floor's own record of what a batch
+// is and who it is for, and covers batches that were never requested through Sunloc.
+// tokens === null builds the map for every batch (used by the full rebuild).
+async function _v48r_batchProfiles(tokens) {
+  const want = Array.isArray(tokens) ? Array.from(new Set(tokens.map(_v48r_norm).filter(Boolean))) : null;
+  if (want && !want.length) return {};
+  const out = {};
+  const ent = b => {
+    const k = _v48r_norm(b);
+    if (!k) return null;
+    return out[k] || (out[k] = { pcs: [], customer: '', cardCode: '', custSrc: '' });
+  };
+  const addPc = (e, pc) => {
+    const v = String(pc == null ? '' : pc).trim();
+    if (!v || e.pcs.some(x => _v48r_norm(x) === _v48r_norm(v))) return;
+    e.pcs.push(v);
+  };
+  try {
+    // (1) invoice_requests FIRST — it records what was actually invoiced for the batch and
+    //     carries the card code, so it outranks the floor labels for customer identity.
+    if (pgPool) {
+      const r1 = want
+        ? await pgPool.query(`SELECT batch_number, pc_code, customer, card_code FROM invoice_requests WHERE UPPER(batch_number) = ANY($1)`, [want])
+        : await pgPool.query(`SELECT batch_number, pc_code, customer, card_code FROM invoice_requests`);
+      for (const r of r1.rows) {
+        const e = ent(r.batch_number); if (!e) continue;
+        addPc(e, r.pc_code);
+        if (!e.customer && r.customer) { e.customer = String(r.customer).trim(); e.custSrc = 'invoice_request'; }
+        if (!e.cardCode && r.card_code) e.cardCode = String(r.card_code).trim();
+      }
+    } else {
+      const inSql = want ? ` WHERE UPPER(batch_number) IN (${want.map(() => '?').join(',')})` : '';
+      for (const r of db.prepare(`SELECT batch_number, pc_code, customer, card_code FROM invoice_requests${inSql}`).all(...(want || []))) {
+        const e = ent(r.batch_number); if (!e) continue;
+        addPc(e, r.pc_code);
+        if (!e.customer && r.customer) { e.customer = String(r.customer).trim(); e.custSrc = 'invoice_request'; }
+        if (!e.cardCode && r.card_code) e.cardCode = String(r.card_code).trim();
+      }
+    }
+    // (2) tracking_labels — the floor's own record.
+    //     v48T FIXES (all three found by reading the re-customer handler):
+    //       • voided + orange labels are EXCLUDED from the re-customer UPDATE, so they keep the
+    //         OLD customer forever. Reading them was importing known-stale identity.
+    //       • a batch can legitimately carry MORE THAN ONE pc_code (26ZH036 → 00015 ×5, 00204 ×21),
+    //         so we keep the full SET rather than whichever row happened to come back first.
+    //       • ordering by label count makes the primary PC deterministic instead of arbitrary.
+    const lblWhere = `COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`;
+    if (pgPool) {
+      const q = want
+        ? `SELECT batch_number, pc_code, customer, COUNT(*) AS n FROM tracking_labels
+           WHERE ${lblWhere} AND UPPER(batch_number) = ANY($1) GROUP BY 1,2,3 ORDER BY 1, n DESC`
+        : `SELECT batch_number, pc_code, customer, COUNT(*) AS n FROM tracking_labels
+           WHERE ${lblWhere} GROUP BY 1,2,3 ORDER BY 1, n DESC`;
+      const r2 = want ? await pgPool.query(q, [want]) : await pgPool.query(q);
+      for (const r of r2.rows) {
+        const e = ent(r.batch_number); if (!e) continue;
+        addPc(e, r.pc_code);
+        if (!e.customer && r.customer) { e.customer = String(r.customer).trim(); e.custSrc = 'label'; }
+      }
+    } else {
+      const inSql = want ? ` AND UPPER(batch_number) IN (${want.map(() => '?').join(',')})` : '';
+      const q = `SELECT batch_number, pc_code, customer, COUNT(*) AS n FROM tracking_labels
+                 WHERE ${lblWhere}${inSql} GROUP BY 1,2,3 ORDER BY 1, n DESC`;
+      for (const r of db.prepare(q).all(...(want || []))) {
+        const e = ent(r.batch_number); if (!e) continue;
+        addPc(e, r.pc_code);
+        if (!e.customer && r.customer) { e.customer = String(r.customer).trim(); e.custSrc = 'label'; }
+      }
+    }
+  } catch (e) { console.warn('[v48T] batch profile load failed:', e && e.message); }
+  return out;
+}
+
+// v48S: plausibility ceiling for a payload-less invoice's HEADER total (Lakhs).
+// Some legacy rows carry raw thousands in total_qty_lakhs (e.g. 37500 for 375L), a
+// known pre-existing corruption. A real capsule invoice never approaches this bar, so
+// anything above it is refused rather than imported as authoritative. Confirmed by Ishan.
+const _V48S_MAX_CREDIBLE_INVOICE_L = 1000;
+
+// v48T: CUSTOMER IDENTITY NORMALISATION.
+// The v48S guard compared raw strings and so read pure formatting as contradiction:
+// "ARISTO PHARMACEUTICALS PVT LTD" vs "ARISTO PHARMACEUTICALS PVT.LTD.", and
+// "ASIA NOOR MEDICINE PRODUCTION CO" vs "...PRODUCTIONCOMPANY". Strip punctuation,
+// collapse spacing, and drop the legal-form suffixes that carry no identity, so only a
+// genuinely DIFFERENT company registers.
+// Self-contained so there is exactly one definition of customer identity in the codebase.
+function _v48t_custKey(v) {
+  const JUNK = new Set(['', '-', '--', 'W/O', 'WO', 'NA', 'N/A', 'NONE', 'UNASSIGNED', 'UNKNOWN', 'TBD']);
+  // longest first — 'PRIVATELIMITED' must be consumed before 'LIMITED'
+  const SUFFIX = ['PRIVATELIMITED', 'PVTLTD', 'INCORPORATED', 'CORPORATION', 'INTERNATIONAL',
+                  'COMPANY', 'LIMITED', 'PRIVATE', 'LTDA', 'CORP', 'LLP', 'LLC', 'INC',
+                  'LTD', 'PVT', 'CO'];
+  let x = String(v == null ? '' : v).toUpperCase().trim();
+  if (JUNK.has(x)) return '';
+  x = x.replace(/[.,'"()\-\/&]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (JUNK.has(x)) return '';
+  const full = x.replace(/\s+/g, '');
+  // Strip legal-form suffixes from the END of the COMPACTED name. Doing it on the compact
+  // form rather than on word boundaries is what makes "…PRODUCTION CO" and
+  // "…PRODUCTIONCOMPANY" resolve to the same identity — SAP drops the space, so a
+  // \b-anchored pattern never sees a boundary before COMPANY.
+  let k = full, changed = true;
+  while (changed) {
+    changed = false;
+    for (const t of SUFFIX) {
+      if (k.endsWith(t) && k.length - t.length >= 4) { k = k.slice(0, -t.length); changed = true; break; }
+    }
+  }
+  return k || full;
+}
+
+// v48T: corroborating evidence for a proposed batch attribution.
+//
+// WHY THE PC TEST IS NO LONGER BLOCKING — established by reading the re-customer handler
+// (POST /api/tracking/recustomer) rather than assumed:
+//   • Re-customer rewrites tracking_labels IN PLACE (customer, po_number, ship_to, bill_to)
+//     and is BLOCKED outright once a SAP invoice exists for the batch. So for any invoiced
+//     batch the label customer was current at invoice time — customer IS a sound signal.
+//   • But NOT ONE of the 22 UPDATE tracking_labels sites ever writes pc_code. It is
+//     write-once at label creation, so a batch that changes customer keeps its original PC
+//     forever — the label PC goes stale in exactly the situation this test probes.
+//   • A batch can also hold several valid PCs at once (26ZH036 → 00015 and 00204).
+// v48S treated a PC difference as proof of a bad tag and flagged 36 lines on that basis.
+// It is now recorded as ADVISORY only. Customer remains blocking, on normalised keys.
+function _v48t_corroborate(batch, pc, row, profiles) {
+  const out = { pcAdvisory: false, custConflict: false, pcNote: '', custNote: '' };
+  const p = profiles[_v48r_norm(batch)];
+  if (!p) return out;                       // batch unknown to us — no evidence either way
+  if (pc && p.pcs && p.pcs.length && !p.pcs.some(x => _v48r_norm(x) === _v48r_norm(pc))) {
+    out.pcAdvisory = true;
+    out.pcNote = `line PC ${pc} is not among batch ${batch}'s recorded PCs (${p.pcs.join(', ')}) — note only; pc_code is never updated on re-customer`;
+  }
+  const invKey = _v48t_custKey(row && (row.customer || ''));
+  const batKey = _v48t_custKey(p.customer);
+  const invCard = _v48r_norm(row && row.card_code);
+  const batCard = _v48r_norm(p.cardCode);
+  if (batCard && invCard && batCard !== invCard) {
+    out.custConflict = true;
+    out.custNote = `invoice card code ${row.card_code} but batch ${batch} is ${p.cardCode}`;
+  } else if (batKey && invKey && batKey !== invKey) {
+    out.custConflict = true;
+    out.custNote = `invoice customer ${row.customer} but batch ${batch} belongs to ${p.customer}`;
+  }
+  return out;
+}
+
+// Pure function — no I/O. Returns one allocation object per invoice LINE.
+function _v48r_attribute(inv, row, profiles) {
+  const lines = (inv && inv.DocumentLines) || [];
+  const keyTokens = String((row && row.batch_number) || '').split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
+  const keyUpper = keyTokens.map(t => t.toUpperCase());
+  // v48T: the invoice-side customer/card values live inside _v48t_corroborate,
+  // which is the single place both L1 and L3 consult.
+  const singleLine = lines.length === 1;
+  const out = [];
+
+  // ── v48S: PAYLOAD-LESS INVOICES ────────────────────────────────────────────
+  // The bulk SAP fetch is lean and omits DocumentLines, so 171 stored invoices
+  // (115,472 L) have a payload but no line array. v48R emitted nothing for these,
+  // which would have DELETED their quantity the moment a consumer read the new
+  // table. A SINGLE-batch invoice needs no lines at all — its whole header total
+  // belongs to that one batch by construction — so it is recovered from the header.
+  // Multi-batch and batch-less ones have nothing to split on and are flagged.
+  if (!lines.length) {
+    const q = Math.round((parseFloat(row && row.total_qty_lakhs) || 0) * 100) / 100;
+    const hdr = {
+      invoice_id: row.id, sap_doc_entry: row.sap_doc_entry || null, sap_doc_num: row.sap_doc_num || null,
+      line_num: -1,                                   // -1 = header-derived, not a real SAP line
+      pc_code: String((row && row.pc_code) || '').trim(),
+      qty_lakhs: q, boxes: parseInt(row && row.total_boxes, 10) || 0,
+    };
+    const flagHdr = (reason) => out.push({ ...hdr, batch_number: null, method: 'unattributed', status: 'needs_manual', reason });
+    if (!keyTokens.length)      flagHdr('invoice has no DocumentLines and no batch key');
+    else if (keyTokens.length > 1) flagHdr(`invoice has no DocumentLines and covers ${keyTokens.length} batches — nothing to split on`);
+    else if (!(q > 0))          flagHdr('invoice has no DocumentLines and no usable header total');
+    else if (q > _V48S_MAX_CREDIBLE_INVOICE_L)
+      flagHdr(`header total ${q}L exceeds the ${_V48S_MAX_CREDIBLE_INVOICE_L}L plausibility ceiling — suspected raw-thousands corruption, not imported`);
+    else
+      out.push({ ...hdr, batch_number: keyTokens[0], method: 'header_single', status: 'attributed', reason: 'no DocumentLines — whole header total of a single-batch invoice' });
+    return out;
+  }
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const l = lines[idx] || {};
+    const lineNum = (l.LineNum != null && Number.isFinite(parseInt(l.LineNum, 10))) ? parseInt(l.LineNum, 10) : idx;
+    const qty = parseFloat((((parseFloat(l.Quantity) || 0) * _sapUomScale(l))).toFixed(3));
+    let boxes = parseInt(l.U_NO_BOXES, 10);
+    if (!Number.isFinite(boxes) || boxes < 0) boxes = singleLine ? (parseInt(row && row.total_boxes, 10) || 0) : 0;
+    const pc = String(l.ItemCode || '').trim();
+    const base = {
+      invoice_id: row.id, sap_doc_entry: row.sap_doc_entry || null, sap_doc_num: row.sap_doc_num || null,
+      line_num: lineNum, pc_code: pc, qty_lakhs: qty, boxes,
+    };
+    const flag = (reason) => out.push({ ...base, batch_number: null, method: 'unattributed', status: 'needs_manual', reason });
+
+    // v48T: a ZERO-quantity line contributes nothing to any tally, so an ambiguity on it has no
+    // financial consequence. Recorded as 'ignored' (auditable) but kept OUT of the manual queue —
+    // three of v48S's flags were zero-qty SUNIL HEALTHCARE lines that would only have wasted DM's time.
+    if (!(qty > 0)) {
+      out.push({ ...base, batch_number: null, method: 'zero_qty', status: 'ignored', reason: 'line quantity is zero — nothing to attribute' });
+      continue;
+    }
+
+    // v48Y (confirmed by Ishan): SCRAP lines are a scrap/adjustment posting, not batch quantity
+    // awaiting assignment to a batch. Left in the queue they were its entire permanent residue —
+    // 4 lines totalling 0.4 L — which trains DM to ignore a badge that is always lit. Recorded as
+    // 'ignored' so they stay auditable, but kept out of the work queue, so a badge appearing again
+    // actually means something.
+    if (/^SCRAP/i.test(pc)) {
+      out.push({ ...base, batch_number: null, method: 'scrap_line', status: 'ignored',
+                 reason: `scrap/adjustment line (${pc}) — not batch quantity, excluded from the allocation queue` });
+      continue;
+    }
+
+    // L1 — the line names its own batch
+    const lineBatches = _v48r_lineBatchTokens(l);
+    if (lineBatches.length === 1) {
+      // ── v48U: AN EXPLICIT SAP TAG IS AUTHORITATIVE. NOTHING LOCAL OVERRIDES IT. ──
+      // Three successive attempts to second-guess the tag from our own reference data each
+      // failed against live data, and the reason is now clear: OUR data is messier than SAP's
+      // statement, so it has no standing to overrule it.
+      //   • v48S blocked on a PC difference → 36 false flags. pc_code is written once at label
+      //     creation and never updated (0 of 22 UPDATE tracking_labels sites touch it), so it
+      //     goes stale precisely when a batch changes hands.
+      //   • v48T blocked on a customer difference → 209 false flags. Live examples, all the SAME
+      //     customer recorded two ways: "K SHYAM TRADER" vs "K SHYAM TRADERS" (plural),
+      //     "ROHAN PHARMA PRIVATE LIMITED BADDI" vs "ROHAN PHARMA PRIVATE LTD" (branch suffix),
+      //     "ALKEM WELLNESS LIMITED" vs "ALKEM WELLNUS LTD." (spelling). No normalisation can
+      //     separate WELLNESS/WELLNUS from genuinely distinct companies without merging those too.
+      // So both contradictions are now recorded as ADVISORY and the tag is honoured. The guard
+      // survives only on L3 below, where the batch is INFERRED from a PC match and there is no
+      // SAP statement to defer to.
+      // CONSEQUENCE, ACCEPTED BY ISHAN: the one known bad tag (invoice 9035 line 4 → 26V083)
+      // is attributed, putting 26V083 at 54.25L against 40.25L packed. That is an
+      // invoiced-exceeds-packed exception, which is the right place for it — but note it stays
+      // RECORDED-NOT-SURFACED until the consumer flip, because check_invoiced_exceeds_packed
+      // still reads the old reconstruction and cannot see this table yet.
+      const corr = _v48t_corroborate(lineBatches[0], pc, row, profiles);
+      const notes = [];
+      if (!keyUpper.includes(lineBatches[0].toUpperCase())) notes.push('line batch is absent from the invoice header batch key');
+      if (corr.pcAdvisory) notes.push(corr.pcNote);
+      if (corr.custConflict) notes.push(`${corr.custNote} — advisory only; the explicit SAP tag is authoritative`);
+      out.push({
+        ...base, batch_number: lineBatches[0], method: 'line_batch', status: 'attributed',
+        reason: notes.length ? notes.join('; ') : null,
+      });
+      continue;
+    }
+    if (lineBatches.length > 1) { flag(`line carries ${lineBatches.length} batch identifiers`); continue; }
+
+    // L2 — the invoice covers exactly one batch
+    if (keyTokens.length === 1) {
+      out.push({ ...base, batch_number: keyTokens[0], method: 'single_batch', status: 'attributed', reason: null });
+      continue;
+    }
+    if (!keyTokens.length) { flag('invoice carries no batch key'); continue; }
+
+    // L3 — unique PC match among this invoice's batches, customer must agree
+    if (!pc) { flag('multi-batch invoice and this line has no ItemCode'); continue; }
+    const matches = keyTokens.filter(t => {          // v48T: match against the batch's FULL PC set
+      const p = profiles[t.toUpperCase()];
+      return p && p.pcs && p.pcs.some(x => _v48r_norm(x) === _v48r_norm(pc));
+    });
+    if (matches.length === 1) {
+      // v48S: same corroboration helper as L1, but here a customer difference DOES block.
+      // There is no explicit tag on this line — the batch is inferred purely from a PC
+      // match, so a differing customer means the PC very likely collided across two
+      // customers' batches on one bulk invoice rather than identifying the right batch.
+      const corr = _v48t_corroborate(matches[0], pc, row, profiles);
+      if (corr.custConflict) {
+        flag(`PC ${pc} matches ${matches[0]}, but ${corr.custNote} — customer guard, manual allocation required`);
+      } else {
+        out.push({ ...base, batch_number: matches[0], method: 'pc_unique', status: 'attributed', reason: null });
+      }
+      continue;
+    }
+    flag(matches.length === 0
+      ? `no batch on this invoice has PC ${pc}`
+      : `${matches.length} batches on this invoice share PC ${pc} — manual allocation required`);
+  }
+  return out;
+}
+
+// Write allocations for one invoice. MANUAL rows are never overwritten: a human
+// allocation outranks anything the engine can derive, and survives every re-pull.
+async function _v48r_persist(invoiceId, allocs) {
+  const manual = new Set();
+  if (pgPool) {
+    const r = await pgPool.query(`SELECT line_num FROM invoice_batch_alloc WHERE invoice_id=$1 AND method='manual'`, [invoiceId]);
+    for (const x of r.rows) manual.add(parseInt(x.line_num, 10));
+    await pgPool.query(`DELETE FROM invoice_batch_alloc WHERE invoice_id=$1 AND method<>'manual'`, [invoiceId]);
+  } else {
+    for (const x of db.prepare(`SELECT line_num FROM invoice_batch_alloc WHERE invoice_id=? AND method='manual'`).all(invoiceId)) manual.add(parseInt(x.line_num, 10));
+    db.prepare(`DELETE FROM invoice_batch_alloc WHERE invoice_id=? AND method<>'manual'`).run(invoiceId);
+  }
+  let written = 0;
+  for (const a of allocs) {
+    if (manual.has(parseInt(a.line_num, 10))) continue;
+    const id = `alloc_${invoiceId}_${a.line_num}`;
+    if (pgPool) {
+      await pgPool.query(`
+        INSERT INTO invoice_batch_alloc (id, invoice_id, sap_doc_entry, sap_doc_num, line_num,
+          batch_number, pc_code, qty_lakhs, boxes, method, status, reason, allocated_by, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULL,NOW()::TEXT,NOW()::TEXT)
+        ON CONFLICT (id) DO UPDATE SET
+          batch_number=EXCLUDED.batch_number, pc_code=EXCLUDED.pc_code, qty_lakhs=EXCLUDED.qty_lakhs,
+          boxes=EXCLUDED.boxes, method=EXCLUDED.method, status=EXCLUDED.status, reason=EXCLUDED.reason,
+          updated_at=NOW()::TEXT`,
+        [id, invoiceId, a.sap_doc_entry, a.sap_doc_num, a.line_num, a.batch_number, a.pc_code,
+         a.qty_lakhs, a.boxes, a.method, a.status, a.reason || null]);
+    } else {
+      db.prepare(`
+        INSERT INTO invoice_batch_alloc (id, invoice_id, sap_doc_entry, sap_doc_num, line_num,
+          batch_number, pc_code, qty_lakhs, boxes, method, status, reason, allocated_by, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL,datetime('now'),datetime('now'))
+        ON CONFLICT(id) DO UPDATE SET
+          batch_number=excluded.batch_number, pc_code=excluded.pc_code, qty_lakhs=excluded.qty_lakhs,
+          boxes=excluded.boxes, method=excluded.method, status=excluded.status, reason=excluded.reason,
+          updated_at=datetime('now')`)
+        .run(id, invoiceId, a.sap_doc_entry, a.sap_doc_num, a.line_num, a.batch_number, a.pc_code,
+             a.qty_lakhs, a.boxes, a.method, a.status, a.reason || null);
+    }
+    written++;
+  }
+  return { written, manualPreserved: manual.size };
+}
+
+// Attribute ONE invoice row (payload optional — read from payload_json when omitted).
+async function _v48r_recomputeInvoice(row, payload) {
+  if (!row || !row.id) return { ok: false, error: 'no invoice row' };
+  let inv = payload;
+  if (!inv) {
+    try { inv = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : (row.payload_json || null); }
+    catch (e) { inv = null; }
+  }
+  // v48S: a payload WITHOUT DocumentLines is no longer skipped — _v48r_attribute
+  // recovers a single-batch invoice from its header total. Only an unreadable
+  // payload aborts here.
+  if (!inv) return { ok: false, error: 'payload unreadable', invoiceId: row.id };
+  const tokens = String(row.batch_number || '').split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
+  const profiles = await _v48r_batchProfiles(tokens);
+  const allocs = _v48r_attribute(inv, row, profiles);
+  const res = await _v48r_persist(row.id, allocs);
+  return { ok: true, invoiceId: row.id, lines: allocs.length, ...res, allocations: allocs };
+}
+
+// Full rebuild across every stored invoice. DRY-RUN BY DEFAULT — computes and reports
+// without writing, so the before/after can be reviewed before anything is persisted.
+async function _v48r_recomputeAll({ dryRun = true, limit = 0, batch = '' } = {}) {
+  const wheres = [`payload_json IS NOT NULL`];
+  const args = [];
+  if (batch) { wheres.push(pgPool ? `batch_number ILIKE $${args.length + 1}` : `batch_number LIKE ?`); args.push('%' + batch + '%'); }
+  const lim = (limit && limit > 0) ? ` LIMIT ${parseInt(limit, 10)}` : '';
+  const sql = `SELECT id, sap_doc_entry, sap_doc_num, batch_number, customer, card_code, total_boxes,
+                      total_qty_lakhs, pc_code, source, payload_json
+               FROM invoices_received WHERE ${wheres.join(' AND ')} ORDER BY invoice_date DESC${lim}`;
+  let rows;
+  if (pgPool) rows = (await pgPool.query(sql, args)).rows;
+  else        rows = db.prepare(sql).all(...args);
+
+  const profiles = await _v48r_batchProfiles(null);   // one map for the whole run
+  const perBatchAfter = {};                            // batch → attributed Lakhs
+  const flagged = [];
+  let invoicesProcessed = 0, linesTotal = 0, linesAttributed = 0, linesFlagged = 0, noPayload = 0, written = 0;
+  let headerDerived = 0;   // v48S: single-batch invoices recovered from their header total
+  let linesIgnored = 0;    // v48T: zero-qty lines
+
+  for (const row of rows) {
+    let inv;
+    try { inv = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : row.payload_json; }
+    catch (e) { inv = null; }
+    if (!inv) { noPayload++; continue; }                       // v48S: only UNREADABLE payloads are skipped
+    const allocs = _v48r_attribute(inv, row, profiles);
+    invoicesProcessed++;
+    for (const a of allocs) {
+      linesTotal++;
+      if (a.status === 'attributed' && a.batch_number) {
+        linesAttributed++;
+        if (a.method === 'header_single') headerDerived++;
+        const k = a.batch_number;
+        perBatchAfter[k] = Math.round(((perBatchAfter[k] || 0) + (a.qty_lakhs || 0)) * 100) / 100;
+      } else if (a.status === 'ignored') {
+        linesIgnored++;                       // v48T: zero-qty — auditable, never in DM's queue
+      } else {
+        linesFlagged++;
+        flagged.push({
+          invoice: row.sap_doc_num, invoiceId: row.id, line: a.line_num, pc: a.pc_code,
+          qty: a.qty_lakhs, batchKey: row.batch_number, customer: row.customer, reason: a.reason,
+        });
+      }
+    }
+    if (!dryRun) { const r = await _v48r_persist(row.id, allocs); written += r.written; }
+  }
+
+  // BEFORE = today's reconstruction, i.e. what the integrity engine attributes precisely:
+  // a single-batch invoice's whole total to that batch, a multi-batch invoice to nothing.
+  const perBatchBefore = {};
+  for (const row of rows) {
+    const toks = String(row.batch_number || '').split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
+    if (toks.length !== 1) continue;
+    const q = Math.round((parseFloat(row.total_qty_lakhs) || 0) * 100) / 100;
+    perBatchBefore[toks[0]] = Math.round(((perBatchBefore[toks[0]] || 0) + q) * 100) / 100;
+  }
+  const deltas = [];
+  for (const b of new Set([...Object.keys(perBatchBefore), ...Object.keys(perBatchAfter)])) {
+    const before = perBatchBefore[b] || 0, after = perBatchAfter[b] || 0;
+    if (Math.abs(after - before) > 0.001) deltas.push({ batch: b, before, after, delta: Math.round((after - before) * 100) / 100 });
+  }
+  deltas.sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta));
+
+  return {
+    ok: true, dryRun, invoicesScanned: rows.length, invoicesProcessed, noPayload,
+    linesTotal, linesAttributed, linesFlagged, linesIgnored, headerDerived, written,
+    batchesChanged: deltas.length, deltas, flagged,
+  };
+}
+
 // v45I #6: repopulate batch_number for already-pulled invoices that rendered blank because only the
 // header UDF was read at ingest time. Reads each blank row's STORED payload_json (no new SAP call)
 // and applies the same explicit-field extractor. One-shot (retried until it succeeds), then skipped.
@@ -3410,6 +4296,31 @@ async function _doRefreshSapInvoices() {
         }
       }
     } catch (e) { console.warn('[SAP] invoice match error:', e.message); }
+    // v48I (Ishan): PC-CONSISTENCY GUARD on the batch-UDF match above. SAP's header U_SunlocBatch can be
+    // WRONG — e.g. it named 26ZE107 while the invoice's line is item 2877 (= 26ZA060) — linking the invoice
+    // to the wrong batch's request BEFORE the PC-gated line-based SO pass runs. That's the mis-link that
+    // recurred after un-link + re-pull. If the UDF-matched request's PC isn't on any invoice line, reject the
+    // match (invReqId→null) so the invoice falls through to the line-based, PC-gated reconciliation. The bulk
+    // fetch omits lines, so enrich them here when the UDF matched but lines are absent.
+    if (invReqId) {
+      try {
+        if (!inv.DocumentLines || !inv.DocumentLines.length) {
+          const full = await sap.getInvoice(inv.DocEntry);
+          if (full && full.ok && full.invoice && Array.isArray(full.invoice.DocumentLines)) inv.DocumentLines = full.invoice.DocumentLines;
+        }
+        const _linePcs48i = new Set((inv.DocumentLines || []).map(l => String(l.ItemCode || '').trim()).filter(Boolean));
+        if (_linePcs48i.size) {
+          let _mpc;
+          if (pgPool) _mpc = (await pgPool.query(`SELECT pc_code FROM invoice_requests WHERE id=$1`, [invReqId])).rows[0];
+          else        _mpc = db.prepare(`SELECT pc_code FROM invoice_requests WHERE id=?`).get(invReqId);
+          const _reqPc48i = String((_mpc && _mpc.pc_code) || '').trim();
+          if (_reqPc48i && !_linePcs48i.has(_reqPc48i)) {
+            console.log(`[v48I PC-guard] DocEntry ${inv.DocEntry}: UDF-matched request ${invReqId} (PC ${_reqPc48i}) REJECTED — invoice lines [${Array.from(_linePcs48i).join(',')}] differ`);
+            invReqId = null; source = 'direct_sap';
+          }
+        }
+      } catch (e) { console.warn('[v48I PC-guard]', e.message); }
+    }
     // v44S Issue 4: the bulk fetchRecentInvoices omits DocumentLines (B1 SL can reject $select on the
     // lines collection), so a DIRECT-SAP invoice (no linked Sunloc request) arrives with no line
     // detail — leaving PC / Size / Colour blank and Qty 0 in Report H / Generated Invoices. Pull the
@@ -3582,6 +4493,24 @@ async function _doRefreshSapInvoices() {
           else        db.prepare(`UPDATE invoices_received SET base_so_doc_num=? WHERE sap_doc_entry=? AND (base_so_doc_num IS NULL OR base_so_doc_num='')`).run(_baseSoNum, inv.DocEntry);
         }
       } catch (e) { console.warn('[v44ZC] set invoice base_so_doc_num:', e.message); }
+
+      // v48R: compute per-batch attribution for this invoice into invoice_batch_alloc.
+      // Fully guarded — attribution is a derived read-model, so a failure here must never
+      // break the invoice pull itself. Nothing reads these rows in v48R.
+      try {
+        let _b48r = batchForStore;
+        if (!_b48r) {                       // blank UDF: the upsert kept the stored key, so read it back
+          if (pgPool) _b48r = ((await pgPool.query(`SELECT batch_number FROM invoices_received WHERE id=$1`, [recId])).rows[0] || {}).batch_number || '';
+          else        _b48r = (db.prepare(`SELECT batch_number FROM invoices_received WHERE id=?`).get(recId) || {}).batch_number || '';
+        }
+        await _v48r_recomputeInvoice({
+          id: recId, sap_doc_entry: inv.DocEntry, sap_doc_num: String(inv.DocNum || ''),
+          batch_number: _b48r, customer: inv.CardName || '', card_code: inv.CardCode || '',
+          total_boxes: totalBoxes, total_qty_lakhs: totalQtyLakhs, pc_code: pcCode,   // v48S: header path needs these
+        }, inv);
+        await _v48x_sweepInvoiceRequests(recId);   // v48X: clear any request this invoice now satisfies
+      } catch (e) { console.warn('[v48R] attribution skipped for DocEntry ' + inv.DocEntry + ':', e && e.message); }
+
       if (invReqId) {
         try {
           if (pgPool) {
@@ -3623,16 +4552,62 @@ async function _doRefreshSapInvoices() {
               let pendingReqsFull;
               if (pgPool) {
                 const r3 = await pgPool.query(
-                  `SELECT id, qty_lakhs, batch_number FROM invoice_requests WHERE sap_doc_entry=$1 AND status='pending_reconciliation' ORDER BY created_at ASC`,
+                  `SELECT id, qty_lakhs, batch_number, pc_code FROM invoice_requests WHERE sap_doc_entry=$1 AND status='pending_reconciliation' ORDER BY created_at ASC`,
                   [soDocEntry]
                 );
                 pendingReqsFull = r3.rows;
               } else {
-                pendingReqsFull = db.prepare(`SELECT id, qty_lakhs, batch_number FROM invoice_requests WHERE sap_doc_entry=? AND status='pending_reconciliation' ORDER BY created_at ASC`).all(soDocEntry);
+                pendingReqsFull = db.prepare(`SELECT id, qty_lakhs, batch_number, pc_code FROM invoice_requests WHERE sap_doc_entry=? AND status='pending_reconciliation' ORDER BY created_at ASC`).all(soDocEntry);
               }
               // Mark all matching pending_reconciliation rows as reconciled (first-come-first-served).
               // Note: in practice these should already have been matched via batchUdf, but this is the safety net.
               for (const pr of pendingReqsFull) {
+                // v48G (Ishan): PC-CODE GATE — the strongest discriminator. This invoice LINE is for item
+                // `line.ItemCode` (which IS the PC code); a request whose pc_code differs is a DIFFERENT
+                // product and cannot be this line's request, even when it shares the Sales Order and its qty
+                // happens to fall in the recon band. This is exactly the mis-link seen live: a 26Y059 invoice
+                // with a BLANK batch UDF (slipped the v47R gate) reconciled a 26T079 request whose 14L slipped
+                // the v47L qty band. When the line has no ItemCode, fall through to the existing gates (no
+                // regression). One SO is one customer and the PC encodes size/colour, so PC + FIFO suffice.
+                const _linePc48g = String(line.ItemCode || '').trim();
+                const _prPc48g   = String(pr.pc_code || '').trim();
+                if (_linePc48g && _prPc48g && _linePc48g !== _prPc48g) {
+                  console.log(`[v48G PC-gate] SO ${soDocEntry}: request ${pr.id} (PC ${_prPc48g}) left PENDING — invoice line item ${_linePc48g} differs`);
+                  continue;
+                }
+                // v47R (C fix — 26X083): batch-token gate. If the arriving invoice carries a NON-BLANK batch
+                // list that does NOT include this request's batch as an exact token, it cannot be this
+                // request's invoice — leave it pending. A blank batch UDF still falls through to the qty-band
+                // net below (the SO-pass's original purpose). 26X083 was falsely reconciled to an SO-sharing
+                // invoice (e.g. bulk 9038, whose 12-batch list omits it); this prevents recurrence.
+                const _invBatchTokens47r = String(batchForStore || '').split(/[\s,]+/).map(t => t.trim().toUpperCase()).filter(Boolean);
+                const _prBatchUp47r = String(pr.batch_number || '').trim().toUpperCase();
+                if (_invBatchTokens47r.length && _prBatchUp47r && !_invBatchTokens47r.includes(_prBatchUp47r)) {
+                  console.log(`[v47R SO-gate] SO ${soDocEntry}: request ${pr.id} (batch ${_prBatchUp47r}) left PENDING — invoice DocNum ${inv.DocNum} batch list omits it`);
+                  continue;
+                }
+                // v47L (confirmed by Ishan): QUANTITY-GATE this safety-net. Previously EVERY pending request
+                // sharing this Sales Order was flipped to 'reconciled' the moment ANY invoice on the SO
+                // arrived — so batches that share a Sales Order with an invoiced batch (26ZD104/26ZE101)
+                // were falsely reconciled with no invoice of their own, vanishing from Pending Reconciliation
+                // and freeing their quantity. Now the safety-net reconciles only a request whose quantity the
+                // arriving invoice actually covers (within the recon band), at most ONE per invoice; every
+                // other request stays pending_reconciliation and visible to the SAP user.
+                const _prQtyL47l  = parseFloat(pr.qty_lakhs) || 0;
+                // v48P (confirmed by Ishan): gate on THIS LINE's quantity, not the invoice TOTAL. v47L
+                // compared each request against the sum of every line, so any invoice covering MORE THAN
+                // ONE request failed for ALL of them — DocNum 1893 (57.75L = lines 31.50 + 26.25) left both
+                // 26Z070 and 26Z071 pending forever, the invoice stayed direct_sap and never became
+                // scannable. The v48G PC gate immediately above has already pinned this request to THIS
+                // line, so the line quantity is the correct and strictly TIGHTER basis — this narrows the
+                // net v47L was built to narrow, it does not widen it. Falls back to the invoice total when
+                // the line carries no usable quantity, so single-line invoices behave exactly as before.
+                const _lineQtyL48p = (parseFloat(lineQty) || 0) * _sapUomScale(line);
+                const _invQtyL47l = (_lineQtyL48p > 0) ? _lineQtyL48p : (parseFloat(totalQtyLakhs) || 0);
+                if (!(_invQtyL47l > 0 && _prQtyL47l >= _invQtyL47l * _RECON_UNDER && _prQtyL47l <= _invQtyL47l * _RECON_OVER)) {
+                  console.log(`[v47L SO-gate] SO ${soDocEntry}: request ${pr.id} (${_prQtyL47l}L) left PENDING — invoice DocNum ${inv.DocNum} covers ${_invQtyL47l}L (outside recon band)`);
+                  continue;
+                }
                 if (pgPool) {
                   await pgPool.query(
                     `UPDATE invoice_requests SET status='reconciled', sap_response_doc_num=$1, sap_response_doc_entry=$2, reconciled_at=NOW()::TEXT, reconciled_with_invoice_id=$3, updated_at=NOW()::TEXT WHERE id=$4 AND status='pending_reconciliation'`,
@@ -3660,6 +4635,7 @@ async function _doRefreshSapInvoices() {
                   ).run(pr.id, pr.batch_number || null, recId);
                 }
                 console.log(`[v41r] Reconciled invoice_request ${pr.id} via SO BaseEntry=${soDocEntry} + promoted invoice ${recId} direct_sap→sunloc`);
+                break;  // v47L: one invoice reconciles at most the single request it covers — the rest stay pending
               }
             } catch (e) { console.warn('[v41 P19.3] SO reconciliation error:', e.message); }
 
@@ -3808,11 +4784,21 @@ async function _doRefreshSapInvoices() {
             // (so_doc_num), the cache-independent key. The DocEntry path needs the indent cache to
             // resolve the SO number, but the cache prunes completed SOs, so it fails at reconcile
             // time; the so_doc_num match (recorded on the request at creation) reconciles regardless.
+            // v48J (Ishan): line PCs of THIS invoice, for the PC-gate below (the retry pass matched purely
+            // by Sales Order and re-mislinked on every re-pull — the third ungated path after v48G/v48I).
+            const _retryLinePcs48j = new Set(((payload && payload.DocumentLines) || []).map(l => String(l.ItemCode || '').trim()).filter(Boolean));
             const req = await pgPool.query(
-              `SELECT id, batch_number, boxes, qty_lakhs FROM invoice_requests WHERE (sap_doc_entry=$1 OR so_doc_num=$2) AND status='pending_reconciliation' ORDER BY created_at ASC`,
+              `SELECT id, batch_number, boxes, qty_lakhs, pc_code FROM invoice_requests WHERE (sap_doc_entry=$1 OR so_doc_num=$2) AND status='pending_reconciliation' ORDER BY created_at ASC`,
               [soDocEntry, String(soNum)]
             );
             for (const pr of req.rows) {
+              // v48J: PC-gate — skip a request whose PC isn't on any invoice line (a different product that
+              // merely shares the Sales Order). Falls through when the invoice has no line item codes.
+              const _prPc48j = String(pr.pc_code || '').trim();
+              if (_retryLinePcs48j.size && _prPc48j && !_retryLinePcs48j.has(_prPc48j)) {
+                console.log(`[v48J retry PC-gate] SO ${soDocEntry}: request ${pr.id} (PC ${_prPc48j}) left PENDING — invoice lines [${Array.from(_retryLinePcs48j).join(',')}] differ`);
+                continue;
+              }
               const recId = `inv_${iv.sap_doc_entry}`;
               const boxes = (pr.boxes && parseInt(pr.boxes) > 0) ? parseInt(pr.boxes) : (iv.total_boxes || 0);
               const qty   = (pr.qty_lakhs && parseFloat(pr.qty_lakhs) > 0) ? parseFloat(pr.qty_lakhs) : (iv.total_qty_lakhs || 0);
@@ -4560,12 +5546,24 @@ app.post('/api/invoice/request-batch', async (req, res) => {
         if (!b.sapDocEntry && b.sapDocNum) {
           let cached;
           if (pgPool) {
-            const r = await pgPool.query(`SELECT sap_doc_entry FROM sap_indent_cache WHERE sap_doc_num=$1 LIMIT 1`, [String(b.sapDocNum).trim()]);
+            const r = await pgPool.query(`SELECT sap_doc_entry, card_name FROM sap_indent_cache WHERE sap_doc_num=$1 LIMIT 1`, [String(b.sapDocNum).trim()]);
             cached = r.rows[0];
           } else {
-            cached = db.prepare(`SELECT sap_doc_entry FROM sap_indent_cache WHERE sap_doc_num=? LIMIT 1`).get(String(b.sapDocNum).trim());
+            cached = db.prepare(`SELECT sap_doc_entry, card_name FROM sap_indent_cache WHERE sap_doc_num=? LIMIT 1`).get(String(b.sapDocNum).trim());
           }
           if (cached && cached.sap_doc_entry != null) {
+            // v47E (confirmed by Ishan): CUSTOMER-MATCH guard. The resolved SAP Sales Order must belong
+            // to this order's customer — this is what stops a wrong SO number (e.g. an adjacent SO for a
+            // different customer, like 292=Wellness attaching to an Alkem order) from EVER invoicing
+            // against the wrong account. Gross-mismatch only: names are tokenised (4+ char words) and must
+            // share at least one token; minor formatting differences pass, clearly different names block.
+            const _toks = s => String(s||'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim().split(' ').filter(t => t.length >= 4);
+            const _soT  = new Set(_toks(cached.card_name));
+            const _ordT = _toks(b.customer);
+            if (_soT.size > 0 && _ordT.length > 0 && !_ordT.some(t => _soT.has(t))) {
+              batchRes.error = 'SO/customer mismatch: Sales Order ' + b.sapDocNum + ' belongs to "' + (cached.card_name || '?') + '", not this order\'s customer "' + (b.customer || '?') + '". Correct the Sales Order Number on the order before invoicing.';
+              results.push(batchRes); continue;
+            }
             b.sapDocEntry = cached.sap_doc_entry;
           } else {
             batchRes.error = 'Sales Order ' + b.sapDocNum + ' not found in SAP indent cache — re-pull indents (SAP button) then retry';
@@ -4750,7 +5748,9 @@ app.get('/api/invoice/requests', async (req, res) => {
     const wheres = [];
     const args = [];
     if (status) { wheres.push(pgPool ? `status = $${args.length+1}` : 'status = ?'); args.push(status); }
-    if (batch) { wheres.push(pgPool ? `batch_number = $${args.length+1}` : 'batch_number = ?'); args.push(batch); }
+    // v48C (Ishan #1, blast radius): same substring fix as /api/invoice/received — a multi-batch request
+    // key or a partial search must still match here (feeds the Invoice-State modal).
+    if (batch) { wheres.push(pgPool ? `batch_number ILIKE $${args.length+1}` : 'batch_number LIKE ?'); args.push('%' + batch + '%'); }
     const whereSql = wheres.length ? 'WHERE ' + wheres.join(' AND ') : '';
     let rows;
     if (pgPool) {
@@ -4781,7 +5781,10 @@ app.get('/api/invoice/received', async (req, res) => {
     const wheres = [];
     const args = [];
     if (status) { wheres.push(pgPool ? `dispatch_status = $${args.length+1}` : 'dispatch_status = ?'); args.push(status); }
-    if (batch) { wheres.push(pgPool ? `batch_number = $${args.length+1}` : 'batch_number = ?'); args.push(batch); }
+    // v48C (Ishan #1): multi-batch invoices store a concatenated batch_number ("26ZD103, 26ZD100"), and a
+    // partial like "26T" is never equal to a full number — an exact match therefore missed both. Substring
+    // match (like the customer filter) so "26ZD103" finds the multi-batch invoice and "26T" finds 26T0xx.
+    if (batch) { wheres.push(pgPool ? `batch_number ILIKE $${args.length+1}` : 'batch_number LIKE ?'); args.push('%' + batch + '%'); }
     if (customer) { wheres.push(pgPool ? `customer ILIKE $${args.length+1}` : 'customer LIKE ?'); args.push('%' + customer + '%'); }
     if (fromDate) { wheres.push(pgPool ? `invoice_date >= $${args.length+1}` : 'invoice_date >= ?'); args.push(fromDate); }
     if (toDate) { wheres.push(pgPool ? `invoice_date <= $${args.length+1}` : 'invoice_date <= ?'); args.push(toDate); }
@@ -4969,24 +5972,53 @@ app.post('/api/invoice/:id/dispatch-out', async (req, res) => {
     // v44O #3: ledger qty in Lakhs — prefer the authoritative total_qty_lakhs (from the
     // invoice_request, or SAP Σ Quantity which is itself in Lakhs). The old total_boxes/100 was
     // wrong: a box count is not Lakhs/100 (e.g. 4 boxes is not 0.04 Lakhs).
-    const qty = parseFloat(inv.total_qty_lakhs) > 0
+    const _fullQty = parseFloat(inv.total_qty_lakhs) > 0
       ? parseFloat(inv.total_qty_lakhs)
       : (parseFloat(inv.total_boxes) > 0 ? parseFloat(inv.total_boxes) / 100 : 0);
-    const boxes = parseInt(inv.total_boxes) || 0;
+    const _fullBoxes = parseInt(inv.total_boxes) || 0;
     const ts = new Date().toISOString();
-    // Insert dispatch record
+    // v46H #4: split a MULTI-batch / consolidated (export) invoice into ONE record PER batch, each
+    // carrying its OWN DocumentLine qty+boxes (_lineDispatchForBatch) — not the whole invoice total,
+    // which is the "full invoice qty shown against every batch" over-count (e.g. Eskay 188L on each
+    // of 26ZB081/26ZB079/…). A batch whose line can't be resolved is FLAGGED (qty/boxes 0 + remark)
+    // for re-allocation, never given the full share. SINGLE-batch invoices are UNCHANGED: one record,
+    // full qty — byte-for-byte the prior behaviour.
+    const _dispBatches = String(inv.batch_number || '').split(',').map(s => s.trim()).filter(Boolean);
+    let _dispPayload = null;
+    try { _dispPayload = inv.payload_json ? JSON.parse(inv.payload_json) : null; } catch { _dispPayload = null; }
+    let _dispAllocs;
+    if (_dispBatches.length > 1) {
+      _dispAllocs = _dispBatches.map(b => {
+        const d = _dispPayload ? _lineDispatchForBatch(_dispPayload, b) : null;
+        if (!d) return { batch: b, qty: 0, boxes: 0, flagged: true };
+        const _qb = _dispatchQtyBoxes(b, d.qty, d.boxes); // v46U: recalibrate export qty (÷100) + derive boxes
+        return { batch: b, qty: _qb.qty, boxes: _qb.boxes, flagged: false };
+      });
+    } else {
+      const _sb = (_dispBatches[0] || inv.batch_number);
+      const _qb = _dispatchQtyBoxes(_sb, _fullQty, _fullBoxes); // v46U: recalibrate export qty + derive boxes
+      _dispAllocs = [{ batch: _sb, qty: _qb.qty, boxes: _qb.boxes, flagged: false }];
+    }
+    // Insert dispatch record(s) — recId stays the FIRST record's id (preserves invoice→record linkage).
     try {
-      if (pgPool) {
-        await pgPool.query(
-          `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by")
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo || '', inv.sap_doc_num || '', remarks || '', ts, dispatchedBy || 'unknown']
-        );
-      } else {
-        db.prepare(
-          `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by)
-           VALUES (?,?,?,?,?,?,?,?,?,?)`
-        ).run(recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo || '', inv.sap_doc_num || '', remarks || '', ts, dispatchedBy || 'unknown');
+      for (let _i = 0; _i < _dispAllocs.length; _i++) {
+        const a = _dispAllocs[_i];
+        const rid = _i === 0 ? recId : ('disprec_' + crypto.randomBytes(6).toString('hex'));
+        const rmk = (remarks || '') + (a.flagged ? ' [v46H: batch line unresolved in invoice — needs re-allocation]' : '');
+        // v48D (Ishan): double-fire guard — skip this allocation if an identical record already exists.
+        if (await _isDuplicateDispatch(a.batch, inv.sap_doc_num || '', a.boxes, a.qty)) continue;
+        if (pgPool) {
+          await pgPool.query(
+            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by")
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [rid, a.batch, inv.customer || '', a.qty, a.boxes, vehicleNo || '', inv.sap_doc_num || '', rmk, ts, dispatchedBy || 'unknown']
+          );
+        } else {
+          db.prepare(
+            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by)
+             VALUES (?,?,?,?,?,?,?,?,?,?)`
+          ).run(rid, a.batch, inv.customer || '', a.qty, a.boxes, vehicleNo || '', inv.sap_doc_num || '', rmk, ts, dispatchedBy || 'unknown');
+        }
       }
     } catch (e) {
       return res.status(500).json({ ok: false, error: 'Failed to write dispatch record: ' + e.message });
@@ -5006,10 +6038,13 @@ app.post('/api/invoice/:id/dispatch-out', async (req, res) => {
     } catch (e) {
       console.warn('[v39 P10a] invoice update failed (record was created):', e.message);
     }
-    // Recompute dispatch_actuals for this batch — keeps downstream summaries fresh
+    // Recompute dispatch_actuals — v46H #4: per split batch (was the comma-joined string, which
+    // never matched an individual batch's summary), keeping downstream per-batch summaries fresh.
     try {
       if (typeof _recomputeDispatchActuals === 'function') {
-        await _recomputeDispatchActuals(inv.batch_number, vehicleNo || null, inv.sap_doc_num || null);
+        for (const _b of _dispAllocs.map(a => a.batch)) {
+          await _recomputeDispatchActuals(_b, vehicleNo || null, inv.sap_doc_num || null);
+        }
       }
     } catch (e) {
       console.warn('[v39 P10a] dispatch_actuals recompute failed:', e.message);
@@ -5153,9 +6188,150 @@ async function _applyFallbackReconcile(reqRow, inv) {
 
 // Request-side: evaluate one pending request. Returns {reconciled:true} on a clean single auto-match,
 // {proposal:[...]} when ambiguous (multiple candidates or qty out of band), or null when no match.
+// ─────────────────────────────────────────────────────────────────────────────
+// v48X: ALLOCATION-BASED RECONCILIATION
+//
+// The header matcher (_orphanInvoicesForRequest) compares a PER-BATCH request against the WHOLE
+// invoice: exact batch_number string, exact customer string, and the invoice's total quantity.
+// A multi-batch invoice can never satisfy it —
+//   • its key is "26Z070, 26Z071", which never equals "26Z070";
+//   • its total (57.75L) is far outside the ±tolerance band around a single batch's ask (31.5L);
+//   • and once one request claims it, invoices_received.invoice_request_id is spent.
+// So live requests sat on "Awaiting SAP Invoice" with their invoice already received and dispatched.
+//
+// invoice_batch_alloc already records the answer per LINE: 1893 line 0 → 26Z070 31.5, line 1 →
+// 26Z071 26.25, 1832 line 1 → 26T081 3.5. Matching against those rows instead of the header
+// resolves all three, and the per-allocation link means one invoice can satisfy several requests.
+//
+// The safety shape of the old matcher is preserved exactly: single unambiguous candidate,
+// the same _RECON_UNDER/_RECON_OVER quantity band, and anything ambiguous is proposed, not applied.
+// ─────────────────────────────────────────────────────────────────────────────
+async function _allocationsForRequest(reqRow) {
+  const batch = (reqRow.batch_number || '').trim();
+  if (!batch) return [];
+  // Unclaimed, attributed allocations for this batch, on an invoice that has actually been dispatched.
+  const sql = `SELECT a.*, i.customer AS inv_customer, i.card_code AS inv_card_code,
+                      i.sap_doc_num AS inv_doc_num, i.dispatch_status
+               FROM invoice_batch_alloc a
+               JOIN invoices_received i ON i.id = a.invoice_id
+               WHERE a.invoice_request_id IS NULL
+                 AND a.status = 'attributed'
+                 AND i.dispatch_status = 'dispatched'
+                 AND UPPER(TRIM(a.batch_number)) = UPPER(TRIM($1))
+               ORDER BY i.invoice_date ASC, a.line_num ASC`;
+  const rows = pgPool ? (await pgPool.query(sql, [batch])).rows
+                      : db.prepare(sql.replace(/\$1/g, '?')).all(batch);
+  // NO CUSTOMER FILTER — deliberate, and the third time this lesson has been learned here.
+  // The plan for this build assumed _v48t_custKey would reconcile "ALKEM WELLNUS LTD." (request)
+  // with "ALKEM WELLNESS LIMITED" (invoice 1893). It does not: the normaliser collapses punctuation,
+  // spacing and legal suffixes, but WELLNUS vs WELLNESS is a spelling difference in the core name,
+  // so filtering on it would have excluded the very rows this build exists to match. v48T already
+  // established that these names are too messy to refuse on (209 false flags); the same applies here.
+  // THE BATCH NUMBER IS THE STRONG KEY: an allocation for 26Z070 can only be that physical batch,
+  // and a pending request for 26Z070 is for the same one. Safety comes from the quantity band and
+  // the single-unambiguous-candidate rule below, not from string-matching company names.
+  // Differences are still RECORDED on the reconcile log line for audit.
+  return rows;
+}
+
+// Link ONE allocation row to the request and mark the request reconciled.
+// Deliberately does NOT touch invoices_received.invoice_request_id or source: that column holds a
+// single request and a multi-batch invoice legitimately serves several, so overwriting it would
+// evict whichever request got there first. It is left as the legacy per-invoice field.
+// Guards on both sides keep this idempotent and race-safe.
+async function _applyAllocationReconcile(reqRow, alloc) {
+  if (pgPool) {
+    const r = await pgPool.query(
+      `UPDATE invoice_batch_alloc SET invoice_request_id=$1, updated_at=NOW()::TEXT
+        WHERE id=$2 AND invoice_request_id IS NULL`, [reqRow.id, alloc.id]);
+    if (!r.rowCount) return false;                // another request claimed it first
+    await pgPool.query(
+      `UPDATE invoice_requests
+          SET status='reconciled', sap_response_doc_num=$1, sap_response_doc_entry=$2,
+              reconciled_at=NOW()::TEXT, reconciled_with_invoice_id=$3, updated_at=NOW()::TEXT
+        WHERE id=$4 AND status='pending_reconciliation'`,
+      [String(alloc.inv_doc_num || ''), alloc.sap_doc_entry || null, alloc.invoice_id, reqRow.id]);
+  } else {
+    const r = db.prepare(`UPDATE invoice_batch_alloc SET invoice_request_id=?, updated_at=datetime('now')
+                           WHERE id=? AND invoice_request_id IS NULL`).run(reqRow.id, alloc.id);
+    if (!r.changes) return false;
+    db.prepare(`UPDATE invoice_requests
+                   SET status='reconciled', sap_response_doc_num=?, sap_response_doc_entry=?,
+                       reconciled_at=datetime('now'), reconciled_with_invoice_id=?, updated_at=datetime('now')
+                 WHERE id=? AND status='pending_reconciliation'`)
+      .run(String(alloc.inv_doc_num || ''), alloc.sap_doc_entry || null, alloc.invoice_id, reqRow.id);
+  }
+  const _cd = (_v48t_custKey(reqRow.customer || '') && _v48t_custKey(alloc.inv_customer || '')
+               && _v48t_custKey(reqRow.customer) !== _v48t_custKey(alloc.inv_customer))
+    ? ` [customer differs: request "${reqRow.customer}" vs invoice "${alloc.inv_customer}"]` : '';
+  console.log(`[v48X] reconciled request ${reqRow.id} (${reqRow.batch_number} ${reqRow.qty_lakhs}L) against invoice ${alloc.inv_doc_num} line ${alloc.line_num} (${alloc.qty_lakhs}L)${_cd}`);
+  return true;
+}
+
+// Invoice-side sweep: when an invoice arrives (or is repaired) its allocations may satisfy requests
+// that are still waiting. Guarded and best-effort — reconciliation must never break the invoice pull.
+async function _v48x_sweepInvoiceRequests(invoiceId) {
+  try {
+    const bSql = `SELECT DISTINCT batch_number FROM invoice_batch_alloc
+                   WHERE invoice_id=$1 AND status='attributed' AND invoice_request_id IS NULL
+                     AND batch_number IS NOT NULL AND batch_number <> ''`;
+    const bRows = pgPool ? (await pgPool.query(bSql, [invoiceId])).rows
+                         : db.prepare(bSql.replace(/\$1/g, '?')).all(invoiceId);
+    let cleared = 0;
+    for (const b of bRows) {
+      const rSql = `SELECT * FROM invoice_requests
+                     WHERE status='pending_reconciliation'
+                       AND UPPER(TRIM(batch_number)) = UPPER(TRIM($1))
+                     ORDER BY created_at ASC`;
+      const reqs = pgPool ? (await pgPool.query(rSql, [b.batch_number])).rows
+                          : db.prepare(rSql.replace(/\$1/g, '?')).all(b.batch_number);
+      for (const rq of reqs) {
+        const r = await _v48x_reconcileByAllocation(rq);
+        if (r && r.reconciled) cleared++;
+      }
+    }
+    if (cleared) console.log(`[v48X] invoice ${invoiceId}: cleared ${cleared} pending request(s) via allocation match`);
+    return cleared;
+  } catch (e) { console.warn('[v48X sweep]', e && e.message); return 0; }
+}
+
+// Returns { reconciled } | { proposal } | null — same contract as the header fallback.
+async function _v48x_reconcileByAllocation(reqRow) {
+  const reqQty = parseFloat(reqRow.qty_lakhs) || 0;
+  if (!(reqQty > 0)) return null;
+  let cands;
+  try { cands = await _allocationsForRequest(reqRow); }
+  catch (e) { console.warn('[v48X alloc-recon]', e && e.message); return null; }   // table absent → header path
+  if (!cands.length) return null;
+  const inBand = cands.filter(c => {
+    const q = parseFloat(c.qty_lakhs) || 0;
+    return q >= reqQty * _RECON_UNDER && q <= reqQty * _RECON_OVER;
+  });
+  if (inBand.length === 1) {
+    const ok = await _applyAllocationReconcile(reqRow, inBand[0]);
+    if (ok) return { reconciled: true, invoiceId: inBand[0].invoice_id, allocationId: inBand[0].id };
+    return null;
+  }
+  // Nothing in band, or several equally plausible — never guess. Surface for a human.
+  return {
+    proposal: cands.map(c => ({
+      invoiceId: c.invoice_id, docNum: c.inv_doc_num, sapDocEntry: c.sap_doc_entry,
+      qty: c.qty_lakhs, boxes: c.boxes, line: c.line_num, allocationId: c.id,
+      dispatchStatus: c.dispatch_status, via: 'allocation', askQty: reqQty,
+      note: inBand.length ? `${inBand.length} allocations match this quantity` : `allocation qty ${c.qty_lakhs}L is outside the tolerance band for an ask of ${reqQty}L`,
+    })),
+  };
+}
+
 async function _fallbackReconcileRequest(reqRow) {
   if (!reqRow || reqRow.status !== 'pending_reconciliation') return null;
+  // v48X: try the per-batch allocation match first — it is strictly more precise than the header
+  // match (a real line quantity for THIS batch, rather than a whole-invoice total). The header path
+  // below is retained unchanged for invoices with no allocation rows.
+  const byAlloc = await _v48x_reconcileByAllocation(reqRow);
+  if (byAlloc && byAlloc.reconciled) return byAlloc;
   const cands = await _orphanInvoicesForRequest(reqRow);
+  if (!cands.length && byAlloc && byAlloc.proposal) return byAlloc;
   if (!cands.length) return null;
   const reqQty = parseFloat(reqRow.qty_lakhs) || 0;
   if (cands.length === 1 && reqQty > 0) {
@@ -5168,7 +6344,9 @@ async function _fallbackReconcileRequest(reqRow) {
   return {
     proposal: cands.map(c => ({
       invoiceId: c.id, docNum: c.sap_doc_num, sapDocEntry: c.sap_doc_entry,
-      qty: c.total_qty_lakhs, boxes: c.total_boxes, dispatchStatus: c.dispatch_status
+      qty: c.total_qty_lakhs, boxes: c.total_boxes, dispatchStatus: c.dispatch_status,
+      via: 'invoice_header', askQty: reqQty,     // v48Y: header candidates carry no allocation row,
+      note: 'whole-invoice total — no per-line allocation available for this invoice',
     }))
   };
 }
@@ -5233,6 +6411,178 @@ function _v44zj_lakhToBox(lakhs, size) {
   const q = parseFloat(lakhs) || 0;
   return ps ? Math.ceil(q / ps) : 0;
 }
+// v46S (confirmed by Ishan — Option 2): a dispatch record MUST carry a box count, because the Planning
+// truck binner nets remaining boxes (planned − dispatched) per lot. SAP-reconciled / deemed invoices
+// routinely arrive with total_boxes = 0 (qty only), so the record was written boxes=0 and the lot never
+// shrank by boxes on the truck plan (26T078 lingered after being fully invoiced + dispatched). When the
+// recorded box count is 0 but a dispatched qty is present, derive boxes from the batch's pack size —
+// the SAME basis planned boxes use (ceil(Lakhs / packSizeLakhs)) — so a fully-dispatched lot nets to
+// zero. Never overrides a real (>0) box count; returns 0 (unchanged) if the batch size can't be resolved.
+// v46Y (confirmed by Ishan — strengthen at source): orange PI-verification labels must never share a
+// box's numeric label_number. They were stored as the bare box number (client 'OL-11' → server strips
+// 'OL-' → 11), so an orange label collided with its box (26ZE104 box 11) in the client's batch+box scan
+// lookup. We now store orange numbers in a dedicated high range (BASE + box#), which can't collide with a
+// real box number (few hundred) or an excess number (small/negative), while staying INTEGER-safe. The
+// box number is still recoverable as (stored − BASE), and orange labels are keyed by id everywhere that
+// matters, so nothing else depends on their raw number.
+const _ORANGE_NUM_BASE = 1000000;
+const _labelNumForStore = (l) => {
+  const raw = (l && (l.labelNumber ?? l.label_number));
+  if (raw == null) return null;
+  const n = parseInt(String(raw).replace(/^OL-/i, ''), 10);
+  if (isNaN(n)) return null;
+  return (l && l.isOrange) ? (_ORANGE_NUM_BASE + Math.abs(n)) : n;
+};
+// v46U (confirmed by Ishan): server replica of the planning app's isExportZone (planning.html). Export
+// SAP lines use UoM "THOUSAND" (qty in thousands → ×0.01 to Lakhs); those orders carry an export zone.
+const _EXPORT_ZONES_SRV = ['EXPORT','BANGLADESH','NEPAL','MUMBAI'];
+function _isExportZoneSrv(zone) {
+  if (!zone) return false;
+  const z = String(zone).toUpperCase();
+  return _EXPORT_ZONES_SRV.some(ez => z.includes(ez));
+}
+// v46U (confirmed by Ishan): a dispatch record must carry the CORRECT qty + box count so the Planning
+// truck binner nets remaining boxes. Two problems seen in the v46S dry-run:
+//  1. SAP-reconciled/deemed invoices arrive with total_boxes = 0 → record written boxes=0.
+//  2. EXPORT invoices store qty in "THOUSAND" units (×100) that were never recalibrated on the dispatch
+//     record — e.g. 26ZA051 recorded 4550, which is really 45.5 L (26 boxes); another really 375 boxes.
+// This resolves both against the batch's order: derive boxes from pack size, and for EXPORT batches whose
+// qty is implausibly large for the order (the ×100 THOUSAND form) apply the planning app's ×0.01 rule to
+// get Lakhs, then derive boxes. A genuinely-corrupt DOMESTIC qty (can't exceed the order) is left for
+// manual review (skip=true). Returns { qty (Lakhs), boxes, recalibrated, skip }.
+function _dispatchQtyBoxes(batchNumber, qtyLakhs, recordedBoxes) {
+  const rb = Math.round(parseFloat(recordedBoxes) || 0);
+  const q0 = parseFloat(qtyLakhs) || 0;
+  const orders = (_planningStateCache && _planningStateCache.orders) || [];
+  const ord = batchNumber ? orders.find(o => o && o.batchNumber === batchNumber) : null;
+  const ps = ord ? (_V44ZJ_PACK_SIZES[String(ord.size)] || 0) : 0;
+  if (!(q0 > 0) || !ps) return { qty: q0, boxes: rb, recalibrated: false, skip: false }; // can't derive; leave as-is
+  const isExport = _isExportZoneSrv(ord.zone);
+  // v46V (dry-run finding): decide on an ABSOLUTE qty cutoff, NOT a ratio against the order. A single
+  // batch's whole gross is ≤ ~60 L (and orders ≥50 L are split across dispatches), so a dispatch-record
+  // qty above ~100 L in LAKH units is not a domestic Lakh value — it's either an EXPORT "THOUSAND" figure
+  // (×100 → ÷100 to Lakhs, per the planning app's UoM rule) or a corrupt domestic figure. At/below 100 L
+  // the qty is a plausible Lakh value: taken as-is, boxes derived from pack size. The earlier order-ratio
+  // test wrongly flagged normal records where the dispatch legitimately exceeds the order's planned boxes
+  // (over-production) — e.g. 25.4 L against a 17 L order, and 26U101's 5 L → 0.05 L.
+  const IMPLAUSIBLE_LAKH = 100;
+  let q = q0, recalibrated = false;
+  if (q0 > IMPLAUSIBLE_LAKH) {
+    if (isExport) { q = q0 * 0.01; recalibrated = true; }        // THOUSAND → LAKH
+    else return { qty: q0, boxes: rb, recalibrated: false, skip: true }; // corrupt domestic → manual review
+  }
+  let boxes = Math.ceil(q / ps);
+  if (rb > 0 && !recalibrated) boxes = rb;                       // keep a real box count if qty wasn't corrected
+  return { qty: q, boxes, recalibrated, skip: false };
+}
+
+// ── v46K (confirmed by Ishan): W/O-split DPR-gross apportionment ─────────────────────────────────
+// A W/O split — AND a re-customer split (v46L) — rebatches the child box labels + scans to the child batch (see split/approve) but
+// NEVER touches production_actuals — DPR gross is machine/date/shift-keyed, not box-range-keyed, so
+// it physically can't split and stays wholly on the PARENT batch number. Every per-batch gross map
+// (cumulative _grossByBatch and month-sliced monthGross) therefore attributes the whole gross to the
+// parent and ZERO to each child. Downstream, the frozen Unscanned-WIP formula max(0, Gross−Salvage−
+// ScanIn) then reads, per the 26ZH079 case: parent = 54.00 gross with only its residual box scanned
+// in → 54−4.10−0.75 = 49.15 PHANTOM WIP; child = 0 gross with 44.25 scanned in → clamps to 0. The
+// batch family's true remaining WIP (4.90) is stranded on the parent and the child under-reports.
+//
+// Fix: at the read-model layer only, split the parent's gross across its children by their RECORDED
+// box ranges (wo_split_lines, written once at propose — the durable source, not the clobberable
+// per-order actualProd), residual to the parent. child_gross = child.boxes × packSize (the boxed
+// Lakhs that physically moved); parent keeps the remainder (its residual boxes + salvage + still-
+// unboxed WIP). Conserves to the parent's DPR total, leaves production_actuals PHYSICALLY WHOLE (DPR
+// closed-batch view unchanged), and the frozen formulas are untouched — only the `gross` they are
+// fed is corrected. Applied to BOTH gross maps so the AIM report, Reports B–E/G, planning WIP and
+// A-grade all agree. Existing splits self-heal on the next warm; no data repair.
+//
+// Loads the approved-split families once. Each family = { parentBatch, children:[{batch, boxed}] }.
+// `boxed` = boxes × packSize when the parent pack size is known (exact), else the line's stored
+// qty_lakhs (the cumulative-min planned split — a safe conserving fallback). Pack size comes from the
+// parent order in the warm planning-state cache; on a cold cache the family is skipped this cycle and
+// self-heals on the next warm (same discipline as the actuals injection).
+async function _v46k_loadSplitFamilies() {
+  let reqs, linesAll;
+  if (pgPool) {
+    reqs = (await pgPool.query(`SELECT id, source_order_id, source_batch_number FROM wo_split_requests WHERE status='approved'`)).rows;
+    linesAll = (await pgPool.query(`SELECT split_request_id, child_batch_number, boxes, qty_lakhs FROM wo_split_lines`)).rows;
+  } else {
+    reqs = db.prepare(`SELECT id, source_order_id, source_batch_number FROM wo_split_requests WHERE status='approved'`).all();
+    linesAll = db.prepare(`SELECT split_request_id, child_batch_number, boxes, qty_lakhs FROM wo_split_lines`).all();
+  }
+  const linesByReq = {};
+  for (const l of (linesAll || [])) (linesByReq[l.split_request_id] = linesByReq[l.split_request_id] || []).push(l);
+  const ordById = {}, ordByBatch = {};
+  const orders = (_planningStateCache && _planningStateCache.orders) || [];
+  for (const o of orders) { if (o && o.id) ordById[o.id] = o; if (o && o.batchNumber) ordByBatch[o.batchNumber] = o; }
+  const families = [];
+  const _packForSize = (o) => (o ? (_V44ZJ_PACK_SIZES[String(o.size)] || 0) : 0);
+
+  // (1) W/O splits — approved requests, children from wo_split_lines (box ranges written at propose).
+  for (const req of (reqs || [])) {
+    const parentBatch = req.source_batch_number && String(req.source_batch_number).trim();
+    if (!parentBatch) continue;
+    const lines = linesByReq[req.id] || [];
+    if (!lines.length) continue;
+    const ps = _packForSize(ordById[req.source_order_id]);
+    const children = lines.map(l => {
+      const boxes = Number(l.boxes) || 0;
+      const boxed = ps > 0 ? boxes * ps : (parseFloat(l.qty_lakhs) || 0);
+      return { batch: l.child_batch_number, boxed: Math.max(0, boxed) };
+    }).filter(c => c.batch);
+    if (children.length) families.push({ parentBatch, children });
+  }
+
+  // (2) v46L: re-customer SPLITS — a distinct event from the W/O split but structurally identical
+  // (last N boxes + their scans rebatch to a suffixed child; production_actuals stays on the parent),
+  // so it must be apportioned the same way or the child shows a phantom. Full re-customers change only
+  // the customer field on the same batch (no child, no rebatch) and are correctly ignored: we select
+  // ONLY rows with a real child_batch_number and split_boxes>0 (action_type 'split' / 'split+convert').
+  // Pack size uses the canonical _V44ZJ_PACK_SIZES (the scan-matching box↔Lakhs map — the endpoint's
+  // own internal _PACK map differs and is not the box→Lakhs authority). Each row is one parent→child
+  // edge; multiple splits on one parent chain-subtract correctly (the applier re-reads the running
+  // parent gross per family). Nested re-splits of a child aren't ordered here — same limitation noted
+  // for W/O nested splits.
+  let rcRows = [];
+  try {
+    if (pgPool) rcRows = (await pgPool.query(`SELECT batch_number, child_batch_number, split_boxes FROM recustomer_log WHERE child_batch_number IS NOT NULL AND child_batch_number <> '' AND COALESCE(split_boxes,0) > 0`)).rows;
+    else        rcRows = db.prepare(`SELECT batch_number, child_batch_number, split_boxes FROM recustomer_log WHERE child_batch_number IS NOT NULL AND child_batch_number <> '' AND COALESCE(split_boxes,0) > 0`).all();
+  } catch (e) { rcRows = []; } // table absent on a very fresh boot — safe to skip
+  for (const r of (rcRows || [])) {
+    const parentBatch = r.batch_number && String(r.batch_number).trim();
+    const childBatch = r.child_batch_number && String(r.child_batch_number).trim();
+    if (!parentBatch || !childBatch) continue;
+    const boxes = Number(r.split_boxes) || 0;
+    if (!(boxes > 0)) continue;
+    const ps = _packForSize(ordByBatch[parentBatch]);
+    const boxed = ps > 0 ? boxes * ps : 0; // no per-child qty stored here; 0 → applier skips (never guesses)
+    if (!(boxed > 0)) continue;
+    families.push({ parentBatch, children: [{ batch: childBatch, boxed }] });
+  }
+  return families;
+}
+
+// Apply the apportionment to a per-batch gross map IN PLACE. Idempotent against a freshly-built map
+// (both maps are rebuilt from scratch each warm/request, so the parent still holds its full gross
+// here). Guard: never assign more than the parent's gross — if the boxed sum exceeds it (gross
+// under-reported, or a cross-month slice smaller than the boxed total), scale the children down
+// proportionally so the map still conserves and the parent residual never goes negative.
+function _v46k_applyGrossApportionment(map, families) {
+  if (!map || !families || !families.length) return;
+  for (const fam of families) {
+    const parentGross = map[fam.parentBatch];
+    if (!(parentGross > 0)) continue;                 // parent absent/zero in this map → nothing to split
+    const sum = fam.children.reduce((s, c) => s + (c.boxed || 0), 0);
+    if (!(sum > 0)) continue;
+    const scale = sum > parentGross ? parentGross / sum : 1;
+    let assigned = 0;
+    for (const c of fam.children) {
+      const g = +((c.boxed || 0) * scale).toFixed(3);
+      map[c.batch] = (map[c.batch] || 0) + g;         // child has no own production_actuals → base 0
+      assigned += g;
+    }
+    map[fam.parentBatch] = Math.max(0, +(parentGross - assigned).toFixed(3));
+  }
+}
 
 // v44ZJ Issue 2+5: single source of truth for applying a regularisation. Writes one CLEAN
 // per-batch dispatch record per allocation (single batch key — never a concatenated string),
@@ -5279,6 +6629,10 @@ async function _applyRegularisation(inv, clean, who, ts, rsn) {
 
   let firstRecId = null;
   for (const c of clean) {
+    // v48D (Ishan): double-fire guard — skip this allocation if an identical record already exists (the
+    // ZF097/1692 exact-dupe originated on this regularise path). firstRecId is only set on a real insert,
+    // so the invoice→record link below still resolves to the surviving record.
+    if (await _isDuplicateDispatch(c.batch, inv.sap_doc_num || '', c.boxes, c.qty)) continue;
     const recId = 'disprec_' + crypto.randomBytes(6).toString('hex');
     if (!firstRecId) firstRecId = recId;
     const recRemarks = 'Regularised[inv:' + invId + ']: ' + rsn;
@@ -5312,7 +6666,23 @@ function _v44zj_parseAllocations(body, inv) {
   let allocations = Array.isArray(body && body.allocations) ? body.allocations : null;
   if (!allocations) {
     const bn = (body && body.batchNumber && String(body.batchNumber).trim()) ? String(body.batchNumber).trim() : (inv.batch_number || '');
-    allocations = bn ? [{ batch: bn, qty: parseFloat(inv.total_qty_lakhs) || 0, boxes: parseInt(inv.total_boxes, 10) || 0 }] : [];
+    // v47V: the default (no explicit per-batch allocations) may assign the whole invoice total to ONE
+    // batch ONLY when the invoice is genuinely single-batch. For a MULTI-batch invoice regularised
+    // against a single target batch, the full total is wrong — that dumped the bulk invoice inv_44812's
+    // 362.25L onto 26X082 (the "362L phantom" dispatch record). Instead resolve that batch's OWN
+    // DocumentLine qty/boxes from the invoice payload; if it can't be resolved, 0 (which then fails the
+    // qty>0 check below, forcing an explicit allocation) — never the full total. This mirrors the v46H
+    // per-batch split on the normal dispatch route. Single-batch invoices are byte-for-byte unchanged.
+    const _invBatches47v = String(inv.batch_number || '').split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+    let _qty47v = parseFloat(inv.total_qty_lakhs) || 0;
+    let _boxes47v = parseInt(inv.total_boxes, 10) || 0;
+    if (_invBatches47v.length > 1 && bn && !/[\s,]/.test(bn)) {
+      let _pl47v = null; try { _pl47v = inv.payload_json ? JSON.parse(inv.payload_json) : null; } catch { _pl47v = null; }
+      const _d47v = _pl47v ? _lineDispatchForBatch(_pl47v, bn) : null;
+      if (_d47v) { const _qb47v = _dispatchQtyBoxes(bn, _d47v.qty, _d47v.boxes); _qty47v = _qb47v.qty; _boxes47v = _qb47v.boxes; }
+      else { _qty47v = 0; _boxes47v = 0; }
+    }
+    allocations = bn ? [{ batch: bn, qty: _qty47v, boxes: _boxes47v }] : [];
   }
   const clean = [];
   for (const a of (allocations || [])) {
@@ -5509,6 +6879,241 @@ app.put('/api/invoice/truck-scan-session/:truckNumber', async (req, res) => {
   }
 });
 
+// v47F (confirmed by Ishan): CANCEL a pending (not-yet-reconciled) invoice request. A pending request
+// counts toward a batch's invoiced total (double-bill guard), so once one exists at the full packed
+// amount there is no remaining qty to re-invoice a smaller amount. This frees that qty by marking the
+// request 'cancelled' — excluded from the invoiced total. Guardrails: only in-flight statuses are
+// cancellable, and if a SAP invoice is already linked (SAP created it) the cancel is refused to avoid
+// desync — reconcile in that case instead. Role-gated to admin / planning_manager / dispatch_manager.
+app.post('/api/invoice/cancel-request', async (req, res) => {
+  try {
+    const requestId = ((req.body && req.body.requestId) || '').toString().trim();
+    const role = (req.headers['x-sunloc-role'] || '').toString().toLowerCase();
+    if (!requestId) return res.status(400).json({ ok: false, error: 'requestId required' });
+    if (!['admin', 'planning_manager', 'dispatch_manager'].includes(role)) {
+      return res.status(403).json({ ok: false, error: 'Only dispatch manager, planning manager, or admin can cancel an invoice request.' });
+    }
+    let reqRow;
+    if (pgPool) reqRow = (await pgPool.query(`SELECT id, batch_number, status FROM invoice_requests WHERE id=$1`, [requestId])).rows[0];
+    else        reqRow = db.prepare(`SELECT id, batch_number, status FROM invoice_requests WHERE id=?`).get(requestId);
+    if (!reqRow) return res.status(404).json({ ok: false, error: 'Invoice request not found.' });
+    if (!['pending', 'sent_to_sap', 'pending_reconciliation'].includes(reqRow.status)) {
+      return res.status(409).json({ ok: false, error: `Request status is '${reqRow.status}' — only an in-flight (pending) request can be cancelled.` });
+    }
+    // v48E (Ishan): block cancel ONLY if a linked SAP invoice is genuinely for THIS request's batch. The
+    // reconciliation had mis-linked invoices of OTHER batches (e.g. 26Y059 invoices linked to 26T079
+    // requests — likely a SAP DocEntry collision), which left those requests un-cancellable AND invisible
+    // under their own batch. If the only linked invoice is for a different batch, allow the cancel so admin
+    // can clear the stuck request. An empty request batch keeps the old (block-on-any-link) behaviour.
+    const _rbn = (reqRow.batch_number || '').toString().trim();
+    let recv;
+    if (pgPool) recv = (await pgPool.query(`SELECT 1 FROM invoices_received WHERE invoice_request_id=$1 AND ($2='' OR batch_number ILIKE '%'||$2||'%') LIMIT 1`, [requestId, _rbn])).rows[0];
+    else        recv = db.prepare(`SELECT 1 FROM invoices_received WHERE invoice_request_id=? AND (?='' OR batch_number LIKE '%'||?||'%') LIMIT 1`).get(requestId, _rbn, _rbn);
+    if (recv) return res.status(409).json({ ok: false, error: 'A SAP invoice for this batch is already linked to this request — cannot cancel; reconcile it instead.' });
+    const who = (req.headers['x-sunloc-user'] || role || 'unknown').toString();
+    if (pgPool) await pgPool.query(`UPDATE invoice_requests SET status='cancelled', updated_at=NOW()::text WHERE id=$1`, [requestId]);
+    else        db.prepare(`UPDATE invoice_requests SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(requestId);
+    console.log(`[v47F cancel-request] ${requestId} (batch ${reqRow.batch_number}) cancelled by ${who}`);
+    res.json({ ok: true, requestId, batchNumber: reqRow.batch_number });
+  } catch (err) {
+    console.error('[cancel-request]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// v48G (Ishan): READ-ONLY preview of invoice↔request MIS-LINKS. For every linked invoice, compare the
+// linked request's pc_code against the invoice's line item codes (payload DocumentLines[].ItemCode). A
+// request whose PC isn't on any invoice line is mis-linked — the SO-share reconciliation error the new
+// PC-gate prevents going forward. Writes nothing; lets IT/admin see the scope (incl. the stuck T079/ZF107).
+app.get('/api/tracking/preview-invoice-mislinks', async (req, res) => {
+  try {
+    const sel = `SELECT ir.sap_doc_num, ir.batch_number AS invoice_batch, ir.invoice_request_id, ir.payload_json,
+                        req.batch_number AS request_batch, req.pc_code AS request_pc, req.status AS request_status
+                 FROM invoices_received ir JOIN invoice_requests req ON req.id = ir.invoice_request_id`;
+    const rows = pgPool ? (await pgPool.query(sel)).rows : db.prepare(sel).all();
+    const mislinks = [];
+    for (const r of rows) {
+      const reqPc = String(r.request_pc || '').trim();
+      if (!reqPc) continue; // can't judge a mis-link without a request PC
+      let linePcs = [];
+      try {
+        const p = r.payload_json ? JSON.parse(r.payload_json) : null;
+        linePcs = ((p && p.DocumentLines) || []).map(l => String(l.ItemCode || '').trim()).filter(Boolean);
+      } catch (_e) {}
+      if (linePcs.length && !linePcs.includes(reqPc)) {
+        mislinks.push({
+          request_id: r.invoice_request_id, request_batch: r.request_batch, request_pc: reqPc,
+          request_status: r.request_status, invoice_doc_num: r.sap_doc_num, invoice_batch: r.invoice_batch,
+          invoice_line_pcs: Array.from(new Set(linePcs))
+        });
+      }
+    }
+    res.json({ ok: true, mode: 'preview', wroteNothing: true, count: mislinks.length, mislinks });
+  } catch (err) {
+    console.error('[preview-invoice-mislinks]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// v48H (Ishan): REPAIR the existing invoice↔request mis-links (dry-run by default). Un-links each wrong
+// pairing — resets the mis-linked request to pending_reconciliation and reverts its invoice to unlinked
+// (direct_sap) — so the now PC-gated poller re-reconciles them correctly on the next "Re-pull from SAP".
+// Only requests at pending/sent/pending_reconciliation/reconciled are touched (never a further-advanced
+// status). Physical dispatch records are NEVER modified; each entry reports the batch's dispatch qty so
+// already-dispatched batches are visible. ?apply=unlink performs it atomically, audit-logged.
+app.post('/api/tracking/repair-invoice-mislinks', async (req, res) => {
+  try {
+    const apply = String((req.query && req.query.apply) || (req.body && req.body.apply) || '').trim(); // '' | 'unlink' | 'repair'
+    const who = (req.body && req.body.by) || 'admin';
+    const _touchable = new Set(['pending','sent_to_sap','pending_reconciliation','reconciled']);
+    // Parse the distinct line PCs (SAP ItemCodes) off an invoice payload — the correctness signal used by both passes.
+    const _linePcsOf = (payload) => {
+      try { const p = payload ? JSON.parse(payload) : null; return Array.from(new Set(((p && p.DocumentLines) || []).map(l => String(l.ItemCode || '').trim()).filter(Boolean))); }
+      catch (_e) { return []; }
+    };
+    const _dispatchOf = async (batch) => {
+      const q = pgPool
+        ? (await pgPool.query(`SELECT COALESCE(SUM(qty),0) q, COUNT(*) n FROM tracking_dispatch_records WHERE batch_number=$1`, [batch])).rows[0]
+        : db.prepare(`SELECT COALESCE(SUM(qty),0) q, COUNT(*) n FROM tracking_dispatch_records WHERE batch_number=?`).get(batch);
+      return { q: Math.round((parseFloat(q.q) || 0) * 100) / 100, n: parseInt(q.n, 10) || 0 };
+    };
+    const items = [];
+    const seen = new Set(); // dedupe key: request_id|invoice_id
+
+    // ── Pass 1 — INVOICE-anchored (v44N): an invoice linked to a request whose PC isn't on any invoice line.
+    //    Unchanged detection from v48J; each hit is an 'unlink' item (reset request → pending_reconciliation, free invoice).
+    const selInv = `SELECT ir.id AS inv_id, ir.sap_doc_num, ir.batch_number AS invoice_batch, ir.invoice_request_id, ir.payload_json,
+                        req.batch_number AS request_batch, req.pc_code AS request_pc, req.status AS request_status
+                 FROM invoices_received ir JOIN invoice_requests req ON req.id = ir.invoice_request_id`;
+    const invRows = pgPool ? (await pgPool.query(selInv)).rows : db.prepare(selInv).all();
+    for (const r of invRows) {
+      const reqPc = String(r.request_pc || '').trim(); if (!reqPc) continue;
+      const linePcs = _linePcsOf(r.payload_json);
+      if (linePcs.length && !linePcs.includes(reqPc)) {
+        const dq = await _dispatchOf(r.request_batch);
+        seen.add(`${r.invoice_request_id}|${r.inv_id}`);
+        items.push({
+          pass: 'invoice', reqAction: 'unlink', invAction: 'null',
+          request_id: r.invoice_request_id, request_batch: r.request_batch, request_pc: reqPc, request_status: r.request_status,
+          invoice_id: r.inv_id, invoice_doc_num: r.sap_doc_num, invoice_batch: r.invoice_batch, invoice_line_pcs: linePcs,
+          batch_dispatched_qty: dq.q, batch_dispatch_records: dq.n,
+          reason: 'Invoice is linked to this request, but the request PC is not on any invoice line.',
+          willAct: _touchable.has(String(r.request_status || '')),
+          // kept for backward-compatible eyeballing of prior tooling
+          willUnlink: _touchable.has(String(r.request_status || ''))
+        });
+      }
+    }
+
+    // ── Pass 2 — REQUEST-anchored (v48K): a request reconciled to an invoice whose lines don't carry the request PC.
+    //    Pass 1 can't see these when the invoice is (correctly) linked to a DIFFERENT request or to nobody, because the
+    //    invoice→request join never lands on the offending request. We walk the other direction here.
+    //    Branch is deliberately conservative:
+    //      • invoice is provably a DIFFERENT request's (that request's PC IS on the invoice) → this one over-requested → CANCEL (request only; invoice untouched).
+    //      • invoice orphaned / self-linked here → detach this request (→ pending_reconciliation) so a re-pull can re-pair; free invoice only if it self-links here.
+    //      • rightful owner not PC-verifiable (other PC absent, or dangling link) → REVIEW only; never auto-acted.
+    const selReq = `SELECT req.id AS request_id, req.batch_number AS request_batch, req.pc_code AS request_pc,
+                           req.status AS request_status, req.qty_lakhs AS request_qty,
+                           ir.id AS inv_id, ir.sap_doc_num, ir.batch_number AS invoice_batch,
+                           ir.invoice_request_id AS inv_backlink, ir.payload_json,
+                           other.id AS other_id, other.pc_code AS other_pc, other.batch_number AS other_batch, other.status AS other_status
+                    FROM invoice_requests req
+                    JOIN invoices_received ir ON ir.id = req.reconciled_with_invoice_id
+                    LEFT JOIN invoice_requests other ON other.id = ir.invoice_request_id AND other.id <> req.id
+                    WHERE req.reconciled_with_invoice_id IS NOT NULL`;
+    const reqRows = pgPool ? (await pgPool.query(selReq)).rows : db.prepare(selReq).all();
+    for (const r of reqRows) {
+      if (!_touchable.has(String(r.request_status || ''))) continue;
+      const reqPc = String(r.request_pc || '').trim(); if (!reqPc) continue;
+      if (seen.has(`${r.request_id}|${r.inv_id}`)) continue; // already surfaced by Pass 1
+      const linePcs = _linePcsOf(r.payload_json);
+      if (!linePcs.length || linePcs.includes(reqPc)) continue; // no lines to judge, or PC matches → correct link, never flag
+      const backlink = (r.inv_backlink == null || String(r.inv_backlink).trim() === '') ? null : String(r.inv_backlink).trim();
+      const otherPc = String(r.other_pc || '').trim();
+      let reqAction, invAction, reason;
+      if (backlink && backlink !== r.request_id) {
+        if (r.other_id && otherPc && linePcs.includes(otherPc)) {
+          reqAction = 'cancel'; invAction = 'keep';
+          reason = `Invoice belongs to request ${r.other_id} (PC ${otherPc}, batch ${r.other_batch || '?'}) whose PC is on the invoice; this request over-requested. Cancel this request; invoice left intact.`;
+        } else {
+          reqAction = 'review'; invAction = 'keep';
+          reason = `Request PC ${reqPc} not on invoice; invoice is linked to ${backlink} but that owner isn't PC-verified — manual review before any change.`;
+        }
+      } else {
+        reqAction = 'unlink'; invAction = (backlink === r.request_id) ? 'null' : 'keep';
+        reason = 'Request reconciled to an invoice whose lines lack the request PC; detaching so a re-pull can re-pair.';
+      }
+      const dq = await _dispatchOf(r.request_batch);
+      items.push({
+        pass: 'request', reqAction, invAction,
+        request_id: r.request_id, request_batch: r.request_batch, request_pc: reqPc, request_status: r.request_status,
+        request_qty: Math.round((parseFloat(r.request_qty) || 0) * 100) / 100,
+        invoice_id: r.inv_id, invoice_doc_num: r.sap_doc_num, invoice_batch: r.invoice_batch, invoice_line_pcs: linePcs,
+        invoice_backlink: backlink, other_request_id: r.other_id || null, other_request_pc: otherPc || null,
+        batch_dispatched_qty: dq.q, batch_dispatch_records: dq.n,
+        reason, willAct: reqAction !== 'review'
+      });
+    }
+
+    const _willUnlink = items.filter(i => i.willAct && i.reqAction === 'unlink').length;
+    const _willCancel = items.filter(i => i.willAct && i.reqAction === 'cancel').length;
+    const _willReview = items.filter(i => i.reqAction === 'review').length;
+    if (!apply) return res.json({ ok: true, mode: 'dryrun', wroteNothing: true, count: items.length, willUnlink: _willUnlink, willCancel: _willCancel, willReview: _willReview, mislinks: items });
+    if (apply !== 'unlink' && apply !== 'repair') return res.status(400).json({ ok: false, error: "apply must be 'unlink' (invoice-anchored only, backward-compatible) or 'repair' (full v48K cleanup incl. PC-verified cancels); omit for dry-run" });
+
+    // apply=unlink → backward-compatible: Pass-1 invoice-anchored unlinks only (byte-identical behaviour to v48J).
+    // apply=repair  → full: Pass-1 unlinks + Pass-2 unlinks + Pass-2 PC-verified cancels. 'review' items are NEVER auto-acted.
+    const todo = items.filter(i => {
+      if (!i.willAct) return false;
+      if (apply === 'unlink') return i.pass === 'invoice' && i.reqAction === 'unlink';
+      return true;
+    });
+    if (!todo.length) return res.json({ ok: true, mode: apply, unlinked: 0, cancelled: 0, note: 'nothing actionable for this mode' });
+
+    let unlinked = 0, cancelled = 0;
+    const auditDetails = JSON.stringify({ mode: apply, count: todo.length, items: todo });
+    if (pgPool) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        const exec = {
+          unlinkReq: id => client.query(`UPDATE invoice_requests SET status='pending_reconciliation', reconciled_with_invoice_id=NULL, sap_response_doc_num=NULL, sap_response_doc_entry=NULL, sap_response_irn=NULL, reconciled_at=NULL, updated_at=NOW()::TEXT WHERE id=$1`, [id]),
+          cancel:    id => client.query(`UPDATE invoice_requests SET status='cancelled', reconciled_with_invoice_id=NULL, sap_response_doc_num=NULL, sap_response_doc_entry=NULL, sap_response_irn=NULL, reconciled_at=NULL, updated_at=NOW()::TEXT WHERE id=$1`, [id]),
+          unlinkInv: id => client.query(`UPDATE invoices_received SET invoice_request_id=NULL, source='direct_sap' WHERE id=$1`, [id]),
+        };
+        for (const it of todo) {
+          if (it.reqAction === 'cancel') { await exec.cancel(it.request_id); cancelled++; }
+          else { await exec.unlinkReq(it.request_id); unlinked++; }
+          if (it.invAction === 'null') await exec.unlinkInv(it.invoice_id);
+        }
+        await client.query(`INSERT INTO audit_log (username,role,app,action,details) VALUES ($1,'admin','tracking','INVOICE_MISLINK_REPAIR',$2)`, [who, auditDetails]);
+        await client.query('COMMIT');
+      } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {}; throw e; }
+      finally { client.release(); }
+    } else {
+      const uReq = db.prepare(`UPDATE invoice_requests SET status='pending_reconciliation', reconciled_with_invoice_id=NULL, sap_response_doc_num=NULL, sap_response_doc_entry=NULL, sap_response_irn=NULL, reconciled_at=NULL, updated_at=datetime('now') WHERE id=?`);
+      const uCancel = db.prepare(`UPDATE invoice_requests SET status='cancelled', reconciled_with_invoice_id=NULL, sap_response_doc_num=NULL, sap_response_doc_entry=NULL, sap_response_irn=NULL, reconciled_at=NULL, updated_at=datetime('now') WHERE id=?`);
+      const uInv = db.prepare(`UPDATE invoices_received SET invoice_request_id=NULL, source='direct_sap' WHERE id=?`);
+      const tx = db.transaction(() => {
+        for (const it of todo) {
+          if (it.reqAction === 'cancel') { uCancel.run(it.request_id); cancelled++; }
+          else { uReq.run(it.request_id); unlinked++; }
+          if (it.invAction === 'null') uInv.run(it.invoice_id);
+        }
+        db.prepare(`INSERT INTO audit_log (username,role,app,action,details) VALUES (?,'admin','tracking','INVOICE_MISLINK_REPAIR',?)`).run(who, auditDetails);
+      });
+      tx();
+    }
+    const _note = apply === 'repair'
+      ? 'Repair applied. If any request was reset to pending_reconciliation, press "Re-pull from SAP" so the PC-gated poller re-pairs it to its correct invoice.'
+      : 'Now press "Re-pull from SAP" so the PC-gated poller re-reconciles each invoice to its correct request.';
+    res.json({ ok: true, mode: apply, unlinked, cancelled, note: _note });
+  } catch (err) {
+    console.error('[repair-invoice-mislinks]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // DELETE — discard session (after successful dispatch or explicit abandon)
 app.delete('/api/invoice/truck-scan-session/:truckNumber', async (req, res) => {
   try {
@@ -5531,13 +7136,25 @@ app.delete('/api/invoice/truck-scan-session/:truckNumber', async (req, res) => {
 
 app.get('/api/invoice/scan-session/:invoiceId', async (req, res) => {
   const id = req.params.invoiceId;
+  const batch = (req.query.batch || '').toString().trim();  // v47L: batch fallback (id-churn resilient)
   try {
     let row;
     if (pgPool) {
       const r = await pgPool.query(`SELECT scanned_json, saved_at FROM invoice_scan_sessions WHERE invoice_id=$1`, [id]);
       row = r.rows[0];
+      if (!row && batch) {
+        // v47L: the invoice id may have changed on a re-pull — restore the batch's most-recent session.
+        // v47Z (Ishan): but for a batch with MULTIPLE invoices, this must NOT pull an ALREADY-DISPATCHED
+        // invoice's session into a fresh one (that made the 2nd invoice for a batch start pre-loaded with
+        // the 1st invoice's dispatched boxes → cap = new total − prior scanned, i.e. cumulative not
+        // additive). Exclude sessions whose invoice is dispatched; id-churn on a still-pending invoice
+        // (or an orphaned session with no matching invoice) is unaffected.
+        const rb = await pgPool.query(`SELECT ss.scanned_json, ss.saved_at FROM invoice_scan_sessions ss LEFT JOIN invoices_received iv ON iv.id = ss.invoice_id WHERE ss.batch_number=$1 AND COALESCE(iv.dispatch_status,'') <> 'dispatched' ORDER BY ss.saved_at DESC LIMIT 1`, [batch]);
+        row = rb.rows[0];
+      }
     } else {
       row = db.prepare(`SELECT scanned_json, saved_at FROM invoice_scan_sessions WHERE invoice_id=?`).get(id);
+      if (!row && batch) row = db.prepare(`SELECT ss.scanned_json, ss.saved_at FROM invoice_scan_sessions ss LEFT JOIN invoices_received iv ON iv.id = ss.invoice_id WHERE ss.batch_number=? AND COALESCE(iv.dispatch_status,'') <> 'dispatched' ORDER BY ss.saved_at DESC LIMIT 1`).get(batch);
     }
     if (!row) return res.json({ ok: true, scanned: [] });
     const scanned = JSON.parse(row.scanned_json || '[]');
@@ -5547,19 +7164,20 @@ app.get('/api/invoice/scan-session/:invoiceId', async (req, res) => {
 
 app.put('/api/invoice/scan-session/:invoiceId', async (req, res) => {
   const id = req.params.invoiceId;
-  const { scanned } = req.body || {};
+  const { scanned, batch } = req.body || {};   // v47L: capture batch so restore survives invoice-id churn
+  const batchStr = (batch || '').toString().trim() || null;
   try {
     const json = JSON.stringify(scanned || []);
     const now = new Date().toISOString();
     if (pgPool) {
       await pgPool.query(
-        `INSERT INTO invoice_scan_sessions (invoice_id, scanned_json, saved_at) VALUES ($1,$2,$3)
-         ON CONFLICT (invoice_id) DO UPDATE SET scanned_json=$2, saved_at=$3`,
-        [id, json, now]
+        `INSERT INTO invoice_scan_sessions (invoice_id, scanned_json, saved_at, batch_number) VALUES ($1,$2,$3,$4)
+         ON CONFLICT (invoice_id) DO UPDATE SET scanned_json=$2, saved_at=$3, batch_number=COALESCE($4, invoice_scan_sessions.batch_number)`,
+        [id, json, now, batchStr]
       );
     } else {
-      db.prepare(`INSERT INTO invoice_scan_sessions (invoice_id, scanned_json, saved_at) VALUES (?,?,?)
-                  ON CONFLICT(invoice_id) DO UPDATE SET scanned_json=excluded.scanned_json, saved_at=excluded.saved_at`).run(id, json, now);
+      db.prepare(`INSERT INTO invoice_scan_sessions (invoice_id, scanned_json, saved_at, batch_number) VALUES (?,?,?,?)
+                  ON CONFLICT(invoice_id) DO UPDATE SET scanned_json=excluded.scanned_json, saved_at=excluded.saved_at, batch_number=COALESCE(excluded.batch_number, invoice_scan_sessions.batch_number)`).run(id, json, now, batchStr);
     }
     res.json({ ok: true });
   } catch (e) { res.json({ ok: false, error: e.message }); }
@@ -5675,24 +7293,38 @@ app.post('/api/invoice/dispatch-out-truck', async (req, res) => {
       }
       // Build dispatch record
       const recId = 'tdr_' + crypto.randomBytes(8).toString('hex');
-      const qty = parseFloat(inv.total_qty_lakhs) > 0
+      const _qtyRaw = parseFloat(inv.total_qty_lakhs) > 0
         ? parseFloat(inv.total_qty_lakhs)
         : (parseInt(inv.total_boxes) > 0 ? parseInt(inv.total_boxes) / 100 : 0);
-      const boxes = scannedBoxes || parseInt(inv.total_boxes) || 0;
+      const _disp = _dispatchQtyBoxes(inv.batch_number, _qtyRaw, scannedBoxes || parseInt(inv.total_boxes) || 0); // v46U: recalibrate export qty + derive boxes
+      const qty = _disp.qty;
+      const boxes = _disp.boxes;
       const ts = new Date().toISOString();
       // Insert dispatch record
+      // v46H #2: per-box audit trail — the box labels scanned OUT at dispatch, stored as metadata on
+      // the (already qty-counted) record. Deliberately NOT written as tracking_scans rows, because
+      // _v40_dispatchedLakhs SUMS scan-out rows + dispatch records — separate scan rows would
+      // DOUBLE-COUNT the dispatched quantity. Pending = packed box numbers − these dispatched ones.
+      const _sLabels = Array.isArray(b.scannedLabels)
+        ? JSON.stringify(b.scannedLabels.map(s => ({ labelId: s.labelId || null, boxNumber: (s.boxNumber != null ? s.boxNumber : null), batchNumber: s.batchNumber || inv.batch_number, size: s.size || null })))
+        : '[]';
+      // v48D (Ishan): double-fire guard — skip this invoice's insert if an identical record already exists.
+      if (await _isDuplicateDispatch(inv.batch_number, inv.sap_doc_num || '', boxes, qty)) {
+        results.push({ invoiceId: invId, ok: true, skipped: true, reason: 'identical dispatch record already exists (duplicate suppressed)' });
+        continue;
+      }
       try {
         if (pgPool) {
           await pgPool.query(
-            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by")
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-            [recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo, inv.sap_doc_num || '', remarks, ts, dispatchedBy]
+            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by", scanned_labels_json)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            [recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo, inv.sap_doc_num || '', remarks, ts, dispatchedBy, _sLabels]
           );
         } else {
           db.prepare(
-            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by)
-             VALUES (?,?,?,?,?,?,?,?,?,?)`
-          ).run(recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo, inv.sap_doc_num || '', remarks, ts, dispatchedBy);
+            `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by, scanned_labels_json)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+          ).run(recId, inv.batch_number, inv.customer || '', qty, boxes, vehicleNo, inv.sap_doc_num || '', remarks, ts, dispatchedBy, _sLabels);
         }
       } catch (e) {
         results.push({ invoiceId: invId, ok: false, error: 'Insert dispatch record failed: ' + e.message });
@@ -5766,6 +7398,57 @@ app.post('/api/invoice/dispatch-out-truck', async (req, res) => {
   }
 });
 
+// v49ZK (confirmed by Ishan — invoice 1968: expected 9 vs 27 physical boxes, 18+9):
+// For a MULTI-batch invoice, invoices_received.total_boxes is stamped from ONE fulfilled
+// invoice_request (the v44O "authoritative boxes" rule predates multi-request invoices), so the
+// scan-out over-count gate cut off after the first batch's worth — the second batch could never
+// scan out. The per-batch truth lives in the v48R attribution engine: overlay the EXPECTED box
+// count from clean alloc rows at READ time (pending-scan-out + invoice details). Boxes per alloc
+// line = recorded boxes (U_NO_BOXES) when present, else ceil(qty ÷ pack size of that batch) — the
+// SAME derivation _dispatchQtyBoxes already applies at dispatch, so expected and dispatched agree.
+// Overlay ONLY when every attributed line resolves and none needs manual allocation; otherwise the
+// stored value stands unchanged. Single-batch invoices are never touched. Also stamps
+// row.alloc_boxes = { batch: boxes } so the scan-out modal can show the per-batch expectation.
+async function _mbAllocExpected(rows) {
+  try {
+    const multi = (rows || []).filter(r => r && String(r.batch_number || '').split(/[\s,]+/).filter(Boolean).length >= 2);
+    if (!multi.length) return;
+    const ids = multi.map(r => r.id);
+    let allocs;
+    if (pgPool) {
+      allocs = (await pgPool.query(
+        `SELECT invoice_id, batch_number, qty_lakhs, boxes, status FROM invoice_batch_alloc WHERE invoice_id = ANY($1)`, [ids])).rows;
+    } else {
+      const ph = ids.map(() => '?').join(',');
+      allocs = db.prepare(`SELECT invoice_id, batch_number, qty_lakhs, boxes, status FROM invoice_batch_alloc WHERE invoice_id IN (${ph})`).all(...ids);
+    }
+    if (!allocs || !allocs.length) return;
+    const st = await getPlanningStateAsync().catch(() => null);
+    const sizeByBatch = {};
+    for (const o of ((st && st.orders) || [])) if (o && o.batchNumber && !o.deleted) sizeByBatch[o.batchNumber] = String(o.size || '');
+    const byInv = {};
+    for (const a of allocs) (byInv[a.invoice_id] = byInv[a.invoice_id] || []).push(a);
+    for (const row of multi) {
+      const list = byInv[row.id];
+      if (!list || !list.length) continue;
+      let ok = true, sum = 0; const perBatch = {};
+      for (const a of list) {
+        if (a.status === 'ignored') continue;                       // zero-qty lines (v48T) contribute nothing
+        if (a.status !== 'attributed' || !a.batch_number) { ok = false; break; }  // manual queue → stored value stands
+        let bx = parseInt(a.boxes, 10) || 0;
+        if (!(bx > 0)) {
+          const ps = _V44ZJ_PACK_SIZES[sizeByBatch[a.batch_number]] || 0;
+          const q = parseFloat(a.qty_lakhs) || 0;
+          if (q > 0 && ps > 0) bx = Math.ceil(q / ps);              // same rule as _dispatchQtyBoxes
+          else { ok = false; break; }                                // size unknown → cannot derive → no overlay
+        }
+        sum += bx; perBatch[a.batch_number] = (perBatch[a.batch_number] || 0) + bx;
+      }
+      if (ok && sum > 0) { row.total_boxes = sum; row.alloc_boxes = perBatch; }
+    }
+  } catch (e) { console.warn('[v49ZK] alloc expected overlay:', e && e.message); }
+}
+
 // GET /api/invoice/pending-scan-out — list invoices ready for the Scan Out
 // activity. Returns invoices_received where dispatch_status='pending' and
 // either source='sunloc' or (source='direct_sap' AND admin_approved_at IS NOT NULL).
@@ -5794,6 +7477,7 @@ app.get('/api/invoice/pending-scan-out', async (req, res) => {
          LIMIT ?`
       ).all(limit);
     }
+    await _mbAllocExpected(rows);   // v49ZK: multi-batch expected-boxes overlay (single-batch untouched)
     // v40 Phase 18.5: enrich each invoice with truck_number looked up from
     // dispatch_plans by batch_number. Falls back to null if no plan found.
     const batchNumbers = [...new Set(rows.map(r => r.batch_number).filter(Boolean))];
@@ -5850,6 +7534,7 @@ app.get('/api/invoice/:id/details', async (req, res) => {
       row = db.prepare(`SELECT * FROM invoices_received WHERE id=?`).get(id);
     }
     if (!row) return res.status(404).json({ ok: false, error: 'invoice not found' });
+    await _mbAllocExpected([row]);   // v49ZK: corrected expected boxes in the detail view too
     // Parse the SAP payload — payload_json holds the full SAP Invoice response
     let payload = {};
     try {
@@ -5896,6 +7581,408 @@ app.get('/api/invoice/:id/details', async (req, res) => {
   }
 });
 
+// ─── v48R: per-batch invoice attribution — read + admin API ───────────────────
+// GET /api/invoice/allocations?batch=&invoice_id=&status=&limit=
+// Authoritative per-batch invoiced quantity. `totals` sums ONLY status='attributed'
+// rows — a needs_manual line is counted nowhere until a human allocates it.
+app.get('/api/invoice/allocations', async (req, res) => {
+  try {
+    const batch = (req.query.batch || '').toString().trim();
+    const invoiceId = (req.query.invoice_id || '').toString().trim();
+    const status = (req.query.status || '').toString().trim();
+    const limit = Math.min(parseInt(req.query.limit, 10) || 500, 5000);
+    const wheres = [], args = [];
+    if (batch)     { wheres.push(pgPool ? `UPPER(batch_number)=$${args.length + 1}` : `UPPER(batch_number)=?`); args.push(batch.toUpperCase()); }
+    if (invoiceId) { wheres.push(pgPool ? `invoice_id=$${args.length + 1}` : `invoice_id=?`); args.push(invoiceId); }
+    if (status)    { wheres.push(pgPool ? `status=$${args.length + 1}` : `status=?`); args.push(status); }
+    const whereSql = wheres.length ? 'WHERE ' + wheres.join(' AND ') : '';
+    const sql = `SELECT * FROM invoice_batch_alloc ${whereSql} ORDER BY sap_doc_num DESC, line_num ASC LIMIT ${limit}`;
+    let rows;
+    if (pgPool) rows = (await pgPool.query(sql, args)).rows;
+    else        rows = db.prepare(sql).all(...args);
+    const totals = {};
+    for (const r of rows) {
+      if (r.status !== 'attributed' || !r.batch_number) continue;
+      const e = totals[r.batch_number] || (totals[r.batch_number] = { qty: 0, boxes: 0, lines: 0 });
+      e.qty = Math.round((e.qty + (parseFloat(r.qty_lakhs) || 0)) * 100) / 100;
+      e.boxes += parseInt(r.boxes, 10) || 0;
+      e.lines++;
+    }
+    res.json({ ok: true, count: rows.length, allocations: rows, totals,
+               needsManual: rows.filter(r => r.status === 'needs_manual').length });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/admin/invoice-attribution-preview?limit=&batch=
+// DRY-RUN ONLY — never writes. Returns per-batch BEFORE (today's reconstruction) vs
+// AFTER (per-line attribution) plus every line the engine refused to guess at.
+app.get('/api/admin/invoice-attribution-preview', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const out = await _v48r_recomputeAll({
+      dryRun: true,
+      limit: parseInt(req.query.limit, 10) || 0,
+      batch: (req.query.batch || '').toString().trim(),
+    });
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/admin/invoice-attribution-rebuild   body: { apply: true }
+// Backfills invoice_batch_alloc from every stored payload. Dry-run unless apply===true.
+// Idempotent: re-running produces the same rows, and manual allocations are preserved.
+app.post('/api/admin/invoice-attribution-rebuild', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const apply = (req.body && (req.body.apply === true || req.body.apply === 'true' || req.body.apply === 1));
+    const out = await _v48r_recomputeAll({
+      dryRun: !apply,
+      limit: parseInt((req.body && req.body.limit), 10) || 0,
+      batch: ((req.body && req.body.batch) || '').toString().trim(),
+    });
+    if (apply) console.log(`[v48R] attribution rebuild applied: ${out.written} allocation row(s) across ${out.invoicesProcessed} invoice(s), ${out.linesFlagged} line(s) need manual allocation`);
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/invoice/:id/allocate
+// Manual allocation for a line the engine refused to guess at (Ishan's option (c)).
+// Body: { line_num: <int>, allocations: [ { batch_number, qty_lakhs, boxes? }, ... ] }
+// The allocations MUST sum to that line's own quantity — partial allocation would
+// silently lose quantity, which is the failure mode this whole build exists to end.
+// Rows are written with method='manual' and are never overwritten by the engine.
+app.post('/api/invoice/:id/allocate', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const invId = req.params.id;
+    const lineNum = parseInt((req.body || {}).line_num, 10);
+    const allocations = ((req.body || {}).allocations) || [];
+    if (!Number.isFinite(lineNum)) return res.status(400).json({ ok: false, error: 'line_num is required' });
+    if (!Array.isArray(allocations) || !allocations.length) return res.status(400).json({ ok: false, error: 'allocations[] is required' });
+    for (const a of allocations) {
+      if (!a || !String(a.batch_number || '').trim()) return res.status(400).json({ ok: false, error: 'every allocation needs a batch_number' });
+      if (!Number.isFinite(parseFloat(a.qty_lakhs))) return res.status(400).json({ ok: false, error: 'every allocation needs a numeric qty_lakhs' });
+    }
+    let row;
+    if (pgPool) row = (await pgPool.query(`SELECT * FROM invoices_received WHERE id=$1`, [invId])).rows[0];
+    else        row = db.prepare(`SELECT * FROM invoices_received WHERE id=?`).get(invId);
+    if (!row) return res.status(404).json({ ok: false, error: 'invoice not found' });
+    let payload = {};
+    try { payload = typeof row.payload_json === 'string' ? JSON.parse(row.payload_json) : (row.payload_json || {}); } catch (e) { payload = {}; }
+    const lines = payload.DocumentLines || [];
+    // v48S: line_num -1 addresses a payload-less invoice's HEADER total (no SAP line exists),
+    // so the target to match is the invoice total rather than a line quantity.
+    let line = null, lineQty = 0;
+    if (lineNum === -1) {
+      lineQty = Math.round((parseFloat(row.total_qty_lakhs) || 0) * 100) / 100;
+      line = { ItemCode: row.pc_code || '' };
+      if (!(lineQty > 0)) return res.status(400).json({ ok: false, error: 'invoice has no usable header total to allocate' });
+    } else {
+      line = lines.find((l, i) => ((l && l.LineNum != null) ? parseInt(l.LineNum, 10) : i) === lineNum);
+      if (!line) return res.status(404).json({ ok: false, error: `line ${lineNum} not found on this invoice` });
+      lineQty = parseFloat((((parseFloat(line.Quantity) || 0) * _sapUomScale(line))).toFixed(3));
+    }
+    const sum = Math.round(allocations.reduce((s, a) => s + (parseFloat(a.qty_lakhs) || 0), 0) * 100) / 100;
+    if (Math.abs(sum - lineQty) > 0.01) {
+      return res.status(400).json({ ok: false, error: `allocations sum to ${sum}L but line ${lineNum} is ${lineQty}L — they must match exactly` });
+    }
+    const who = (req.headers['x-sunloc-user'] || 'admin').toString();
+    // Replace any prior rows for this line (engine-derived or a previous manual allocation)
+    if (pgPool) await pgPool.query(`DELETE FROM invoice_batch_alloc WHERE invoice_id=$1 AND line_num=$2`, [invId, lineNum]);
+    else        db.prepare(`DELETE FROM invoice_batch_alloc WHERE invoice_id=? AND line_num=?`).run(invId, lineNum);
+    let seq = 0;
+    for (const a of allocations) {
+      const id = `alloc_${invId}_${lineNum}_m${seq++}`;
+      const qty = Math.round((parseFloat(a.qty_lakhs) || 0) * 1000) / 1000;
+      const bx = parseInt(a.boxes, 10) || 0;
+      const bn = String(a.batch_number).trim();
+      const pc = String(line.ItemCode || '').trim();
+      if (pgPool) {
+        await pgPool.query(`
+          INSERT INTO invoice_batch_alloc (id, invoice_id, sap_doc_entry, sap_doc_num, line_num,
+            batch_number, pc_code, qty_lakhs, boxes, method, status, reason, allocated_by, created_at, updated_at)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'manual','attributed',$10,$11,NOW()::TEXT,NOW()::TEXT)`,
+          [id, invId, row.sap_doc_entry, row.sap_doc_num, lineNum, bn, pc, qty, bx,
+           `manual allocation by ${who}`, who]);
+      } else {
+        db.prepare(`
+          INSERT INTO invoice_batch_alloc (id, invoice_id, sap_doc_entry, sap_doc_num, line_num,
+            batch_number, pc_code, qty_lakhs, boxes, method, status, reason, allocated_by, created_at, updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,'manual','attributed',?,?,datetime('now'),datetime('now'))`)
+          .run(id, invId, row.sap_doc_entry, row.sap_doc_num, lineNum, bn, pc, qty, bx,
+               `manual allocation by ${who}`, who);
+      }
+    }
+    console.log(`[v48R] manual allocation: invoice ${row.sap_doc_num} line ${lineNum} (${lineQty}L) → ${allocations.map(a => a.batch_number + ' ' + a.qty_lakhs + 'L').join(', ')} by ${who}`);
+    res.json({ ok: true, invoiceId: invId, lineNum, lineQty, allocated: allocations.length, by: who });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/admin/invoice-payload-repair   body: { apply: true, limit?: n }
+// v48T: REPAIR AT SOURCE rather than parking work on DM.
+// The bulk SAP fetch is lean and omits DocumentLines. A single-batch invoice survives that
+// (v48S recovers it from the header total), but a MULTI-batch one cannot be split without
+// lines and would sit in DM's queue permanently — 20 such invoices exist. sap.getInvoice()
+// returns the full document, so those are refetched and stored, after which normal per-line
+// attribution applies and the queue entry disappears.
+// Dry-run unless apply===true. NEVER runs automatically: it makes outbound SAP calls, so it
+// stays operator-invoked and is rate-paced. Failures are collected, never thrown.
+app.post('/api/admin/invoice-payload-repair', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const apply = (req.body && (req.body.apply === true || req.body.apply === 'true' || req.body.apply === 1));
+    const limit = Math.min(parseInt((req.body && req.body.limit), 10) || 50, 200);
+    // v48V: scope widened after the first run cleared 20/20 with no failures.
+    //   multi   (default) — payload-less MULTI-batch: cannot be split without lines
+    //   flagged           — ALSO the batch-less and corrupt-header ones (9015-9019, 10002). Their
+    //                       stored header total is unusable (raw thousands) or their header names no
+    //                       batch, but the LINES carry real quantities with a UoM that _sapUomScale
+    //                       handles, and often their own batch tags — the same mechanism that
+    //                       resolved invoice 9035. Repairs the source instead of hand-editing PG.
+    //   all               — every payload-less invoice, replacing the 145 header-total estimates
+    //                       with real line data. Strictly better, ~40s of paced SAP calls.
+    const scope = String((req.body && req.body.scope) || 'multi').toLowerCase();
+    let scopeWhere;
+    if (scope === 'all')          scopeWhere = `1=1`;
+    else if (scope === 'flagged') scopeWhere = `(batch_number LIKE '%,%' OR COALESCE(batch_number,'')=''
+                                                 OR COALESCE(total_qty_lakhs,0) > ${_V48S_MAX_CREDIBLE_INVOICE_L})`;
+    else                          scopeWhere = `batch_number LIKE '%,%'`;
+    const sql = `SELECT id, sap_doc_entry, sap_doc_num, batch_number, customer, card_code, total_boxes,
+                        total_qty_lakhs, pc_code
+                 FROM invoices_received
+                 WHERE payload_json IS NOT NULL AND payload_json NOT LIKE '%DocumentLines%'
+                   AND (${scopeWhere}) AND sap_doc_entry IS NOT NULL
+                 ORDER BY invoice_date DESC LIMIT ${limit}`;
+    const rows = pgPool ? (await pgPool.query(sql)).rows : db.prepare(sql).all();
+    const repaired = [], failed = [];
+    for (const row of rows) {
+      if (!apply) { repaired.push({ invoice: row.sap_doc_num, docEntry: row.sap_doc_entry, batches: row.batch_number, qty: row.total_qty_lakhs, action: 'would refetch from SAP' }); continue; }
+      try {
+        const r = await sap.getInvoice(row.sap_doc_entry);
+        const inv = (r && (r.data || r.invoice || r)) || null;
+        const lines = inv && inv.DocumentLines;
+        if (!inv || !Array.isArray(lines) || !lines.length) { failed.push({ invoice: row.sap_doc_num, error: 'SAP returned no DocumentLines' }); continue; }
+        const payload = JSON.stringify(inv);
+        if (pgPool) await pgPool.query(`UPDATE invoices_received SET payload_json=$1 WHERE id=$2`, [payload, row.id]);
+        else        db.prepare(`UPDATE invoices_received SET payload_json=? WHERE id=?`).run(payload, row.id);
+        const att = await _v48r_recomputeInvoice(row, inv);
+        await _v48x_sweepInvoiceRequests(row.id);   // v48X
+        repaired.push({ invoice: row.sap_doc_num, docEntry: row.sap_doc_entry, lines: lines.length,
+                        attributed: (att.allocations || []).filter(a => a.status === 'attributed').length,
+                        stillFlagged: (att.allocations || []).filter(a => a.status === 'needs_manual').length });
+      } catch (e) { failed.push({ invoice: row.sap_doc_num, error: (e && e.message) || 'SAP call failed' }); }
+      await new Promise(r2 => setTimeout(r2, 250));    // pace the SAP calls
+    }
+    res.json({ ok: true, dryRun: !apply, scope, candidates: rows.length, repaired: repaired.length, failedCount: failed.length, repairedDetail: repaired, failed });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/invoice/attribution-review
+// v48T: DM'S WORK QUEUE. The raw flag list mixes items needing completely different actions,
+// so it is grouped by what DM actually has to DO, and each entry carries the context needed to
+// decide without going back to SAP. 'action' names the resolution; 'candidates' lists the
+// batches on that invoice a line could legitimately be allocated to.
+app.get('/api/invoice/attribution-review', async (req, res) => {
+  if (!_requireAdmin(req, res)) return;
+  try {
+    const sql = `SELECT a.*, i.batch_number AS invoice_batch_key, i.customer, i.total_qty_lakhs
+                 FROM invoice_batch_alloc a
+                 LEFT JOIN invoices_received i ON i.id = a.invoice_id
+                 WHERE a.status = 'needs_manual'
+                 ORDER BY a.qty_lakhs DESC`;
+    const rows = pgPool ? (await pgPool.query(sql)).rows : db.prepare(sql).all();
+    const groups = {};
+    let totalQty = 0;
+    for (const r of rows) {
+      const why = String(r.reason || '');
+      let bucket, action;
+      if (/customer guard/.test(why))               { bucket = 'inferred_batch_customer_mismatch'; action = 'Batch was inferred from a PC match but the customer differs — confirm the batch, then allocate manually'; }
+      else if (/batch identifiers/.test(why))       { bucket = 'multi_tag_line';     action = 'Line names more than one batch — split it across them with POST /api/invoice/:id/allocate'; }
+      else if (/share PC/.test(why))                { bucket = 'ambiguous_pc';       action = 'Two batches on this invoice share a PC — allocate the quantity manually'; }
+      else if (/covers \d+ batches/.test(why))      { bucket = 'payload_less_multi'; action = 'Run POST /api/admin/invoice-payload-repair to refetch the lines from SAP'; }
+      else if (/plausibility ceiling/.test(why))    { bucket = 'corrupt_total';      action = 'Header total is corrupt (raw thousands) — correct the invoice total, then re-run the rebuild'; }
+      else if (/no batch key/.test(why))            { bucket = 'no_batch_key';       action = 'Invoice carries no batch reference at all — identify the batch and allocate manually'; }
+      else                                          { bucket = 'other';              action = 'Review manually'; }
+      const g = groups[bucket] || (groups[bucket] = { count: 0, qtyLakhs: 0, action, items: [] });
+      const q = parseFloat(r.qty_lakhs) || 0;
+      g.count++; g.qtyLakhs = Math.round((g.qtyLakhs + q) * 100) / 100; totalQty += q;
+      g.items.push({
+        invoiceId: r.invoice_id, invoice: r.sap_doc_num, line: r.line_num,
+        pc: r.pc_code, qtyLakhs: q, customer: r.customer,
+        candidates: String(r.invoice_batch_key || '').split(/[\s,]+/).filter(Boolean),
+        reason: r.reason,
+      });
+    }
+    const ordered = Object.keys(groups).sort((x, y) => groups[y].qtyLakhs - groups[x].qtyLakhs)
+      .map(k => ({ category: k, ...groups[k] }));
+    res.json({ ok: true, openItems: rows.length, totalQtyLakhs: Math.round(totalQty * 100) / 100, groups: ordered });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/invoice/allocation-totals
+// v48V: the single authoritative per-batch invoiced figure, in ONE call, for the consumers that
+// used to reconstruct it (planning tally, Invoice button, integrity check, badges).
+// Sums status='attributed' only — a needs_manual line is counted nowhere until a human allocates
+// it, which is the whole point of the option-(c) design. `needsManual` reports, per batch, how many
+// lines are still awaiting a decision so the UI can mark the figure as provisional.
+app.get('/api/invoice/allocation-totals', async (req, res) => {
+  try {
+    const sql = `SELECT batch_number, status, SUM(qty_lakhs) AS qty, SUM(boxes) AS boxes, COUNT(*) AS n
+                 FROM invoice_batch_alloc
+                 WHERE batch_number IS NOT NULL AND batch_number <> ''
+                 GROUP BY batch_number, status`;
+    const rows = pgPool ? (await pgPool.query(sql)).rows : db.prepare(sql).all();
+    const totals = {}, needsManual = {};
+    for (const r of rows) {
+      const b = r.batch_number;
+      if (r.status === 'attributed') {
+        const e = totals[b] || (totals[b] = { qty: 0, boxes: 0 });
+        e.qty = Math.round((e.qty + (parseFloat(r.qty) || 0)) * 100) / 100;
+        e.boxes += parseInt(r.boxes, 10) || 0;
+      } else if (r.status === 'needs_manual') {
+        needsManual[b] = (needsManual[b] || 0) + (parseInt(r.n, 10) || 0);
+      }
+    }
+    // Unattributed lines carry no batch, so they cannot be reported per batch — surface the count
+    // so the UI can tell DM that some quantity is unassigned somewhere.
+    const uSql = `SELECT COUNT(*) AS n FROM invoice_batch_alloc WHERE status='needs_manual' AND (batch_number IS NULL OR batch_number='')`;
+    const uRow = pgPool ? (await pgPool.query(uSql)).rows[0] : db.prepare(uSql).get();
+    // v48X: request IDs already covered by an allocation. planning.html must NOT also count these
+    // as in-flight asks — the quantity would be counted twice (once as the ask, once as the
+    // allocated line), understating what is still available to invoice on a partly-invoiced batch.
+    const lSql = `SELECT DISTINCT invoice_request_id FROM invoice_batch_alloc
+                   WHERE invoice_request_id IS NOT NULL AND status='attributed'`;
+    let linked = [];
+    try {
+      const lRows = pgPool ? (await pgPool.query(lSql)).rows : db.prepare(lSql).all();
+      linked = lRows.map(r => r.invoice_request_id).filter(Boolean);
+    } catch (e) { linked = []; }
+    // v49C: per-batch INVOICE STATE, from the same authoritative per-line attribution.
+    // WHY: planning.html attributes an UNLINKED invoice to its batch_number key AS STORED — that is
+    // deliberate (v47R), so bulk invoice 9038 could not stamp 26X082 as dispatched. The side effect is
+    // that a multi-batch key ("26ZD109, 26ZD110") matches no batch row, leaving hasReceived / docNum /
+    // dispatchStatus unreachable for every batch on such an invoice. Those rows then sit on
+    // "Awaiting SAP Invoice" forever even after the request reconciles, because _applyAllocationReconcile
+    // deliberately does not write invoices_received.invoice_request_id (live: 26ZD109, 26ZD110, 26Z069,
+    // 26ZE100 — all with correct quantities and a stuck badge). v48V flipped the QUANTITY consumer to
+    // invoice_batch_alloc but left the STATE flags on the reconstruction; this supplies the other half.
+    // Deriving state per LINE is exactly as safe as the quantity already is, and does not reopen v47R:
+    // a bulk invoice's lines each name their own batch, so nothing is attributed by guesswork.
+    // Precedence within a batch: a dispatched invoice wins, else the most recent invoice_date.
+    const sSql = `SELECT a.batch_number, i.id AS invoice_id, i.sap_doc_num, i.sap_invoice_no,
+                         i.dispatch_status, i.dispatched_at, i.vehicle_no, i.invoice_date
+                    FROM invoice_batch_alloc a
+                    JOIN invoices_received i ON i.id = a.invoice_id
+                   WHERE a.status = 'attributed'
+                     AND a.batch_number IS NOT NULL AND a.batch_number <> ''`;
+    const invState = {};
+    try {
+      const sRows = pgPool ? (await pgPool.query(sSql)).rows : db.prepare(sSql).all();
+      const _rank = (d) => (d === 'dispatched' || d === 'deemed_dispatched') ? 2 : (d === 'partial' ? 1 : 0);
+      for (const r of sRows) {
+        const b = r.batch_number;
+        const cand = {
+          invoiceId: r.invoice_id,
+          docNum: r.sap_doc_num || r.sap_invoice_no || null,
+          dispatchStatus: r.dispatch_status || null,
+          dispatchedAt: r.dispatched_at || null,
+          vehicleNo: r.vehicle_no || null,
+          _r: _rank(r.dispatch_status),
+          _d: String(r.invoice_date || ''),
+        };
+        const cur = invState[b];
+        if (!cur || cand._r > cur._r || (cand._r === cur._r && cand._d > cur._d)) invState[b] = cand;
+      }
+      for (const b of Object.keys(invState)) { delete invState[b]._r; delete invState[b]._d; }
+    } catch (e) {
+      // Additive overlay only — totals above remain valid without it, so a failure here degrades to
+      // prior behaviour rather than breaking the endpoint.
+      console.warn('[v49C] per-batch invoice state unavailable:', e.message);
+    }
+
+    res.json({ ok: true, totals, needsManual, openUnassigned: parseInt(uRow && uRow.n, 10) || 0,
+               linkedRequestIds: linked, invState, batches: Object.keys(totals).length });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/invoice/request/:id/accept-proposal
+// v48Y (confirmed by Ishan): resolve a request whose invoice arrived at a DIFFERENT quantity.
+//
+// GOVERNING RULE — the invoice is the financial fact; the request is only an intent. When they
+// disagree the INVOICED quantity always wins and the request is closed at that figure. This handles
+// both directions with one action:
+//   • invoice < request (live case 26X085: 2.0L invoiced against a 3.0L ask) — the request closes at
+//     2.0L and the 1.0L difference returns to available-to-invoice on that batch, so the residual can
+//     still be billed later. Nothing is silently written off.
+//   • invoice > request — closes at the invoice, and if that exceeds packed the invoiced_exceeds_packed
+//     check fires, which is the correct outcome rather than something to suppress here.
+// Sunloc cannot edit a SAP invoice (it raises Delivery Notes; the SAP user converts them), so
+// "correct the invoice" is deliberately NOT offered — it is not an action this system can perform.
+//
+// A reason is REQUIRED only when the divergence falls outside the same 0.99–1.15 tolerance band the
+// automatic matcher uses; inside the band this is simply the auto-reconcile a human triggered early.
+// Either way it is audit-logged with both quantities.
+app.post('/api/invoice/request/:id/accept-proposal', async (req, res) => {
+  const session = _v41_requireInvoiceRole(req, res);
+  if (!session) return;
+  try {
+    const reqId = req.params.id;
+    const allocationId = ((req.body || {}).allocationId || '').toString().trim();
+    const reason = ((req.body || {}).reason || '').toString().trim();
+    if (!allocationId) return res.status(400).json({ ok: false, error: 'allocationId is required' });
+
+    const rq = pgPool ? (await pgPool.query(`SELECT * FROM invoice_requests WHERE id=$1`, [reqId])).rows[0]
+                      : db.prepare(`SELECT * FROM invoice_requests WHERE id=?`).get(reqId);
+    if (!rq) return res.status(404).json({ ok: false, error: 'request not found' });
+    if (rq.status !== 'pending_reconciliation') return res.status(400).json({ ok: false, error: `request is ${rq.status}, not awaiting reconciliation` });
+
+    const aSql = `SELECT a.*, i.customer AS inv_customer, i.sap_doc_num AS inv_doc_num, i.dispatch_status
+                  FROM invoice_batch_alloc a JOIN invoices_received i ON i.id = a.invoice_id
+                  WHERE a.id = $1`;
+    const alloc = pgPool ? (await pgPool.query(aSql, [allocationId])).rows[0]
+                         : db.prepare(aSql.replace(/\$1/g, '?')).get(allocationId);
+    if (!alloc) return res.status(404).json({ ok: false, error: 'allocation not found' });
+    if (alloc.invoice_request_id) return res.status(409).json({ ok: false, error: `that invoice line is already reconciled against request ${alloc.invoice_request_id}` });
+    if (alloc.status !== 'attributed') return res.status(400).json({ ok: false, error: 'that invoice line is not attributed to a batch yet' });
+
+    const askQty = parseFloat(rq.qty_lakhs) || 0;
+    const invQty = parseFloat(alloc.qty_lakhs) || 0;
+    const inBand = askQty > 0 && invQty >= askQty * _RECON_UNDER && invQty <= askQty * _RECON_OVER;
+    if (!inBand && !reason) {
+      return res.status(400).json({ ok: false, needsReason: true, askQty, invoicedQty: invQty,
+        error: `Invoiced ${invQty}L against a request for ${askQty}L — outside tolerance, so a reason is required.` });
+    }
+    const ok = await _applyAllocationReconcile(rq, alloc);
+    if (!ok) return res.status(409).json({ ok: false, error: 'that invoice line was claimed by another request just now — reopen the list and retry' });
+
+    const note = `manual accept by ${session.username}: request ${askQty}L closed at invoiced ${invQty}L (invoice ${alloc.inv_doc_num})${reason ? ' — ' + reason : ''}`;
+    try {
+      if (pgPool) await pgPool.query(`UPDATE invoice_batch_alloc SET reason=$1, allocated_by=$2 WHERE id=$3`, [note, session.username, alloc.id]);
+      else db.prepare(`UPDATE invoice_batch_alloc SET reason=?, allocated_by=? WHERE id=?`).run(note, session.username, alloc.id);
+    } catch (e) { /* annotation only */ }
+    logAudit(session.username, session.role, 'invoice', 'RECON_MANUAL_ACCEPT', note);
+    console.log(`[v48Y] ${note}`);
+    res.json({ ok: true, requestId: reqId, allocationId: alloc.id, askQty, invoicedQty: invQty,
+               difference: Math.round((invQty - askQty) * 100) / 100, inBand, reasonRecorded: reason || null });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // v39 Phase 16: POST /api/invoice/:id/deemed-scan-out
 // Admin marks an invoice as dispatched without physical box scanning. Used for:
 //   - Documentation-only dispatches
@@ -5935,15 +8022,23 @@ app.post('/api/invoice/:id/deemed-scan-out', async (req, res) => {
       });
     }
     const recId = 'disprec_deemed_' + crypto.randomBytes(6).toString('hex');
-    const boxes = parseInt(inv.total_boxes) || 0;
-    const qtyLakhs = parseFloat(inv.total_qty_lakhs) > 0
+    let boxes = parseInt(inv.total_boxes) || 0;
+    let qtyLakhs = parseFloat(inv.total_qty_lakhs) > 0
       ? parseFloat(inv.total_qty_lakhs)
       : (boxes > 0 ? boxes / 100 : 0);
+    const _disp = _dispatchQtyBoxes(inv.batch_number, qtyLakhs, boxes); // v46U: recalibrate export qty + derive boxes
+    qtyLakhs = _disp.qty; boxes = _disp.boxes;
     const ts = new Date().toISOString();
     const dispatchRemarks = `DEEMED: ${reason}${remarks ? ' | ' + remarks : ''}`;
     // Insert dispatch record
+    // v48D (Ishan): a double-fire of this regularise must not create a 2nd identical record — the
+    // 26ZF097/1692 exact-dupe originated here. Skip the insert idempotently if one already exists; the
+    // rest of the flow (marking the invoice dispatched) still runs so a partial first fire self-heals.
+    const _dupDeemed = await _isDuplicateDispatch(inv.batch_number, inv.sap_doc_num || '', boxes, qtyLakhs);
     try {
-      if (pgPool) {
+      if (_dupDeemed) {
+        /* identical dispatch record already exists — suppress duplicate insert */
+      } else if (pgPool) {
         await pgPool.query(
           `INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by")
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
@@ -6068,6 +8163,8 @@ app.post('/api/orders/upsert', async (req, res) => {
   try {
     const ord = req.body;
     if (!ord || !ord.id) return res.status(400).json({ ok: false, error: 'id required' });
+    await _v49gWarmDprClosed();   // v49G: DPR-closed set for the option-B close gate
+    await _v49gWarmReopenedOpen();   // v49G option (ii): reopened-and-open set for the single re-close exemption
 
     // v41x FIX: apply the same conflict-resolution guard as /api/orders/upsert-bulk and
     // POST /api/planning/state. The single-order upsert was unconditionally overwriting
@@ -6080,6 +8177,10 @@ app.post('/api/orders/upsert', async (req, res) => {
     let finalActualProd = ord.actualProd || 0;
     let mergedOrd = ord;
     let preserved = false;
+    let _v49gDprRefused = false;   // v49G: hoisted so the response can report the DPR-gate refusal
+    let _v49gCascadeDprClose = false;   // v49G option (ii): re-close of a reopened batch must re-close DPR
+    let _v49nLimitRefused = false;   // v49N: 2-order-limit promotion refusal, reported to the client
+    let _v49nOccupying = [];         // v49N: the batches occupying the machine's 2 running slots
     let existing = null;
     try {
       if (pgPool) {
@@ -6094,10 +8195,58 @@ app.post('/api/orders/upsert', async (req, res) => {
       try { exData = typeof existing.data_json === 'string' ? JSON.parse(existing.data_json) : (existing.data_json || {}); } catch(e) {}
       const clientEdit = parseInt(ord._localEditedAt || 0);
       const dbUpdated  = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
+      let _v49gOverride = false;
       if (existing.status && ord.status && existing.status !== ord.status) {
-        if (dbUpdated > clientEdit + 5000) {
+        // v49G: an explicit planner close/reopen wins over the timestamp race (option B honours the
+        // DPR gate). Only when there is NO explicit intent do we fall back to the old staleness guard.
+        const _intent = _v49gStatusIntent(ord, existing.status);
+        if (_intent) {
+          finalStatus = _intent.status;
+          if (_intent.refusedDprGate) { preserved = true; _v49gDprRefused = true; }
+          if (_intent.cascadeDprClose) { _v49gCascadeDprClose = true; }
+          if (_intent.override) {
+            _v49gOverride = true;
+            // status + closedDate + manualEndDate move as one set so the row can't self-contradict
+            ord.status = _intent.status;
+            if (_intent.status === 'closed') { ord.manualEndDate = true; ord.closedDate = ord.closedDate || new Date().toISOString(); }
+            else { ord.manualEndDate = false; ord.closedDate = null; }
+          }
+        } else if (ord.status === 'closed' && (ord.closedDate || ord.manualEndDate) && existing.status !== 'closed') {
+          // v49R: stale historical close — hold DB status silently, never signal a correction
+          finalStatus = existing.status;
+        } else if (dbUpdated > clientEdit + 5000) {
           finalStatus = existing.status;
           preserved = true;
+        }
+        // v49N (confirmed by Ishan): 2-order limit as a PROMOTION GATE on the single-order path too.
+        // This endpoint had NO limit at all — the modal/dropdown promotion was always accepted here and
+        // a later sweep (bulk/bg-merge downgrade, now removed) silently undid it: the flip the planner
+        // saw. Now the decision happens ONCE, at the moment of the action, loudly. Reopens are untouched
+        // (they route through _v49gStatusIntent above, from status closed). v45X exemption kept: a batch
+        // with real production re-promotes freely.
+        if (finalStatus === 'running' && existing.status !== 'running' && existing.status !== 'closed'
+            && ord.machineId && !_orderHasActuals(ord) && !_orderHasActuals(exData)) {
+          try {
+            let _rr;
+            if (pgPool) {
+              _rr = (await pgPool.query(
+                `SELECT id, batch_number FROM production_orders
+                  WHERE machine_id=$1 AND status='running' AND COALESCE(deleted,false)=false AND id<>$2`,
+                [ord.machineId, ord.id])).rows;
+            } else {
+              _rr = db.prepare(
+                `SELECT id, batch_number FROM production_orders
+                  WHERE machine_id=? AND status='running' AND COALESCE(deleted,0)=0 AND id<>?`)
+                .all(ord.machineId, ord.id);
+            }
+            const _occ = (_rr || []).filter(r => _v49kCountsAsRunning(r.id, { id: r.id, status: 'running', deleted: false, batch_number: r.batch_number }));
+            if (_occ.length >= 2) {
+              finalStatus = existing.status || 'pending';
+              _v49nLimitRefused = true;
+              _v49nOccupying = _occ.map(r => r.batch_number || r.id).slice(0, 4);
+              console.log(`[v49N] 2-order limit: promotion of ${ord.batchNumber||ord.id} on MC ${ord.machineId} refused — running: ${_v49nOccupying.join(', ')}`);
+            }
+          } catch (e) { console.warn('[v49N] limit gate skipped:', e && e.message); }
         }
       }
       if (exData.deleted || existing.deleted) finalDeleted = true;
@@ -6117,19 +8266,35 @@ app.post('/api/orders/upsert', async (req, res) => {
         else                 finalActualProd = Math.max(ord.actualProd || 0, exData.actualProd || 0);
       }
       const hasManualDate = exData.manualEndDate || exData.manualStartDate;
+      const _staleWrite = (dbUpdated > (clientEdit || 0) + 5000); // v47 Point 1: incoming client older than DB by >5s
       mergedOrd = {
         ...ord,
+        // v47 Point 1 (confirmed by Ishan): planner-owned fields were written UNGUARDED here, so a stale
+        // tab's push clobbered them and colour/gross/customer/W-O "reverted" on the next sync (the client
+        // reads these from production_orders, not the blob). Guard them with the same _localEditedAt rule
+        // used for status: if the DB copy is newer than the incoming edit stamp, keep DB; else fresh edit wins.
+        colour:        _staleWrite && exData.colour        != null ? exData.colour        : ord.colour,
+        customer:      _staleWrite && exData.customer      != null ? exData.customer      : ord.customer,
+        shipTo:        _staleWrite && exData.shipTo        != null ? exData.shipTo        : ord.shipTo,
+        billTo:        _staleWrite && exData.billTo        != null ? exData.billTo        : ord.billTo,
+        grossOverride: _staleWrite && exData.grossOverride != null ? exData.grossOverride : ord.grossOverride,
+        woStatus:      _staleWrite && exData.woStatus      != null ? exData.woStatus      : ord.woStatus,
         status: finalStatus,
         deleted: finalDeleted,
         actualProd: finalActualProd,
         startDate:       hasManualDate ? exData.startDate   : ord.startDate,
         endDate:         hasManualDate ? exData.endDate     : ord.endDate,
         manualStartDate: exData.manualStartDate || ord.manualStartDate,
-        manualEndDate:   exData.manualEndDate   || ord.manualEndDate,
-        // v41z: protect SAP refs and PO number — DB wins if set; stale client cannot blank them
-        sapDocEntry: exData.sapDocEntry || ord.sapDocEntry || null,
-        sapDocNum:   exData.sapDocNum   || ord.sapDocNum   || '',
-        poNumber:    exData.poNumber    || ord.poNumber    || '',
+        // v49G: on an explicit status override, manualEndDate/closedDate follow the client's decision
+        // (a reopen CLEARS them); otherwise the existing DB-wins behaviour is unchanged.
+        manualEndDate:   _v49gOverride ? (ord.manualEndDate || false) : (exData.manualEndDate || ord.manualEndDate),
+        closedDate:      _v49gOverride ? (ord.closedDate || null)     : (ord.closedDate != null ? ord.closedDate : (exData.closedDate || null)),
+        // v47E (confirmed by Ishan): SAP refs + PO are now STAMP-AWARE. A stale client still cannot
+        // blank/revert them (DB wins), but a FRESH stamped edit — e.g. a planner correcting a wrong
+        // Sales Order Number — wins, so corrections hold instead of bouncing back to the old value.
+        sapDocEntry: _staleWrite ? (exData.sapDocEntry || ord.sapDocEntry || null) : (ord.sapDocEntry || exData.sapDocEntry || null),
+        sapDocNum:   _staleWrite ? (exData.sapDocNum   || ord.sapDocNum   || '')   : (ord.sapDocNum   || exData.sapDocNum   || ''),
+        poNumber:    _staleWrite ? (exData.poNumber    || ord.poNumber    || '')   : (ord.poNumber    || exData.poNumber    || ''),
         // v41z2: user-editable fields — client wins when saving; fall back to DB only if null
         qty:      ord.qty      != null ? ord.qty      : (exData.qty      != null ? exData.qty      : null),
         grossQty: ord.grossQty != null ? ord.grossQty : (exData.grossQty != null ? exData.grossQty : null),
@@ -6144,6 +8309,7 @@ app.post('/api/orders/upsert', async (req, res) => {
     if (preserved) {
       console.log(`[v41x upsert] Preserved DB status on ${ord.id} (client="${ord.status}" → DB="${finalStatus}", stale write blocked)`);
     }
+    mergedOrd = _v49f_rcLock(mergedOrd, exData);   // v49F: re-customer is authoritative
     const json = JSON.stringify(mergedOrd);
     if (pgPool) {
       await pgPool.query(`
@@ -6162,7 +8328,30 @@ app.post('/api/orders/upsert', async (req, res) => {
         status=excluded.status,deleted=excluded.deleted,updated_at=datetime('now')`)
         .run(mergedOrd.id, json, mergedOrd.machineId||null, mergedOrd.batchNumber||null, finalStatus, finalDeleted?1:0);
     }
-    res.json({ ok: true, preserved, savedAt: new Date().toISOString() });
+    // v49G option (ii): a re-close of a legitimately-reopened batch cascades to DPR — write the
+    // dpr_batch_closed row so DPR and Tracking re-close together with Planning. This is the second
+    // leg of the round-trip; the once-only reopen guard means the batch can't reopen again after this.
+    if (_v49gCascadeDprClose && finalStatus === 'closed') {
+      try {
+        const _cb = mergedOrd.batchNumber || null;
+        if (pgPool) {
+          await pgPool.query(
+            `INSERT INTO dpr_batch_closed (order_id, batch_number, closed_at, closed_by, notes)
+             VALUES ($1,$2,NOW(),$3,$4) ON CONFLICT(order_id) DO UPDATE SET closed_at=NOW()`,
+            [mergedOrd.id, _cb, 'planning-cascade', 'Re-closed from Planning after reopen (v49G cascade)']);
+        } else {
+          db.prepare(`INSERT OR REPLACE INTO dpr_batch_closed (order_id, batch_number, closed_at, closed_by, notes)
+             VALUES (?,?,datetime('now'),?,?)`).run(mergedOrd.id, _cb, 'planning-cascade', 'Re-closed from Planning after reopen (v49G cascade)');
+        }
+        _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
+        console.log(`[v49G] cascade: re-close of reopened batch ${_cb||mergedOrd.id} written to dpr_batch_closed`);
+      } catch (e) { console.warn('[v49G] DPR-close cascade failed:', e && e.message); }
+    }
+    res.json({ ok: true, preserved, dprGateRefused: !!_v49gDprRefused,
+      limitRefused: !!_v49nLimitRefused, heldStatus: _v49nLimitRefused ? finalStatus : undefined,
+      occupying: _v49nLimitRefused ? _v49nOccupying : undefined,
+               dprGateMessage: _v49gDprRefused ? 'Close in DPR first' : undefined,
+               savedAt: new Date().toISOString() });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
@@ -6444,6 +8633,8 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
   try {
     const { orders } = req.body;
     if (!Array.isArray(orders)) return res.status(400).json({ ok: false, error: 'orders array required' });
+    await _v49gWarmDprClosed();   // v49G: DPR-closed set for the option-B close gate
+    await _v49gWarmReopenedOpen();   // v49G option (ii): reopened-and-open set for the single re-close exemption
 
     // v41w FIX: this endpoint is called on every page load (loadState migration push) AND
     // whenever a client wants to sync. Previously it unconditionally overwrote DB.status with
@@ -6481,7 +8672,7 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
     const dbRunningPerMachine = {};
     const _dbRunningOrderIds = {};
     const _allRunningRows = Object.entries(existingMap)
-      .filter(([, row]) => row && row.status === 'running' && !row.deleted)
+      .filter(([id, row]) => _v49kCountsAsRunning(id, row))   // v49K: DPR-closed ghosts don't count
       .sort((a, b) => {
         const ta = a[1].updated_at ? new Date(a[1].updated_at).getTime() : 0;
         const tb = b[1].updated_at ? new Date(b[1].updated_at).getTime() : 0;
@@ -6496,15 +8687,20 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
         _dbRunningOrderIds[machineId].push(rowId);
       }
     });
-    // ACTIVE ENFORCEMENT: if DB already has 3+ running on a machine, downgrade the newest ones
-    const _forcePendingIds = new Set();
+    // v49N (confirmed by Ishan): the ACTIVE ENFORCEMENT that downgraded "the newest ones" is REMOVED.
+    // Root cause of the status flips that survived v49K/M: this slice(2) protected the two OLDEST
+    // DB rows — including ghosts the planner believes closed (e.g. a v49G DPR-gate-refused close held
+    // at running) — and downgraded the planner's freshly-set running/upcoming batches. The blob-save
+    // site protected the NEWEST two, so the two enforcers fought each other and the status oscillated
+    // forever. New rule: NO code path ever writes a status the planner did not ask for. The 2-order
+    // limit survives as a PROMOTION GATE below (refuse-and-surface, same pattern as the DPR gate).
+    const _mcRunNames = {};   // machineId -> batch numbers currently counted running (for the message)
     Object.entries(_dbRunningOrderIds).forEach(([machineId, ids]) => {
-      if (ids.length > 2) {
-        ids.slice(2).forEach(id => {
-          _forcePendingIds.add(id);
-          console.log('[v41z upsert-bulk] MC ' + machineId + ' has ' + ids.length + ' running — downgrading ' + id + ' to pending (2-order limit)');
-        });
-      }
+      _mcRunNames[machineId] = ids.map(id => {
+        const row = existingMap[id];
+        if (row && row.batch_number) return row.batch_number;
+        try { const d = typeof row.data_json === 'string' ? JSON.parse(row.data_json) : row.data_json; return (d && d.batchNumber) || id; } catch(e) { return id; }
+      });
     });
     for (const ord of orders) {
       if (!ord.id) continue;
@@ -6512,6 +8708,7 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
       let finalDeleted = ord.deleted || false;
       let finalActualProd = ord.actualProd || 0;
       let mergedOrd = ord;
+      let _v49gOverride2 = false;   // v49G: explicit status override for this order
       const existing = existingMap[ord.id];
       if (existing) {
         let exData = {};
@@ -6527,36 +8724,82 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
         const _dbIsRunningOrClosed = existing.status === 'running' || existing.status === 'closed';
         const _clientIsRunningOrClosed = ord.status === 'running' || ord.status === 'closed';
 
-        // If DB already has running/closed — preserve it always, client cannot overwrite
-        if (_dbIsRunningOrClosed && ord.status !== existing.status) {
+        // v49G: an EXPLICIT planner close/reopen must win here first — this branch (the old "PERMANENT
+        // STATUS PROTECTION") preserved DB status unconditionally when it differed, which is precisely
+        // what discarded genuine closes (log: client="closed" -> DB="running", stale write blocked).
+        // Option B: a DPR-gated batch is still refused rather than silently reverted.
+        const _intent2 = _v49gStatusIntent(ord, existing.status);
+        if (_intent2) {
+          finalStatus = _intent2.status;
+          if (_intent2.refusedDprGate) {
+            preservedCount++;
+            preservedOrders.push({ id: ord.id, batchNumber: ord.batchNumber||null, machineId: ord.machineId||null, clientStatus: ord.status, dbStatus: existing.status, dprGateRefused: true });
+          } else if (_intent2.override) {
+            _v49gOverride2 = true;
+            ord.status = _intent2.status;
+            if (_intent2.status === 'closed') { ord.manualEndDate = true; ord.closedDate = ord.closedDate || new Date().toISOString(); }
+            else { ord.manualEndDate = false; ord.closedDate = null; }
+          }
+        // If DB already has running/closed — preserve it, client cannot overwrite…
+        // v49P (confirmed by Ishan; log-proven): …EXCEPT a FRESH explicit demote running→pending. The
+        // protection exists to stop AUTOMATIC/stale rewrites, but it also blocked the planner: a DPR-Open
+        // batch could not be closed (DPR gate, correctly) NOR demoted (this branch) — it was stuck In
+        // Production forever (26ZG154/155) and every attempt "flipped back". A fresh planner demote is a
+        // deliberate user action, exactly like a promotion. Closed stays sacred — reopen path only.
+        } else if (_dbIsRunningOrClosed && ord.status !== existing.status) {
+          if (existing.status === 'running' && ord.status === 'pending' && _v49pFresh(ord)) {
+            finalStatus = 'pending';
+            if (ord.machineId && dbRunningPerMachine[ord.machineId]) {
+              dbRunningPerMachine[ord.machineId]--;   // vacated a slot for later promotions in this payload
+              if (_mcRunNames[ord.machineId]) _mcRunNames[ord.machineId] = _mcRunNames[ord.machineId].filter(n => n !== (ord.batchNumber || ord.id));
+            }
+            console.log(`[v49P] explicit demote accepted: ${ord.batchNumber||ord.id} running → pending`);
+          } else if (ord.status === 'closed' && (ord.closedDate || ord.manualEndDate) && !_v49pFresh(ord)) {
+            // v49R: stale HISTORICAL close vs table running — hold DB silently, emit NO correction.
+            // The correction entry is what made the client un-close the order and clear its
+            // closedDate (the month-scoping flood). The blob keeps the close (R1a).
+            finalStatus = existing.status;
+          } else {
           finalStatus = existing.status;
           preservedCount++;
           preservedOrders.push({ id: ord.id, batchNumber: ord.batchNumber||null, machineId: ord.machineId||null, clientStatus: ord.status, dbStatus: existing.status });
-        // If client is setting running/closed — always accept (user action)
-        } else if (_clientIsRunningOrClosed && !_dbIsRunningOrClosed) {
-          finalStatus = ord.status;
-          if (ord.status === 'running' && !_alreadyRunningInDB && ord.machineId) {
-            dbRunningPerMachine[ord.machineId] = (dbRunningPerMachine[ord.machineId] || 0) + 1;
           }
-        // 2-order limit: only applies to running, never to closed
-        } else if (_forcePendingIds.has(ord.id) && ord.status === 'running' && existing.status !== 'closed') {
-          finalStatus = 'pending';
-          preservedCount++;
-          preservedOrders.push({ id: ord.id, batchNumber: ord.batchNumber||null, machineId: ord.machineId||null, clientStatus: ord.status, dbStatus: 'pending' });
-        } else {
-        const _wouldExceedLimit = ord.status === 'running' && !_alreadyRunningInDB && _machineRunCount >= 2;
-        if (_wouldExceedLimit) {
-          finalStatus = 'pending';
-          preservedCount++;
+        // If client is setting running/closed — accept (user action), EXCEPT a running promotion on a
+        // machine whose 2 slots are already occupied: v49N refuses it and names the occupants, instead
+        // of accepting now and having a later sweep silently downgrade it (the flip). v45X exemption
+        // kept: a batch with real production re-promotes freely — that is a resume, not a new start.
+        } else if (_clientIsRunningOrClosed && !_dbIsRunningOrClosed) {
+          const _v49nPromo = ord.status === 'running' && !_alreadyRunningInDB && ord.machineId;
+          if (_v49nPromo && (dbRunningPerMachine[ord.machineId] || 0) >= 2
+              && !_orderHasActuals(ord) && !_orderHasActuals(exData)) {
+            finalStatus = existing.status || 'pending';
+            preservedCount++;
+            preservedOrders.push({ id: ord.id, batchNumber: ord.batchNumber||null, machineId: ord.machineId||null,
+              clientStatus: ord.status, dbStatus: finalStatus, limitRefused: true,
+              occupying: (_mcRunNames[ord.machineId] || []).slice(0, 4) });
+            console.log(`[v49N] 2-order limit: promotion of ${ord.batchNumber||ord.id} on MC ${ord.machineId} refused — running: ${(_mcRunNames[ord.machineId]||[]).join(', ')}`);
+          } else {
+            finalStatus = ord.status;
+            if (_v49nPromo) {
+              dbRunningPerMachine[ord.machineId] = (dbRunningPerMachine[ord.machineId] || 0) + 1;
+              if (!_mcRunNames[ord.machineId]) _mcRunNames[ord.machineId] = [];
+              _mcRunNames[ord.machineId].push(ord.batchNumber || ord.id);
+            }
+          }
         } else if (existing.status && ord.status && existing.status !== ord.status) {
-          if (dbUpdated > clientEdit + 5000) {
+          // v49R: a stale client 'closed' with a closedDate is a historical fact — hold the DB status
+          // SILENTLY (no preservedOrders entry). Emitting the entry made the client patch the order
+          // open and clear its closedDate (the month-scoping flood). The blob keeps the close (R1a);
+          // v45S heals the table at boot.
+          if (ord.status === 'closed' && (ord.closedDate || ord.manualEndDate)) {
+            finalStatus = existing.status;
+          } else if (dbUpdated > clientEdit + 5000) {
             finalStatus = existing.status;
             preservedCount++;
             preservedOrders.push({ id: ord.id, batchNumber: ord.batchNumber||null, machineId: ord.machineId||null, clientStatus: ord.status, dbStatus: existing.status });
           }
           // else: client wins
         }
-        } // end 2-order limit else
         // Deleted is sticky once true — never resurrect a deleted order
         if ((exData.deleted || existing.deleted) && !ord.deleted) {
           finalDeleted = true;
@@ -6583,19 +8826,31 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
         }
         // Preserve manual date flags from DB if set
         const hasManualDate = exData.manualEndDate || exData.manualStartDate;
+        const _staleWrite = (dbUpdated > (clientEdit || 0) + 5000); // v47 Point 1: incoming client older than DB by >5s
         mergedOrd = {
           ...ord,
+          // v47 Point 1: same stale-tab guard as the single upsert — the bulk sync pushes ALL of a tab's
+          // orders, so a stale tab clobbered colour/gross/customer/W-O for every order. Keep DB when the
+          // incoming edit stamp is older than the DB copy; otherwise the fresh edit flows through.
+          colour:        _staleWrite && exData.colour        != null ? exData.colour        : ord.colour,
+          customer:      _staleWrite && exData.customer      != null ? exData.customer      : ord.customer,
+          shipTo:        _staleWrite && exData.shipTo        != null ? exData.shipTo        : ord.shipTo,
+          billTo:        _staleWrite && exData.billTo        != null ? exData.billTo        : ord.billTo,
+          grossOverride: _staleWrite && exData.grossOverride != null ? exData.grossOverride : ord.grossOverride,
+          woStatus:      _staleWrite && exData.woStatus      != null ? exData.woStatus      : ord.woStatus,
           status: finalStatus,
           deleted: finalDeleted,
           actualProd: finalActualProd,
           startDate:       hasManualDate ? exData.startDate   : ord.startDate,
           endDate:         hasManualDate ? exData.endDate     : ord.endDate,
           manualStartDate: exData.manualStartDate || ord.manualStartDate,
-          manualEndDate:   exData.manualEndDate   || ord.manualEndDate,
-          // v41z: protect SAP refs and PO number — DB wins if set; stale client cannot blank them
-          sapDocEntry: exData.sapDocEntry || ord.sapDocEntry || null,
-          sapDocNum:   exData.sapDocNum   || ord.sapDocNum   || '',
-          poNumber:    exData.poNumber    || ord.poNumber    || '',
+          // v49G: an explicit status override lets the client's manualEndDate/closedDate win (reopen clears them)
+          manualEndDate:   _v49gOverride2 ? (ord.manualEndDate || false) : (exData.manualEndDate || ord.manualEndDate),
+          closedDate:      _v49gOverride2 ? (ord.closedDate || null)     : (ord.closedDate != null ? ord.closedDate : (exData.closedDate || null)),
+          // v47E (confirmed by Ishan): stamp-aware SAP refs + PO — stale can't blank, fresh edit wins.
+          sapDocEntry: _staleWrite ? (exData.sapDocEntry || ord.sapDocEntry || null) : (ord.sapDocEntry || exData.sapDocEntry || null),
+          sapDocNum:   _staleWrite ? (exData.sapDocNum   || ord.sapDocNum   || '')   : (ord.sapDocNum   || exData.sapDocNum   || ''),
+          poNumber:    _staleWrite ? (exData.poNumber    || ord.poNumber    || '')   : (ord.poNumber    || exData.poNumber    || ''),
           // v41z2: user-editable fields — client wins when saving; DB only as fallback
           qty:      ord.qty      != null ? ord.qty      : (exData.qty      != null ? exData.qty      : null),
           grossQty: ord.grossQty != null ? ord.grossQty : (exData.grossQty != null ? exData.grossQty : null),
@@ -6607,6 +8862,7 @@ app.post('/api/orders/upsert-bulk', async (req, res) => {
           endDate:   ord.endDate   || exData.endDate   || null,
         };
       }
+      mergedOrd = _v49f_rcLock(mergedOrd, exData);   // v49F: re-customer is authoritative
       const json = JSON.stringify(mergedOrd);
       mergedList.push({ row: mergedOrd, json, finalStatus, finalDeleted });
     }
@@ -6683,6 +8939,7 @@ app.get('/api/orders/all', async (req, res) => {
       else if (_grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, bn)) o.actualProd = _grossByBatch[bn] || 0;
       if (_firstProdByBatch && _firstProdByBatch[bn]) o.dprFirstDate = _firstProdByBatch[bn]; // v45W
       if (_lastProdByBatch  && _lastProdByBatch[bn])  o.dprLastDate  = _lastProdByBatch[bn];  // v45X
+      { const _dca = _v49gDprClosedAtFor(o); if (_dca) o.dprClosedAt = _dca; }               // v49ZJ
     }
     res.json({ ok: true, orders: rows });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -6802,6 +9059,7 @@ app.post('/api/machines/master', async (req, res) => {
 // GET full planning state — uses direct pg pool for large JSON
 app.get('/api/planning/state', async (req, res) => {
   try {
+    await _v49gWarmDprClosed();   // v49K: DPR-closed set for the running-count exclusion + ghost correction
     // v45N: the tracking app requests ?reconcile=1 so blob status is reconciled DB-authoritatively
     // even when the blob was re-saved with a stale 'pending' AFTER the DB went 'running' (the v45
     // month-rollover case — batches active in DPR/production_orders but sitting 'pending' in the blob,
@@ -6870,6 +9128,12 @@ app.get('/api/planning/state', async (req, res) => {
         // background-merge timing) AND the status differs, prefer the DB status. This catches
         // the "close succeeded in table but blob save failed" stale-blob case.
         let reconciledCount = 0;
+        // v49P (confirmed by Ishan; log-proven root cause of the ~20-batch churn): v49K corrected the
+        // BLOB only — production_orders stayed 'running', so every client save rebuilt the blob from
+        // client+table (both running) and the same cohort was "corrected" again on every GET
+        // (26ZG152/153, 26G017, 26ZH084, 26ZA075 ×62 in one 2-hour log). The DPR-authoritative close
+        // must land in the TABLE too, once, so the whole system agrees and the churn ends.
+        const _v49pTableCloseIds = [];
         const dbById = new Map();
         dbOrders.forEach(o => dbById.set(o.id, o));
         (state.orders||[]).forEach(o => {
@@ -6881,6 +9145,24 @@ app.get('/api/planning/state', async (req, res) => {
             reconciledCount++;
             return;
           }
+          // v49K (confirmed by Ishan): a ghost that is 'running' in the blob but CLOSED in DPR
+          // ("lost in transit" closure) must be corrected to 'closed'. This is not an auto-revert to
+          // pending — it promotes a stale-running order to its true, DPR-authoritative closed state, so
+          // it stops inflating the v41z running count and causing real running orders to be downgraded.
+          if ((o.status === 'running' || o.status === 'pending') && _v49gIsDprClosed({ id: o.id, batchNumber: o.batchNumber })
+              && !_v49gIsReopenedOpen(o)) {
+            o.status = 'closed';
+            // v49ZJ (confirmed by Ishan — 48h label-window fix): stamp closedDate from the ACTUAL
+            // DPR close moment, never the planner's endDate. The old `|| o.endDate` fallback dated
+            // the close days/weeks in the past for over-run batches, so canGenerateLabels' 48h
+            // post-close window was already expired the instant the batch closed — the root cause of
+            // "labels blocked immediately after DPR close" since the DPR-first gate went in.
+            o.closedDate = o.closedDate || _v49gDprClosedAtFor(o) || new Date().toISOString();
+            o.manualEndDate = true;
+            reconciledCount++;
+            _v49pTableCloseIds.push({ id: o.id, batchNumber: o.batchNumber || null, ord: o });
+            console.log(`[v49K GET reconcile] ${o.batchNumber||o.id} is DPR-closed but blob said running — corrected to closed`);
+          }
           const dbUpd = dbO._dbUpdatedAt ? new Date(dbO._dbUpdatedAt).getTime() : 0;
           // Only override if DB is meaningfully newer than blob's last save (30s grace) AND statuses differ.
           // Without the grace, normal sync timing where DB is written just after blob would always win.
@@ -6889,24 +9171,54 @@ app.get('/api/planning/state', async (req, res) => {
           // v45N: tracking (reconcile=1) skips the timestamp guard so a blob 'pending' that the DB
           // has flipped to 'running' surfaces even if the blob was saved later — the running/closed
           // protection still prevents any auto-revert of a real physical status.
-          const _passTsGuard = _trkReconcile ? true : (dbUpd > blobSavedAt + 30000);
+          const _passTsGuard = _trkReconcile ? true : (dbUpd > blobSavedAt + 30000)
+                             || dbO._dbStatus === 'closed';   // v49R: table 'closed' is authoritative — heal the blob regardless of timestamps
           if (dbO._dbStatus && o.status && dbO._dbStatus !== o.status && _passTsGuard && !blobStatusIsProtected) {
+            console.log(`[v41z GET reconcile] ${o.batchNumber||o.id}: blob '${o.status}' -> DB '${dbO._dbStatus}'`);   // v49P: name it
             o.status = dbO._dbStatus;
+            if (dbO._dbStatus === 'closed' && !o.closedDate) {   // v49R: carry the close stamp so month scoping places it
+              o.closedDate = dbO.closedDate || o.endDate || dbO.endDate || null;
+              if (o.closedDate) o.manualEndDate = true;
+            }
             reconciledCount++;
           }
-          // v45B: production_orders is authoritative for the reconciled gross. The reconcile toggle
-          // writes grossOverride/grossQty there durably (v45 queue), but the blob's copy can lag —
-          // leaving Tracking's label cap and the DPR planned-gross display on a STALE planned gross.
-          // The override is a deliberate durable action (like status), so the DB value wins whenever
-          // it is set and differs from the blob. No timestamp gate: the override's home is the table,
-          // so the table is its freshest source by design.
+          // v45B: production_orders is authoritative for the reconciled gross — Tracking's label cap
+          // and the DPR planned-gross display read it, so a durable override propagates to the blob.
+          // v46G (root cause of 26N031/26ZC094 "gross amendment reverts, DPR correction not reflected"):
+          // the override was applied with NO recency gate and NO clear path, so once the integrity
+          // autofix stamped grossOverride, EVERY GET re-forced it onto the blob — silently reverting any
+          // later manual Planning edit or DPR correction. Fix: a manual edit made AFTER the override was
+          // set (o._localEditedAt / updated_at newer than the override's _autoFixedAt) WINS — we skip the
+          // re-apply so the human correction sticks. Batches without an override, and overridden batches
+          // never re-edited, are UNCHANGED (the override still propagates exactly as before).
           const _dbOv = Number(dbO.grossOverride);
-          if (Number.isFinite(_dbOv) && _dbOv > 0 && Number(o.grossOverride) !== _dbOv) {
+          const _ovSetAt   = dbO._autoFixedAt ? new Date(dbO._autoFixedAt).getTime() : 0;
+          const _blobEdit  = parseInt(o._localEditedAt || 0) || (o.updated_at ? new Date(o.updated_at).getTime() : 0);
+          const _editWins  = _ovSetAt > 0 && _blobEdit > _ovSetAt;   // manual correction newer than the auto-fix
+          if (Number.isFinite(_dbOv) && _dbOv > 0 && Number(o.grossOverride) !== _dbOv && !_editWins) {
             o.grossOverride = dbO.grossOverride;
             if (dbO.grossQty != null) o.grossQty = dbO.grossQty;
             reconciledCount++;
           }
         });
+        // v49P: land the DPR-authoritative closes in production_orders so table+blob+client all agree
+        // from the next save onward. Idempotent — once status='closed' in the table, the v49K branch
+        // stops matching. Uses the ALREADY-corrected order object so data_json carries the close too.
+        if (_v49pTableCloseIds.length > 0) {
+          try {
+            for (const t of _v49pTableCloseIds) {
+              if (pgPool) {
+                await pgPool.query(
+                  `UPDATE production_orders SET status='closed', data_json=$2, updated_at=NOW()::TEXT WHERE id=$1 AND status<>'closed'`,
+                  [t.id, JSON.stringify(t.ord)]);
+              } else {
+                db.prepare(`UPDATE production_orders SET status='closed', data_json=?, updated_at=datetime('now') WHERE id=? AND status<>'closed'`)
+                  .run(JSON.stringify(t.ord), t.id);
+              }
+            }
+            console.log(`[v49P GET reconcile] DPR-authoritative close written to production_orders for ${_v49pTableCloseIds.length} batch(es): ${_v49pTableCloseIds.map(t=>t.batchNumber||t.id).slice(0,25).join(', ')}`);
+          } catch(e) { console.warn('[v49P GET reconcile] table close write failed:', e.message); }
+        }
         if (reconciledCount > 0) {
           console.log(`[v41z GET reconcile] Updated ${reconciledCount} blob order(s) with newer DB status (stale-blob recovery)`);
           // v41z: kick off a deferred background blob update to make the fix permanent.
@@ -6950,21 +9262,11 @@ app.get('/api/planning/state', async (req, res) => {
           // Genuinely missing order — recover it
           state.orders = state.orders || [];
           const { _dbStatus, _dbUpdatedAt, ...cleanOrd } = dbOrd;
-          // CRITICAL: Enforce max 2 IN PRODUCTION per machine
-          // v45X (confirmed by Ishan): the limit gates NEW promotions only — never demote an order
-          // with real production (actuals>0). Demotion hid a mid-production batch from the Tracking
-          // label view (26ZF104) after the June→July carry-forward spike.
-          if (cleanOrd.status === 'running' && cleanOrd.machineId) {
-            const runningOnMachine = state.orders.filter(o => o.machineId === cleanOrd.machineId && o.status === 'running' && !o.deleted).length;
-            if (runningOnMachine >= 2 && !_orderHasActuals(cleanOrd)) {
-              cleanOrd.status = 'pending';
-              console.log(`[State] Recovered ${cleanOrd.batchNumber} on ${cleanOrd.machineId} — downgraded to pending (2-order limit)`);
-            } else {
-              console.log(`[State] Recovered missing order: ${cleanOrd.batchNumber} on ${cleanOrd.machineId}`);
-            }
-          } else {
-            console.log(`[State] Recovered missing order: ${cleanOrd.batchNumber} on ${cleanOrd.machineId}`);
-          }
+          // v49N (confirmed by Ishan): recover with the order's TRUE status — the old demotion wrote
+          // 'pending' into the blob for a DB-running order, which PERMANENT STATUS PROTECTION then
+          // restored to running on the next merge: another oscillation vector. An over-limit machine
+          // now simply shows 3 running so the planner closes the right one; nothing is rewritten.
+          console.log(`[State] Recovered missing order: ${cleanOrd.batchNumber} on ${cleanOrd.machineId} (status ${cleanOrd.status||'pending'})`);
           state.orders.push(cleanOrd);
           stateOrderById.set(dbOrd.id, cleanOrd);
           if (dbOrd.batchNumber && dbOrd.machineId) stateOrderByBatchMc.set(bmKey, cleanOrd);
@@ -7028,26 +9330,42 @@ app.get('/api/planning/state', async (req, res) => {
         // both gross maps has no actuals, so the legacy/0 fallback is exactly what effectiveGross
         // would have returned in PG mode (SQLite is dormant) — behaviour is unchanged, just faster.
         const bn = ord.batchNumber;
-        const hasOverride = bn != null && Object.prototype.hasOwnProperty.call(_grossOverride, bn);
-        let eff = 0;
-        if (hasOverride) eff = _grossOverride[bn] || 0;
-        else if (bn != null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, bn)) eff = _grossByBatch[bn] || 0;
-        // v45: legacy fallback now prefers the BATCH-keyed cache over the order-keyed one. The order-
-        // keyed entry is a single (order_id,batch) group total that can belong to a *different* batch
-        // after a renumber/split — that is exactly how Planning's actualProd showed 57.9 while the true
-        // batch sum (and the DPR screen) was 54. The batch-keyed cache is now the accumulated per-batch
-        // sum; with the persistent _orderBatch, _grossByBatch is reliably present so eff>0 usually wins
-        // outright, but this keeps the rare fallback correct too.
+        // v47S (confirmed by Ishan — reverses v47K): DPR closed-batch gross is AUTHORITATIVE over the
+        // stale planning-blob grossOverride. actualProd precedence is now:
+        //   (1) batch_gross_override  — the deliberate DPR-Edit correction (top authority);
+        //   (2) _grossByBatch         — the DPR attributed batch sum (split-family already apportioned);
+        //   (3) blob grossOverride    — ONLY when the batch has NO DPR gross at all (a pre-production
+        //                               planning estimate) AND is not a split-family batch (v47M);
+        //   (4) legacy order/batch cache.
+        // The v47K order let a stale Planning-Edit value silently beat DPR reality in Label Gen /
+        // Report B / Report E (26ZD109 blob 52 vs DPR 54; 26ZF113 blob 43.25 vs DPR 47.25; 26ZH081
+        // blob 55.80 vs DPR 54). Batches whose ONLY correct gross lived in the blob (26ZC094 → 8.90,
+        // whose DPR sum 25.50 is wrong) are migrated to batch_gross_override BEFORE deploy, so they keep
+        // winning at (1) — no regression. o.grossOverride was already reconciled from the DB above.
+        const _blobOv = (ord.grossOverride != null && ord.grossOverride !== '' && !isNaN(Number(ord.grossOverride)) && Number(ord.grossOverride) >= 0) ? Number(ord.grossOverride) : null;
+        const _hasOverride = bn != null && Object.prototype.hasOwnProperty.call(_grossOverride, bn);
+        const _hasByBatch  = bn != null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, bn);
+        const _isSplitFam  = bn != null && _splitFamilyBatches && _splitFamilyBatches.has(bn);
+        let eff = 0, _effSet = false;
+        if (_hasOverride)               { eff = _grossOverride[bn] || 0; _effSet = true; }  // (1) DPR-Edit override
+        else if (_hasByBatch)           { eff = _grossByBatch[bn]  || 0; _effSet = true; }  // (2) DPR attributed sum (apportioned for splits) — beats stale blob
+        else if (_blobOv != null && !_isSplitFam) { eff = _blobOv;      _effSet = true; }  // (3) blob only when NO DPR gross (and not split-family)
+        // v45: legacy fallback prefers the BATCH-keyed cache over the order-keyed one (an order-keyed
+        // group total can belong to a different batch after a renumber/split — the 57.9-vs-54 bug).
         const legacy = (bn != null && Object.prototype.hasOwnProperty.call(_actualsCache, bn))
           ? (_actualsCache[bn] || 0)
           : (_actualsCache[ord.id] || 0);
-        ord.actualProd = (hasOverride || eff > 0) ? eff : legacy;
+        ord.actualProd = _effSet ? eff : legacy;
         // v45W: expose the first actual DPR production date so the client cascade can anchor a
         // started order's start date to production reality instead of the plan cursor.
         if (bn != null && _firstProdByBatch && _firstProdByBatch[bn]) ord.dprFirstDate = _firstProdByBatch[bn];
         // v45X: expose the LAST actual DPR production date — the cascade anchors a complete
         // order's end date to it (reality-driven ends; +ceil day convention unchanged).
         if (bn != null && _lastProdByBatch && _lastProdByBatch[bn]) ord.dprLastDate = _lastProdByBatch[bn];
+        // v49ZJ: expose the DPR close moment — tracking anchors the 48h post-close label window on
+        // it (dprClosedAt > closedDate > endDate), so batches already mis-stamped with a planned
+        // endDate by the old v49K fallback also get the correct window without data repair.
+        { const _dca = _v49gDprClosedAtFor(ord); if (_dca) ord.dprClosedAt = _dca; }
       }
     }
 
@@ -7086,6 +9404,73 @@ app.post('/api/planning/state', async (req, res) => {
   try {
     const { state } = req.body;
     if (!state) return res.status(400).json({ ok: false, error: 'No state provided' });
+    await _v49gWarmDprClosed();   // v49G: DPR-closed set for the option-B close gate
+    await _v49gWarmReopenedOpen();   // v49G option (ii): reopened-and-open set for the single re-close exemption
+
+    // ── v49: SELECTIVE ORDER MERGE — protect SERVER-side writes from a stale client blob ──
+    //
+    // ROOT CAUSE THIS FIXES: planning state is one blob and this endpoint replaced it wholesale.
+    // A server-side subsystem writes an order — re-customer sets ord.customer, creates the split
+    // child and reduces the parent; W/O reconcile writes sapDocEntry/sapDocNum — and then ANY
+    // planner whose page loaded before that change saves anything at all, pushing their entire
+    // stale blob back and silently undoing it. Live case: 26P044/26P045 were re-customered to
+    // K Shyam Traders, the labels updated correctly, and Label Generation kept showing Rohan
+    // Pharma because the planning order had been overwritten by a planner's stale copy.
+    //
+    // The client already knows exactly which orders it changed — v48Z derives it by comparing
+    // against the last synced snapshot — so it now sends that list. Orders IN the list take the
+    // client's version; every other order keeps whatever the server currently holds.
+    //
+    // NO-REGRESSION GUARANTEE: if the list is absent (any other caller, an older cached client,
+    // an import, a restore) this block is skipped entirely and the endpoint replaces wholesale
+    // exactly as before. Only the orders array is merged; every other key in the blob is
+    // untouched by this logic.
+    const _chg = req.body && req.body.changedOrderIds;
+    if (Array.isArray(_chg) && Array.isArray(state.orders)) {
+      try {
+        const cur = await getPlanningStateAsync();
+        const curOrders = (cur && Array.isArray(cur.orders)) ? cur.orders : null;
+        if (curOrders && curOrders.length) {
+          const changed = new Set(_chg.map(String));
+          const _fldRaw = req.body && req.body.changedOrderFields;
+          const _fldMap = (_fldRaw && typeof _fldRaw === 'object' && !Array.isArray(_fldRaw)) ? _fldRaw : null;
+          const clientById = new Map();
+          for (const o of state.orders) if (o && o.id) clientById.set(String(o.id), o);
+          const merged = [];
+          const seen = new Set();
+          for (const srv of curOrders) {
+            if (!srv || !srv.id) { merged.push(srv); continue; }
+            const id = String(srv.id);
+            seen.add(id);
+            const cli = clientById.get(id);
+            if (!cli) { merged.push(srv); continue; }              // client never had it → keep server's
+            if (!changed.has(id)) { merged.push(srv); continue; }  // untouched → server wins
+            // v49A: FIELD-LEVEL merge. v49 replaced the whole order object here, so a planner who
+            // edited only a date also pushed back their stale `customer` and wiped a server-side
+            // re-customer — observed live on 26P044/26P045, where customer AND recustomeredAt
+            // disappeared together. Now only the fields the planner actually changed are taken.
+            const flds = _fldMap && _fldMap[id];
+            // v49F: the whole-object fallback is kept (a locally-new order has no server copy to merge
+            // against), but the re-customer lock is re-applied so a missing field map can never
+            // wholesale-revert a re-customered order the way it did on 26P044/26P045.
+            if (flds === '*' || !Array.isArray(flds)) { merged.push(_v49f_rcLock(cli, srv)); continue; }  // locally new / no detail → whole object
+            const out = { ...srv };
+            for (const k of flds) {
+              if (Object.prototype.hasOwnProperty.call(cli, k)) out[k] = cli[k];
+              else delete out[k];                                  // planner removed the field
+            }
+            merged.push(_v49f_rcLock(out, srv));   // v49F: re-customer is authoritative
+          }
+          // Orders the client has that the server does not: brand-new locally. Keep them.
+          for (const [id, cli] of clientById) if (!seen.has(id)) merged.push(cli);
+          const _kept = merged.length - state.orders.length;
+          state.orders = merged;
+          console.log(`[v49A] selective merge (${_fldMap ? 'field-level' : 'order-level'}): ${changed.size} client-changed order(s), ${merged.length} total${_kept ? ` (${_kept >= 0 ? '+' : ''}${_kept} vs client blob)` : ''}`);
+        }
+      } catch (e) {
+        console.warn('[v49] selective merge skipped, saving blob as sent:', e && e.message);
+      }
+    }
 
     // Background order merge — runs AFTER response is sent so planning_state save is never blocked
     // With 300+ orders, sequential queries timed out and prevented planning_state from saving
@@ -7119,7 +9504,7 @@ app.post('/api/planning/state', async (req, res) => {
           const dbRunningPerMachine = {};
           const _bgRunningOrderIds = {};
           const _bgAllRunning = Object.entries(existingMap)
-            .filter(([, o]) => o && o.status === 'running' && o.machineId && !o.deleted)
+            .filter(([id, o]) => o && o.machineId && _v49kCountsAsRunning(id, o))   // v49K: DPR-closed ghosts don't count
             .sort((a, b) => {
               const ta = a[1].updated_at ? new Date(a[1].updated_at).getTime() : 0;
               const tb = b[1].updated_at ? new Date(b[1].updated_at).getTime() : 0;
@@ -7133,18 +9518,14 @@ app.post('/api/planning/state', async (req, res) => {
           // ACTIVE ENFORCEMENT: downgrade newest orders on machines already over limit
           // v45X (confirmed by Ishan): skip orders with real production — the limit gates NEW
           // promotions, not batches that already ran (DPR gate ⇒ actuals imply it WAS running).
-          const _bgForcePendingIds = new Set();
+          // v49N (confirmed by Ishan): the slice(2) downgrade is REMOVED — it protected the two OLDEST
+          // running rows (including ghosts, e.g. DPR-gate-refused closes still held running) and
+          // silently downgraded the planner's freshly-set batches, which is the flip that survived
+          // v49K/M. The 2-order limit now acts only as a promotion gate (refuse-and-surface) in the
+          // accept branch below; no code path writes a status the planner did not ask for.
+          const _bgMcRunNames = {};
           Object.entries(_bgRunningOrderIds).forEach(([machineId, ids]) => {
-            if (ids.length > 2) {
-              ids.slice(2).forEach(id => {
-                if (_orderHasActuals(existingMap[id])) {
-                  console.log('[v41z bg-merge] MC ' + machineId + ' over limit but ' + id + ' has actuals — NOT downgrading (v45X guard)');
-                  return;
-                }
-                _bgForcePendingIds.add(id);
-                console.log('[v41z bg-merge] MC ' + machineId + ' has ' + ids.length + ' running — downgrading ' + id + ' to pending (2-order limit)');
-              });
-            }
+            _bgMcRunNames[machineId] = ids.map(id => (existingMap[id] && existingMap[id].batchNumber) || id);
           });
 
           // v40 P18.14i Fix 1: status merge — client wins.
@@ -7175,19 +9556,31 @@ app.post('/api/planning/state', async (req, res) => {
               const _bgDbProtected = ex.status === 'running' || ex.status === 'closed';
               const _bgClientProtected = ord.status === 'running' || ord.status === 'closed';
               if (_bgDbProtected && ord.status !== ex.status) {
-                // DB has running/closed — preserve it, client cannot change it
-                finalStatus = ex.status;
+                // DB has running/closed — preserve it, client cannot change it…
+                // v49P: …except a FRESH explicit planner demote running→pending (see bulk-upsert note).
+                if (ex.status === 'running' && ord.status === 'pending' && _v49pFresh(ord)) {
+                  finalStatus = 'pending';
+                  if (ord.machineId && dbRunningPerMachine[ord.machineId]) dbRunningPerMachine[ord.machineId]--;
+                } else {
+                  finalStatus = ex.status;
+                }
               } else if (_bgClientProtected && !_bgDbProtected) {
-                // Client setting running/closed — accept it (user action)
-                finalStatus = ord.status;
-              } else if (_bgForcePendingIds.has(ord.id) && ord.status === 'running' && ex.status !== 'closed') {
-                finalStatus = 'pending';
-              } else {
-              // v45X (confirmed by Ishan): an order with actuals already ran — re-promotion is not a
-              // "new" start and must not be blocked/demoted by the 2-order limit.
-              const wouldExceedLimit = ord.status === 'running' && !alreadyRunningInDB && machineRunCount >= 2 && !_orderHasActuals(ord);
-              if (wouldExceedLimit) {
-                finalStatus = 'pending';
+                // Client setting running/closed — accept it (user action), EXCEPT a running promotion
+                // beyond the machine's 2 slots: v49N holds DB status (the blob pre-save gate has already
+                // reverted + surfaced this to the planner; this is defense-in-depth for other callers).
+                // v45X exemption kept: a batch with actuals re-promotes freely.
+                const _v49nBgPromo = ord.status === 'running' && !alreadyRunningInDB && ord.machineId;
+                if (_v49nBgPromo && machineRunCount >= 2 && !_orderHasActuals(ord) && !_orderHasActuals(ex)) {
+                  finalStatus = ex.status || 'pending';
+                  console.log(`[v49N bg-merge] 2-order limit: promotion of ${ord.batchNumber||ord.id} on MC ${ord.machineId} held at '${finalStatus}' — running: ${(_bgMcRunNames[ord.machineId]||[]).join(', ')}`);
+                } else {
+                  finalStatus = ord.status;
+                  if (_v49nBgPromo) {
+                    dbRunningPerMachine[ord.machineId] = (dbRunningPerMachine[ord.machineId] || 0) + 1;
+                    if (!_bgMcRunNames[ord.machineId]) _bgMcRunNames[ord.machineId] = [];
+                    _bgMcRunNames[ord.machineId].push(ord.batchNumber || ord.id);
+                  }
+                }
               } else if (ex.status && ord.status && ex.status !== ord.status) {
                 // Protect running/closed from being reverted
                 const clientIsProtected = ord.status === 'running' || ord.status === 'closed';
@@ -7208,9 +9601,18 @@ app.post('/api/planning/state', async (req, res) => {
               } else {
                 finalStatus = ord.status || ex.status || 'pending';
               }
-              } // end _bgForcePendingIds else
+              const _staleWrite = (dbUpdated > (clientEdit || 0) + 5000); // v47 Point 1: incoming blob older than DB by >5s
               mergedOrd = {
                 ...ord,
+                // v47 Point 1: THE primary revert vector — a stale tab's ~30s full-blob auto-save reaches
+                // this background merge, which wrote colour/gross/customer/W-O straight from the blob into
+                // production_orders. Same _localEditedAt staleness guard: keep DB when the blob is older.
+                colour:        _staleWrite && ex.colour        != null ? ex.colour        : ord.colour,
+                customer:      _staleWrite && ex.customer      != null ? ex.customer      : ord.customer,
+                shipTo:        _staleWrite && ex.shipTo        != null ? ex.shipTo        : ord.shipTo,
+                billTo:        _staleWrite && ex.billTo        != null ? ex.billTo        : ord.billTo,
+                grossOverride: _staleWrite && ex.grossOverride != null ? ex.grossOverride : ord.grossOverride,
+                woStatus:      _staleWrite && ex.woStatus      != null ? ex.woStatus      : ord.woStatus,
                 startDate:       hasManualDate ? ex.startDate   : ord.startDate,
                 endDate:         hasManualDate ? ex.endDate     : ord.endDate,
                 manualEndDate:   ex.manualEndDate   || ord.manualEndDate,
@@ -7222,10 +9624,10 @@ app.post('/api/planning/state', async (req, res) => {
                   if (_b!=null && Object.prototype.hasOwnProperty.call(_grossOverride,_b)) return _grossOverride[_b]||0;
                   if (_b!=null && _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch,_b)) return _grossByBatch[_b]||0;
                   return Math.max(ord.actualProd||0, ex.actualProd||0); })(),
-                // v41z: protect SAP refs and PO number — DB wins if set; client cannot blank them via stale tab
-                sapDocEntry: ex.sapDocEntry || ord.sapDocEntry || null,
-                sapDocNum:   ex.sapDocNum   || ord.sapDocNum   || '',
-                poNumber:    ex.poNumber    || ord.poNumber    || '',
+                // v47E (confirmed by Ishan): stamp-aware SAP refs + PO — stale blob can't blank, fresh edit wins.
+                sapDocEntry: _staleWrite ? (ex.sapDocEntry || ord.sapDocEntry || null) : (ord.sapDocEntry || ex.sapDocEntry || null),
+                sapDocNum:   _staleWrite ? (ex.sapDocNum   || ord.sapDocNum   || '')   : (ord.sapDocNum   || ex.sapDocNum   || ''),
+                poNumber:    _staleWrite ? (ex.poNumber    || ord.poNumber    || '')   : (ord.poNumber    || ex.poNumber    || ''),
                 // v41z2: bg-merge — DB always wins over stale blob for user-editable fields
                 qty:      ex.qty      != null ? ex.qty      : (ord.qty      != null ? ord.qty      : null),
                 grossQty: ex.grossQty != null ? ex.grossQty : (ord.grossQty != null ? ord.grossQty : null),
@@ -7237,12 +9639,21 @@ app.post('/api/planning/state', async (req, res) => {
                 endDate:   ex.endDate   || ord.endDate   || null,
               };
             }
-            return mergedOrd;
+            return _v49f_rcLock(mergedOrd, ex);   // v49F: re-customer is authoritative
           }));
 
+          // v49P: write only rows whose merged content actually differs from the stored row.
+          const _writeList = mergedList.filter(m => {
+            const ex = existingMap[m.id];
+            if (!ex) return true;                       // brand-new row
+            try { return _v49pStable(m) !== _v49pStable(ex); } catch(e) { return true; }
+          });
+          if (_writeList.length !== mergedList.length) {
+            console.log(`[v49P bg-merge] ${mergedList.length - _writeList.length}/${mergedList.length} rows unchanged — skipped (updated_at preserved)`);
+          }
           const CHUNK = 500;
-          for (let i = 0; i < mergedList.length; i += CHUNK) {
-            const chunk = mergedList.slice(i, i + CHUNK);
+          for (let i = 0; i < _writeList.length; i += CHUNK) {
+            const chunk = _writeList.slice(i, i + CHUNK);
             const vals = [];
             const params = [];
             chunk.forEach((m, idx) => {
@@ -7259,7 +9670,7 @@ app.post('/api/planning/state', async (req, res) => {
                 updated_at=NOW()::TEXT
             `, params);
           }
-          console.log(`[State] Background merged ${orders.length} orders into production_orders (batched)`);
+          console.log(`[State] Background merged ${orders.length} orders into production_orders (${_writeList.length} written, batched)`);
           // v45S: collapse any (batch_number, machine_id) duplicate this id-keyed merge may have created.
           await _v45s_collapseDuplicateOrders();
         } catch(e) { console.warn('[State] Background order merge failed:', e.message); }
@@ -7296,14 +9707,52 @@ app.post('/api/planning/state', async (req, res) => {
             try { exData = r.data_json ? (typeof r.data_json === 'string' ? JSON.parse(r.data_json) : r.data_json) : {}; } catch(e) {}
             dbMap[r.id] = { ...r, _exData: exData };
           });
+          // v49N: machine slot occupancy from the DB (authoritative), for the promotion gate below.
+          // Excludes DPR-closed ghosts (v49K rule) so a batch closed in DPR never blocks a slot.
+          const _v49nMcCount = {};
+          const _v49nMcNames = {};
+          Object.values(dbMap).forEach(r => {
+            const _mc = r._exData && r._exData.machineId;
+            if (!_mc) return;
+            if (!_v49kCountsAsRunning(r.id, { id: r.id, status: r.status, deleted: r.deleted, batchNumber: r._exData.batchNumber })) return;
+            _v49nMcCount[_mc] = (_v49nMcCount[_mc] || 0) + 1;
+            if (!_v49nMcNames[_mc]) _v49nMcNames[_mc] = [];
+            _v49nMcNames[_mc].push(r._exData.batchNumber || r.id);
+          });
           state.orders = state.orders.map(ord => {
             const dbRow = dbMap[ord.id];
             if (!dbRow) return ord;
             const clientEdit = parseInt(ord._localEditedAt || 0);
             const dbUpdated  = dbRow.updated_at ? new Date(dbRow.updated_at).getTime() : 0;
             let result = ord;
-            // Status: DB wins if meaningfully newer
-            if (dbRow.status && ord.status && dbRow.status !== ord.status && dbUpdated > clientEdit + 5000) {
+            // v49G: explicit planner close/reopen wins over the timestamp guard; DPR-gated closes are
+            // refused (status held to DB) rather than silently reverted (option B).
+            const _intent3 = _v49gStatusIntent(ord, dbRow.status);
+            if (_intent3) {
+              if (_intent3.refusedDprGate) {
+                result = { ...result, status: dbRow.status };
+                blobPreservedCount++;
+                preservedOrders.push({ id: ord.id, batchNumber: ord.batchNumber || null, machineId: ord.machineId || null, clientStatus: ord.status, dbStatus: dbRow.status, dprGateRefused: true });
+              } else if (_intent3.override) {
+                if (_intent3.status === 'closed') {
+                  result = { ...result, status: 'closed', manualEndDate: true, closedDate: (ord.closedDate || new Date().toISOString()) };
+                } else {
+                  result = { ...result, status: 'running', manualEndDate: false, closedDate: null };
+                }
+              }
+            // Status: DB wins if meaningfully newer (no explicit intent)
+            // v49P: a FRESH explicit demote running→pending is a user action — never preserved over.
+            } else if (dbRow.status === 'running' && ord.status === 'pending' && _v49pFresh(ord)) {
+              // keep the client's pending in the blob; the bg merge accepts it into the table (E2b)
+            // v49R (confirmed by Ishan; root cause of the month-scoping flood): the v49P freshness rule
+            // stripped HISTORICAL closes of their explicit-close intent, so this staleness guard began
+            // rewriting the blob's real closes back to a stale table 'running'/'pending' — un-closing
+            // months of history and flooding every month view via orderInMonth's carry-forward rule.
+            // A blob 'closed' with a closedDate is a recorded historical fact: the staleness guard must
+            // NEVER reverse it. (Fresh closes still route through the DPR gate above, unchanged.)
+            } else if (ord.status === 'closed' && (ord.closedDate || ord.manualEndDate) && dbRow.status !== 'closed') {
+              // keep the blob's close; v45S (boot) and the v49K/E1 reconcile heal the table side
+            } else if (dbRow.status && ord.status && dbRow.status !== ord.status && dbUpdated > clientEdit + 5000) {
               result = { ...result, status: dbRow.status };
               blobPreservedCount++;
               preservedOrders.push({
@@ -7313,6 +9762,31 @@ app.post('/api/planning/state', async (req, res) => {
                 clientStatus: ord.status,
                 dbStatus: dbRow.status,
               });
+            // v49N: 2-order limit as a PROMOTION GATE — a fresh pending→running promotion on a machine
+            // whose 2 slots are occupied is refused HERE, before the blob is written, and surfaced by
+            // name. Replaces the removed v41z downgrade sweeps, which silently un-set the planner's
+            // choice later (the flip). Reopens are handled by _v49gStatusIntent above (from closed).
+            // v45X exemption kept: a batch with real production re-promotes freely.
+            } else if (result.status === 'running' && dbRow.status !== 'running' && dbRow.status !== 'closed'
+                && ord.machineId && (_v49nMcCount[ord.machineId] || 0) >= 2
+                && !_orderHasActuals(ord) && !_orderHasActuals(dbRow._exData)) {
+              result = { ...result, status: dbRow.status || 'pending' };
+              blobPreservedCount++;
+              preservedOrders.push({
+                id: ord.id,
+                batchNumber: ord.batchNumber || null,
+                machineId: ord.machineId || null,
+                clientStatus: 'running',
+                dbStatus: dbRow.status || 'pending',
+                limitRefused: true,
+                occupying: (_v49nMcNames[ord.machineId] || []).slice(0, 4),
+              });
+              console.log(`[v49N blob-save] 2-order limit: promotion of ${ord.batchNumber||ord.id} on MC ${ord.machineId} refused — running: ${(_v49nMcNames[ord.machineId]||[]).join(', ')}`);
+            } else if (result.status === 'running' && dbRow.status !== 'running' && dbRow.status !== 'closed' && ord.machineId) {
+              // accepted promotion — occupy a slot so a second promotion in the same save counts it
+              _v49nMcCount[ord.machineId] = (_v49nMcCount[ord.machineId] || 0) + 1;
+              if (!_v49nMcNames[ord.machineId]) _v49nMcNames[ord.machineId] = [];
+              _v49nMcNames[ord.machineId].push(ord.batchNumber || ord.id);
             }
             // Deleted is sticky
             if (dbRow.deleted && !result.deleted) {
@@ -7354,7 +9828,8 @@ app.post('/api/planning/state', async (req, res) => {
             return result;
           });
           if (blobPreservedCount > 0) {
-            console.log(`[v41w blob-save] Preserved DB status on ${blobPreservedCount}/${state.orders.length} orders before blob write`);
+            const _v49pNames = preservedOrders.slice(-blobPreservedCount).map(p => `${p.batchNumber||p.id} ${p.clientStatus}->${p.dbStatus}`).slice(0, 12).join(', ');
+            console.log(`[v41w blob-save] Preserved DB status on ${blobPreservedCount}/${state.orders.length} orders before blob write: ${_v49pNames}`);   // v49P: name them
           }
         }
       } catch (e) {
@@ -7362,45 +9837,12 @@ app.post('/api/planning/state', async (req, res) => {
       }
     }
 
-    // v41z FINAL FIX: Enforce 2-order limit directly in the blob before saving.
-    // This stops stale browsers from re-corrupting the blob with 3+ running orders.
-    // Also adds downgraded orders to preservedOrders so client clears _localOrderChanges.
-    if (state.orders && state.orders.length > 0) {
-      const _blobRunningPerMC = {};
-      // First pass: count running per machine (sort by _localEditedAt desc — newest protected first)
-      const _blobRunning = state.orders
-        .filter(o => o && o.status === 'running' && o.machineId && !o.deleted)
-        .sort((a, b) => (parseInt(b._localEditedAt||0)) - (parseInt(a._localEditedAt||0)));
-      const _blobAllowedIds = new Set();
-      for (const o of _blobRunning) {
-        const cnt = _blobRunningPerMC[o.machineId] || 0;
-        if (cnt < 2) {
-          _blobAllowedIds.add(o.id);
-          _blobRunningPerMC[o.machineId] = cnt + 1;
-        }
-      }
-      let blobLimitDowngraded = 0;
-      state.orders = state.orders.map(o => {
-        // NEVER downgrade closed orders — only running orders subject to 2-order limit
-        if (o && o.status === 'running' && o.machineId && !o.deleted && !_blobAllowedIds.has(o.id)) {
-          blobLimitDowngraded++;
-          console.log(`[v41z blob-save] MC ${o.machineId} over limit — downgrading ${o.batchNumber||o.id} to pending`);
-          preservedOrders.push({
-            id: o.id,
-            batchNumber: o.batchNumber || null,
-            machineId: o.machineId || null,
-            clientStatus: 'running',
-            dbStatus: 'pending',
-          });
-          return { ...o, status: 'pending' };
-        }
-        // CLOSED orders are permanent — never touch them
-        return o;
-      });
-      if (blobLimitDowngraded > 0) {
-        console.log(`[v41z blob-save] Downgraded ${blobLimitDowngraded} over-limit running orders to pending`);
-      }
-    }
+    // v49N (confirmed by Ishan): the v41z blob-side 2-order downgrade is REMOVED. It protected the
+    // two NEWEST-edited running orders while the DB-side sweeps protected the two OLDEST rows — the
+    // two enforcers disagreed, so a downgraded ghost was restored by PERMANENT STATUS PROTECTION on
+    // the next merge and the planner's batch was downgraded again on the next save: the oscillation
+    // that survived v49K/M. The limit is now enforced ONCE, as a promotion gate in the v41w pre-save
+    // check above (refuse-and-surface); no sweep ever rewrites statuses behind the planner's back.
 
     // v46A merge-guard (confirmed by Ishan; root cause of the 26ZC094/095 churn): the planning blob is
     // full-state last-write-wins, so a stale client session saving after another session created new
@@ -7437,6 +9879,29 @@ app.post('/api/planning/state', async (req, res) => {
             _missing.forEach(o => { if (_delMap[o.id]) return; state.orders.push(o); _restored++; });
             if (_restored) console.log(`[v46A merge-guard] restored ${_restored} unclosed order(s) missing from incoming blob (stale-client overwrite protection): ${_missing.filter(o=>!_delMap[o.id]).map(o=>o.batchNumber||o.id).join(', ')}`);
           }
+          // v46G best-effort (W/O customer reverts to "W/O — pending" after a few moments): a W/O
+          // customer is assigned via its own endpoint (wo/assign-customer → savePlanningState), but a
+          // stale Planning tab's ~30s full-state auto-save still carries the OLD unassigned order and
+          // blanks it back on save. Guard: for an order present in BOTH stored and incoming, if the
+          // STORED blob already holds a real assigned customer and the incoming payload has it empty
+          // (regressed to unassigned/"W/O"), keep the stored customer. Only ever RESTORES a lost
+          // assignment — a genuine reassignment (real->different real) still passes through. Reversible.
+          try {
+            const _isRealCust = c => { const s = (c==null?'':String(c)).trim(); return s !== '' && !/^w\/?o\b/i.test(s) && !/pending/i.test(s); };
+            const _storedById = new Map();
+            _storedBlob.orders.forEach(o => { if (o && o.id) _storedById.set(o.id, o); });
+            let _custKept = 0;
+            state.orders.forEach(o => {
+              if (!o || !o.id) return;
+              const s = _storedById.get(o.id);
+              if (s && _isRealCust(s.customer) && !_isRealCust(o.customer)) {
+                o.customer = s.customer;
+                if (s.woCustomerAssigned != null && o.woCustomerAssigned == null) o.woCustomerAssigned = s.woCustomerAssigned;
+                _custKept++;
+              }
+            });
+            if (_custKept) console.log(`[v46G customer-guard] preserved ${_custKept} assigned customer(s) a stale client blanked back to W/O`);
+          } catch (_cgErr) { console.warn('[v46G customer-guard] skipped:', _cgErr.message); }
         }
       }
     } catch (_mgErr) { console.warn('[v46A merge-guard] skipped:', _mgErr.message); }
@@ -7481,7 +9946,9 @@ app.post('/api/tracking/orange-backfill', async (req, res) => {
       const r = await pgPool.query(
         `INSERT INTO tracking_labels (id, batch_number, label_number, size, qty, is_orange, parent_label_id,
                                       customer, colour, pc_code, printing_matter, generated, printed, voided)
-         SELECT 'ol-'||p.id, p.batch_number, p.label_number, p.size, p.qty, 1, p.id,
+         SELECT 'ol-'||p.id, p.batch_number,
+                ${_ORANGE_NUM_BASE} + ABS(CASE WHEN p.label_number::text ~ '^-?[0-9]+$' THEN p.label_number::integer ELSE 0 END),
+                p.size, p.qty, 1, p.id,
                 p.customer, p.colour, p.pc_code, p.printing_matter, $2, 0, 0
          FROM tracking_labels p
          WHERE p.batch_number = $1 AND COALESCE(p.is_orange,0)=0 AND COALESCE(p.voided,0)=0
@@ -7506,7 +9973,7 @@ app.post('/api/tracking/orange-backfill', async (req, res) => {
         `INSERT OR IGNORE INTO tracking_labels (id, batch_number, label_number, size, qty, is_orange, parent_label_id,
                                                 customer, colour, pc_code, printing_matter, generated, printed, voided)
          VALUES (?,?,?,?,?,1,?,?,?,?,?,?,0,0)`);
-      parents.forEach(p => { const info = ins.run('ol-'+p.id, p.batch_number, p.label_number, p.size, p.qty, p.id, p.customer, p.colour, p.pc_code, p.printing_matter, ts); created += info.changes; });
+      parents.forEach(p => { const info = ins.run('ol-'+p.id, p.batch_number, _ORANGE_NUM_BASE + Math.abs(parseInt(p.label_number,10)||0), p.size, p.qty, p.id, p.customer, p.colour, p.pc_code, p.printing_matter, ts); created += info.changes; });
     }
     res.json({ ok: true, created, batchNumber });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
@@ -8584,6 +11051,288 @@ app.post('/api/admin/rebuild-actuals-from-dpr', async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// v46U (confirmed by Ishan): BACKFILL dispatch-record box counts (and recalibrate export qty). Records
+// written with boxes=0 (SAP-reconciled / deemed invoices whose total_boxes was 0) never shrank the
+// Planning truck plan by boxes. Some of those are EXPORT invoices whose qty was stored in "THOUSAND"
+// units (×100) and never recalibrated on the dispatch record (26ZA051 recorded 4550 = really 45.5 L /
+// 26 boxes). For each 0-box record this resolves the batch's order: derives boxes from pack size, and for
+// export batches whose qty is implausibly large applies the planning app's ÷100 rule (writing the
+// corrected qty AND boxes). A corrupt DOMESTIC qty is left untouched for manual review. Then it recomputes
+// each affected batch's dispatch actuals so the truck binner nets it. Idempotent. Dry-run by default —
+// pass {"confirm":true} to write.
+app.post('/api/admin/backfill-dispatch-boxes', async (req, res) => {
+  try {
+    const confirm = (req.body && req.body.confirm) === true;
+    // Ensure the batch→order lookup is fresh (PG keeps _planningStateCache warm; reload defensively).
+    if (pgPool) { try { const pr = await pgPool.query('SELECT state_json FROM planning_state ORDER BY id DESC LIMIT 1'); if (pr.rows[0]) _planningStateCache = JSON.parse(pr.rows[0].state_json); } catch(_) {} }
+    let recs;
+    if (pgPool) recs = (await pgPool.query(`SELECT id, batch_number, qty, boxes FROM tracking_dispatch_records WHERE COALESCE(boxes,0) = 0 AND COALESCE(qty,0) > 0`)).rows;
+    else        recs = db.prepare(`SELECT id, batch_number, qty, boxes FROM tracking_dispatch_records WHERE COALESCE(boxes,0) = 0 AND COALESCE(qty,0) > 0`).all();
+    let boxesOnly = 0, recalibrated = 0, skippedNoSize = 0, implausible = 0, written = 0;
+    const affected = new Set(); const samples = []; const recalibratedSamples = []; const implausibleSamples = [];
+    for (const r of (recs || [])) {
+      const q0 = parseFloat(r.qty) || 0;
+      const qb = _dispatchQtyBoxes(r.batch_number, r.qty, 0);
+      if (qb.skip) {                                   // corrupt domestic qty (or still implausible after ÷100)
+        implausible++;
+        if (implausibleSamples.length < 25) implausibleSamples.push({ id: r.id, batch: r.batch_number, qty: q0 });
+        continue;
+      }
+      if (!(qb.boxes > 0)) { skippedNoSize++; continue; } // no order/size → can't derive
+      if (r.batch_number) affected.add(r.batch_number);
+      if (qb.recalibrated) {
+        recalibrated++;
+        if (recalibratedSamples.length < 25) recalibratedSamples.push({ id: r.id, batch: r.batch_number, fromQty: q0, toQty: qb.qty, boxes: qb.boxes });
+        if (confirm) {
+          if (pgPool) await pgPool.query(`UPDATE tracking_dispatch_records SET qty=$1, boxes=$2 WHERE id=$3`, [qb.qty, qb.boxes, r.id]);
+          else        db.prepare(`UPDATE tracking_dispatch_records SET qty=?, boxes=? WHERE id=?`).run(qb.qty, qb.boxes, r.id);
+          written++;
+        }
+      } else {
+        boxesOnly++;
+        if (samples.length < 25) samples.push({ id: r.id, batch: r.batch_number, qty: q0, boxes: qb.boxes });
+        if (confirm) {
+          if (pgPool) await pgPool.query(`UPDATE tracking_dispatch_records SET boxes=$1 WHERE id=$2`, [qb.boxes, r.id]);
+          else        db.prepare(`UPDATE tracking_dispatch_records SET boxes=? WHERE id=?`).run(qb.boxes, r.id);
+          written++;
+        }
+      }
+    }
+    if (confirm) { for (const bn of affected) { try { await _recomputeDispatchActuals(bn, null, null); } catch(_) {} } }
+    res.json({ ok: true, dryRun: confirm !== true, scanned: (recs || []).length,
+               boxesOnlyFixed: boxesOnly, exportRecalibrated: recalibrated, rowsToFix: boxesOnly + recalibrated,
+               skippedNoSize, implausibleQty: implausible, rowsWritten: written,
+               batchesAffected: affected.size, actualsRecomputed: confirm ? affected.size : 0,
+               samples, recalibratedSamples, implausibleSamples });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v46W (confirmed by Ishan): BACKFILL residual EXPORT dispatch qty. The boxes=0 backfill already
+// recalibrated export records with no box count. EXPORT scan-out records (boxes already set) still hold
+// the ×100 "THOUSAND" qty, so dispatched-qty totals (Report D) read inflated. Detect them by a qty-vs-boxes
+// mismatch — if the recorded qty implies far more boxes than the record actually carries
+// (ceil(qty/packSize) ≥ 50× boxes), the qty is the ×100 form → ÷100 (boxes already correct, left as-is).
+// Idempotent: an already-correct record's qty matches its boxes, so it's skipped; a legit large export
+// (375 L / 375 boxes) matches too and is untouched. Dry-run by default — pass {"confirm":true} to write.
+app.post('/api/admin/backfill-export-dispatch-qty', async (req, res) => {
+  try {
+    const confirm = (req.body && req.body.confirm) === true;
+    if (pgPool) { try { const pr = await pgPool.query('SELECT state_json FROM planning_state ORDER BY id DESC LIMIT 1'); if (pr.rows[0]) _planningStateCache = JSON.parse(pr.rows[0].state_json); } catch(_) {} }
+    let recs;
+    if (pgPool) recs = (await pgPool.query(`SELECT id, batch_number, qty, boxes FROM tracking_dispatch_records WHERE COALESCE(boxes,0) > 0 AND COALESCE(qty,0) > 0`)).rows;
+    else        recs = db.prepare(`SELECT id, batch_number, qty, boxes FROM tracking_dispatch_records WHERE COALESCE(boxes,0) > 0 AND COALESCE(qty,0) > 0`).all();
+    const orders = (_planningStateCache && _planningStateCache.orders) || [];
+    let wouldFix = 0, written = 0, exportScanned = 0; const affected = new Set(); const samples = [];
+    for (const r of (recs || [])) {
+      const q0 = parseFloat(r.qty) || 0; const bx = parseInt(r.boxes, 10) || 0;
+      const ord = orders.find(o => o && o.batchNumber === r.batch_number);
+      if (!ord || !_isExportZoneSrv(ord.zone)) continue;              // export batches only
+      const ps = _V44ZJ_PACK_SIZES[String(ord.size)] || 0; if (!ps || !(bx > 0)) continue;
+      exportScanned++;
+      const impliedBoxes = Math.ceil(q0 / ps);
+      if (impliedBoxes >= bx * 50) {                                  // qty ≈ ×100 the boxes → THOUSAND form
+        const newQty = Math.round((q0 * 0.01) * 1000) / 1000;
+        wouldFix++;
+        if (samples.length < 30) samples.push({ id: r.id, batch: r.batch_number, boxes: bx, fromQty: q0, toQty: newQty });
+        affected.add(r.batch_number);
+        if (confirm) {
+          if (pgPool) await pgPool.query(`UPDATE tracking_dispatch_records SET qty=$1 WHERE id=$2`, [newQty, r.id]);
+          else        db.prepare(`UPDATE tracking_dispatch_records SET qty=? WHERE id=?`).run(newQty, r.id);
+          written++;
+        }
+      }
+    }
+    if (confirm) { for (const bn of affected) { try { await _recomputeDispatchActuals(bn, null, null); } catch(_) {} } }
+    res.json({ ok: true, dryRun: confirm !== true, scanned: (recs || []).length, exportRecordsScanned: exportScanned,
+               rowsToFix: wouldFix, rowsWritten: written, batchesAffected: affected.size,
+               actualsRecomputed: confirm ? affected.size : 0, samples });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v46Y (confirmed by Ishan): NORMALIZE existing orange labels into the dedicated numeric range. Older
+// orange labels were stored with the bare box number (they could collide with the box in the client's
+// batch+box scan lookup — 26ZE104 box 11). This rewrites any orange label whose number is still a real
+// box number (0 < n < BASE) to BASE + n, so it can never collide again. Keyed by id, so no other data
+// references break. Idempotent (already-normalized labels are ≥ BASE and skipped). The v46X client guard
+// already makes these harmless for scanning; this is the data-level cleanup. Dry-run by default.
+app.post('/api/admin/normalize-orange-label-numbers', async (req, res) => {
+  try {
+    const confirm = (req.body && req.body.confirm) === true;
+    let recs;
+    if (pgPool) {
+      recs = (await pgPool.query(
+        `SELECT id, batch_number,
+                ABS(CASE WHEN label_number::text ~ '^-?[0-9]+$' THEN label_number::integer ELSE 0 END) AS num
+         FROM tracking_labels WHERE COALESCE(is_orange,0) = 1`)).rows;
+    } else {
+      recs = db.prepare(`SELECT id, batch_number, label_number FROM tracking_labels WHERE COALESCE(is_orange,0)=1`).all()
+        .map(r => ({ id: r.id, batch_number: r.batch_number, num: Math.abs(parseInt(r.label_number, 10) || 0) }));
+    }
+    const todo = (recs || []).filter(r => r.num > 0 && r.num < _ORANGE_NUM_BASE);
+    const samples = todo.slice(0, 30).map(r => ({ id: r.id, batch: r.batch_number, from: r.num, to: _ORANGE_NUM_BASE + r.num }));
+    let updated = 0, conflicts = 0;
+    if (confirm) {
+      for (const r of todo) {
+        const newNum = _ORANGE_NUM_BASE + r.num;
+        try {
+          if (pgPool) await pgPool.query(`UPDATE tracking_labels SET label_number=$1 WHERE id=$2`, [newNum, r.id]);
+          else        db.prepare(`UPDATE tracking_labels SET label_number=? WHERE id=?`).run(newNum, r.id);
+          updated++;
+        } catch (e) { conflicts++; }
+      }
+    }
+    res.json({ ok: true, dryRun: confirm !== true, orangeLabelsScanned: (recs || []).length,
+               rowsToFix: todo.length, rowsWritten: updated, conflicts, samples });
+  } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+// v47C (confirmed by Ishan): REPAIR labels whose `printed` flag was reset to 0 by a stale bulk sync
+// (the pre-v47C printed=EXCLUDED.printed overwrite). A label with ANY scan was physically printed —
+// you cannot scan an unprinted label — so this sets printed=1 on non-voided, currently-unprinted
+// labels that carry at least one scan, for the given batches. Dry-run by default; {"confirm":true}
+// writes. Idempotent (already-printed labels are skipped by the printed=0 filter).
+app.post('/api/admin/repair-printed-labels', async (req, res) => {
+  try {
+    const batches = Array.isArray(req.body && req.body.batches) ? req.body.batches.filter(Boolean) : [];
+    const confirm = !!(req.body && req.body.confirm);
+    if (!batches.length) return res.status(400).json({ ok:false, error:'body.batches (array of batch numbers) required' });
+    if (!pgPool) return res.status(400).json({ ok:false, error:'repair supported on Postgres only' });
+    // Candidates: non-voided, printed=0 labels in the given batches that have >=1 scan (proof of printing).
+    const cand = (await pgPool.query(
+      `SELECT l.id, l.batch_number
+       FROM tracking_labels l
+       WHERE l.batch_number = ANY($1)
+         AND COALESCE(l.voided,0)=0
+         AND COALESCE(l.printed,0)=0
+         AND EXISTS (SELECT 1 FROM tracking_scans s WHERE s.label_id = l.id)`,
+      [batches])).rows;
+    const perBatch = {};
+    cand.forEach(r => { perBatch[r.batch_number] = (perBatch[r.batch_number]||0) + 1; });
+    if (!confirm) {
+      return res.json({ ok:true, dryRun:true, candidates:cand.length, perBatch, note:'Dry-run. Re-POST with {"confirm":true} to set printed=1 on these labels.' });
+    }
+    const ids = cand.map(r => r.id);
+    let updated = 0;
+    if (ids.length) {
+      const u = await pgPool.query(
+        `UPDATE tracking_labels SET printed=1, printed_at=COALESCE(printed_at, NOW()::text) WHERE id = ANY($1)`,
+        [ids]);
+      updated = u.rowCount || 0;
+    }
+    res.json({ ok:true, dryRun:false, updated, perBatch });
+  } catch (err) {
+    console.error('[repair-printed-labels]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
+// ── v49E (confirmed by Ishan): BACKFILL the ship-to / bill-to residue left by every re-customer done
+// before this build. /api/tracking/recustomer wrote ord.customer and never touched shipTo/billTo, so
+// the OLD customer's name survived on both fields while `customer` held the new one. Every display
+// prefers shipTo, so those batches kept showing the previous customer.
+//
+// Qualifying test — a record is touched ONLY when all three hold:
+//   1. the order was re-customered            (recustomeredFrom present)
+//   2. shipTo and/or billTo STILL equal recustomeredFrom  (i.e. untouched residue)
+//   3. customer holds the NEW name            (customer !== recustomeredFrom)
+// Action: blank the matching field(s). Nothing else on the record changes.
+//
+// Deliberately NOT touched:
+//   · anything a planner has typed since the re-customer — if the field is any value other than the
+//     old name it is left exactly as it is. This is what protects a genuine third-party ship-to.
+//   · orders never re-customered, where a differing bill-to is a real commercial arrangement
+//   · split PARENTS, which keep customer A legitimately — they carry no recustomeredFrom, so test 1
+//     already excludes them; test 3 is a second guard.
+// Both stores are covered with the same test: the planning order (blob + production_orders) and
+// tracking_labels.ship_to/bill_to for that batch.
+// Dry-run by default — returns the full before/after list and writes nothing. {"confirm":true} writes.
+// Idempotent: once blanked, a field no longer equals recustomeredFrom, so a re-run matches nothing.
+app.post('/api/admin/repair-recustomer-shipto', async (req, res) => {
+  try {
+    const confirm = !!(req.body && req.body.confirm);
+    const only = Array.isArray(req.body && req.body.batches) ? req.body.batches.filter(Boolean).map(String) : [];
+    if (!pgPool) return res.status(400).json({ ok:false, error:'repair supported on Postgres only' });
+    const norm = v => String(v == null ? '' : v).trim().toLowerCase();
+
+    const plan = await getPlanningStateAsync();
+    const orders = (plan && Array.isArray(plan.orders)) ? plan.orders : [];
+    const candidates = [];
+    for (const o of orders) {
+      if (!o || o.deleted) continue;
+      if (only.length && !only.includes(String(o.batchNumber||''))) continue;
+      const rf = norm(o.recustomeredFrom);
+      if (!rf) continue;                       // test 1 — never re-customered (also excludes split parents)
+      const cust = norm(o.customer);
+      if (!cust || cust === rf) continue;      // test 3 — customer must already hold the NEW name
+      const shipHit = norm(o.shipTo) === rf;   // test 2 — per field, residue only
+      const billHit = norm(o.billTo) === rf;
+      if (!shipHit && !billHit) continue;
+      candidates.push({ id:o.id, batchNumber:o.batchNumber||'', customer:o.customer||'',
+        recustomeredFrom:o.recustomeredFrom||'',
+        shipTo:{ before:o.shipTo||'', after: shipHit ? '' : (o.shipTo||''), cleared:shipHit },
+        billTo:{ before:o.billTo||'', after: billHit ? '' : (o.billTo||''), cleared:billHit } });
+    }
+
+    // Labels carrying the same residue, counted per batch under the identical test.
+    for (const c of candidates) {
+      c.labels = { shipToRows:0, billToRows:0 };
+      if (!c.batchNumber) continue;
+      const lr = await pgPool.query(
+        `SELECT COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(ship_to,''))) = LOWER(TRIM($2)))::int AS ship_rows,
+                COUNT(*) FILTER (WHERE LOWER(TRIM(COALESCE(bill_to,''))) = LOWER(TRIM($2)))::int AS bill_rows
+         FROM tracking_labels WHERE batch_number=$1 AND COALESCE(voided,0)=0`,
+        [c.batchNumber, c.recustomeredFrom]);
+      c.labels = { shipToRows: lr.rows[0]?.ship_rows || 0, billToRows: lr.rows[0]?.bill_rows || 0 };
+    }
+
+    if (!confirm) {
+      return res.json({ ok:true, dryRun:true, ordersMatched:candidates.length,
+        labelRowsShipTo: candidates.reduce((a,c)=>a+(c.labels.shipToRows||0),0),
+        labelRowsBillTo: candidates.reduce((a,c)=>a+(c.labels.billToRows||0),0),
+        candidates,
+        note:'Dry-run — nothing written. Re-POST with {"confirm":true} to blank the fields listed above.' });
+    }
+
+    // ── LIVE. Blob first, then production_orders per touched order, then the labels.
+    let ordersWritten = 0, labelRowsWritten = 0;
+    const byId = new Set(candidates.map(c=>c.id));
+    for (const o of orders) {
+      if (!byId.has(o.id)) continue;
+      const c = candidates.find(x=>x.id===o.id);
+      if (c.shipTo.cleared) o.shipTo = '';
+      if (c.billTo.cleared) o.billTo = '';
+      o._localEditedAt = Date.now();          // server write must win the client staleness guard
+    }
+    await savePlanningState(plan);
+    _planningStateCache = plan; _planningStateCacheTime = Date.now();
+    for (const c of candidates) {
+      const o = orders.find(x=>x.id===c.id);
+      if (!o) continue;
+      await pgPool.query(
+        `INSERT INTO production_orders (id,data_json,machine_id,batch_number,status,deleted,updated_at)
+         VALUES ($1,$2,$3,$4,$5,false,NOW()::TEXT)
+         ON CONFLICT(id) DO UPDATE SET data_json=$2, machine_id=$3, batch_number=$4, status=$5, deleted=false, updated_at=NOW()::TEXT`,
+        [o.id, JSON.stringify(o), o.machineId||null, o.batchNumber, o.status||'running']);
+      ordersWritten++;
+      if (!c.batchNumber) continue;
+      const u = await pgPool.query(
+        `UPDATE tracking_labels
+            SET ship_to = CASE WHEN LOWER(TRIM(COALESCE(ship_to,''))) = LOWER(TRIM($2)) THEN NULL ELSE ship_to END,
+                bill_to = CASE WHEN LOWER(TRIM(COALESCE(bill_to,''))) = LOWER(TRIM($2)) THEN NULL ELSE bill_to END
+          WHERE batch_number=$1 AND COALESCE(voided,0)=0
+            AND (LOWER(TRIM(COALESCE(ship_to,''))) = LOWER(TRIM($2)) OR LOWER(TRIM(COALESCE(bill_to,''))) = LOWER(TRIM($2)))`,
+        [c.batchNumber, c.recustomeredFrom]);
+      labelRowsWritten += (u.rowCount || 0);
+    }
+    try { logAudit('system','admin','tracking','RECUSTOMER_SHIPTO_BACKFILL', JSON.stringify({ orders:ordersWritten, labelRows:labelRowsWritten, batches:candidates.map(c=>c.batchNumber) }), req.ip); } catch(e) {}
+    console.log(`[v49E] recustomer ship/bill backfill: ${ordersWritten} order(s), ${labelRowsWritten} label row(s)`);
+    res.json({ ok:true, dryRun:false, ordersWritten, labelRowsWritten, candidates });
+  } catch (err) {
+    console.error('[repair-recustomer-shipto]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
 // v45Z (confirmed by Ishan): REPAIR existing export-invoice quantities written before the UoM fix.
 // For every invoices_received row whose payload_json lines include a THOUSAND-UoM line, recompute
 // total_qty_lakhs with the per-line scale; where the linked tracking_dispatch_records row still
@@ -8880,14 +11629,23 @@ app.get('/api/tracking/handover-gap-boxes', async (req, res) => {
 app.get('/api/tracking/handover-gap-counts', async (req, res) => {
   try {
     const pairs = [['aim','printing'],['printing','pi'],['pi','packing'],['aim','packing']];
+    // v47G (confirmed by Ishan): alongside the gap COUNT, sum the ACTUAL label qty of each gap box
+    // (the exact boxes scanned OUT of `from` with no scan-IN at `to`) — partial-aware, pack-standard
+    // fallback. This is the literal "5 boxes scanned out but not in → 4×1L + 1×0.5L = 4.5L" figure, and
+    // it is derived from the SAME box set as the count, so the Boxes and (L) columns can never disagree.
+    // DISTINCT (bn,label,qty) collapses any double scan-out so each gap label is counted/summed once.
     const gapSql = `
-      SELECT s.batch_number AS bn, COUNT(DISTINCT s.label_id) AS gap
-        FROM tracking_scans s
-       WHERE s.dept = $1 AND s.type = 'out' AND s.label_id NOT LIKE 'recon-%'
-         AND s.batch_number IS NOT NULL AND s.batch_number <> ''
-         AND NOT EXISTS (SELECT 1 FROM tracking_scans t
-                          WHERE t.label_id = s.label_id AND t.dept = $2 AND t.type = 'in')
-       GROUP BY s.batch_number`;
+      SELECT bn, COUNT(*) AS gap, COALESCE(SUM(qty),0) AS gap_qty FROM (
+        SELECT DISTINCT s.batch_number AS bn, s.label_id AS lid,
+               COALESCE(l.qty, ${_v47gPackCaseSql('s')}) AS qty
+          FROM tracking_scans s
+          LEFT JOIN tracking_labels l ON l.id = s.label_id
+         WHERE s.dept = $1 AND s.type = 'out' AND s.label_id NOT LIKE 'recon-%'
+           AND s.batch_number IS NOT NULL AND s.batch_number <> ''
+           AND NOT EXISTS (SELECT 1 FROM tracking_scans t
+                            WHERE t.label_id = s.label_id AND t.dept = $2 AND t.type = 'in')
+      ) g
+      GROUP BY bn`;
     const extraSql = `
       SELECT t.batch_number AS bn, COUNT(DISTINCT t.label_id) AS extra
         FROM tracking_scans t
@@ -8908,9 +11666,9 @@ app.get('/api/tracking/handover-gap-counts', async (req, res) => {
         gRows = db.prepare(gapSql.replace(/\$1/g,'?').replace(/\$2/g,'?')).all(from, to);
         eRows = db.prepare(extraSql.replace(/\$1/g,'?').replace(/\$2/g,'?')).all(to, from); // v45ZG audit: extraSql's $2 precedes $1 — positional order is (to, from)
       }
-      for (const r of (gRows||[])) transitions[key][r.bn] = { gap: parseInt(r.gap,10)||0, extraIn: 0 };
+      for (const r of (gRows||[])) transitions[key][r.bn] = { gap: parseInt(r.gap,10)||0, gapQty: parseFloat(r.gap_qty)||0, extraIn: 0 };
       for (const r of (eRows||[])) {
-        if (!transitions[key][r.bn]) transitions[key][r.bn] = { gap: 0, extraIn: 0 };
+        if (!transitions[key][r.bn]) transitions[key][r.bn] = { gap: 0, gapQty: 0, extraIn: 0 };
         transitions[key][r.bn].extraIn = parseInt(r.extra,10)||0;
       }
     }
@@ -8988,6 +11746,7 @@ app.post('/api/dpr/batch-close', async (req, res) => {
 
     // Refresh actuals cache after flush+close
     try { await warmActualsCache(); } catch {}
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
 
     res.json({ ok: true });
   } catch (err) {
@@ -9003,6 +11762,7 @@ app.delete('/api/dpr/batch-close/:orderId', async (req, res) => {
     } else {
       db.prepare('DELETE FROM dpr_batch_closed WHERE order_id = ?').run(req.params.orderId);
     }
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -9040,15 +11800,25 @@ app.post('/api/dpr/batch-reopen', async (req, res) => {
     }
 
     if (!closedRow) return res.status(409).json({ ok: false, error: 'Batch is not currently closed in DPR.' });
-    if (reopenRow)  return res.status(409).json({ ok: false, error: 'This batch has already been reopened once and cannot be reopened again. Contact Admin.' });
+    // v49ZD (confirmed by Ishan): ADMIN can override BOTH guards — the once-only rule and the 2-day
+    // window. Non-admin behaviour unchanged; both refusals now carry canAdminOverride so admin
+    // clients can offer a confirmed override retry. Every override is audited.
+    const _admOv = (req.body && req.body.adminOverride === true && req.body.userRole === 'admin');
+    if (reopenRow && !_admOv) return res.status(409).json({ ok: false, canAdminOverride: true, error: 'This batch has already been reopened once and cannot be reopened again. Contact Admin.' });
 
-    // Same-IST-day guard: the close date (IST) must equal today (IST).
+    // v49G: 2-day reopen window (was same-day). A batch may be reopened on the day it was closed
+    // OR the following IST calendar day — i.e. the IST-day difference must be 0 or 1. Once-only guard
+    // above is unchanged; this only widens the time window.
     const closeDayIST = _istYMD(closedRow.closed_at);
     const todayIST    = _istYMD(new Date().toISOString());
-    if (closeDayIST && todayIST && closeDayIST !== todayIST) {
-      return res.status(409).json({ ok: false, error: `Reopen window expired. A batch can only be reopened on the same day it was closed (closed ${closeDayIST}, today ${todayIST}). Contact Admin.` });
+    if (closeDayIST && todayIST && !_admOv) {
+      const _dayDiff = Math.round((Date.parse(todayIST) - Date.parse(closeDayIST)) / 86400000);
+      if (!(Number.isFinite(_dayDiff) && _dayDiff >= 0 && _dayDiff <= 1)) {
+        return res.status(409).json({ ok: false, canAdminOverride: true, error: `Reopen window expired. A batch can be reopened within 2 days of closing (closed ${closeDayIST}, today ${todayIST}). Contact Admin.` });
+      }
     }
 
+    if (_admOv) { try { logAudit((req.body && req.body.reopenedBy) || 'admin', 'admin', 'dpr', 'DPR_REOPEN_ADMIN_OVERRIDE', `Admin override reopen: ${batchNumber || closedRow.batch_number || orderId} (bypassed once-only/2-day guards)`); } catch(_) {} }
     // Perform: record the reopen (blocks future reopens) then delete the closed row.
     if (pgPool) {
       await pgPool.query(
@@ -9062,6 +11832,7 @@ app.post('/api/dpr/batch-reopen', async (req, res) => {
         VALUES (?, ?, ?, datetime('now'), ?)`).run(orderId, batchNumber || closedRow.batch_number || null, closedRow.closed_at || null, reopenedBy || null);
       db.prepare('DELETE FROM dpr_batch_closed WHERE order_id=?').run(orderId);
     }
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
     res.json({ ok: true, reopenedAt: new Date().toISOString() });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -9154,6 +11925,7 @@ app.post('/api/batch/retire', async (req, res) => {
     }
     await loadRetiredBatches();
     try { await warmPlanningCache(); } catch (e) {}
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
     console.log(`[retire] ${retired} batch(es) retired by ${by}`);
     res.json({ ok: true, retired });
   } catch (err) { console.error('[retire] error', err.message); res.status(500).json({ ok: false, error: err.message }); }
@@ -9186,6 +11958,7 @@ app.post('/api/batch/unretire', async (req, res) => {
     }
     await loadRetiredBatches();
     try { await warmPlanningCache(); } catch (e) {}
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
     console.log(`[retire] ${restored} batch(es) un-retired`);
     res.json({ ok: true, restored });
   } catch (err) { console.error('[unretire] error', err.message); res.status(500).json({ ok: false, error: err.message }); }
@@ -9286,66 +12059,135 @@ app.get('/api/dpr/batch-closed', async (req, res) => {
 
 // GET /api/dpr/closed-batches — machine-wise list of all closed batches with planned vs actual DPR gross.
 // One row per closed production order. "Actual DPR Gross" = override (if set) else SUM(production_actuals).
+//
+// v49W (root cause of the chronic slow-load AND the 28-Jul "operation timed out"): every GET
+// re-fetched the FULL planning blob from PG and JSON.parse'd it (ignoring the in-memory cache the
+// 30s planning polling keeps warm), then made three MORE sequential pool round-trips. Under
+// peak-hour pool saturation (max 10 connections, 10s acquisition timeout, heavy actuals GROUP-BYs
+// + blob reads/writes from every device's auto-sync) those four queued acquisitions exceeded the
+// client's 20s abort — the same contention class as the v41ZM incident. Now the payload is built
+// once and served from memory: fresh cache serves instantly with zero DB touches; a stale cache
+// still serves instantly (flagged stale:true) while a single-flight background rebuild refreshes;
+// only a fully cold server awaits a build — and the build itself is cheap now (cache-first planning
+// read + three small keyed scans). Writers that change the payload (batch close / reopen / retire /
+// unretire / gross-override / v49G planning re-close cascade) invalidate the cache generation, so
+// corrections and closes reflect on the very next fetch.
+let _closedBatchesCache = null;
+let _closedBatchesCacheTime = 0;
+let _closedBatchesBuilding = null;   // in-flight build promise (single-flight)
+let _closedBatchesGen = 0;           // bumped on invalidation; stale in-flight builds refuse to commit
+const CLOSED_BATCHES_TTL_MS = 45000;
+function _invalidateClosedBatchesCache() {
+  _closedBatchesCache = null; _closedBatchesCacheTime = 0;
+  _closedBatchesGen++; _closedBatchesBuilding = null;   // drop any pre-write in-flight build
+}
+async function _buildClosedBatchesPayload() {
+  // Keep the gross maps warm (backgrounded + 60s-throttled inside; never blocks this build).
+  warmActualsCache().catch(()=>{});
+  // v49ZB: the Start/End columns anchor to ACTUAL production dates (below) — on a truly cold
+  // instance the date maps may not exist yet, so await one warm rather than serving planned dates.
+  if (!_firstProdByBatch || !_lastProdByBatch) { try { await warmActualsCache(); } catch(_){} }
+  await loadGrossOverrides();
+  // v49W: cache-first planning read — the 30s planning polling keeps _planningStateCache warm, so
+  // re-fetching the multi-MB blob per request was pure waste and the dominant chronic cost here.
+  const ps = (_planningStateCache && Array.isArray(_planningStateCache.orders) && (Date.now() - _planningStateCacheTime) < 60000)
+    ? _planningStateCache : await getPlanningStateAsync();
+  const orders = (ps.orders || []).filter(o => o && !o.deleted);
+
+  // closed set from dpr_batch_closed (keyed by order_id and batch_number) + closed_at lookup
+  let closedRows;
+  if (pgPool) closedRows = (await pgPool.query('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed')).rows;
+  else closedRows = db.prepare('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed').all();
+  const closedById = new Map(), closedByBatch = new Map();
+  for (const c of (closedRows || [])) {
+    if (c.order_id) closedById.set(c.order_id, c);
+    if (c.batch_number) closedByBatch.set(c.batch_number, c);
+  }
+
+  // v49ZB(b): closing shift — the shift of each batch's LAST production row. Lexical MAX of
+  // "YYYY-MM-DD|shift" gives the last date's latest shift (A<B<C sorts correctly); one keyed
+  // aggregate per (background/cold) rebuild, self-contained here so no shared warm path changes.
+  const lastShiftByBatch = {};
+  try {
+    let _lsRows;
+    if (pgPool) _lsRows = (await pgPool.query("SELECT batch_number, MAX(date::text || '|' || COALESCE(shift,'')) AS ds FROM production_actuals WHERE batch_number IS NOT NULL GROUP BY batch_number")).rows;
+    else _lsRows = db.prepare("SELECT batch_number, MAX(date || '|' || COALESCE(shift,'')) AS ds FROM production_actuals WHERE batch_number IS NOT NULL GROUP BY batch_number").all();
+    for (const r of (_lsRows || [])) {
+      const ds = String(r.ds || ''); const i = ds.indexOf('|');
+      if (r.batch_number && i > 0) lastShiftByBatch[r.batch_number] = ds.slice(i + 1);
+    }
+  } catch(_) {}
+
+  // override metadata (reason/by/at) for display
+  let ovRows;
+  if (pgPool) ovRows = (await pgPool.query('SELECT batch_number, gross_lakhs, reason, updated_by, updated_at FROM batch_gross_override')).rows;
+  else ovRows = db.prepare('SELECT batch_number, gross_lakhs, reason, updated_by, updated_at FROM batch_gross_override').all();
+  const ovByBatch = new Map((ovRows || []).map(r => [r.batch_number, r]));
+
+  const out = [];
+  for (const o of orders) {
+    const cRow = closedById.get(o.id) || closedByBatch.get(o.batchNumber);
+    const isClosed = !!cRow || o.status === 'closed';
+    if (!isClosed) continue;
+    const ov = ovByBatch.get(o.batchNumber) || null;
+    const rawGross = _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, o.batchNumber)
+      ? _grossByBatch[o.batchNumber] : effectiveGross(o.batchNumber);
+    out.push({
+      orderId: o.id,
+      batchNumber: o.batchNumber || '',
+      machineId: o.machineId || '',
+      size: (o.size != null ? String(o.size) : ''),
+      colour: o.colour || o.color || '',
+      pcCode: o.pcCode || '',
+      customer: o.customer || '',
+      // v49ZB (Ishan, 26ZE116/117): Start/End show the ACTUAL production window — MIN/MAX
+      // production_actuals dates (the same v45W/X dprFirstDate/dprLastDate anchor Planning uses for
+      // closed batches) — falling back to the planner's dates only when no actuals exist. Previously
+      // these columns showed the PLANNED window, so any batch that overran or underran its plan
+      // (ZE116 ran 25–27 Jul, showed 25–26; ZE117 ran 27–28, showed 27–27) displayed wrong dates
+      // and the Start From/To filters matched the wrong rows.
+      startDate: (_firstProdByBatch && _firstProdByBatch[o.batchNumber]) || o.startDate || '',
+      endDate:   (_lastProdByBatch  && _lastProdByBatch[o.batchNumber])  || o.endDate   || '',
+      endShift:  lastShiftByBatch[o.batchNumber] || '',   // v49ZB(b): shift that closed the batch (last production row's shift)
+      plannedGross: parseFloat(o.grossQty || 0) || 0,
+      rawDprGross: parseFloat(rawGross || 0) || 0,                 // pure SUM(production_actuals)
+      actualGross: effectiveGross(o.batchNumber),                 // override (if any) else raw sum
+      hasOverride: !!ov,
+      overrideReason: ov ? (ov.reason || '') : '',
+      overrideBy: ov ? (ov.updated_by || '') : '',
+      overrideAt: ov ? (ov.updated_at || '') : '',
+      closedAt: cRow ? (cRow.closed_at || '') : '',
+      status: o.status || ''
+    });
+  }
+  // Machine then batch ordering (report is grouped/filtered client-side)
+  out.sort((a,b) => (a.machineId||'').localeCompare(b.machineId||'') || (a.batchNumber||'').localeCompare(b.batchNumber||''));
+  return { ok: true, batches: out };
+}
+function _refreshClosedBatchesCache() {
+  if (_closedBatchesBuilding) return _closedBatchesBuilding;
+  const gen = _closedBatchesGen;
+  const p = _buildClosedBatchesPayload()
+    .then(payload => {
+      if (gen === _closedBatchesGen) { _closedBatchesCache = payload; _closedBatchesCacheTime = Date.now(); }
+      return payload;
+    })
+    .finally(() => { if (_closedBatchesBuilding === p) _closedBatchesBuilding = null; });
+  _closedBatchesBuilding = p;
+  return p;
+}
 app.get('/api/dpr/closed-batches', async (req, res) => {
   try {
-    // v41ZK: do NOT await the heavy actuals aggregation here — this is an on-demand report and the
-    // client aborts at 12s. warmActualsCache() blocked long enough on the production DB to time the
-    // request out ("Failed to load closed batches: The operation timed out"). The gross maps are kept
-    // warm by the startup warm + planning/state polling, so we read them as-is and only await the
-    // cheap single-row override refresh below for correctness.
-    warmActualsCache().catch(()=>{});
-    await loadGrossOverrides();
-    const ps = await getPlanningStateAsync();
-    const orders = (ps.orders || []).filter(o => o && !o.deleted);
-
-    // closed set from dpr_batch_closed (keyed by order_id and batch_number) + closed_at lookup
-    let closedRows;
-    if (pgPool) closedRows = (await pgPool.query('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed')).rows;
-    else closedRows = db.prepare('SELECT order_id, batch_number, closed_at, closed_by FROM dpr_batch_closed').all();
-    const closedById = new Map(), closedByBatch = new Map();
-    for (const c of (closedRows || [])) {
-      if (c.order_id) closedById.set(c.order_id, c);
-      if (c.batch_number) closedByBatch.set(c.batch_number, c);
+    const age = Date.now() - _closedBatchesCacheTime;
+    if (_closedBatchesCache && age < CLOSED_BATCHES_TTL_MS) return res.json(_closedBatchesCache);
+    if (_closedBatchesCache) {
+      // stale: serve instantly, refresh in the background (single-flight)
+      _refreshClosedBatchesCache().catch(e => console.error('[closed-batches] background rebuild:', e.message));
+      return res.json(Object.assign({}, _closedBatchesCache, { stale: true }));
     }
-
-    // override metadata (reason/by/at) for display
-    let ovRows;
-    if (pgPool) ovRows = (await pgPool.query('SELECT batch_number, gross_lakhs, reason, updated_by, updated_at FROM batch_gross_override')).rows;
-    else ovRows = db.prepare('SELECT batch_number, gross_lakhs, reason, updated_by, updated_at FROM batch_gross_override').all();
-    const ovByBatch = new Map((ovRows || []).map(r => [r.batch_number, r]));
-
-    const out = [];
-    for (const o of orders) {
-      const cRow = closedById.get(o.id) || closedByBatch.get(o.batchNumber);
-      const isClosed = !!cRow || o.status === 'closed';
-      if (!isClosed) continue;
-      const ov = ovByBatch.get(o.batchNumber) || null;
-      const rawGross = _grossByBatch && Object.prototype.hasOwnProperty.call(_grossByBatch, o.batchNumber)
-        ? _grossByBatch[o.batchNumber] : effectiveGross(o.batchNumber);
-      out.push({
-        orderId: o.id,
-        batchNumber: o.batchNumber || '',
-        machineId: o.machineId || '',
-        size: (o.size != null ? String(o.size) : ''),
-        colour: o.colour || o.color || '',
-        pcCode: o.pcCode || '',
-        customer: o.customer || '',
-        startDate: o.startDate || '',
-        endDate: o.endDate || '',
-        plannedGross: parseFloat(o.grossQty || 0) || 0,
-        rawDprGross: parseFloat(rawGross || 0) || 0,                 // pure SUM(production_actuals)
-        actualGross: effectiveGross(o.batchNumber),                 // override (if any) else raw sum
-        hasOverride: !!ov,
-        overrideReason: ov ? (ov.reason || '') : '',
-        overrideBy: ov ? (ov.updated_by || '') : '',
-        overrideAt: ov ? (ov.updated_at || '') : '',
-        closedAt: cRow ? (cRow.closed_at || '') : '',
-        status: o.status || ''
-      });
-    }
-    // Machine then batch ordering (report is grouped/filtered client-side)
-    out.sort((a,b) => (a.machineId||'').localeCompare(b.machineId||'') || (a.batchNumber||'').localeCompare(b.batchNumber||''));
-    res.json({ ok: true, batches: out });
+    // cold (first hit after boot or after an invalidating write): await the build
+    const payload = await _refreshClosedBatchesCache();
+    res.json(payload);
   } catch (err) {
     console.error('[closed-batches]', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -9382,6 +12224,7 @@ app.post('/api/dpr/gross-override', async (req, res) => {
     }
     await loadGrossOverrides();                 // refresh override map → effectiveGross() picks it up immediately
     _planningStateCacheTime = 0;                // force planning state cache to re-serve with new gross
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
     try { logAudit(by, userRole || '', 'dpr', 'DPR_GROSS_OVERRIDE', `Set batch ${batchNumber} gross → ${g}L. ${reasonStr}`, req.ip); } catch {}
     res.json({ ok: true, batchNumber, actualGross: effectiveGross(batchNumber) });
   } catch (err) {
@@ -9399,6 +12242,7 @@ app.delete('/api/dpr/gross-override/:batchNumber', async (req, res) => {
     else db.prepare('DELETE FROM batch_gross_override WHERE batch_number=?').run(bn);
     await loadGrossOverrides();
     _planningStateCacheTime = 0;
+    _invalidateClosedBatchesCache();   // v49W: closed-batches report cache
     try { logAudit(by, '', 'dpr', 'DPR_GROSS_OVERRIDE_CLEAR', `Cleared gross override for batch ${bn}`, req.ip); } catch {}
     res.json({ ok: true, batchNumber: bn, actualGross: effectiveGross(bn) });
   } catch (err) {
@@ -9427,86 +12271,57 @@ app.get('/api/dpr/:floor/:date', async (req, res) => {
 // GET /api/actuals/machine-summary — total qty and distinct days per machine (for Planning avg daily rate)
 app.get('/api/actuals/machine-summary', async (req, res) => {
   try {
-    // v37E: Per user spec — average production per day must only include FULLY-ENTERED calendar days
-    // (all 3 shifts A/B/C present in the saved DPR). Today's partial entry (e.g., only A-shift) is
-    // excluded so the average doesn't drop spuriously. The average locks at end of day and updates
-    // once all shifts are entered.
-    //
-    // Completeness signal: a shift is "entered" when its `incharge` field is non-empty.
-    // The DPR UI initializes incharge as '' (empty string) on a blank day, and operators fill it
-    // when they record the shift. This is a reliable signal that someone actively entered shift
-    // data (more reliable than checking shift keys exist — those exist by default in the skeleton).
-    // incharge can be a string OR an array of names; both forms count as "filled" if non-empty.
+    // v46Q (confirmed by Ishan): the planning header's "Avg Actual /day" must equal the DPR Plant
+    // Report's per-machine Daily Avg for every machine. DPR (/api/dpr/plant-cum) computes it as
+    // total-produced ÷ DAYS-WITH-PRODUCTION (it drops day_total<=0). This endpoint previously used a
+    // different day-set: only days where the floor DPR was "complete" (all 3 shifts' incharge filled),
+    // and — crucially — it counted EVERY (machine,date) in production_actuals in the denominator,
+    // INCLUDING zero-qty rows (COUNT(*) with no qty filter). That inflated the divisor with 0-produced
+    // days (Ishan's "extra day with 0 production"), so planning read low (MC14 11.3 vs DPR 13.2).
+    // Fix: mirror plant-cum exactly — sum per (machine,date), keep only day_qty>0, then
+    // avgPerDay = SUM(day_qty) ÷ COUNT(producing days). Identical to DPR by construction; the partial
+    // "today" day is naturally excluded when it has no production and included (as DPR does) when it
+    // does. Per-order partial-day attribution is a scheduling concern, unaffected by this number.
+    // v46R (confirmed by Ishan — v46Q follow-up): the math already mirrors plant-cum, but the DATE
+    // WINDOW didn't. This endpoint summed ALL production_actuals (all-time), while the DPR Plant Report's
+    // default view is "This Month" — from the 1st of the current month to today (from=<month>-01,
+    // to=<today>, exactly what dpr.html passes to /api/dpr/plant-cum). Any prior-month rows (e.g. June)
+    // shifted the all-time average off the July figure Ishan compares against (MC30 25.6 vs DPR 25.84).
+    // Fix: default the window to the current month, matching DPR "This Month" day-for-day. Optional
+    // from/to query params override it (kept for flexibility); planning calls it with none → current month.
+    const _pad = n => String(n).padStart(2, '0');
+    const _now = new Date();
+    const _defFrom = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-01`;
+    const _defTo   = `${_now.getFullYear()}-${_pad(_now.getMonth() + 1)}-${_pad(_now.getDate())}`;
+    const _isDate = d => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''));
+    const winFrom = _isDate(req.query.from) ? String(req.query.from).slice(0, 10) : _defFrom;
+    const winTo   = _isDate(req.query.to)   ? String(req.query.to).slice(0, 10)   : _defTo;
     let rows;
     if (pgPool) {
       const r = await pgPool.query(`
-        WITH complete_floor_days AS (
-          -- A day's DPR is complete when all 3 shifts have non-empty incharge
-          SELECT floor, date FROM dpr_records
-          WHERE COALESCE(jsonb_typeof(data_json::jsonb -> 'shifts' -> 'A' -> 'incharge'), 'null') != 'null'
-            AND COALESCE(jsonb_typeof(data_json::jsonb -> 'shifts' -> 'B' -> 'incharge'), 'null') != 'null'
-            AND COALESCE(jsonb_typeof(data_json::jsonb -> 'shifts' -> 'C' -> 'incharge'), 'null') != 'null'
-            AND (
-              -- A: array with length > 0  OR  non-empty string
-              (jsonb_typeof(data_json::jsonb -> 'shifts' -> 'A' -> 'incharge') = 'array'
-                AND jsonb_array_length(data_json::jsonb -> 'shifts' -> 'A' -> 'incharge') > 0)
-              OR (jsonb_typeof(data_json::jsonb -> 'shifts' -> 'A' -> 'incharge') = 'string'
-                AND length(data_json::jsonb -> 'shifts' -> 'A' ->> 'incharge') > 0)
-            )
-            AND (
-              (jsonb_typeof(data_json::jsonb -> 'shifts' -> 'B' -> 'incharge') = 'array'
-                AND jsonb_array_length(data_json::jsonb -> 'shifts' -> 'B' -> 'incharge') > 0)
-              OR (jsonb_typeof(data_json::jsonb -> 'shifts' -> 'B' -> 'incharge') = 'string'
-                AND length(data_json::jsonb -> 'shifts' -> 'B' ->> 'incharge') > 0)
-            )
-            AND (
-              (jsonb_typeof(data_json::jsonb -> 'shifts' -> 'C' -> 'incharge') = 'array'
-                AND jsonb_array_length(data_json::jsonb -> 'shifts' -> 'C' -> 'incharge') > 0)
-              OR (jsonb_typeof(data_json::jsonb -> 'shifts' -> 'C' -> 'incharge') = 'string'
-                AND length(data_json::jsonb -> 'shifts' -> 'C' ->> 'incharge') > 0)
-            )
-        ),
-        machine_complete_days AS (
-          SELECT pa.machine_id, pa.date, SUM(pa.qty_lakhs) AS day_qty
-          FROM production_actuals pa
-          JOIN complete_floor_days cfd ON cfd.floor = pa.floor AND cfd.date = pa.date
-          GROUP BY pa.machine_id, pa.date
-        )
         SELECT machine_id,
-               SUM(day_qty)        AS total_qty,
-               COUNT(*)            AS distinct_days,
-               MIN(date)           AS first_date,
-               MAX(date)           AS last_date
-        FROM machine_complete_days
-        GROUP BY machine_id`);
+               SUM(day_qty) AS total_qty,
+               COUNT(*)     AS distinct_days,
+               MIN(date)    AS first_date,
+               MAX(date)    AS last_date
+        FROM (
+          SELECT machine_id, date, SUM(qty_lakhs) AS day_qty
+          FROM production_actuals
+          WHERE date >= $1 AND date <= $2
+          GROUP BY machine_id, date
+          HAVING SUM(qty_lakhs) > 0
+        ) t
+        GROUP BY machine_id`, [winFrom, winTo]);
       rows = r.rows;
     } else {
-      // SQLite fallback — use json_extract to peek at incharge values.
-      // For SQLite we fetch all dpr_records and filter in JS (simpler and SQLite has no jsonb_typeof).
-      const allDprRecs = db.prepare('SELECT floor, date, data_json FROM dpr_records').all();
-      const completeFloorDays = new Set();
-      for (const rec of allDprRecs) {
-        try {
-          const j = JSON.parse(rec.data_json);
-          const shifts = j?.shifts || {};
-          const isFilled = (sh) => {
-            const inc = shifts[sh]?.incharge;
-            if (Array.isArray(inc)) return inc.length > 0;
-            if (typeof inc === 'string') return inc.length > 0;
-            return false;
-          };
-          if (isFilled('A') && isFilled('B') && isFilled('C')) {
-            completeFloorDays.add(`${rec.floor}|${rec.date}`);
-          }
-        } catch(e) {}
-      }
-      // Now sum production_actuals only for those (floor, date) combos
-      const allActuals = db.prepare(`SELECT machine_id, floor, date, SUM(qty_lakhs) AS day_qty FROM production_actuals GROUP BY machine_id, floor, date`).all();
+      // SQLite fallback — same rule as plant-cum: producing days only (day_qty>0), current-month window.
+      const allActuals = db.prepare(`SELECT machine_id, date, SUM(qty_lakhs) AS day_qty FROM production_actuals WHERE date >= ? AND date <= ? GROUP BY machine_id, date`).all(winFrom, winTo);
       const machineAcc = {};
       allActuals.forEach(a => {
-        if (!completeFloorDays.has(`${a.floor}|${a.date}`)) return;
+        const q = parseFloat(a.day_qty || 0);
+        if (!(q > 0)) return; // days-with-production only — mirrors DPR plant-cum
         if (!machineAcc[a.machine_id]) machineAcc[a.machine_id] = { total_qty: 0, distinct_days: 0, first_date: a.date, last_date: a.date };
-        machineAcc[a.machine_id].total_qty += parseFloat(a.day_qty || 0);
+        machineAcc[a.machine_id].total_qty += q;
         machineAcc[a.machine_id].distinct_days += 1;
         if (a.date < machineAcc[a.machine_id].first_date) machineAcc[a.machine_id].first_date = a.date;
         if (a.date > machineAcc[a.machine_id].last_date)  machineAcc[a.machine_id].last_date  = a.date;
@@ -9523,7 +12338,7 @@ app.get('/api/actuals/machine-summary', async (req, res) => {
         avgPerDay: distinctDays > 0 ? parseFloat((totalQty / distinctDays).toFixed(3)) : 0,
         firstDate: r.first_date,
         lastDate:  r.last_date,
-        note: 'Only days with all 3 shifts (A/B/C) fully entered (incharge filled) count toward this average.'
+        note: 'Total produced ÷ days-with-production this month — same rule and window as the DPR Plant Report (This Month) daily average.'
       };
     });
     res.json({ ok: true, machines });
@@ -10394,9 +13209,16 @@ app.post('/api/wo/propose-reconciliation', async (req, res) => {
       return res.status(403).json({ ok: false, error: 'Planning Manager or Admin required' });
     }
     if (!customer) return res.status(400).json({ ok: false, error: 'Customer name required' });
-    // v39 Phase 9c: partial SAP link guard — both or neither
-    if ((sapDocEntry && !sapDocNum) || (!sapDocEntry && sapDocNum)) {
-      return res.status(400).json({ ok: false, error: 'sapDocEntry and sapDocNum must both be provided, or both omitted' });
+    // v48W: the old rule demanded sapDocEntry and sapDocNum together, or neither. But sapDocEntry is
+    // SAP's INTERNAL key (e.g. 44985) which a planner has no way to know — they have the Sales Order
+    // NUMBER (e.g. 345). So supplying the SO number alone was rejected, planners submitted neither,
+    // and the W/O converted with its customer updated but no SAP link at all (live case: 26ZG136,
+    // reconciled to Windlas, left un-invoiceable). A DocNum on its own is sufficient downstream —
+    // the SAP reconcile matches on sapDocEntry preferred / poNumber fallback, and the invoice gate
+    // accepts any one of DocEntry, DocNum or PO. Only the reverse remains invalid: a bare internal
+    // DocEntry with no human-readable SO number.
+    if (sapDocEntry && !sapDocNum) {
+      return res.status(400).json({ ok: false, error: 'A Sales Order Number is required when a DocEntry is supplied' });
     }
     const id = `WORECON-${Date.now()}`;
     const billTo = req.body.billTo || '';
@@ -10455,10 +13277,11 @@ app.post('/api/wo/approve/:id', async (req, res) => {
         ord.woStatus = 'wo-reconciled';
         ord.woReconciledAt = now;
         ord.woReconciledBy = session.username;
-        // v39 Phase 9c: apply SAP refs from the reconciliation request, if present
-        if (request.sap_doc_entry) {
-          ord.sapDocEntry = request.sap_doc_entry;
-          ord.sapDocNum = request.sap_doc_num || '';
+        // v48W: apply whichever SAP ref the proposal carried. Previously gated on sap_doc_entry
+        // alone, so an SO-number-only reconciliation silently dropped the link.
+        if (request.sap_doc_entry || request.sap_doc_num) {
+          if (request.sap_doc_entry) ord.sapDocEntry = request.sap_doc_entry;
+          if (request.sap_doc_num)   ord.sapDocNum   = request.sap_doc_num;
         }
         // Update dispatch plans
         (planState.dispatchPlans || []).forEach(d => {
@@ -12942,7 +15765,7 @@ app.get('/api/tracking/state', async (req, res) => {
     if (pgPool) {
       const mapClosure = r => ({ ...r, batchNumber: r.batch_number, closedAt: r.closed_at, closedBy: r.closed_by, shortClose: r.short_close, shortReason: r.short_reason, shortBoxes: r.short_boxes });
       const mapWastage = r => ({ ...r, batchNumber: r.batch_number });
-      const mapDispatch = r => ({ ...r, batchNumber: r.batch_number, vehicleNo: r.vehicle_no, invoiceNo: r.invoice_no });
+      const mapDispatch = r => ({ ...r, batchNumber: r.batch_number, vehicleNo: r.vehicle_no, invoiceNo: r.invoice_no, scannedLabels: (() => { try { return JSON.parse(r.scanned_labels_json || '[]'); } catch { return []; } })() });
       const mapAlert = r => ({ ...r, labelId: r.label_id, batchNumber: r.batch_number, scanInTs: r.scan_in_ts, hoursStuck: r.hours_stuck });
       const mapRev = r => ({ reversedScanId: r.reversed_scan_id, labelId: r.label_id, batchNumber: r.batch_number, dept: r.dept, type: r.type });
       if (light) {
@@ -13005,7 +15828,7 @@ app.post('/api/tracking/state', async (req, res) => {
             await client.query(`INSERT INTO tracking_labels
               (id,batch_number,label_number,size,qty,is_partial,is_orange,parent_label_id,customer,colour,pc_code,po_number,machine_id,printing_matter,generated,printed,printed_at,voided,void_reason,voided_at,voided_by,qr_data,wo_status,ship_to,bill_to,is_excess,excess_num,excess_total,normal_total)
               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
-              ON CONFLICT (id) DO UPDATE SET batch_number=EXCLUDED.batch_number,label_number=EXCLUDED.label_number,printed=EXCLUDED.printed,printed_at=EXCLUDED.printed_at,voided=EXCLUDED.voided,void_reason=EXCLUDED.void_reason,voided_at=EXCLUDED.voided_at,wo_status=EXCLUDED.wo_status,ship_to=EXCLUDED.ship_to,bill_to=EXCLUDED.bill_to`,
+              ON CONFLICT (id) DO UPDATE SET batch_number=EXCLUDED.batch_number,label_number=EXCLUDED.label_number,printed=GREATEST(COALESCE(tracking_labels.printed,0), COALESCE(EXCLUDED.printed,0)),printed_at=COALESCE(EXCLUDED.printed_at, tracking_labels.printed_at),voided=EXCLUDED.voided,void_reason=EXCLUDED.void_reason,voided_at=EXCLUDED.voided_at,wo_status=EXCLUDED.wo_status,ship_to=EXCLUDED.ship_to,bill_to=EXCLUDED.bill_to`,
               [l.id,l.batchNumber,l.labelNumber,l.size,l.qty,l.isPartial?1:0,l.isOrange?1:0,l.parentLabelId||null,l.customer||null,l.colour||null,l.pcCode||null,l.poNumber||null,l.machineId||null,l.printingMatter||null,l.generated||new Date().toISOString(),l.printed?1:0,l.printedAt||null,l.voided?1:0,l.voidReason||null,l.voidedAt||null,l.voidedBy||null,l.qrData||null,l.woStatus||null,l.shipTo||null,l.billTo||null,l.isExcess?1:0,l.excessNum||null,l.excessTotal||null,l.normalTotal||null]);
           }
         }
@@ -13053,6 +15876,55 @@ app.post('/api/tracking/state', async (req, res) => {
     res.json({ ok: true });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
+// POST /api/repair/resplit-dispatch-records  (v46J point 3)
+// One-time repair for the export over-count on OLD records: existing multi-batch dispatch records
+// carry the WHOLE invoice qty on a single comma-joined batch_number row (e.g. Eskay 188L against
+// "26ZB081, 26ZB079, …"). Re-split each into per-batch records using the invoice's own DocumentLines
+// (_lineDispatchForBatch) — the same logic v46H applies to NEW dispatches. SAFETY: DRY-RUN by default;
+// pass ?apply=1 (or {apply:true}) to execute. Idempotent — only touches records whose batch_number
+// contains a comma. Unresolvable batch lines are FLAGGED (qty 0 + remark), never given a share. The
+// original record's id/ts/customer/vehicle/invoice_no are preserved on the first per-batch row.
+app.post('/api/repair/resplit-dispatch-records', async (req, res) => {
+  try {
+    const apply = String(req.query.apply || '') === '1' || req.body?.apply === true;
+    let recs;
+    if (pgPool) recs = (await pgPool.query(`SELECT * FROM tracking_dispatch_records WHERE batch_number LIKE '%,%'`)).rows;
+    else recs = db.prepare(`SELECT * FROM tracking_dispatch_records WHERE batch_number LIKE '%,%'`).all();
+    const plan = [];
+    let created = 0, deleted = 0, skipped = 0;
+    const _touchedBatches = new Set();
+    for (const r of recs) {
+      let inv;
+      if (pgPool) inv = (await pgPool.query(`SELECT * FROM invoices_received WHERE dispatch_record_id=$1 OR (sap_doc_num=$2 AND $2 <> '') LIMIT 1`, [r.id, r.invoice_no || ''])).rows[0];
+      else inv = db.prepare(`SELECT * FROM invoices_received WHERE dispatch_record_id=? OR (sap_doc_num=? AND ? <> '') LIMIT 1`).get(r.id, r.invoice_no || '', r.invoice_no || '');
+      let payload = null; try { payload = inv && inv.payload_json ? JSON.parse(inv.payload_json) : null; } catch { payload = null; }
+      const batches = String(r.batch_number).split(',').map(s => s.trim()).filter(Boolean);
+      if (!payload) { skipped++; plan.push({ recId: r.id, batch: r.batch_number, action: 'SKIP', reason: 'no invoice payload to split from — left unchanged' }); continue; }
+      const allocs = batches.map(b => {
+        const d = _lineDispatchForBatch(payload, b);
+        return d ? { batch: b, qty: d.qty, boxes: d.boxes, flagged: false } : { batch: b, qty: 0, boxes: 0, flagged: true };
+      });
+      plan.push({ recId: r.id, oldBatch: r.batch_number, oldQty: r.qty, oldBoxes: r.boxes, newRecords: allocs });
+      if (apply) {
+        if (pgPool) await pgPool.query(`DELETE FROM tracking_dispatch_records WHERE id=$1`, [r.id]);
+        else db.prepare(`DELETE FROM tracking_dispatch_records WHERE id=?`).run(r.id);
+        deleted++;
+        for (let i = 0; i < allocs.length; i++) {
+          const a = allocs[i];
+          const rid = i === 0 ? r.id : ('disprec_' + crypto.randomBytes(6).toString('hex'));
+          const rmk = (r.remarks || '') + ' [v46J re-split]' + (a.flagged ? ' [batch line unresolved in invoice — needs re-allocation]' : '');
+          if (pgPool) await pgPool.query(`INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, "by", scanned_labels_json) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [rid, a.batch, r.customer || '', a.qty, a.boxes, r.vehicle_no || '', r.invoice_no || '', rmk, r.ts, r.by || 'v46J-resplit', '[]']);
+          else db.prepare(`INSERT INTO tracking_dispatch_records (id, batch_number, customer, qty, boxes, vehicle_no, invoice_no, remarks, ts, by, scanned_labels_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(rid, a.batch, r.customer || '', a.qty, a.boxes, r.vehicle_no || '', r.invoice_no || '', rmk, r.ts, r.by || 'v46J-resplit', '[]');
+          created++; _touchedBatches.add(a.batch);
+        }
+      }
+    }
+    if (apply && typeof _recomputeDispatchActuals === 'function') {
+      for (const b of _touchedBatches) { try { await _recomputeDispatchActuals(b, null, null); } catch (e) { console.warn('[v46J re-split] recompute failed for', b, e.message); } }
+    }
+    res.json({ ok: true, dryRun: !apply, multiBatchRecordsFound: recs.length, wouldCreateRecords: plan.reduce((s, p) => s + (p.newRecords ? p.newRecords.length : 0), 0), created, deleted, skipped, note: apply ? 'APPLIED' : 'DRY-RUN — pass ?apply=1 to execute', plan: plan.slice(0, 300) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 // GET /api/tracking/batch-summary/:batchNumber
 app.get('/api/tracking/batch-summary/:batchNumber', async (req, res) => {
   try {
@@ -13080,6 +15952,19 @@ app.get('/api/tracking/batch-summary/:batchNumber', async (req, res) => {
     });
     const labelStats = { total: labels.length, printed: labels.filter(l=>l.printed).length, voided: labels.filter(l=>l.voided).length };
     const dispatched = dispatch.reduce((s,d) => s + d.boxes, 0);
+    // v46J (point 4): the Batch-Tracker modal renders w.salvage / w.remelt per row, but tracking_wastage
+    // stores raw rows as { dept, type:'salvage'|'remelt', qty } — so raw rows showed 0.00 (and a batch
+    // with both a salvage and a remelt row showed two zero lines, e.g. 26ZG138). Aggregate per dept,
+    // summing qty by type, so the modal matches Report E's salvage/remelt.
+    const _wagg = {};
+    for (const w of wastage) {
+      const dept = w.dept;
+      if (!_wagg[dept]) _wagg[dept] = { dept, salvage: 0, remelt: 0 };
+      const q = parseFloat(w.qty) || 0;
+      if (w.type === 'salvage') _wagg[dept].salvage += q;
+      else if (w.type === 'remelt') _wagg[dept].remelt += q;
+    }
+    wastage = Object.values(_wagg);
     res.json({ ok: true, deptMap, labelStats, wastage, alerts, dispatched, batchNumber });
   } catch(err) { res.status(500).json({ ok: false, error: err.message }); }
 });
@@ -13572,6 +16457,81 @@ if (typeof process !== 'undefined' && !process.env.SUNLOC_DISABLE_BG_JOBS) {
 // This is the correct data source for all reports — replaces raw scan fetching
 // v37I (restoring v37G): each query is individually guarded so one bad table never takes
 // down the whole endpoint. Without this, a schema gap on any one table would 500 all reports.
+// v47W (Ishan #3): FULL per-batch scan history for the Report K / Dispatch drill-down. The drill-down's
+// scan-by-scan LIST was built from the browser's recency-windowed state.scans, so a batch with 20 pack-in
+// scans could show only the ~7 still cached (26ZD104). The COUNTS were always correct (scan-summary); only
+// the list was short. This returns every NON-REVERSED scan for the batch so the drill-down can show all of
+// them. Same reversal filter as scan-summary. Read-only; nothing else depends on it.
+// v48 (Ishan #3): per-batch PERIOD pack-in and dispatch-out, aggregated server-side over the FULL
+// tracking_scans + tracking_dispatch_records — so the Per-Batch Pack In->Dispatch Out summary is correct on
+// first view and honestly date-scoped, instead of relying on the browser's recency-windowed scan cache
+// (which under-counted the period and left the lifetime DISP OUT unscoped → the impossible 52,150 L).
+// Date filter uses the PRODUCTION DAY (ts - 30 min → UTC date = 6 AM IST cut), identical to client _istDayKey.
+// Pack-in qty reuses _v47gScanQtySql (per-box label sum); dispatch-out = out-scans + dispatch records, the
+// same two sources _v40_dispatchedBoxes/_v40_dispatchedLakhs combine on the client.
+app.get('/api/tracking/dispatch-period-summary', async (req, res) => {
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from||'')) ? String(req.query.from) : null;
+  const to   = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to||''))   ? String(req.query.to)   : null;
+  if (!from || !to) return res.status(400).json({ ok:false, error:'from & to (YYYY-MM-DD) required' });
+  const lo = from <= to ? from : to, hi = from <= to ? to : from;
+  const out = {};
+  const add = (bn, k, v) => { if(!bn) return; if(!out[bn]) out[bn]={packInBoxes:0,packInQty:0,dispOutBoxes:0,dispOutQty:0}; out[bn][k]+=(Number(v)||0); };
+  try {
+    if (pgPool) {
+      const pday = col => `((LEFT(${col},19))::timestamp - interval '30 minutes')::date`;
+      const rev = `NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)`;
+      const scanQ = (dept,type) => `SELECT s.batch_number bn, COUNT(*) boxes, COALESCE(SUM(${_v47gScanQtySql('s','l')}),0) qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id=s.label_id WHERE s.dept='${dept}' AND s.type='${type}' AND ${rev} AND ${pday('s.ts')} BETWEEN $1::date AND $2::date GROUP BY s.batch_number`;
+      const [pin, dos, drec] = await Promise.all([
+        pgPool.query(scanQ('packing','in'), [lo,hi]),
+        pgPool.query(scanQ('dispatch','out'), [lo,hi]),
+        pgPool.query(`SELECT batch_number bn, boxes, qty FROM tracking_dispatch_records WHERE ${pday('ts')} BETWEEN $1::date AND $2::date`, [lo,hi]),
+      ]);
+      pin.rows.forEach(r=>{ add(r.bn,'packInBoxes',r.boxes); add(r.bn,'packInQty',r.qty); });
+      dos.rows.forEach(r=>{ add(r.bn,'dispOutBoxes',r.boxes); add(r.bn,'dispOutQty',r.qty); });
+      // v48D (Ishan): correct EXPORT dispatch records PER-RECORD on read. Old/pre-v46U rows stored capsule
+      // counts in `boxes` and THOUSAND (not LAKH) in `qty`, so summing raw inflated Report G's dispatch-out
+      // (the impossible 86508 boxes). _dispatchQtyBoxes recalibrates export qty (÷100) and derives boxes from
+      // qty/pack-size — the same rule applied at insert — while domestic/normal rows pass through unchanged.
+      drec.rows.forEach(r=>{ const c=_dispatchQtyBoxes(r.bn, r.qty, r.boxes); add(r.bn,'dispOutBoxes',c.boxes); add(r.bn,'dispOutQty',c.qty); });
+    } else {
+      const pday = col => `date(datetime(${col}, '-30 minutes'))`;
+      const rev = `NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)`;
+      const scanQ = (dept,type) => `SELECT s.batch_number bn, COUNT(*) boxes, COALESCE(SUM(${_v47gScanQtySql('s','l')}),0) qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id=s.label_id WHERE s.dept='${dept}' AND s.type='${type}' AND ${rev} AND ${pday('s.ts')} BETWEEN ? AND ? GROUP BY s.batch_number`;
+      db.prepare(scanQ('packing','in')).all(lo,hi).forEach(r=>{ add(r.bn,'packInBoxes',r.boxes); add(r.bn,'packInQty',r.qty); });
+      db.prepare(scanQ('dispatch','out')).all(lo,hi).forEach(r=>{ add(r.bn,'dispOutBoxes',r.boxes); add(r.bn,'dispOutQty',r.qty); });
+      db.prepare(`SELECT batch_number bn, boxes, qty FROM tracking_dispatch_records WHERE ${pday('ts')} BETWEEN ? AND ?`).all(lo,hi).forEach(r=>{ const c=_dispatchQtyBoxes(r.bn, r.qty, r.boxes); add(r.bn,'dispOutBoxes',c.boxes); add(r.bn,'dispOutQty',c.qty); });
+    }
+    res.json({ ok:true, from:lo, to:hi, batches: out });
+  } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
+});
+app.get('/api/tracking/batch-scans/:batch', async (req, res) => {
+  try {
+    const batch = String(req.params.batch || '').trim();
+    if (!batch) return res.status(400).json({ ok: false, error: 'batch required' });
+    let rows;
+    if (pgPool) {
+      rows = (await pgPool.query(
+        `SELECT s.id, s.label_id, s.batch_number, s.dept, s.type, s.ts, s.size, s.label_number
+         FROM tracking_scans s
+         WHERE s.batch_number = $1
+           AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id = s.id)
+         ORDER BY s.ts`, [batch])).rows;
+    } else {
+      rows = db.prepare(
+        `SELECT s.id, s.label_id, s.batch_number, s.dept, s.type, s.ts, s.size, s.label_number
+         FROM tracking_scans s
+         WHERE s.batch_number = ?
+           AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id = s.id)
+         ORDER BY s.ts`).all(batch);
+    }
+    res.json({ ok: true, batch, scans: (rows || []).map(r => ({
+      id: r.id, labelId: r.label_id, batchNumber: r.batch_number, dept: r.dept,
+      type: r.type, ts: r.ts, size: r.size, labelNumber: r.label_number
+    })) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 app.get('/api/tracking/scan-summary', async (req, res) => {
   try {
     // v45F: optional as-of-date snapshot (cumulative THROUGH the given IST production day) — powers
@@ -13589,7 +16549,7 @@ app.get('/api/tracking/scan-summary', async (req, res) => {
         catch(e) { console.warn('[scan-summary] query failed:', e.message); return []; }
       };
       const pgCut = col => `(LEFT(${col},19))::timestamp < ($1::date + interval '1 day' + interval '30 minutes')`;
-      const scanSql = `SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans s WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)${asof?` AND ${pgCut('s.ts')}`:''} GROUP BY batch_number, dept, type`;
+      const scanSql = `SELECT s.batch_number, s.dept, s.type, COUNT(*) as cnt, SUM(${_v47gScanQtySql('s','l')}) as total_qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)${asof?` AND ${pgCut('s.ts')}`:''} GROUP BY s.batch_number, s.dept, s.type`;
       const wasteSql = `SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage${asof?` WHERE ${pgCut('ts')}`:''} GROUP BY batch_number, dept, type`;
       const dispSql  = `SELECT batch_number, SUM(qty) as total_qty FROM tracking_dispatch_records${asof?` WHERE ${pgCut('ts')}`:''} GROUP BY batch_number`;
       [scanRows, wastageRows, dispatchRows] = await Promise.all([
@@ -13601,7 +16561,7 @@ app.get('/api/tracking/scan-summary', async (req, res) => {
     } else {
       const sc = (sql, params) => { try { return db.prepare(sql).all(...(params||[])); } catch(e) { return []; } };
       const liteCut = col => `datetime(${col}) < datetime(?, '+1 day', '+30 minutes')`;
-      scanRows     = sc(`SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans s WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)${asof?` AND ${liteCut('s.ts')}`:''} GROUP BY batch_number, dept, type`, asof?[asof]:[]);
+      scanRows     = sc(`SELECT s.batch_number, s.dept, s.type, COUNT(*) as cnt, SUM(${_v47gScanQtySql('s','l')}) as total_qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id WHERE NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)${asof?` AND ${liteCut('s.ts')}`:''} GROUP BY s.batch_number, s.dept, s.type`, asof?[asof]:[]);
       wastageRows  = sc(`SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage${asof?` WHERE ${liteCut('ts')}`:''} GROUP BY batch_number, dept, type`, asof?[asof]:[]);
       dispatchRows = sc(`SELECT batch_number, SUM(qty) as total_qty FROM tracking_dispatch_records${asof?` WHERE ${liteCut('ts')}`:''} GROUP BY batch_number`, asof?[asof]:[]);
       if (asof) grossRows = sc(`SELECT batch_number, SUM(qty_lakhs) as total FROM production_actuals WHERE substr(date,1,10) <= ? GROUP BY batch_number`, [asof]);
@@ -13644,7 +16604,17 @@ app.get('/api/tracking/scan-summary', async (req, res) => {
       for (const bn of Object.keys(_grossOverride || {})) grossByBatch[bn] = _grossOverride[bn];
     }
 
-    res.json({ ok: true, summary, wastage, dispatched, grossByBatch, asof: asof||null });
+    // v49X: ship the override metadata so every report can flag DPR-corrected batches (OVR badge)
+    // with who/when/why on hover. Tiny table; full-row read is cheap and always current.
+    let grossOverrides = {};
+    try {
+      let _ovr;
+      if (pgPool) _ovr = (await pgPool.query('SELECT batch_number, gross_lakhs, reason, updated_by, updated_at FROM batch_gross_override')).rows;
+      else _ovr = db.prepare('SELECT batch_number, gross_lakhs, reason, updated_by, updated_at FROM batch_gross_override').all();
+      for (const r of (_ovr || [])) if (r.batch_number) grossOverrides[r.batch_number] = {
+        gross: parseFloat(r.gross_lakhs) || 0, by: r.updated_by || '', at: r.updated_at || '', reason: r.reason || '' };
+    } catch(_) {}
+    res.json({ ok: true, summary, wastage, dispatched, grossByBatch, grossOverrides, asof: asof||null });
   } catch(err) {
     console.error('[scan-summary]', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -13689,11 +16659,13 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
         catch(e){ console.warn('[agrade-by-month] pg query failed:', e.message); return []; }
       };
       [scanRows, wastageRows, spanRows] = await Promise.all([
-        sq(`SELECT batch_number, dept, type,
-              COUNT(*) FILTER (WHERE label_id NOT LIKE 'recon-%') AS box_cnt,
-              COALESCE(SUM(qty) FILTER (WHERE label_id LIKE 'recon-%'),0) AS recon_qty
-            FROM tracking_scans WHERE ts >= $1 AND ts < $2
-            GROUP BY batch_number, dept, type`, [start, end]),
+        sq(`SELECT s.batch_number, s.dept, s.type,
+              COUNT(*) FILTER (WHERE s.label_id NOT LIKE 'recon-%') AS box_cnt,
+              COALESCE(SUM(s.qty) FILTER (WHERE s.label_id LIKE 'recon-%'),0) AS recon_qty,
+              COALESCE(SUM(CASE WHEN s.label_id NOT LIKE 'recon-%' THEN COALESCE(l.qty, ${_v47gPackCaseSql('s')}) ELSE 0 END),0) AS real_qty
+            FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id
+            WHERE s.ts >= $1 AND s.ts < $2
+            GROUP BY s.batch_number, s.dept, s.type`, [start, end]),
         sq(`SELECT batch_number, dept, type, COALESCE(SUM(qty),0) AS total_qty
             FROM tracking_wastage WHERE ts >= $1 AND ts < $2
             GROUP BY batch_number, dept, type`, [start, end]),
@@ -13704,11 +16676,13 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
       ]);
     } else {
       const sq = (sql, params) => { try { return db.prepare(sql).all(...params); } catch(e){ console.warn('[agrade-by-month] sqlite query failed:', e.message); return []; } };
-      scanRows    = sq(`SELECT batch_number, dept, type,
-                          SUM(CASE WHEN label_id NOT LIKE 'recon-%' THEN 1 ELSE 0 END) AS box_cnt,
-                          COALESCE(SUM(CASE WHEN label_id LIKE 'recon-%' THEN qty ELSE 0 END),0) AS recon_qty
-                        FROM tracking_scans WHERE ts >= ? AND ts < ?
-                        GROUP BY batch_number, dept, type`, [start, end]);
+      scanRows    = sq(`SELECT s.batch_number, s.dept, s.type,
+                          SUM(CASE WHEN s.label_id NOT LIKE 'recon-%' THEN 1 ELSE 0 END) AS box_cnt,
+                          COALESCE(SUM(CASE WHEN s.label_id LIKE 'recon-%' THEN s.qty ELSE 0 END),0) AS recon_qty,
+                          COALESCE(SUM(CASE WHEN s.label_id NOT LIKE 'recon-%' THEN COALESCE(l.qty, ${_v47gPackCaseSql('s')}) ELSE 0 END),0) AS real_qty
+                        FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id
+                        WHERE s.ts >= ? AND s.ts < ?
+                        GROUP BY s.batch_number, s.dept, s.type`, [start, end]);
       wastageRows = sq(`SELECT batch_number, dept, type, COALESCE(SUM(qty),0) AS total_qty
                         FROM tracking_wastage WHERE ts >= ? AND ts < ?
                         GROUP BY batch_number, dept, type`, [start, end]);
@@ -13722,15 +16696,19 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
     const summary = {};
     const ensure = (bn, dept) => {
       if (!summary[bn]) summary[bn] = {};
-      if (!summary[bn][dept]) summary[bn][dept] = { inBoxes:0, outBoxes:0, inReconQty:0, outReconQty:0 };
+      if (!summary[bn][dept]) summary[bn][dept] = { inBoxes:0, outBoxes:0, inReconQty:0, outReconQty:0, inRealQty:0, outRealQty:0 };
     };
     scanRows.forEach(r => {
       const bn = r.batch_number; if (!bn) return;
       ensure(bn, r.dept);
       const boxes = parseInt(r.box_cnt||0,10);
       const reconQ = parseFloat(r.recon_qty||0);
-      if (r.type === 'in')  { summary[bn][r.dept].inBoxes  += boxes; summary[bn][r.dept].inReconQty  += reconQ; }
-      if (r.type === 'out') { summary[bn][r.dept].outBoxes += boxes; summary[bn][r.dept].outReconQty += reconQ; }
+      // v47G: realQ = SUM of each real box's label qty (partial-aware, pack-standard fallback) for
+      // this window/dept/type. Client uses (realQty + reconQty) as Scan-In/Out Lakhs, replacing the
+      // old boxToLakh(box-count, size). box_cnt is retained for the box-count columns.
+      const realQ = parseFloat(r.real_qty||0);
+      if (r.type === 'in')  { summary[bn][r.dept].inBoxes  += boxes; summary[bn][r.dept].inReconQty  += reconQ; summary[bn][r.dept].inRealQty  += realQ; }
+      if (r.type === 'out') { summary[bn][r.dept].outBoxes += boxes; summary[bn][r.dept].outReconQty += reconQ; summary[bn][r.dept].outRealQty += realQ; }
     });
     const wastage = {};
     wastageRows.forEach(r => {
@@ -13761,6 +16739,7 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
     // dated within YYYY-MM, matching DPR per-machine totals.
     const monthGross = {};
     const monthMachine = {};
+    let _splitFamsForClient = []; // v46R #5: filled below with W/O + re-customer split families for the client
     try {
       // v45Y (confirmed by Ishan): attribution parity with warmActualsCache. The old query grouped
       // by RAW batch_number and dropped NULL-batch rows entirely — but the warm cache (which feeds
@@ -13796,9 +16775,118 @@ app.get('/api/tracking/agrade-by-month', async (req, res) => {
       for (const [bn, per] of Object.entries(_mcAgg)) {
         monthMachine[bn] = Object.entries(per).sort((a,b)=>b[1]-a[1])[0][0];
       }
+      // v46K: same W/O-split apportionment on the MONTH-sliced gross so Reports D/E/G (month mode)
+      // match the cumulative AIM report. Uses this month's parent gross as the total; the scale guard
+      // in _v46k_applyGrossApportionment caps a cross-month slice smaller than the boxed total.
+      try {
+        const _splitFams = await _v46k_loadSplitFamilies();
+        _v46k_applyGrossApportionment(monthGross, _splitFams);
+        _splitFamsForClient = _splitFams; // v46R #5: surface to client so Report C rolls child→parent
+      } catch (e) { console.warn('[v46K] split-gross apportionment skipped (month):', e.message); }
+      // v47T (fixes carry-forward leak reported by Ishan): the planning-blob grossOverride is a whole-batch
+      // TOTAL with no month breakdown, so it must NOT participate in month-scoped gross. In v47S the blob
+      // still filled monthGross for a batch with no DPR production this month — which meant a carry-forward
+      // batch (produced in a prior month, blob set, zero July output) surfaced its full prior-month total as
+      // THIS month's gross, and with no current-month scan-in the entire amount showed as phantom Production
+      // WIP (e.g. 260035/Lucon: gross 49.76L, 0 boxes in, 49.76L WIP). Month-scoped gross is now purely
+      // DPR-derived:
+      //   (a) DPR-Edit batch_gross_override — authoritative, propagated to month mode (kept from v47S);
+      //   (b) the DPR month slice already in monthGross from the actuals query — kept as-is.
+      // The blob no longer fills monthGross at all, so a batch with no current-month DPR production shows
+      // month gross 0 (its prior-month gross/WIP stay counted in the month it was produced). Cumulative
+      // reports are unaffected (they use actualProd/grossSummary). Split-family apportionment untouched.
+      // 26ZC094-type batches are safe: their correct value now lives in batch_gross_override, so it wins via
+      // (a) when they have current-month production and is correctly absent (gross 0) when carried forward.
+      try {
+        const _splitB47m = new Set();
+        for (const _f of (_splitFamsForClient || [])) { if (_f.parentBatch) _splitB47m.add(_f.parentBatch); for (const _c of (_f.children || [])) if (_c.batch) _splitB47m.add(_c.batch); }
+        // (a) DPR-Edit override propagates to month mode, for batches that already have a month slice
+        //     (a deliberate correction of THIS month's produced batch). Does not manufacture new month
+        //     rows for override-only batches — a carry-forward batch with no current-month DPR stays out.
+        // v49X: the split-family skip below belonged to the v47M BLOB-override path (removed in
+        // v47T). batch_gross_override is the deliberate DPR-Edit correction — TOP authority per
+        // v47S — so it must also beat the apportioned family slice (26ZC095-A: override 28.00 was
+        // invisible in month mode because the skip blocked it). "Only where a month slice already
+        // exists" still holds — no new month rows are manufactured for carry-forward batches.
+        for (const _bn of Object.keys(_grossOverride || {})) {
+          if (Object.prototype.hasOwnProperty.call(monthGross, _bn)) monthGross[_bn] = _grossOverride[_bn];
+        }
+        // (v47T) blob-fill loop removed: the planning blob no longer participates in month-scoped gross.
+      } catch(e) { console.warn('[v47T] month-gross DPR override apply skipped:', e.message); }
     } catch(e) { console.warn('[agrade-by-month] monthGross query failed:', e.message); }
 
-    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth, monthGross, monthMachine });
+    // v47B (confirmed by Ishan): month-scoped WIP box SET per batch/dept — boxes scanned INTO a dept
+    // within THIS window that have NO scan-OUT of that dept (any time). Report B uses this for BOTH the
+    // WIP-box count and the click-through list, so count === list by construction and is month-scoped
+    // ("click 8 → those exact 8"). Real physical boxes only: voided/orange/specimen(0) and recon-synthetic
+    // scans excluded; excess kept (rendered E-n). No wastage subtraction — salvage is pre-box (unprinted)
+    // or absorbed into the re-printed last label that scans out (printed), and remelt is phased out — so
+    // scan-in − scan-out is the whole story at the box level. Same window (start/end) as the counts above.
+    const wipBoxes = {};
+    const wipQtys  = {};   // v49D: actual label-qty sum per batch/dept for the same WIP set
+    try {
+      let wrows;
+      if (pgPool) {
+        wrows = (await pgPool.query(
+          `WITH ins AS (
+             SELECT DISTINCT label_id, dept FROM tracking_scans
+             WHERE type='in' AND ts >= $1 AND ts < $2 AND label_id NOT LIKE 'recon-%'
+           ),
+           outs AS (
+             SELECT DISTINCT label_id, dept FROM tracking_scans
+             WHERE type='out' AND label_id NOT LIKE 'recon-%'
+           )
+           SELECT l.batch_number, i.dept, l.label_number, l.is_orange, l.is_excess, l.qty, l.size
+           FROM ins i
+           JOIN tracking_labels l ON l.id = i.label_id
+           LEFT JOIN outs o ON o.label_id = i.label_id AND o.dept = i.dept
+           WHERE o.label_id IS NULL AND COALESCE(l.voided,0)=0
+             AND i.dept IN ('aim','printing','pi','packing')`,
+          [start, end])).rows;
+      } else {
+        wrows = db.prepare(
+          `WITH ins AS (
+             SELECT DISTINCT label_id, dept FROM tracking_scans
+             WHERE type='in' AND ts >= ? AND ts < ? AND label_id NOT LIKE 'recon-%'
+           ),
+           outs AS (
+             SELECT DISTINCT label_id, dept FROM tracking_scans
+             WHERE type='out' AND label_id NOT LIKE 'recon-%'
+           )
+           SELECT l.batch_number, i.dept, l.label_number, l.is_orange, l.is_excess, l.qty, l.size
+           FROM ins i
+           JOIN tracking_labels l ON l.id = i.label_id
+           LEFT JOIN outs o ON o.label_id = i.label_id AND o.dept = i.dept
+           WHERE o.label_id IS NULL AND COALESCE(l.voided,0)=0
+             AND i.dept IN ('aim','printing','pi','packing')`
+        ).all(start, end);
+      }
+      wrows.forEach(r => {
+        if (Number(r.is_orange)) return;                    // orange twin — not a separate physical box
+        const num = Number(r.label_number);
+        if (!Number.isFinite(num) || num === 0) return;     // specimen sentinel (0/NULL)
+        const bn = r.batch_number; if (!bn) return;
+        if (!wipBoxes[bn]) wipBoxes[bn] = {};
+        if (!wipBoxes[bn][r.dept]) wipBoxes[bn][r.dept] = [];
+        wipBoxes[bn][r.dept].push((Number(r.is_excess) || num < 0) ? ('E-' + Math.abs(num)) : String(Math.abs(num)));
+        // v49D (confirmed by Ishan): ACTUAL quantity of the boxes still in the department, summed from
+        // the label rows themselves rather than box-count x nominal pack size. PI salvage is taken out
+        // of boxes that are already scanned in, and the floor records it by amending those labels down
+        // (a part-box cannot travel to packing any other way). Nominal sizing cannot see that amendment,
+        // so Report B's PI leg reported the pre-salvage figure. Falls back to nominal only when a label
+        // carries no qty. Parallel to wipBoxes — the array shape is untouched, so every existing consumer
+        // (count, chip list, sort) is unaffected.
+        const _ps49d = { '00':0.75, '0':1.00, '1':1.25, '2':1.75, '3':2.25, '4':3.00 }[String(r.size)] || 0;
+        const _q49d = (r.qty === null || r.qty === undefined || !Number.isFinite(Number(r.qty)))
+          ? _ps49d : Number(r.qty);
+        if (!wipQtys[bn]) wipQtys[bn] = {};
+        wipQtys[bn][r.dept] = Math.round(((wipQtys[bn][r.dept] || 0) + _q49d) * 100) / 100;
+      });
+      Object.values(wipBoxes).forEach(byDept => Object.values(byDept).forEach(arr =>
+        arr.sort((a,b)=> (parseInt(String(a).replace(/\D/g,''),10)||0) - (parseInt(String(b).replace(/\D/g,''),10)||0))));
+    } catch(e) { console.warn('[agrade-by-month] wipBoxes query failed:', e.message); }
+
+    res.json({ ok:true, month:ym, window:{ start, end }, summary, wastage, crossMonth, monthGross, monthMachine, splitFamilies: _splitFamsForClient, wipBoxes, wipQtys });
   } catch(err) {
     console.error('[agrade-by-month]', err.message);
     res.status(500).json({ ok:false, error: err.message });
@@ -13874,12 +16962,35 @@ app.get('/api/tracking/sync-version', async (req, res) => {
       : 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(qty),0), 3) AS qtysum FROM tracking_wastage';
     const wst = await one(wstSql);
     const dsp = await one('SELECT COUNT(*) AS count FROM tracking_dispatch_records');
+    // v49X (root cause of "DPR correction doesn't reflect in Reports B/D/E"): the signature covered
+    // scans/wastage/labels/dispatch but NOT the DPR gross itself. A closed-batch gross-override (or a
+    // reopen→edit→re-close of production_actuals) changed neither scans nor wastage, so _ssNeed never
+    // fired, scan-summary was never re-fetched, and every device's state.grossSummary kept the stale
+    // pre-correction gross indefinitely (masked only when an unrelated scan flipped the version) —
+    // the exact v45Z wastage-edit lesson, one table over. Two new signature blocks close both paths.
+    const ovrSql = pgPool
+      ? 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(gross_lakhs),0)::numeric, 3) AS grosssum FROM batch_gross_override'
+      : 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(gross_lakhs),0), 3) AS grosssum FROM batch_gross_override';
+    const ovr = await one(ovrSql);
+    const dprSql = pgPool
+      ? 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(qty_lakhs),0)::numeric, 3) AS qtysum FROM production_actuals'
+      : 'SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(qty_lakhs),0), 3) AS qtysum FROM production_actuals';
+    const dpr = await one(dprSql);
+    // v49ZG (v49X lesson, one table over): an excess-unprint approval posts scan REVERSALS and
+    // re-batches existing scans — neither changes tracking_scans count nor max(ts), so the scans
+    // signature alone would leave every other device's scan-summary (whose queries exclude
+    // reversed scans) permanently stale. The reversal ledger joins the signature; any conversion
+    // flips it and the clients re-pull scan-summary + box-stages.
+    const rev = await one('SELECT COUNT(*) AS count FROM tracking_scan_reversals');
     res.json({
       ok: true,
       labels:   { count: parseInt(lab.count || 0, 10), voided: parseInt(lab.voided || 0, 10), printed: parseInt(lab.printed || 0, 10) },
       scans:    { count: parseInt(scn.count || 0, 10), maxTs: scn.maxts || scn.maxTs || null },
       wastage:  { count: parseInt(wst.count || 0, 10), qtySum: parseFloat(wst.qtysum || wst.qtySum || 0) },
-      dispatch: { count: parseInt(dsp.count || 0, 10) }
+      dispatch: { count: parseInt(dsp.count || 0, 10) },
+      override: { count: parseInt(ovr.count || 0, 10), grossSum: parseFloat(ovr.grosssum || ovr.grossSum || 0) },
+      dprGross: { count: parseInt(dpr.count || 0, 10), qtySum: parseFloat(dpr.qtysum || dpr.qtySum || 0) },
+      reversals:{ count: parseInt(rev.count || 0, 10) }
     });
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
@@ -13898,12 +17009,11 @@ app.post('/api/tracking/labels', async (req, res) => {
     // (or two rapid clicks bypassing the client _v41y_labelGenInFlight flag) try to
     // create labels with the same number for the same batch. Updates to an existing id
     // (reprint state, void, etc.) still pass through.
-    const parseLabelNum = n => { if (n == null) return null; const s = String(n).replace(/^OL-/i, ''); const p = parseInt(s); return isNaN(p) ? null : p; };
     const skipped = [];
     const accepted = [];
     if (pgPool) {
       for (const l of labels) {
-        const lnum = parseLabelNum(l.labelNumber ?? l.label_number);
+        const lnum = _labelNumForStore(l);
         const bn = l.batchNumber || l.batch_number;
         if (!bn || lnum == null) { accepted.push(l); continue; }
         const r = await pgPool.query(
@@ -13922,7 +17032,7 @@ app.post('/api/tracking/labels', async (req, res) => {
       }
     } else {
       for (const l of labels) {
-        const lnum = parseLabelNum(l.labelNumber ?? l.label_number);
+        const lnum = _labelNumForStore(l);
         const bn = l.batchNumber || l.batch_number;
         if (!bn || lnum == null) { accepted.push(l); continue; }
         const ex = db.prepare(
@@ -13958,15 +17068,16 @@ app.post('/api/tracking/labels', async (req, res) => {
           ON CONFLICT (id) DO UPDATE SET
             batch_number=EXCLUDED.batch_number, label_number=EXCLUDED.label_number,
             qty=EXCLUDED.qty, is_partial=EXCLUDED.is_partial,
-            printed=EXCLUDED.printed, printed_at=EXCLUDED.printed_at,
+            printed=GREATEST(COALESCE(tracking_labels.printed,0), COALESCE(EXCLUDED.printed,0)),
+            printed_at=COALESCE(EXCLUDED.printed_at, tracking_labels.printed_at),
             voided=EXCLUDED.voided, void_reason=EXCLUDED.void_reason,
             voided_at=EXCLUDED.voided_at, voided_by=EXCLUDED.voided_by,
             qr_data=EXCLUDED.qr_data, pc_code=EXCLUDED.pc_code,
             is_excess=EXCLUDED.is_excess, excess_num=EXCLUDED.excess_num,
             excess_total=EXCLUDED.excess_total, normal_total=EXCLUDED.normal_total`,
           [l.id, l.batchNumber||l.batch_number,
-           // labelNumber may be "OL-15" (orange) or a number — always store as integer
-           (()=>{ const n=l.labelNumber??l.label_number; if(n==null) return null; const s=String(n).replace(/^OL-/i,''); const p=parseInt(s); return isNaN(p)?null:p; })(),
+           // v46Y: orange labels store in the dedicated high range (BASE+box#); non-orange store the box#.
+           _labelNumForStore(l),
            l.size, l.qty, l.isPartial?1:0, l.isOrange?1:0, l.parentLabelId||null,
            l.customer||null, l.colour||null, l.pcCode||null, l.poNumber||null,
            l.machineId||null, l.printingMatter||l.printMatter||null,
@@ -13984,7 +17095,7 @@ app.post('/api/tracking/labels', async (req, res) => {
          is_excess,excess_num,excess_total,normal_total)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       labelsToWrite.forEach(l => stmt.run(
-        l.id, l.batchNumber||l.batch_number, parseLabelNum(l.labelNumber??l.label_number),
+        l.id, l.batchNumber||l.batch_number, _labelNumForStore(l),
         l.size, l.qty, l.isPartial?1:0, l.isOrange?1:0, l.parentLabelId||null,
         l.customer||null, l.colour||null, l.pcCode||null, l.poNumber||null,
         l.machineId||null, l.printingMatter||l.printMatter||null,
@@ -14599,13 +17710,9 @@ app.post('/api/tracking/scan', async (req, res) => {
 // ── A-Grade summary per batch — for Planning live update ──────
 app.get('/api/tracking/agrade-summary', async (req, res) => {
   try {
-    // Pack sizes for fallback calculation
-    const PACK_SIZES = {'0':1.5,'00':1.5,'000':1.5,'1':1.25,'2':1.0,'3':0.75,'4':0.5,'5':0.333};
-
-    // Get batch sizes from planning state for fallback
-    const planState = getPlanningState();
-    const batchSizeMap = {};
-    (planState.orders||[]).forEach(o => { if(o.batchNumber) batchSizeMap[o.batchNumber.toUpperCase()] = String(o.size||'2'); });
+    // v47G: the divergent local PACK_SIZES map and planning-state batchSizeMap that fed the old
+    // COUNT × pack fallback are gone — per-box qty is now summed authoritatively in SQL from
+    // tracking_labels.qty (see _v47gScanQtySql), so no client-visible pack map is needed here.
 
     // Scan counts per batch per dept per type
     // v41ZG #3: optional ?since=YYYY-MM-DD window. The three aggregations below scan the FULL
@@ -14619,8 +17726,8 @@ app.get('/api/tracking/agrade-summary', async (req, res) => {
     let scans, wastage, prodActuals;
     if (pgPool) {
       const scanSql = since
-        ? 'SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans WHERE ts >= $1 GROUP BY batch_number, dept, type'
-        : 'SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans GROUP BY batch_number, dept, type';
+        ? `SELECT s.batch_number, s.dept, s.type, COUNT(*) as cnt, SUM(${_v47gScanQtySql('s','l')}) as total_qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id WHERE s.ts >= $1 GROUP BY s.batch_number, s.dept, s.type`
+        : `SELECT s.batch_number, s.dept, s.type, COUNT(*) as cnt, SUM(${_v47gScanQtySql('s','l')}) as total_qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id GROUP BY s.batch_number, s.dept, s.type`;
       const wasteSql = since
         ? 'SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage WHERE ts >= $1 GROUP BY batch_number, dept, type'
         : 'SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage GROUP BY batch_number, dept, type';
@@ -14636,8 +17743,8 @@ app.get('/api/tracking/agrade-summary', async (req, res) => {
       scans = r1.rows; wastage = r2.rows; prodActuals = r3.rows;
     } else {
       const scanSql = since
-        ? 'SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans WHERE ts >= ? GROUP BY batch_number, dept, type'
-        : 'SELECT batch_number, dept, type, COUNT(*) as cnt, SUM(qty) as total_qty FROM tracking_scans GROUP BY batch_number, dept, type';
+        ? `SELECT s.batch_number, s.dept, s.type, COUNT(*) as cnt, SUM(${_v47gScanQtySql('s','l')}) as total_qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id WHERE s.ts >= ? GROUP BY s.batch_number, s.dept, s.type`
+        : `SELECT s.batch_number, s.dept, s.type, COUNT(*) as cnt, SUM(${_v47gScanQtySql('s','l')}) as total_qty FROM tracking_scans s LEFT JOIN tracking_labels l ON l.id = s.label_id GROUP BY s.batch_number, s.dept, s.type`;
       const wasteSql = since
         ? 'SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage WHERE ts >= ? GROUP BY batch_number, dept, type'
         : 'SELECT batch_number, dept, type, SUM(qty) as total_qty FROM tracking_wastage GROUP BY batch_number, dept, type';
@@ -14650,6 +17757,15 @@ app.get('/api/tracking/agrade-summary', async (req, res) => {
     }
     const grossProdMap = {};
     prodActuals.forEach(r => { if(r.batch_number) grossProdMap[r.batch_number.toUpperCase()] = parseFloat(r.gross_prod||0); });
+    // v49X: batch_gross_override (the deliberate DPR-Edit correction) is authoritative over the raw
+    // actuals sum — same precedence as effectiveGross(). Applied only to batches already in the map
+    // (windowed calls stay windowed for absent batches; a batch present in the window has its full
+    // recent history here, so the corrected cumulative gross is the right value). This feeds the
+    // planning live A-Grade feed and the server wipLakhs, so corrected gross flows into WIP too.
+    try { for (const _bn of Object.keys(_grossOverride || {})) {
+      const _u = String(_bn).toUpperCase();
+      if (Object.prototype.hasOwnProperty.call(grossProdMap, _u)) grossProdMap[_u] = _grossOverride[_bn] || 0;
+    } } catch(_) {}
 
     // Build per-batch summary
     const batches = {};
@@ -14658,11 +17774,11 @@ app.get('/api/tracking/agrade-summary', async (req, res) => {
       if (!batches[bn]) batches[bn] = {};
       if (!batches[bn][s.dept]) batches[bn][s.dept] = {in:0,out:0,inQty:0,outQty:0};
       batches[bn][s.dept][s.type] = parseInt(s.cnt||0, 10);
-      // Use SUM(qty) if available, else fallback to COUNT * packSize
-      const sumQty = parseFloat(s.total_qty||0);
-      const ps = PACK_SIZES[batchSizeMap[bn]||batchSizeMap[s.batch_number]||'2'] || 1.0;
-      const effectiveQty = sumQty > 0 ? sumQty : parseInt(s.cnt||0,10) * ps;
-      batches[bn][s.dept][s.type+'Qty'] = effectiveQty;
+      // v47G (confirmed by Ishan): total_qty is now the authoritative per-box label sum computed in
+      // SQL (_v47gScanQtySql — each box valued at its tracking_labels.qty, pack-standard fallback,
+      // recon-synthetic keep their own qty). The old "SUM(qty) else COUNT × PACK_SIZES" fallback used
+      // a divergent local pack map and the unauthoritative tracking_scans.qty — both retired here.
+      batches[bn][s.dept][s.type+'Qty'] = parseFloat(s.total_qty||0);
     });
 
     wastage.forEach(w => {
@@ -14707,19 +17823,27 @@ app.get('/api/tracking/agrade-summary', async (req, res) => {
       const fgAwaitingDispatch = Math.max(0, packInQty - dispatchInQty);
 
       result[batchNo.toUpperCase()] = { // normalize to uppercase for consistent lookup
+        // v46Q: salvage/remelt now sent SEPARATELY (previously only the combined `wastage`). The
+        // planning header's Live A-Grade must equal Report E's per-machine AIM%, which uses the frozen
+        // formula AIM A-Grade = ScanIn − Remelt, AIM% = (ScanIn−Rem) / (ScanIn + Salvage). The old
+        // combined-wastage payload only let planning compute the Scan-OUT-based % (outQty/inspected),
+        // which reads lower than Report E. Exposing the split lets planning apply the frozen formula.
         aim: {
           inQty: aim.inQty||0, outQty: aimOut,
-          wastage: aimWaste, inspected: aimInspected,
+          wastage: aimWaste, salvage: (aim.wastage?.salvage||0), remelt: (aim.wastage?.remelt||0),
+          inspected: aimInspected,
           aGradePct: aimInspected>0 ? (aimOut/aimInspected*100) : null
         },
         printing: {
           inQty: print.inQty||0, outQty: printOut,
-          wastage: printWaste, inspected: printInspected,
+          wastage: printWaste, salvage: (print.wastage?.salvage||0), remelt: (print.wastage?.remelt||0),
+          inspected: printInspected,
           aGradePct: printInspected>0 ? (printOut/printInspected*100) : null
         },
         pi: {
           inQty: pi.inQty||0, outQty: piOut,
-          wastage: piWaste, inspected: piInspected,
+          wastage: piWaste, salvage: (pi.wastage?.salvage||0), remelt: (pi.wastage?.remelt||0),
+          inspected: piInspected,
           aGradePct: piInspected>0 ? (piOut/piInspected*100) : null
         },
         // v37I.1: packing.outQty/out preserved for legacy/historical reads but no longer
@@ -14801,6 +17925,13 @@ app.post('/api/tracking/dispatch-record', async (req, res) => {
     const batchNumber = record.batchNumber||record.batch_number;
     const vehicleNo = record.vehicleNo||record.vehicle_no||null;
     const invoiceNo = record.invoiceNo||record.invoice_no||null;
+    // v48D (Ishan): ON CONFLICT(id) only stops a same-id resend; a double-fire that generates a NEW id
+    // for the same logical dispatch would still duplicate. Skip idempotently if an identical record
+    // (same batch + invoice + boxes + qty) already exists.
+    if (await _isDuplicateDispatch(batchNumber, invoiceNo, record.boxes, record.qty)) {
+      const totalQty = await _recomputeDispatchActuals(batchNumber, vehicleNo, invoiceNo);
+      return res.json({ok:true, skipped:true, totalQty});
+    }
     if (pgPool) {
       await pgPool.query(`INSERT INTO tracking_dispatch_records (id,batch_number,customer,qty,boxes,vehicle_no,invoice_no,remarks,ts,"by") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(id) DO NOTHING`,
         [record.id, batchNumber, record.customer||null, record.qty, record.boxes, vehicleNo, invoiceNo, record.remarks||null, record.ts, record.by||null]);
@@ -15121,6 +18252,57 @@ app.get('/api/tracking/scans', async (req, res) => {
   } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
 });
 
+// ── v49J (confirmed by Ishan): scan re-point on label regeneration / damaged reprint ─────────────
+// Root cause: regeneratePartialLabel and the damaged-reprint path both VOID the old label and mint a
+// NEW label id for the same physical box. Plain voidLabel preserves the scans (does not reverse them),
+// but they stay pointed at the now-voided old id — so the box's IN/OUT scans orphan: the recent-scan
+// list shows batch/? and Batch Tracker drops the box from its count. Evidenced live on 26ZC105 box 29
+// (scans on dead id mrzsfvlhdg0d8; box reissued as mrzsfmc5hpr5j) and 26ZD114 box 7.
+//
+// Fix (option 1a, confirmed): when the box is regenerated/reprinted, move ALL of its scans (every dept,
+// IN and OUT) from the old label id to the new one in a single UPDATE, so the box keeps its full scan
+// history under the label the physical material now carries. Nothing else changes — no scan is created,
+// deleted, or revalued; only tracking_scans.label_id is repointed on rows that already exist.
+//
+// Guard: mirror the label-void dispatch rule. If the box already has a 'dispatch' scan it has shipped —
+// its old label id is referenced by dispatch/invoice records, so the re-point is REFUSED rather than
+// corrupting a shipped box. The caller surfaces the message; the scans stay on the old id.
+app.post('/api/tracking/relabel-repoint', async (req, res) => {
+  try {
+    const { batchNumber, fromLabelId, toLabelId } = req.body || {};
+    if (!batchNumber || !fromLabelId || !toLabelId) {
+      return res.status(400).json({ ok: false, error: 'batchNumber, fromLabelId and toLabelId are required' });
+    }
+    if (fromLabelId === toLabelId) {
+      return res.json({ ok: true, moved: 0, note: 'from and to are the same id — nothing to move' });
+    }
+    if (pgPool) {
+      const disp = await pgPool.query(
+        `SELECT 1 FROM tracking_scans WHERE label_id=$1 AND dept='dispatch' LIMIT 1`, [fromLabelId]);
+      if (disp.rows[0]) {
+        return res.json({ ok: false, dispatch_blocked: true, error: 'Box already dispatched — scans not re-pointed. Handle via dispatch, not regeneration.' });
+      }
+      const upd = await pgPool.query(
+        `UPDATE tracking_scans SET label_id=$1 WHERE batch_number=$2 AND label_id=$3`,
+        [toLabelId, batchNumber, fromLabelId]);
+      console.log(`[v49J] relabel-repoint: ${upd.rowCount||0} scan(s) moved ${fromLabelId} -> ${toLabelId} (batch ${batchNumber})`);
+      return res.json({ ok: true, moved: upd.rowCount || 0 });
+    } else {
+      const disp = db.prepare(`SELECT 1 FROM tracking_scans WHERE label_id=? AND dept='dispatch' LIMIT 1`).get(fromLabelId);
+      if (disp) {
+        return res.json({ ok: false, dispatch_blocked: true, error: 'Box already dispatched — scans not re-pointed. Handle via dispatch, not regeneration.' });
+      }
+      const info = db.prepare(`UPDATE tracking_scans SET label_id=? WHERE batch_number=? AND label_id=?`)
+        .run(toLabelId, batchNumber, fromLabelId);
+      console.log(`[v49J] relabel-repoint: ${info.changes||0} scan(s) moved ${fromLabelId} -> ${toLabelId} (batch ${batchNumber})`);
+      return res.json({ ok: true, moved: info.changes || 0 });
+    }
+  } catch (err) {
+    console.error('[relabel-repoint]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 app.post('/api/tracking/label-update', async (req, res) => {
   try {
     const { labelId, qty, printed, printedAt } = req.body;
@@ -15252,26 +18434,50 @@ app.post('/api/tracking/recustomer', async (req, res) => {
     if (!session) return res.status(401).json({ ok:false, error:'Not authenticated' });
     if (session.role !== 'admin') return res.status(403).json({ ok:false, error:'Admin required' });
     const { batchNumber, newCustomer, newCardCode, newPoNumber, shipTo, billTo, reason,
-            splitBoxes, convertToPrinted, printMatter, printType } = req.body;
+            splitBoxes, convertToPrinted, printMatter, printType, newSapDocNum } = req.body;
+    // v49B (confirmed by Ishan): the SAP Sales Order belongs to the OLD customer, so after a
+    // re-customer it must not stay attached — 26P045 moved to K Shyam while still carrying Rohan's
+    // SO 285, which would have invoiced the wrong customer's order. The split path already cleared
+    // the child's refs; the full-switch path never did.
+    // Optional by design: if the new customer's SO is supplied it is applied, and if it is not
+    // (common — SAP may not have raised it yet) the refs are CLEARED rather than left wrong. A batch
+    // with no SO simply cannot be invoiced until a correct one is attached, which is the safe state.
+    const _newSO = (newSapDocNum == null ? '' : String(newSapDocNum)).trim();
     if (!batchNumber || !newCustomer) return res.status(400).json({ ok:false, error:'batchNumber and newCustomer required' });
     const ts = new Date().toISOString();
     const _PACK = {'0':1.5,'00':1.5,'000':1.5,'1':1.25,'2':1.0,'3':0.75,'4':0.5,'5':0.333};
     const boxesToLakhsServer = (boxes,size)=>{ const ps=_PACK[String(size)]||1; return (parseInt(boxes,10)||0)*ps; };
 
-    // SAP-finalized guard — a real SAP invoice document for this batch cannot be silently re-pointed.
-    let sapBlock = false, sapWhat = '';
-    if (pgPool) {
-      const ir = (await pgPool.query(`SELECT 1 FROM invoices_received WHERE batch_number=$1 LIMIT 1`,[batchNumber])).rows[0];
-      const rq = (await pgPool.query(`SELECT 1 FROM invoice_requests WHERE batch_number=$1 AND (sap_doc_entry IS NOT NULL OR sap_response_doc_entry IS NOT NULL OR status NOT IN ('pending')) LIMIT 1`,[batchNumber])).rows[0];
-      if (ir) { sapBlock=true; sapWhat='a SAP invoice has already been received'; }
-      else if (rq) { sapBlock=true; sapWhat='an invoice request has already been pushed to SAP'; }
-    } else {
-      const ir = db.prepare(`SELECT 1 FROM invoices_received WHERE batch_number=? LIMIT 1`).get(batchNumber);
-      const rq = db.prepare(`SELECT 1 FROM invoice_requests WHERE batch_number=? AND (sap_doc_entry IS NOT NULL OR sap_response_doc_entry IS NOT NULL OR status NOT IN ('pending')) LIMIT 1`).get(batchNumber);
-      if (ir) { sapBlock=true; sapWhat='a SAP invoice has already been received'; }
-      else if (rq) { sapBlock=true; sapWhat='an invoice request has already been pushed to SAP'; }
+    // ── v48W: SAP-FINALIZED GUARD, NOW MEASURED PER BOX (approved by Ishan) ──
+    // The rule is unchanged in intent: a box SAP has already invoiced cannot be silently re-pointed.
+    // What changed is its SCOPE. It used to trip if ANY invoice touched the batch, which froze the
+    // whole batch including boxes SAP had no claim on — live case 26T080, where 15.75L went out on
+    // invoice 1840 to Rohan Pharma and the REMAINING uninvoiced boxes could not then be split to
+    // G.K.PHARMA. Invoice requests record selected_labels, so the invoiced box set is knowable and
+    // the block now applies only to those specific boxes.
+    // A FULL re-customer still blocks on any SAP document — it moves every box, so any invoiced box
+    // is necessarily included. Only a PARTIAL split can proceed, and only over uninvoiced boxes.
+    let _sapDocs = [], _invoicedLabelIds = new Set(), _sapAny = false, _sapWhat = '';
+    {
+      const qIR = `SELECT sap_doc_num FROM invoices_received WHERE batch_number=$1`;
+      const qRQ = `SELECT id, selected_labels, sap_doc_entry, status FROM invoice_requests
+                   WHERE batch_number=$1 AND (sap_doc_entry IS NOT NULL OR sap_response_doc_entry IS NOT NULL OR status NOT IN ('pending'))`;
+      const irRows = pgPool ? (await pgPool.query(qIR, [batchNumber])).rows
+                            : db.prepare(qIR.replace(/\$1/g, '?')).all(batchNumber);
+      const rqRows = pgPool ? (await pgPool.query(qRQ, [batchNumber])).rows
+                            : db.prepare(qRQ.replace(/\$1/g, '?')).all(batchNumber);
+      if (irRows.length) { _sapAny = true; _sapWhat = 'a SAP invoice has already been received'; _sapDocs = irRows.map(r => r.sap_doc_num).filter(Boolean); }
+      else if (rqRows.length) { _sapAny = true; _sapWhat = 'an invoice request has already been pushed to SAP'; }
+      for (const r of rqRows) {
+        let ids = [];
+        try { ids = typeof r.selected_labels === 'string' ? JSON.parse(r.selected_labels) : (r.selected_labels || []); }
+        catch (e) { ids = []; }
+        if (Array.isArray(ids)) for (const id of ids) _invoicedLabelIds.add(String(id));
+      }
+      // A received invoice whose request we cannot resolve to specific labels leaves the invoiced box
+      // set UNKNOWN. Unknown must fail closed — we cannot prove the boxes being moved are free.
+      if (irRows.length && !_invoicedLabelIds.size) _sapWhat += ' (its boxes cannot be identified)';
     }
-    if (sapBlock) return res.json({ ok:false, sap_blocked:true, error:`Cannot re-customer ${batchNumber}: ${sapWhat}. Cancel that SAP document first, then retry.` });
 
     const planState = getPlanningState();
     const ord = (planState.orders||[]).find(o => o.batchNumber===batchNumber && !o.deleted);
@@ -15294,6 +18500,24 @@ app.post('/api/tracking/recustomer', async (req, res) => {
     const nSplit = Math.max(0, parseInt(splitBoxes,10)||0);
     const doSplit = nSplit > 0 && nSplit < totalBoxes;     // full switch if 0 or ≥ total
     const doConvert = !!convertToPrinted && !wasPrinted;
+
+    // v48W: apply the SAP guard now that the boxes actually moving are known.
+    if (_sapAny) {
+      const _moving = doSplit ? labelSel.slice(totalBoxes - nSplit) : labelSel;
+      const _clash = _moving.filter(l => _invoicedLabelIds.has(String(l.id)));
+      const _unknown = !_invoicedLabelIds.size;              // invoiced box set unresolvable → fail closed
+      if (!doSplit || _clash.length || _unknown) {
+        const detail = !doSplit
+          ? 'a full re-customer moves every box, including the invoiced ones'
+          : (_clash.length
+              ? `${_clash.length} of the ${_moving.length} box(es) you are moving are already on that document`
+              : 'the invoiced boxes could not be identified, so this cannot be verified as safe');
+        return res.json({ ok:false, sap_blocked:true,
+          error:`Cannot re-customer ${batchNumber}: ${_sapWhat} — ${detail}. Cancel that SAP document first, then retry.`,
+          sapDocs: _sapDocs, movingBoxes: _moving.length, clashingBoxes: _clash.length });
+      }
+      console.log(`[v48W] re-customer split of ${batchNumber}: ${_moving.length} uninvoiced box(es) moving; ${_invoicedLabelIds.size} box(es) remain committed to SAP${_sapDocs.length ? ' (' + _sapDocs.join(', ') + ')' : ''}`);
+    }
 
     // Split safety: a pending invoice request references specific labels; moving boxes to a child batch
     // would leave its selected_labels stale. Block split until that pending request is resolved.
@@ -15320,10 +18544,10 @@ app.post('/api/tracking/recustomer', async (req, res) => {
       // Re-batch the moved labels + ALL their scans to the child (in place — no void/mint, ids preserved).
       for (const l of moveLabels) {
         if (pgPool) {
-          await pgPool.query(`UPDATE tracking_labels SET batch_number=$1, customer=$2, po_number=COALESCE($3,po_number), ship_to=COALESCE($4,ship_to), bill_to=COALESCE($5,bill_to), printed=0, printed_at=NULL, qr_data=NULL WHERE id=$6`, [childBatch, newCustomer, newPoNumber||null, shipTo||null, billTo||null, l.id]);
+          await pgPool.query(`UPDATE tracking_labels SET batch_number=$1, customer=$2, po_number=COALESCE($3,po_number), ship_to=$4, bill_to=$5, printed=0, printed_at=NULL, qr_data=NULL WHERE id=$6`, [childBatch, newCustomer, newPoNumber||null, shipTo||null, billTo||null, l.id]);
           await pgPool.query(`UPDATE tracking_scans SET batch_number=$1 WHERE label_id=$2`, [childBatch, l.id]);
         } else {
-          db.prepare(`UPDATE tracking_labels SET batch_number=?, customer=?, po_number=COALESCE(?,po_number), ship_to=COALESCE(?,ship_to), bill_to=COALESCE(?,bill_to), printed=0, printed_at=NULL, qr_data=NULL WHERE id=?`).run(childBatch, newCustomer, newPoNumber||null, shipTo||null, billTo||null, l.id);
+          db.prepare(`UPDATE tracking_labels SET batch_number=?, customer=?, po_number=COALESCE(?,po_number), ship_to=?, bill_to=?, printed=0, printed_at=NULL, qr_data=NULL WHERE id=?`).run(childBatch, newCustomer, newPoNumber||null, shipTo||null, billTo||null, l.id);
           db.prepare(`UPDATE tracking_scans SET batch_number=? WHERE label_id=?`).run(childBatch, l.id);
         }
       }
@@ -15331,7 +18555,12 @@ app.post('/api/tracking/recustomer', async (req, res) => {
       const parentActual = parseFloat(ord?.actualProd || ord?.actualQty || 0);
       const child = {
         ...(ord||{}), id: childBatch, batchNumber: childBatch, customer: newCustomer,
-        shipTo: shipTo||newCustomer, billTo: billTo||'', poNumber: newPoNumber||'',
+        // v49E (confirmed by Ishan): the child is CLEARED, not pre-filled. shipTo defaulted to
+        // newCustomer, which put a guessed address line where the planner's real ship-to belongs.
+        // Blank makes every display fall back to `customer` — the field re-customer writes
+        // correctly — and leaves the planner an obviously-empty field to complete. The PARENT is
+        // untouched: it keeps customer A, so its own ship/bill remain valid.
+        shipTo: shipTo||'', billTo: billTo||'', poNumber: newPoNumber||'',
         qty: +boxesToLakhsServer(nSplit, size).toFixed(4), totalBoxes: nSplit,
         actualProd: +(totalBoxes>0 ? parentActual*nSplit/totalBoxes : 0).toFixed(3),
         actualQty:  +(totalBoxes>0 ? parentActual*nSplit/totalBoxes : 0).toFixed(3),
@@ -15339,7 +18568,9 @@ app.post('/api/tracking/recustomer', async (req, res) => {
         status: (ord?.status==='closed' ? 'running' : (ord?.status||'running')),
         deleted: false, recustomeredFrom: oldCustomer, recustomerSplitFrom: batchNumber,
         recustomeredAt: ts, recustomeredBy: session.username,
-        sapDocEntry: null, sapDocNum: '', _localEditedAt: Date.now()
+        sapDocEntry: null, sapDocNum: _newSO,          // v49B: new customer's SO if supplied, else blank
+        cardCode: newCardCode || undefined,
+        _localEditedAt: Date.now()
       };
       delete child.woStatus;
       planState.orders.push(child);
@@ -15354,18 +18585,33 @@ app.post('/api/tracking/recustomer', async (req, res) => {
     } else {
       // ── FULL switch: in-place customer/address/PO update + forced reprint on the original batch.
       if (pgPool) {
-        await pgPool.query(`UPDATE tracking_labels SET customer=$2, po_number=COALESCE($3,po_number), ship_to=COALESCE($4,ship_to), bill_to=COALESCE($5,bill_to), printed=0, printed_at=NULL, qr_data=NULL WHERE batch_number=$1 AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`, [batchNumber, newCustomer, newPoNumber||null, shipTo||null, billTo||null]);
+        await pgPool.query(`UPDATE tracking_labels SET customer=$2, po_number=COALESCE($3,po_number), ship_to=$4, bill_to=$5, printed=0, printed_at=NULL, qr_data=NULL WHERE batch_number=$1 AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`, [batchNumber, newCustomer, newPoNumber||null, shipTo||null, billTo||null]);
         await pgPool.query(`UPDATE tracking_dispatch_records SET customer=$2 WHERE batch_number=$1`, [batchNumber, newCustomer]);
         await pgPool.query(`UPDATE invoice_requests SET customer=$2, card_code=COALESCE($3,card_code), po_number=COALESCE($4,po_number), updated_at=NOW()::TEXT WHERE batch_number=$1 AND status='pending' AND sap_doc_entry IS NULL`, [batchNumber, newCustomer, newCardCode||null, newPoNumber||null]);
       } else {
-        db.prepare(`UPDATE tracking_labels SET customer=?, po_number=COALESCE(?,po_number), ship_to=COALESCE(?,ship_to), bill_to=COALESCE(?,bill_to), printed=0, printed_at=NULL, qr_data=NULL WHERE batch_number=? AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`).run(newCustomer, newPoNumber||null, shipTo||null, billTo||null, batchNumber);
+        db.prepare(`UPDATE tracking_labels SET customer=?, po_number=COALESCE(?,po_number), ship_to=?, bill_to=?, printed=0, printed_at=NULL, qr_data=NULL WHERE batch_number=? AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`).run(newCustomer, newPoNumber||null, shipTo||null, billTo||null, batchNumber);
         db.prepare(`UPDATE tracking_dispatch_records SET customer=? WHERE batch_number=?`).run(newCustomer, batchNumber);
         db.prepare(`UPDATE invoice_requests SET customer=?, card_code=COALESCE(?,card_code), po_number=COALESCE(?,po_number), updated_at=datetime('now') WHERE batch_number=? AND status='pending' AND sap_doc_entry IS NULL`).run(newCustomer, newCardCode||null, newPoNumber||null, batchNumber);
       }
       if (ord) {
         ord.recustomeredFrom = ord.customer || oldCustomer;
         ord.customer = newCustomer;
+        // v49E (confirmed by Ishan): the full switch wrote ord.customer and never touched shipTo/billTo,
+        // so the OLD customer's name survived on both — and since every display prefers shipTo
+        // (planning renders `ord.shipTo || ord.customer`, ZPL the same), the batch went on showing the
+        // previous customer everywhere except Label Generation, which happens to read customer first.
+        // 26P045 is the evidence: customer K SHYAM TRADER with shipTo and billTo both ROHAN PHARMA
+        // PRIVATE LTD. Assign the supplied values, or BLANK when none are given — blanking is what makes
+        // both fields fall back to `customer`, which is already correct. No copying, no guessing.
+        ord.shipTo = shipTo || '';
+        ord.billTo = billTo || '';
         if (newPoNumber) ord.poNumber = newPoNumber;
+        // v49B: retire the previous customer's SO. sapDocEntry is SAP's internal key which no
+        // operator can know, so it is always cleared and left for the reconcile path to resolve.
+        ord.prevSapDocNum = ord.sapDocNum || '';
+        ord.sapDocNum   = _newSO;
+        ord.sapDocEntry = null;
+        if (newCardCode) ord.cardCode = newCardCode;   // v49B: was passed to invoice_requests only
         if (doConvert) { ord.isPrinted = true; if (ord.status==='closed') { ord.status='running'; ord.reopenedForConvert=true; } } // re-enter printing chain
         ord.recustomeredAt = ts; ord.recustomeredBy = session.username; ord._localEditedAt = Date.now();
         (planState.dispatchPlans||[]).forEach(d => { if (d.batchNumber===batchNumber || d.productionOrderId===ord.id) { d.customer=newCustomer; if(newPoNumber) d.poNumber=newPoNumber; } });
@@ -15443,6 +18689,364 @@ app.get('/api/tracking/recustomer-log', async (req, res) => {
   } catch(err) { res.status(500).json({ ok:false, error:err.message }); }
 });
 
+// ═════════════════════════════════════════════════════════════════════════════════════
+// v49ZG: EXCESS-CAPSULE UNPRINT FLOW (confirmed by Ishan 29-30 Jul)
+// Business case: AIM over-sends unprinted capsules to Printing on a PTD batch (e.g. 55L sent
+// vs 50L order). The printing manager prints only the order qty; the excess boxes are
+// physically unprinted and must convert to an UNPRINTED child batch — colour stock,
+// dispatchable to any customer — instead of blocking inventory as "printed".
+// Design (option C): re-customer split machinery in the missing REVERSE direction.
+//   PROPOSER  = Printing Manager (tracking_printing session) or admin, from the Printing dept
+//               page: selects excess boxes. ELIGIBILITY is system-proof of "physically
+//               unprinted": a live (non-reversed) printing scan-IN and NO live printing
+//               scan-OUT, plus the v48W per-box SAP-finalized guard (an invoiced box cannot
+//               be silently re-pointed; an unresolvable invoiced-box set fails CLOSED).
+//   APPROVER  = planning_manager or admin, from Planning → Reconciliation (card mirrors the
+//               W/O Split pending-approval card).
+//   APPROVAL  = executes via the proven re-customer split internals (/api/tracking/recustomer
+//               v44C): allocate child suffix, re-map the selected labels + their scans to the
+//               child, create the child as a genuine UP order (isPrinted:false — the point),
+//               reduce the parent proportionally, post tracking_scan_reversals rows for the
+//               child's printing scan-INs (v44C ledger: history preserved, every summary
+//               already excludes reversed scans — convertToPrinted is the existing mirror),
+//               clear SAP refs on the child (v49B rule), recustomer_log snapshot (which the
+//               family-attribution consumers already read), savePlanningState (v46D canonical
+//               writer). Parent Printing WIP falls automatically via live scan positions
+//               (v49Z split) — NO adjustment entries anywhere.
+//   CUSTOMER  = OPTIONAL (per Ishan): a customer-less child is COLOUR STOCK, assigned later
+//               via a normal re-customer.
+//   PACK SIZE = system-canonical _V44ZJ_PACK_SIZES (same table as client PACK_SIZES, W/O
+//               split, scan-lakhs) so the child qty matches its own boxes' scan quantities.
+//               (The recustomer endpoint's local _PACK table diverges from this — flagged to
+//               Ishan; NOT changed here.)
+// ═════════════════════════════════════════════════════════════════════════════════════
+
+// Eligible boxes for excess-unprint at Printing: non-voided, non-orange labels of the batch
+// with a live printing scan-IN and no live printing scan-OUT ("live" = not in the v44C
+// reversal ledger). Same SQL on PG and SQLite (COALESCE flag pattern used throughout).
+async function _exuEligibleRows(batchNumber) {
+  const filter = batchNumber ? (pgPool ? ` AND l.batch_number=$1` : ` AND l.batch_number=?`) : '';
+  const sql = `SELECT l.batch_number, l.id AS label_id, l.label_number, l.size, l.customer
+    FROM tracking_labels l
+    WHERE COALESCE(l.voided,0)=0 AND COALESCE(l.is_orange,0)=0${filter}
+      AND EXISTS (SELECT 1 FROM tracking_scans s WHERE s.label_id=l.id AND s.dept='printing' AND s.type='in'
+                  AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id))
+      AND NOT EXISTS (SELECT 1 FROM tracking_scans s2 WHERE s2.label_id=l.id AND s2.dept='printing' AND s2.type='out'
+                  AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r2 WHERE r2.reversed_scan_id=s2.id))`;
+  const args = batchNumber ? [batchNumber] : [];
+  return pgPool ? (await pgPool.query(sql, args)).rows
+                : db.prepare(sql.replace(/\$1/g, '?')).all(...args);
+}
+
+// v48W per-box SAP guard for a batch (reused rule, reused fail-closed semantics): returns
+// { blocked, why, invoicedIds:Set } — blocked=true means the WHOLE batch is untouchable
+// (an invoice exists whose box set cannot be resolved). Otherwise invoicedIds are the
+// specific boxes SAP has a claim on; those boxes are simply not eligible.
+async function _exuSapGuard(batchNumber) {
+  const qIR = `SELECT sap_doc_num FROM invoices_received WHERE batch_number=$1`;
+  const qRQ = `SELECT id, selected_labels, sap_doc_entry, status FROM invoice_requests
+               WHERE batch_number=$1 AND (sap_doc_entry IS NOT NULL OR sap_response_doc_entry IS NOT NULL OR status NOT IN ('pending'))`;
+  const irRows = pgPool ? (await pgPool.query(qIR, [batchNumber])).rows
+                        : db.prepare(qIR.replace(/\$1/g, '?')).all(batchNumber);
+  const rqRows = pgPool ? (await pgPool.query(qRQ, [batchNumber])).rows
+                        : db.prepare(qRQ.replace(/\$1/g, '?')).all(batchNumber);
+  const invoicedIds = new Set();
+  for (const r of rqRows) {
+    let ids = [];
+    try { ids = typeof r.selected_labels === 'string' ? JSON.parse(r.selected_labels) : (r.selected_labels || []); }
+    catch (e) { ids = []; }
+    if (Array.isArray(ids)) for (const id of ids) invoicedIds.add(String(id));
+  }
+  // Unknown invoiced-box set must fail CLOSED (v48W): a received invoice we cannot resolve to
+  // specific labels means we cannot prove any box is free.
+  if (irRows.length && !invoicedIds.size) {
+    return { blocked: true, why: 'a SAP invoice exists for this batch and its boxes cannot be identified', invoicedIds };
+  }
+  return { blocked: false, why: '', invoicedIds };
+}
+
+// Label ids already committed to another PENDING excess-unprint request (no double-proposal).
+async function _exuPendingLabelIds(batchNumber, excludeReqId) {
+  const rows = pgPool
+    ? (await pgPool.query(`SELECT id, selected_labels FROM excess_unprint_requests WHERE batch_number=$1 AND status='pending'`, [batchNumber])).rows
+    : db.prepare(`SELECT id, selected_labels FROM excess_unprint_requests WHERE batch_number=? AND status='pending'`).all(batchNumber);
+  const out = new Set();
+  for (const r of rows) {
+    if (excludeReqId && r.id === excludeReqId) continue;
+    let ids = []; try { ids = JSON.parse(r.selected_labels || '[]'); } catch (e) { ids = []; }
+    for (const id of ids) out.add(String(id));
+  }
+  return out;
+}
+
+// GET /api/printing/excess-unprint/eligible — batches with eligible boxes (for the Printing card).
+app.get('/api/printing/excess-unprint/eligible', async (req, res) => {
+  try {
+    const session = verifyToken(req.headers['x-session-token'] || req.query?.token);
+    if (!session || !['tracking_printing','planning_manager','admin'].includes(session.role))
+      return res.status(403).json({ ok:false, error:'Printing / Planning Manager / Admin required' });
+    const rows = await _exuEligibleRows(null);
+    // Group by batch; apply SAP guard + pending-request exclusion per batch.
+    const byBatch = {};
+    for (const r of rows) (byBatch[r.batch_number] = byBatch[r.batch_number] || []).push(r);
+    const planState = getPlanningState();
+    const batches = [];
+    for (const bn of Object.keys(byBatch)) {
+      const ord = (planState.orders||[]).find(o => o.batchNumber===bn && !o.deleted);
+      if (!ord || !ord.isPrinted) continue;            // only PTD parents — a UP batch has nothing to unprint
+      const guard = await _exuSapGuard(bn);
+      const pendingIds = await _exuPendingLabelIds(bn, null);
+      const boxes = guard.blocked ? [] : byBatch[bn].filter(r => !guard.invoicedIds.has(String(r.label_id)) && !pendingIds.has(String(r.label_id)));
+      if (!boxes.length && !guard.blocked && !pendingIds.size) continue;
+      const size = ord.size || byBatch[bn][0]?.size || '2';
+      const ps = _V44ZJ_PACK_SIZES[String(size)] || 1;
+      batches.push({
+        batchNumber: bn, customer: ord.customer||'', size, packSize: ps,
+        sapBlocked: guard.blocked, sapWhy: guard.why,
+        pendingBoxes: pendingIds.size,
+        boxes: boxes.map(b => ({ labelId: String(b.label_id), labelNumber: b.label_number })).sort((a,b)=>{
+          const na=parseInt(a.labelNumber,10)||0, nb=parseInt(b.labelNumber,10)||0; return na-nb;
+        })
+      });
+    }
+    batches.sort((a,b)=>(a.batchNumber||'').localeCompare(b.batchNumber||''));
+    res.json({ ok:true, batches });
+  } catch(err) { res.status(500).json({ ok:false, error:err.message }); }
+});
+
+// POST /api/printing/excess-unprint/propose — Printing Manager proposes; server re-derives eligibility.
+app.post('/api/printing/excess-unprint/propose', async (req, res) => {
+  try {
+    const session = verifyToken(req.headers['x-session-token'] || req.body?.token);
+    if (!session || !['tracking_printing','admin'].includes(session.role))
+      return res.status(403).json({ ok:false, error:'Printing Manager or Admin required' });
+    const { batchNumber, labelIds, newCustomer, reason } = req.body || {};
+    const ids = Array.isArray(labelIds) ? labelIds.map(String).filter(Boolean) : [];
+    if (!batchNumber || !ids.length) return res.status(400).json({ ok:false, error:'batchNumber and labelIds required' });
+    if (!reason || !String(reason).trim()) return res.status(400).json({ ok:false, error:'Reason required' });
+
+    const planState = getPlanningState();
+    const ord = (planState.orders||[]).find(o => o.batchNumber===batchNumber && !o.deleted);
+    if (!ord) return res.status(404).json({ ok:false, error:`No active order for ${batchNumber}` });
+    if (!ord.isPrinted) return res.status(400).json({ ok:false, error:`${batchNumber} is already an UNPRINTED batch — nothing to convert` });
+
+    const guard = await _exuSapGuard(batchNumber);
+    if (guard.blocked) return res.json({ ok:false, sap_blocked:true, error:`Cannot propose for ${batchNumber}: ${guard.why}. Cancel that SAP document first.` });
+
+    const eligible = await _exuEligibleRows(batchNumber);
+    const eligibleIds = new Set(eligible.map(r => String(r.label_id)));
+    const pendingIds = await _exuPendingLabelIds(batchNumber, null);
+    const bad = ids.filter(id => !eligibleIds.has(id) || guard.invoicedIds.has(id) || pendingIds.has(id));
+    if (bad.length) {
+      return res.status(409).json({ ok:false, error:`${bad.length} of ${ids.length} selected box(es) are not eligible (already printed out, SAP-committed, or on another pending request). Refresh and reselect.`, ineligible: bad });
+    }
+    if (ids.length >= eligible.length && eligibleIds.size === ids.length) {
+      // Carving EVERY held box is allowed only when some boxes have printed out (a residual
+      // exists elsewhere); if literally all the batch's printing-held boxes are selected AND the
+      // batch has no printed-out boxes, this is a full conversion of a batch that never printed —
+      // still legitimate (order cancelled at printing), so no block; the parent just goes to 0 held.
+    }
+    const size = ord.size || eligible[0]?.size || '2';
+    const ps = _V44ZJ_PACK_SIZES[String(size)] || 1;
+    const qty = +(ids.length * ps).toFixed(4);
+    const reqId = `exu-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+    const ts = new Date().toISOString();
+    const row = [reqId, batchNumber, JSON.stringify(ids), ids.length, qty, (newCustomer||'').trim(), String(reason).trim(), session.username, ts];
+    if (pgPool) await pgPool.query(`INSERT INTO excess_unprint_requests (id,batch_number,selected_labels,boxes,qty_lakhs,new_customer,reason,proposed_by,proposed_at,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending')`, row);
+    else db.prepare(`INSERT INTO excess_unprint_requests (id,batch_number,selected_labels,boxes,qty_lakhs,new_customer,reason,proposed_by,proposed_at,status) VALUES (?,?,?,?,?,?,?,?,?,'pending')`).run(...row);
+    try { logAudit(session.username, session.role, 'tracking', 'EXCESS_UNPRINT_PROPOSE', JSON.stringify({ id:reqId, batch_number:batchNumber, boxes:ids.length, qty, newCustomer:newCustomer||'', reason }), req.ip); } catch(e) {}
+    res.json({ ok:true, id: reqId, batchNumber, boxes: ids.length, qtyLakhs: qty });
+  } catch(err) { console.error('[v49ZG] exu propose:', err); res.status(500).json({ ok:false, error:err.message }); }
+});
+
+// GET /api/printing/excess-unprint/pending — pending first (all roles below see all), plus recent decisions.
+app.get('/api/printing/excess-unprint/pending', async (req, res) => {
+  try {
+    const session = verifyToken(req.headers['x-session-token'] || req.query?.token);
+    if (!session || !['tracking_printing','planning_manager','admin'].includes(session.role))
+      return res.status(403).json({ ok:false, error:'Printing / Planning Manager / Admin required' });
+    const pend = pgPool
+      ? (await pgPool.query(`SELECT * FROM excess_unprint_requests WHERE status='pending' ORDER BY proposed_at DESC`)).rows
+      : db.prepare(`SELECT * FROM excess_unprint_requests WHERE status='pending' ORDER BY proposed_at DESC`).all();
+    const done = pgPool
+      ? (await pgPool.query(`SELECT * FROM excess_unprint_requests WHERE status<>'pending' ORDER BY decided_at DESC LIMIT 10`)).rows
+      : db.prepare(`SELECT * FROM excess_unprint_requests WHERE status<>'pending' ORDER BY decided_at DESC LIMIT 10`).all();
+    res.json({ ok:true, requests: pend, recent: done });
+  } catch(err) { res.status(500).json({ ok:false, error:err.message }); }
+});
+
+// POST /api/printing/excess-unprint/reject/:id — planning_manager/admin, reason required.
+app.post('/api/printing/excess-unprint/reject/:id', async (req, res) => {
+  try {
+    const session = verifyToken(req.headers['x-session-token'] || req.body?.token);
+    if (!session || !['planning_manager','admin'].includes(session.role))
+      return res.status(403).json({ ok:false, error:'Planning Manager or Admin required' });
+    const reason = (req.body?.reason||'').trim();
+    if (!reason) return res.status(400).json({ ok:false, error:'Rejection reason required' });
+    const reqId = req.params.id, ts = new Date().toISOString();
+    const cur = pgPool
+      ? (await pgPool.query(`SELECT status FROM excess_unprint_requests WHERE id=$1`, [reqId])).rows[0]
+      : db.prepare(`SELECT status FROM excess_unprint_requests WHERE id=?`).get(reqId);
+    if (!cur) return res.status(404).json({ ok:false, error:'Request not found' });
+    if (cur.status !== 'pending') return res.status(400).json({ ok:false, error:`Already ${cur.status}` });
+    if (pgPool) await pgPool.query(`UPDATE excess_unprint_requests SET status='rejected', decided_by=$2, decided_at=$3, decision_reason=$4 WHERE id=$1`, [reqId, session.username, ts, reason]);
+    else db.prepare(`UPDATE excess_unprint_requests SET status='rejected', decided_by=?, decided_at=?, decision_reason=? WHERE id=?`).run(session.username, ts, reason, reqId);
+    try { logAudit(session.username, session.role, 'planning', 'EXCESS_UNPRINT_REJECT', JSON.stringify({ id:reqId, reason }), req.ip); } catch(e) {}
+    res.json({ ok:true, id: reqId, status:'rejected' });
+  } catch(err) { res.status(500).json({ ok:false, error:err.message }); }
+});
+
+// POST /api/printing/excess-unprint/approve/:id — planning_manager/admin. Re-validates eligibility
+// (boxes may have printed out or been invoiced since the proposal — any drift is a LOUD 409, no
+// partial execution), then executes the conversion through the re-customer split internals.
+app.post('/api/printing/excess-unprint/approve/:id', async (req, res) => {
+  try {
+    const session = verifyToken(req.headers['x-session-token'] || req.body?.token);
+    if (!session || !['planning_manager','admin'].includes(session.role))
+      return res.status(403).json({ ok:false, error:'Planning Manager or Admin required' });
+    const reqId = req.params.id;
+    const request = pgPool
+      ? (await pgPool.query(`SELECT * FROM excess_unprint_requests WHERE id=$1`, [reqId])).rows[0]
+      : db.prepare(`SELECT * FROM excess_unprint_requests WHERE id=?`).get(reqId);
+    if (!request) return res.status(404).json({ ok:false, error:'Request not found' });
+    if (request.status !== 'pending') return res.status(400).json({ ok:false, error:`Already ${request.status}` });
+    let ids = []; try { ids = JSON.parse(request.selected_labels||'[]').map(String); } catch(e) { ids = []; }
+    if (!ids.length) return res.status(400).json({ ok:false, error:'Request has no boxes' });
+    const batchNumber = request.batch_number;
+    const newCustomer = (request.new_customer||'').trim();
+    const ts = new Date().toISOString();
+
+    const planState = await getPlanningStateAsync();
+    const ord = (planState.orders||[]).find(o => o.batchNumber===batchNumber && !o.deleted);
+    if (!ord) return res.status(404).json({ ok:false, error:`Parent order ${batchNumber} no longer exists` });
+
+    // ── RESUME detection (wo/split v44ZU pattern): a prior approval attempt may have executed the
+    // conversion but crashed before marking the request approved. child_batch_number is stamped on
+    // the request BEFORE execution, so a stamped request whose child order already exists resumes
+    // idempotently instead of double-reducing the parent.
+    let childBatch = request.child_batch_number || null;
+    const _resuming = !!(childBatch && (planState.orders||[]).find(o => o.batchNumber===childBatch && !o.deleted));
+
+    // ── Re-validate eligibility NOW (skip when resuming — the labels already moved to the child).
+    if (!_resuming) {
+      const guard = await _exuSapGuard(batchNumber);
+      if (guard.blocked) return res.status(409).json({ ok:false, error:`Cannot approve: ${guard.why}. Cancel that SAP document first.` });
+      const eligible = await _exuEligibleRows(batchNumber);
+      const eligibleIds = new Set(eligible.map(r => String(r.label_id)));
+      const bad = ids.filter(id => !eligibleIds.has(id) || guard.invoicedIds.has(id));
+      if (bad.length) {
+        return res.status(409).json({ ok:false, error:`${bad.length} of ${ids.length} box(es) are no longer eligible (printed out or SAP-committed since the proposal). Reject this request and re-propose with current boxes.`, ineligible: bad });
+      }
+    }
+
+    // ── Allocate the child suffix (same single-letter allocator as re-customer split) and stamp it
+    //    on the request BEFORE any mutation, so a crash mid-way resumes to the SAME child.
+    if (!childBatch) {
+      const used = new Set();
+      (planState.orders||[]).forEach(o=>{ if(!o.deleted && o.batchNumber && o.batchNumber.length===batchNumber.length+1 && o.batchNumber.startsWith(batchNumber)){ const s=o.batchNumber.slice(batchNumber.length); if(/^[A-Z]$/.test(s)) used.add(s); }});
+      let suffix='Z'; for(let i=65;i<=90;i++){ const c=String.fromCharCode(i); if(!used.has(c)){ suffix=c; break; } }
+      childBatch = `${batchNumber}${suffix}`;
+      if (pgPool) await pgPool.query(`UPDATE excess_unprint_requests SET child_batch_number=$2 WHERE id=$1`, [reqId, childBatch]);
+      else db.prepare(`UPDATE excess_unprint_requests SET child_batch_number=? WHERE id=?`).run(childBatch, reqId);
+    }
+
+    // ── Re-batch the selected labels + ALL their scans to the child (recustomer pattern: in place,
+    //    ids preserved; printed flag reset forces label reprint under the child batch number).
+    //    Customer: newCustomer when supplied, else BLANK — a customer-less child is colour stock
+    //    (v49E lesson: blank, never guess).
+    const labRows = pgPool
+      ? (await pgPool.query(`SELECT id, size FROM tracking_labels WHERE batch_number IN ($1,$2) AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`, [batchNumber, childBatch])).rows
+      : db.prepare(`SELECT id, size FROM tracking_labels WHERE batch_number IN (?,?) AND COALESCE(voided,0)=0 AND COALESCE(is_orange,0)=0`).all(batchNumber, childBatch);
+    const parentBoxesBefore = labRows.length;           // parent+child family (child empty pre-move, has our boxes on resume)
+    for (const id of ids) {
+      if (pgPool) {
+        await pgPool.query(`UPDATE tracking_labels SET batch_number=$1, customer=$2, printed=0, printed_at=NULL, qr_data=NULL WHERE id=$3`, [childBatch, newCustomer, id]);
+        await pgPool.query(`UPDATE tracking_scans SET batch_number=$1 WHERE label_id=$2`, [childBatch, id]);
+      } else {
+        db.prepare(`UPDATE tracking_labels SET batch_number=?, customer=?, printed=0, printed_at=NULL, qr_data=NULL WHERE id=?`).run(childBatch, newCustomer, id);
+        db.prepare(`UPDATE tracking_scans SET batch_number=? WHERE label_id=?`).run(childBatch, id);
+      }
+    }
+
+    // ── Reverse the child's printing scans via the v44C ledger (mirror of convertToPrinted, which
+    //    reverses packing scans). Eligible boxes have only printing 'in' scans; the dept filter
+    //    catches any stray. Idempotent by 'rev-'||scan id.
+    const rvReason = `Excess→Unprinted (${batchNumber}→${childBatch})`;
+    let reversedScans = 0;
+    if (pgPool) {
+      const r = await pgPool.query(`INSERT INTO tracking_scan_reversals (id, reversed_scan_id, batch_number, label_id, dept, type, reason, by_user, ts) SELECT 'rev-'||s.id, s.id, s.batch_number, s.label_id, s.dept, s.type, $2, $3, $4 FROM tracking_scans s WHERE s.batch_number=$1 AND s.dept='printing' AND NOT EXISTS (SELECT 1 FROM tracking_scan_reversals r WHERE r.reversed_scan_id=s.id)`, [childBatch, rvReason, session.username, ts]);
+      reversedScans = r.rowCount||0;
+    } else {
+      const r = db.prepare(`INSERT OR IGNORE INTO tracking_scan_reversals (id, reversed_scan_id, batch_number, label_id, dept, type, reason, by_user, ts) SELECT 'rev-'||s.id, s.id, s.batch_number, s.label_id, s.dept, s.type, ?, ?, ? FROM tracking_scans s WHERE s.batch_number=? AND s.dept='printing'`).run(rvReason, session.username, ts, childBatch);
+      reversedScans = r.changes||0;
+    }
+
+    // ── Child order: genuine UP order (isPrinted:false — the conversion), colour stock when no
+    //    customer, SAP refs cleared (v49B), proportional actualProd (recustomer-split math).
+    //    Parent reduced proportionally, guarded against double-reduction on resume.
+    const nSplit = ids.length;
+    const size = ord.size || '2';
+    const ps = _V44ZJ_PACK_SIZES[String(size)] || 1;
+    const totalBoxes = parseInt(ord.totalBoxes) || parentBoxesBefore || nSplit;
+    const parentActual = parseFloat(ord.actualProd || ord.actualQty || 0);
+    let child = (planState.orders||[]).find(o => o.batchNumber===childBatch && !o.deleted);
+    if (!child) {
+      child = {
+        ...(ord||{}), id: childBatch, batchNumber: childBatch, customer: newCustomer,
+        shipTo: '', billTo: '', poNumber: '',
+        qty: +(nSplit * ps).toFixed(4), totalBoxes: nSplit,
+        actualProd: +(totalBoxes>0 ? parentActual*nSplit/totalBoxes : 0).toFixed(3),
+        actualQty:  +(totalBoxes>0 ? parentActual*nSplit/totalBoxes : 0).toFixed(3),
+        isPrinted: false,
+        status: (ord.status==='closed' ? 'running' : (ord.status||'running')),
+        deleted: false, recustomeredFrom: ord.customer||'', excessUnprintFrom: batchNumber,
+        excessUnprintReqId: reqId,
+        recustomeredAt: ts, recustomeredBy: session.username,
+        sapDocEntry: null, sapDocNum: '',
+        _localEditedAt: Date.now()
+      };
+      delete child.woStatus;
+      planState.orders.push(child);
+    }
+    if (!Array.isArray(ord.excessUnprintReqIds)) ord.excessUnprintReqIds = [];
+    if (!ord.excessUnprintReqIds.includes(reqId)) {
+      const residual = Math.max(0, totalBoxes - nSplit);
+      if (ord.qty != null && totalBoxes > 0) ord.qty = +(parseFloat(ord.qty) * (residual/totalBoxes)).toFixed(4);
+      ord.totalBoxes = residual;
+      ord.excessUnprintReqIds.push(reqId);
+      ord._localEditedAt = Date.now();
+    }
+
+    // ── Persist planning state + production_orders (v46D canonical writer + cache refresh).
+    await savePlanningState(planState);
+    _planningStateCache = planState; _planningStateCacheTime = Date.now();
+    const writeOrd = async (o) => {
+      if (!o) return; const oj = JSON.stringify(o);
+      if (pgPool) await pgPool.query(`INSERT INTO production_orders (id,data_json,machine_id,batch_number,status,deleted,updated_at) VALUES ($1,$2,$3,$4,$5,false,NOW()::TEXT) ON CONFLICT(id) DO UPDATE SET data_json=$2, machine_id=$3, batch_number=$4, status=$5, deleted=false, updated_at=NOW()::TEXT`, [o.id, oj, o.machineId||null, o.batchNumber, o.status||'running']);
+      else db.prepare(`INSERT INTO production_orders (id,data_json,machine_id,batch_number,status,deleted,updated_at) VALUES (?,?,?,?,?,0,datetime('now')) ON CONFLICT(id) DO UPDATE SET data_json=excluded.data_json, machine_id=excluded.machine_id, batch_number=excluded.batch_number, status=excluded.status, deleted=0, updated_at=datetime('now')`).run(o.id, oj, o.machineId||null, o.batchNumber, o.status||'running');
+    };
+    await writeOrd(ord);
+    await writeOrd(child);
+
+    // ── recustomer_log snapshot (family-attribution consumers already read child_batch_number +
+    //    split_boxes from this table) + request approved + audit.
+    const before = { batchNumber, customer: ord.recustomeredFrom||ord.customer||'', isPrinted: true, totalBoxes: totalBoxes, poNumber: ord.poNumber||'' };
+    const after  = { batchNumber: childBatch, childBatch, customer: newCustomer, isPrinted: false, boxes: nSplit, convertedToUnprinted: true, reversedPrintingScans: reversedScans };
+    try {
+      const logId = `rc-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+      const row = [logId, batchNumber, childBatch, 'excess-unprint', ord.customer||'', newCustomer, ord.poNumber||'', '', '', '', '', nSplit, totalBoxes, 0, nSplit, JSON.stringify(before), JSON.stringify(after), request.reason||'', session.username, ts];
+      if (pgPool) await pgPool.query(`INSERT INTO recustomer_log (id,batch_number,child_batch_number,action_type,from_customer,to_customer,from_po,to_po,card_code,ship_to,bill_to,split_boxes,total_boxes,converted_to_printed,labels_affected,before_json,after_json,reason,by_user,ts) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`, row);
+      else db.prepare(`INSERT INTO recustomer_log (id,batch_number,child_batch_number,action_type,from_customer,to_customer,from_po,to_po,card_code,ship_to,bill_to,split_boxes,total_boxes,converted_to_printed,labels_affected,before_json,after_json,reason,by_user,ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...row);
+    } catch(e) { console.warn('[v49ZG] recustomer_log:', e.message); }
+    if (pgPool) await pgPool.query(`UPDATE excess_unprint_requests SET status='approved', decided_by=$2, decided_at=$3 WHERE id=$1`, [reqId, session.username, ts]);
+    else db.prepare(`UPDATE excess_unprint_requests SET status='approved', decided_by=?, decided_at=? WHERE id=?`).run(session.username, ts, reqId);
+    try { logAudit(session.username, session.role, 'planning', 'EXCESS_UNPRINT_APPROVE', JSON.stringify({ id:reqId, batch_number:batchNumber, child:childBatch, boxes:nSplit, reversed:reversedScans, newCustomer, resumed:_resuming }), req.ip); } catch(e) {}
+
+    res.json({ ok:true, id:reqId, batchNumber, childBatch, boxes:nSplit, qtyLakhs:+(nSplit*ps).toFixed(4), reversedPrintingScans:reversedScans, customer:newCustomer||'(colour stock — assign via Re-customer)', resumed:_resuming });
+  } catch(err) { console.error('[v49ZG] exu approve:', err); res.status(500).json({ ok:false, error:err.message }); }
+});
+// ═══ end v49ZG ═══════════════════════════════════════════════════════════════════════
+
 // ── Wastage — save salvage/remelt records ─────────────────────
 // Lets admin resolve residual WIP on a batch at month changeover with an explicit
 // A-Grade impact choice:
@@ -15504,6 +19108,218 @@ app.post('/api/tracking/reconcile-wip', async (req, res) => {
     res.json({ ok:true, ts, mode });
   } catch(err) {
     console.error('[reconcile-wip]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
+// ═══ v48B (Ishan): per-DEPARTMENT WIP reconciliation (Report Z tool) ═══════════════════════════
+// Fixes "phantom" department WIP created when boxes were scanned INTO packing (Admin ID) WITHOUT the
+// prior-dept scan-OUT — e.g. PI shows residual WIP even though the material is already in packing. The
+// fix records the MISSING scan(s) as synthetic recon scans (label_id 'recon-%', qty in Lakhs) which
+// flow through EVERY WIP path (Reports B/D/Z) via _v47gScanQtySql with NO frozen-formula change, and are
+// A-Grade-neutral for post-inspection stages. Two dispositions:
+//   movepack — the δ physically reached packing. Record a recon scan-OUT at the stuck dept AND every
+//              downstream production dept, so the telescoping breakdown pushes δ all the way to FG.
+//              Pre-AIM additionally records an AIM scan-IN (δ becomes inspected good ⇒ A-Grade +δ);
+//              Transit records a packing scan-IN. PI / Printing / unprinted-AIM are A-Grade-neutral.
+//   scrap    — the δ was lost. Record salvage/remelt wastage at the dept's leg (A-Grade % drops).
+// Timestamped into the batch's production month so A-Grade attribution stays correct. Atomic. Reversible
+// via /reconcile-wip-clear. The single-dept /reconcile-wip endpoint above is left untouched.
+app.post('/api/tracking/reconcile-wip-dept', async (req, res) => {
+  try {
+    const { batchNumber, dept, delta, disposition, wasteType, isPrinted, month, reason, reconciledBy } = req.body;
+    const d = Math.round(parseFloat(delta||0) * 100) / 100;
+    const DEPTS = ['preaim','aim','printing','pi','transit'];
+    if (!batchNumber || !DEPTS.includes(dept)) return res.status(400).json({ ok:false, error:'batchNumber and a valid dept (preaim|aim|printing|pi|transit) required' });
+    if (!(d > 0)) return res.status(400).json({ ok:false, error:'delta must be > 0' });
+    if (disposition !== 'movepack' && disposition !== 'scrap') return res.status(400).json({ ok:false, error:"disposition must be 'movepack' or 'scrap'" });
+    const printed = !!isPrinted;
+
+    // Timestamp inside the target production month (1s before the 6AM cutoff) — same rule as reconcile-wip.
+    let ts;
+    if (/^\d{4}-\d{2}$/.test(String(month||''))) {
+      const { end } = _v41_monthWindow(month);
+      const endDate = new Date(end.replace(' ','T')); endDate.setSeconds(endDate.getSeconds() - 1);
+      const pad = n => String(n).padStart(2,'0');
+      ts = `${endDate.getFullYear()}-${pad(endDate.getMonth()+1)}-${pad(endDate.getDate())} ${pad(endDate.getHours())}:${pad(endDate.getMinutes())}:${pad(endDate.getSeconds())}`;
+    } else { ts = new Date().toISOString(); }
+    const genId = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+    const who = reconciledBy || 'admin';
+
+    // Build the recon operations. prodStages = every production dept the material must exit to reach packing.
+    const prodStages = printed ? ['aim','printing','pi'] : ['aim'];
+    let scans = [];   // [{dept,type}] synthetic recon scans
+    let waste = null; // {dept,type} write-off
+    if (disposition === 'scrap') {
+      // Loss written off as wastage on the dept's leg. Pre-AIM & AIM losses live on the AIM leg;
+      // a Transit loss belongs to the last production stage.
+      const wDept = (dept === 'preaim' || dept === 'aim') ? 'aim'
+                  : (dept === 'transit') ? prodStages[prodStages.length - 1] : dept;
+      waste = { dept: wDept, type: (wasteType === 'remelt' ? 'remelt' : 'salvage') };
+    } else { // movepack
+      if (dept === 'transit') {
+        scans = [{ dept:'packing', type:'in' }];                       // reached packing → packing scan-IN
+      } else if (dept === 'preaim') {
+        scans = [{ dept:'aim', type:'in' }, ...prodStages.map(s => ({ dept:s, type:'out' }))]; // inspected good, then out to packing
+      } else {
+        const start = prodStages.indexOf(dept);                        // aim / printing / pi
+        scans = (start < 0 ? [] : prodStages.slice(start)).map(s => ({ dept:s, type:'out' }));
+      }
+    }
+
+    const auditDetails = JSON.stringify({ batchNumber, dept, disposition, delta:d, wasteType: waste?waste.type:null, scans, isPrinted:printed, month:month||null, reason:reason||'', ts });
+
+    if (pgPool) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const s of scans) {
+          await client.query(
+            `INSERT INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,qty) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO NOTHING`,
+            [genId(), 'recon-'+genId(), batchNumber, s.dept, s.type, ts, `recon:${who}`, d]
+          );
+        }
+        if (waste) {
+          await client.query(
+            `INSERT INTO tracking_wastage (id,batch_number,dept,type,qty,ts,"by") VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(id) DO NOTHING`,
+            [genId(), batchNumber, waste.dept, waste.type, d, ts, `recon:${who}`]
+          );
+        }
+        await client.query(`INSERT INTO audit_log (username,role,app,action,details) VALUES ($1,'admin','tracking','WIP_RECONCILE_DEPT',$2)`, [who, auditDetails]);
+        await client.query('COMMIT');
+      } catch(e) { try { await client.query('ROLLBACK'); } catch(_){}; throw e; }
+      finally { client.release(); }
+    } else {
+      const insS = db.prepare(`INSERT OR IGNORE INTO tracking_scans (id,label_id,batch_number,dept,type,ts,operator,qty) VALUES (?,?,?,?,?,?,?,?)`);
+      const insW = db.prepare(`INSERT OR IGNORE INTO tracking_wastage (id,batch_number,dept,type,qty,ts,by) VALUES (?,?,?,?,?,?,?)`);
+      const insA = db.prepare(`INSERT INTO audit_log (username,role,app,action,details) VALUES (?,'admin','tracking','WIP_RECONCILE_DEPT',?)`);
+      const tx = db.transaction(() => {
+        for (const s of scans) insS.run(genId(), 'recon-'+genId(), batchNumber, s.dept, s.type, ts, `recon:${who}`, d);
+        if (waste) insW.run(genId(), batchNumber, waste.dept, waste.type, d, ts, `recon:${who}`);
+        insA.run(who, auditDetails);
+      });
+      tx();
+    }
+    res.json({ ok:true, ts, dept, disposition, delta:d, scansWritten:scans.length, wroteWasteoff:!!waste });
+  } catch(err) {
+    console.error('[reconcile-wip-dept]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
+// v48B: undo — remove ALL per-dept WIP reconciliations for a batch (synthetic recon scans + recon:
+// write-offs from this tool / the single-dept reconcile-wip). Real label scans are never touched
+// (recon-% / by 'recon:%' only), restoring the batch's raw scan-derived department WIP.
+app.post('/api/tracking/reconcile-wip-clear', async (req, res) => {
+  try {
+    const { batchNumber, reconciledBy } = req.body;
+    if (!batchNumber) return res.status(400).json({ ok:false, error:'batchNumber required' });
+    const who = reconciledBy || 'admin';
+    let scansDeleted = 0, wasteDeleted = 0;
+    if (pgPool) {
+      const r1 = await pgPool.query(`DELETE FROM tracking_scans WHERE batch_number=$1 AND label_id LIKE 'recon-%'`, [batchNumber]);
+      const r2 = await pgPool.query(`DELETE FROM tracking_wastage WHERE batch_number=$1 AND "by" LIKE 'recon:%'`, [batchNumber]);
+      scansDeleted = r1.rowCount || 0; wasteDeleted = r2.rowCount || 0;
+      await pgPool.query(`INSERT INTO audit_log (username,role,app,action,details) VALUES ($1,'admin','tracking','WIP_RECONCILE_CLEAR',$2)`, [who, JSON.stringify({ batchNumber, scansDeleted, wasteDeleted })]);
+    } else {
+      const r1 = db.prepare(`DELETE FROM tracking_scans WHERE batch_number=? AND label_id LIKE 'recon-%'`).run(batchNumber);
+      const r2 = db.prepare(`DELETE FROM tracking_wastage WHERE batch_number=? AND by LIKE 'recon:%'`).run(batchNumber);
+      scansDeleted = r1.changes || 0; wasteDeleted = r2.changes || 0;
+      db.prepare(`INSERT INTO audit_log (username,role,app,action,details) VALUES (?,'admin','tracking','WIP_RECONCILE_CLEAR',?)`).run(who, JSON.stringify({ batchNumber, scansDeleted, wasteDeleted }));
+    }
+    res.json({ ok:true, scansDeleted, wasteDeleted });
+  } catch(err) {
+    console.error('[reconcile-wip-clear]', err.message);
+    res.status(500).json({ ok:false, error: err.message });
+  }
+});
+
+// v48D (Ishan): idempotency guard — true if an identical dispatch record already exists (same
+// batch_number + invoice_no + boxes + rounded qty). A single invoice never legitimately produces two
+// identical records for a batch, so a match means a double-fire (double-click / retry). Called before
+// the interactive dispatch inserts so the exact-dupe glitch cannot recur. Cross-invoice re-bills are
+// unaffected (different invoice_no). Never throws — a guard error must not block a real dispatch.
+async function _isDuplicateDispatch(batch_number, invoice_no, boxes, qty) {
+  try {
+    if (!batch_number) return false;
+    const b = parseInt(boxes, 10) || 0;
+    const q = Math.round((parseFloat(qty) || 0) * 100) / 100;
+    if (pgPool) {
+      const r = await pgPool.query(
+        `SELECT 1 FROM tracking_dispatch_records WHERE batch_number = $1 AND COALESCE(invoice_no,'') = COALESCE($2,'') AND boxes = $3 AND ROUND(qty::numeric,2) = $4 LIMIT 1`,
+        [batch_number, invoice_no || '', b, q]);
+      return (r.rowCount || 0) > 0;
+    }
+    const r = db.prepare(`SELECT 1 FROM tracking_dispatch_records WHERE batch_number = ? AND COALESCE(invoice_no,'') = COALESCE(?,'') AND boxes = ? AND ROUND(qty,2) = ? LIMIT 1`).get(batch_number, invoice_no || '', b, q);
+    return !!r;
+  } catch (_e) { return false; }
+}
+
+// ═══ v48D (Ishan): dispatch-duplicate REPAIR (Pass A only) — DRY-RUN by default ════════════════
+// Removes exact same-invoice double-inserts from tracking_dispatch_records: identical (batch_number,
+// invoice_no, boxes, qty). A single invoice never legitimately produces two identical records for a
+// batch, so these are pure system double-saves (double-click / retry — e.g. 26U021/1793, 26ZF097/1692
+// inserted ms apart). Keeps the earliest by ts; flags the rest.
+// NB: cross-invoice cases (same batch/qty under DIFFERENT invoice numbers) are LEFT ALONE — they are
+// legitimate business (SAP invoice cancelled + re-billed, or customer return + re-bill) and must not be
+// auto-repaired. Recurrence of the exact-dupe glitch is prevented at write time by _isDuplicateDispatch.
+// Default = DRY-RUN (writes nothing): returns candidate ids + per-batch rollup + totals. ?apply=passA
+// deletes the flagged ids in a transaction, AFTER logging every deleted row to audit_log. Admin only.
+app.post('/api/tracking/repair-dispatch-duplicates', async (req, res) => {
+  try {
+    const apply = String((req.query && req.query.apply) || (req.body && req.body.apply) || '').trim(); // '' | 'passA'
+    const who = (req.body && req.body.by) || 'admin';
+    const qk = pgPool ? 'ROUND(qty::numeric,2)' : 'ROUND(qty,2)'; // round so float noise can't split an identical dispatch
+
+    const passASql = `
+      WITH dup AS (
+        SELECT id, batch_number, invoice_no, boxes, qty, ts,
+          ROW_NUMBER() OVER (PARTITION BY batch_number, invoice_no, boxes, ${qk} ORDER BY ts, id) AS rn
+        FROM tracking_dispatch_records
+      )
+      SELECT id, batch_number, invoice_no, boxes, qty, ts FROM dup WHERE rn > 1`;
+
+    const passA = pgPool ? (await pgPool.query(passASql)).rows : db.prepare(passASql).all();
+
+    const byBatch = {}; let boxes = 0, qty = 0;
+    for (const r of passA) {
+      const b = parseInt(r.boxes,10)||0, q = parseFloat(r.qty)||0;
+      boxes += b; qty += q;
+      const e = byBatch[r.batch_number] = byBatch[r.batch_number] || { batch:r.batch_number, records:0, boxes:0, qty:0 };
+      e.records++; e.boxes += b; e.qty += q;
+    }
+    Object.values(byBatch).forEach(e => e.qty = Math.round(e.qty*100)/100);
+    const A = { count: passA.length, boxesRemoved: boxes, qtyRemoved: Math.round(qty*100)/100,
+                ids: passA.map(r=>r.id), perBatch: Object.values(byBatch), records: passA };
+
+    if (!apply) return res.json({ ok:true, mode:'dryrun', wroteNothing:true, passA:A });
+    if (apply !== 'passA') return res.status(400).json({ ok:false, error:"apply must be 'passA' (omit for dry-run). Cross-invoice cases are not auto-repaired." });
+    if (!A.ids.length) return res.json({ ok:true, mode:'passA', deleted:0, note:'no candidates' });
+    const auditDetails = JSON.stringify({ pass:'passA', count:A.count, boxesRemoved:A.boxesRemoved, qtyRemoved:A.qtyRemoved, records:A.records });
+
+    let deleted = 0;
+    if (pgPool) {
+      const client = await pgPool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`INSERT INTO audit_log (username,role,app,action,details) VALUES ($1,'admin','tracking','DISPATCH_DUP_REPAIR',$2)`, [who, auditDetails]);
+        const del = await client.query(`DELETE FROM tracking_dispatch_records WHERE id = ANY($1)`, [A.ids]);
+        deleted = del.rowCount || 0;
+        await client.query('COMMIT');
+      } catch(e) { try { await client.query('ROLLBACK'); } catch(_){}; throw e; }
+      finally { client.release(); }
+    } else {
+      const tx = db.transaction(() => {
+        db.prepare(`INSERT INTO audit_log (username,role,app,action,details) VALUES (?,'admin','tracking','DISPATCH_DUP_REPAIR',?)`).run(who, auditDetails);
+        const ph = A.ids.map(()=>'?').join(',');
+        const del = db.prepare(`DELETE FROM tracking_dispatch_records WHERE id IN (${ph})`).run(...A.ids);
+        deleted = del.changes || 0;
+      });
+      tx();
+    }
+    res.json({ ok:true, mode:'passA', deleted, boxesRemoved:A.boxesRemoved, qtyRemoved:A.qtyRemoved });
+  } catch(err) {
+    console.error('[repair-dispatch-duplicates]', err.message);
     res.status(500).json({ ok:false, error: err.message });
   }
 });
@@ -15875,6 +19691,69 @@ app.use((err, req, res, next) => {
   if (!res.headersSent) { try { res.status(500).json({ ok:false, error:'server error' }); } catch(_e) {} }
 });
 
+// v47H (confirmed by Ishan): repair the 'printed' flag. A box cannot be scanned onto the line without
+// its label being physically printed, so any non-recon label that HAS a scan yet is still printed=0 was
+// printed and simply never flagged (its in-app print action never persisted printed=1). This left Label
+// Generation showing PRT 0 for fully-run batches (e.g. 26ZC092: 40 of 41 boxes scanned, 0 flagged).
+// Idempotent + safe: only upgrades printed 0→1 for labels that have real scans, never the reverse — a
+// no-op once healed. The pg sync upsert already guards printed with GREATEST(...), so a later stale
+// client push cannot undo this. Runs every boot after tables exist.
+async function _v47h_repairPrintedFlag() {
+  const sql = `
+    UPDATE tracking_labels
+       SET printed = 1,
+           printed_at = COALESCE(printed_at,
+                                 (SELECT MIN(s.ts) FROM tracking_scans s WHERE s.label_id = tracking_labels.id))
+     WHERE tracking_labels.printed = 0
+       AND EXISTS (SELECT 1 FROM tracking_scans s
+                    WHERE s.label_id = tracking_labels.id AND s.label_id NOT LIKE 'recon-%')`;
+  try {
+    if (pgPool) {
+      const r = await pgPool.query(sql);
+      if (r.rowCount) console.log(`[v47H] printed-flag repair: ${r.rowCount} scanned label(s) marked printed`);
+    } else if (db) {
+      const info = db.prepare(sql).run();
+      if (info.changes) console.log(`[v47H] printed-flag repair: ${info.changes} scanned label(s) marked printed`);
+    }
+  } catch (e) { console.warn('[v47H] printed-flag repair failed:', e?.message); }
+}
+
+async function _v47l_repairFalseReconcile() {
+  // v47L (confirmed by Ishan): un-stick invoice requests that the old SO-pass falsely reconciled. A
+  // request sharing a Sales Order with an invoiced batch was flipped to 'reconciled' with no invoice of
+  // its own (26ZD104 / 26ZE101) — hiding it from Pending Reconciliation and freeing its quantity to be
+  // re-invoiced. Revert any 'reconciled' request for which NO received invoice bears its batch back to
+  // 'pending_reconciliation', so the SAP user sees it again. Legit reconciles (e.g. 26Y058, whose real
+  // invoice 1840 carries batch "26Y058, 26T080") are untouched — an invoice DOES bear their batch. Even
+  // a rare over-revert self-heals: the invoice still exists so the next poll re-reconciles it, and the
+  // v47L qty-gate on the SO-pass prevents the false sweep from recurring. Idempotent.
+  const pgSql = `
+    UPDATE invoice_requests ir
+       SET status='pending_reconciliation', reconciled_at=NULL, reconciled_with_invoice_id=NULL,
+           sap_response_doc_num=NULL, sap_response_doc_entry=NULL, updated_at=NOW()::TEXT
+     WHERE ir.status='reconciled'
+       AND ir.batch_number IS NOT NULL AND TRIM(ir.batch_number) <> ''
+       AND NOT EXISTS (SELECT 1 FROM invoices_received iv
+                        WHERE POSITION(LOWER(TRIM(ir.batch_number)) IN LOWER(COALESCE(iv.batch_number,''))) > 0)`;
+  const liteSql = `
+    UPDATE invoice_requests
+       SET status='pending_reconciliation', reconciled_at=NULL, reconciled_with_invoice_id=NULL,
+           sap_response_doc_num=NULL, sap_response_doc_entry=NULL, updated_at=datetime('now')
+     WHERE status='reconciled'
+       AND batch_number IS NOT NULL AND TRIM(batch_number) <> ''
+       AND NOT EXISTS (SELECT 1 FROM invoices_received iv
+                        WHERE INSTR(LOWER(COALESCE(iv.batch_number,'')), LOWER(TRIM(invoice_requests.batch_number))) > 0)`;
+  try {
+    if (pgPool) {
+      const r = await pgPool.query(pgSql);
+      if (r.rowCount) console.log(`[v47L] false-reconcile repair: reverted ${r.rowCount} request(s) with no covering invoice to pending_reconciliation`);
+    } else if (db) {
+      const info = db.prepare(liteSql).run();
+      if (info.changes) console.log(`[v47L] false-reconcile repair: reverted ${info.changes} request(s) to pending_reconciliation`);
+    }
+  } catch (e) { console.warn('[v47L] false-reconcile repair failed:', e?.message); }
+}
+
 app.listen(PORT, () => {
   console.log(`[Sunloc] Server running on port ${PORT}`);
   console.log(`[Sunloc] DB: ${DB_PATH}`);
@@ -15883,9 +19762,14 @@ app.listen(PORT, () => {
   // the big ensurePostgresTables() aborts partway through.
   ensureCriticalPostgresTables().then(() => ensurePostgresTables()).then(()=>{
     _consolidatePlanningStateRows().catch(e => console.warn('[v46D] consolidation boot invocation failed:', e?.message)); // v46D: collapse planning_state to single canonical row
+    _v47h_repairPrintedFlag().catch(e => console.warn('[v47H] printed-flag repair boot invocation failed:', e?.message)); // v47H: mark scanned-but-unflagged labels printed
+    _v47l_repairFalseReconcile().catch(e => console.warn('[v47L] false-reconcile repair boot invocation failed:', e?.message)); // v47L: un-stick SO-pass false reconciles
     warmPlanningCache();
     warmActualsCache();
     loadRetiredBatches(); // v41ZZ: populate retired-batch set for WIP exclusion
+    // v49W: pre-build the closed-batches report cache once the warms above have had a moment to
+    // land, so even the first click after a deploy/restart serves from memory.
+    setTimeout(() => { try { _refreshClosedBatchesCache().catch(()=>{}); } catch(_) {} }, 15000);
     // v45S: repair production_orders identity — collapse (batch_number, machine_id) duplicates and
     // close blob-closed orphan 'running' rows left behind by the historical id-keyed sync/close.
     // Idempotent and soft; runs once per boot after tables exist and the blob is reachable.

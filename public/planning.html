@@ -531,7 +531,7 @@ input[type="file"] { display:none; }
   <div id="sidebar">
     <div class="sidebar-logo">
       <h1>SUNLOC</h1>
-      <p>Planning Suite v3.0 · build v46D</p>
+      <p>Planning Suite v3.0 · build v49ZK</p>
     </div>
     <div class="sidebar-divider"></div>
     <div class="nav-section">Production</div>
@@ -815,10 +815,27 @@ const SYNC = (() => {
   async function push(stateObj) {
     if (!_url || !stateObj) return { ok: false };
     try {
+      // v49: tell the server WHICH orders this client actually changed, so it can merge instead of
+      // replacing the whole blob. Without this a planner who edited one date silently reverts every
+      // server-side write made since their page loaded — a re-customer, a W/O reconcile, anything.
+      // The list is the same divergence v48Z computes for edit protection: orders differing from the
+      // last synced snapshot, plus any order with no snapshot entry (locally new).
+      // If this cannot be computed the key is OMITTED, and the server falls back to replacing the
+      // blob exactly as it did before — the fallback is the old behaviour, so nothing can regress.
+      let _changed, _fields;
+      try {
+        if (typeof _v48zOrderSnap !== 'undefined' && _v48zOrderSnap.size) {
+          _fields  = _v49a_changedFields(stateObj.orders, _v48zOrderSnap);
+          _changed = Object.keys(_fields);
+        }
+      } catch (e) { _changed = undefined; _fields = undefined; }
+      const _payload = { state: stateObj };
+      if (Array.isArray(_changed)) _payload.changedOrderIds = _changed;
+      if (_fields && typeof _fields === 'object') _payload.changedOrderFields = _fields;   // v49A
       const r = await fetch(_url + '/api/planning/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ state: stateObj }),
+        body: JSON.stringify(_payload),
         signal: AbortSignal.timeout(30000)
       });
       if (r.ok) {
@@ -900,6 +917,19 @@ const SYNC = (() => {
             if (ts && (_now - ts) < _protectWindow) _protectedPrintOrders[p.id] = p;
           });
         }
+        // v48Z: add every order that DIFFERS from the last synced snapshot. This is what catches the
+        // edits no mutation site stamped — the PTD/UP toggle among them. Additive only: entries
+        // already protected above keep their existing object, so no prior rule changes behaviour.
+        // GUARD: with no baseline yet (first sync of the session) EVERY order would look diverged,
+        // and stale localStorage would permanently beat the server. Divergence protection therefore
+        // only engages once a snapshot exists — i.e. after the first successful load or save.
+        // Until then behaviour is exactly as before this build.
+        const _divOrders = _v48zOrderSnap.size ? _v48z_diverged(state.orders, _v48zOrderSnap) : {};
+        const _divPrint  = _v48zPrintSnap.size ? _v48z_diverged(state.printOrders, _v48zPrintSnap) : {};
+        let _divAdded = 0;
+        for (const id in _divOrders) { if (!_protectedOrders[id]) { _protectedOrders[id] = _divOrders[id]; _divAdded++; } }
+        for (const id in _divPrint)  { if (!_protectedPrintOrders[id]) { _protectedPrintOrders[id] = _divPrint[id]; _divAdded++; } }
+        if (_divAdded) console.log('[v48Z] protected', _divAdded, 'order(s) that diverged from the last synced snapshot');
         // Take server state
         // Save local dailyPrinting before overwrite — merge after
         const _localDailyPrinting = JSON.parse(JSON.stringify(state.dailyPrinting || []));
@@ -991,6 +1021,11 @@ const SYNC = (() => {
           state.printOrders = (state.printOrders||[]).map(p => _protectedPrintOrders[p.id] || p);
           console.log('[Sync] Protected', Object.keys(_protectedPrintOrders).length, 'locally changed print orders from server overwrite');
         }
+        // v48Z: re-baseline AFTER the merge — but NOT for the orders we just protected. Their edits
+        // are still unsaved, so they must keep their old baseline and stay protected on every
+        // subsequent sync until the save lands. Re-baselining them here is what would make a change
+        // hold once and then revert on the next tick.
+        _v48z_capture(new Set([...Object.keys(_protectedOrders), ...Object.keys(_protectedPrintOrders)]));
         // Restore locally changed machine masters
         if (_savedMachineMaster) { state.machineMaster = _savedMachineMaster; console.log('[Sync] Protected machineMaster from server overwrite'); }
         if (_savedPrintMachineMaster) { state.printMachineMaster = _savedPrintMachineMaster; console.log('[Sync] Protected printMachineMaster from server overwrite'); }
@@ -1322,7 +1357,7 @@ const SYNC = (() => {
   async function loadTrackingStatus() {
     if (!_url) return;
     // Run all fetches in PARALLEL
-    const [wipRes, agRes, daRes, dcRes, mcActRes, tlRes] = await Promise.allSettled([
+    const [wipRes, agRes, daRes, dcRes, mcActRes, tlRes, roRes] = await Promise.allSettled([
       fetch(_url + '/api/tracking/wip-summary?closuresOnly=1',      { signal: AbortSignal.timeout(5000) }),
       // v41ZG #3: window the A-Grade aggregation to the start of the PREVIOUS month and give it a
       // longer timeout. The unwindowed full-history aggregation was timing out at 5s on production,
@@ -1332,8 +1367,28 @@ const SYNC = (() => {
       fetch(_url + '/api/tracking/dispatch-actuals', { signal: AbortSignal.timeout(5000) }),
       fetch(_url + '/api/dpr/batch-closed',          { signal: AbortSignal.timeout(5000) }),
       fetch(_url + '/api/actuals/machine-summary',   { signal: AbortSignal.timeout(5000) }),
-      fetch(_url + '/api/dispatch/truck-locks',      { signal: AbortSignal.timeout(5000) })  // v44R lock-on-activation
+      fetch(_url + '/api/dispatch/truck-locks',      { signal: AbortSignal.timeout(5000) }),  // v44R lock-on-activation
+      fetch(_url + '/api/batch/reconcile-overrides', { signal: AbortSignal.timeout(5000) })   // v46P: admin reconcile map for the Short/Excess column
     ]);
+    // v46P (confirmed by Ishan): load admin reconcile overrides so the planner's Short/Excess column
+    // reflects the SAME figures as the Short & Excess report (reconciled batches show admin packing+wip,
+    // not raw). Tolerant of failure — keeps the prior map on a transient error rather than blanking it.
+    try {
+      if (roRes.status === 'fulfilled' && roRes.value.ok) {
+        const roj = await roRes.value.json();
+        if (roj && roj.ok) {
+          const _m = {};
+          (roj.overrides || []).forEach(o => {
+            if (!o.batch_number) return;
+            _m[String(o.batch_number).trim().toUpperCase()] = {
+              gross: parseFloat(o.gross) || 0, aGrade: parseFloat(o.a_grade) || 0,
+              packing: parseFloat(o.packing) || 0, wip: parseFloat(o.wip) || 0, wastage: parseFloat(o.wastage) || 0
+            };
+          });
+          window._planReconOv = _m;
+        }
+      }
+    } catch (e) { /* keep prior _planReconOv on transient failure */ }
     // v44R: load persisted truck locks (lock-on-activation). buildTruckPlans renders these from their
     // frozen manifest and lays remaining unlocked boxes around them. Tolerant of failure — falls back
     // to fully-ephemeral binning if the endpoint is unreachable.
@@ -1705,6 +1760,88 @@ let _retryTimer = null;
 let _lastServerSaveTime = 0;
 // Registry of locally changed order IDs — these are NEVER overwritten by server sync
 // Key: order id, Value: timestamp of local change
+// ─────────────────────────────────────────────────────────────────────────────
+// v48Z: DIVERGENCE-BASED EDIT PROTECTION.
+//
+// ROOT CAUSE THIS REPLACES: loadFromServer protects a local edit only if the mutating code
+// remembered to stamp _localOrderChanges[id]. The order-edit form — the one carrying PTD/UP,
+// customer, qty, zone and most other fields — NEVER stamps it. And state._savedAt only advances on
+// SAVE, so while an edit is unsaved `serverSavedAt >= localSavedAt` is true and the overwrite branch
+// runs. The edit is then replaced by the server's copy, which is the random revert planners see:
+// a successful save sets a 60s shield, so an edit survives if the save lands quickly and is lost if
+// the 30s idle auto-sync fires first. Same action, different outcome, purely on timing.
+//
+// Stamping is the flaw: it is opt-in, and one of the most-used paths opted out. Divergence is
+// DERIVED instead — we keep a snapshot of orders as last loaded-or-saved, and anything that differs
+// from it is by definition a local edit. No mutation site can forget, including ones written later.
+// This only ever WIDENS the protected set; every existing protection rule below is untouched.
+let _v48zOrderSnap = new Map();       // id -> JSON of the order as last synced
+let _v48zPrintSnap = new Map();
+// keepIds: ids whose PREVIOUS snapshot entry must be preserved rather than re-baselined.
+// This is load-bearing. After a server load we hold the local value for a protected order, but its
+// edit is still UNSAVED — so if we re-baselined it to that local value it would stop looking
+// diverged, lose protection on the very next 30s tick, and the server's stale value would win.
+// That is exactly the reported symptom: the change holds, then reverts a moment later. A protected
+// order therefore keeps its old baseline and stays protected until a successful SAVE re-baselines it.
+function _v48z_capture(keepIds) {
+  try {
+    const keep = keepIds instanceof Set ? keepIds : new Set(keepIds || []);
+    const nextO = new Map(), nextP = new Map();
+    (state.orders || []).forEach(o => {
+      if (!o || !o.id) return;
+      if (keep.has(o.id) && _v48zOrderSnap.has(o.id)) nextO.set(o.id, _v48zOrderSnap.get(o.id));
+      else nextO.set(o.id, JSON.stringify(o));
+    });
+    (state.printOrders || []).forEach(p => {
+      if (!p || !p.id) return;
+      if (keep.has(p.id) && _v48zPrintSnap.has(p.id)) nextP.set(p.id, _v48zPrintSnap.get(p.id));
+      else nextP.set(p.id, JSON.stringify(p));
+    });
+    _v48zOrderSnap = nextO;
+    _v48zPrintSnap = nextP;
+  } catch (e) { /* snapshot is an optimisation — never let it break a sync */ }
+}
+// v49A: per-order list of the FIELD NAMES that differ from the snapshot.
+// v49 sent only which ORDERS changed, and the server then replaced the whole order object with the
+// client's. That object still carried whatever the client last loaded — so a planner editing a DATE
+// on 26P045 also pushed back its stale `customer: ROHAN PHARMA` and `recustomeredAt: null`, silently
+// undoing a re-customer done server-side. Both fields vanished together, which is exactly what the
+// live data showed. Reporting the changed FIELDS lets the server keep its own value for everything
+// the planner did not actually touch.
+function _v49a_changedFields(list, snap) {
+  const out = {};
+  try {
+    (list || []).forEach(o => {
+      if (!o || !o.id) return;
+      const was = snap.get(o.id);
+      if (was === undefined) { out[o.id] = '*'; return; }        // locally new → whole object is the client's
+      let base;
+      try { base = JSON.parse(was); } catch (e) { out[o.id] = '*'; return; }
+      const fields = [];
+      const keys = new Set([...Object.keys(base || {}), ...Object.keys(o)]);
+      for (const k of keys) {
+        if (JSON.stringify(base[k]) !== JSON.stringify(o[k])) fields.push(k);
+      }
+      if (fields.length) out[o.id] = fields;
+    });
+  } catch (e) { return {}; }
+  return out;
+}
+
+// Orders present locally that differ from the last synced snapshot. An order with no snapshot entry
+// is NEW locally and must also be protected, or a server load would delete it before it saves.
+function _v48z_diverged(list, snap) {
+  const out = {};
+  try {
+    (list || []).forEach(o => {
+      if (!o || !o.id) return;
+      const was = snap.get(o.id);
+      if (was === undefined || was !== JSON.stringify(o)) out[o.id] = o;
+    });
+  } catch (e) { /* fall through to the stamp-based protection alone */ }
+  return out;
+}
+
 let _localOrderChanges = {};
 // Registry of locally changed print order IDs
 let _localPrintOrderChanges = {};
@@ -1805,6 +1942,7 @@ async function saveState() {
       try { localStorage.setItem('sunloc_state', JSON.stringify(toSave)); } catch(e) {}
       _pendingSave = null;
       _lastServerSaveTime = Date.now();
+      _v48z_capture();   // v48Z: local state is now identical to the server — new divergence baseline
     } else {
       try { localStorage.setItem('sunloc_state', JSON.stringify(toSave)); } catch(e) {}
       _scheduleRetry(toSave);
@@ -1888,10 +2026,23 @@ function _populateMachineAGrade() {
     const la = window._liveAGrade?.[key] || window._liveAGrade?.[o.batchNumber];
     if (!la) return;
     const mcId = o.machineId;
-    if (!acc[mcId]) acc[mcId] = { aimOut:0, aimInsp:0, printOut:0, printInsp:0, piOut:0, piInsp:0 };
+    if (!acc[mcId]) acc[mcId] = { aimOut:0, aimInsp:0, aimAGFrozen:0, aimInspFrozen:0, printOut:0, printInsp:0, piOut:0, piInsp:0 };
     if ((la.aim?.inspected || 0) > 0) {
       acc[mcId].aimOut  += la.aim.outQty || 0;
       acc[mcId].aimInsp += la.aim.inspected;
+      // v46Q (confirmed by Ishan): a DISPLAY-ONLY per-machine AIM% that equals Report E's, using the
+      // FROZEN formula — AIM A-Grade = ScanIn − Remelt, AIM% = (ScanIn − Rem) / (ScanIn + Salvage).
+      // The server now sends salvage/remelt split (v46Q). Kept separate from aimOut/aimInsp above,
+      // which stay Scan-OUT-based and continue to feed the scheduling factor unchanged. Falls back to
+      // the Scan-OUT figures when an older payload lacks the split (pre-v46Q server).
+      if (la.aim.salvage != null || la.aim.remelt != null) {
+        const _sin = la.aim.inQty || 0, _sal = la.aim.salvage || 0, _rem = la.aim.remelt || 0;
+        acc[mcId].aimAGFrozen   += Math.max(0, _sin - _rem);
+        acc[mcId].aimInspFrozen += (_sin + _sal);
+      } else {
+        acc[mcId].aimAGFrozen   += la.aim.outQty || 0;
+        acc[mcId].aimInspFrozen += la.aim.inspected;
+      }
     }
     if ((la.printing?.inspected || 0) > 0) {
       acc[mcId].printOut  += la.printing.outQty || 0;
@@ -1904,7 +2055,8 @@ function _populateMachineAGrade() {
   });
   Object.entries(acc).forEach(([mcId, a]) => {
     window._machineAGrade[mcId] = {
-      aimPct:   a.aimInsp   > 0 ? (a.aimOut   / a.aimInsp   * 100) : null,
+      aimPct:   a.aimInsp   > 0 ? (a.aimOut   / a.aimInsp   * 100) : null,        // Scan-OUT based — scheduling factor (unchanged)
+      aimPctDisplay: a.aimInspFrozen > 0 ? (a.aimAGFrozen / a.aimInspFrozen * 100) : null, // v46Q: frozen AIM% — matches Report E (header display)
       printPct: a.printInsp > 0 ? (a.printOut / a.printInsp * 100) : null,
       piPct:    a.piInsp    > 0 ? (a.piOut    / a.piInsp    * 100) : null,
     };
@@ -2108,6 +2260,13 @@ async function saveState() {
             deletedCount++;
           } else if (c.dbStatus && c.dbStatus !== o.status) {
             patched = { ...patched, status: c.dbStatus };
+            // v49P: a REFUSED close's lingering stamps made every autosave replay it (the 26G018 loop).
+            // v49R (confirmed by Ishan): clear the stamps ONLY for a DPR-gate refusal — clearing them on
+            // every plain status correction destroyed historical closedDates and un-closed months of
+            // history (the month-scoping flood).
+            if (c.dprGateRefused && c.dbStatus !== 'closed' && (patched.closedDate || patched.manualEndDate)) {
+              patched = { ...patched, closedDate: null, manualEndDate: false };
+            }
             correctedCount++;
           }
           return patched;
@@ -2120,6 +2279,20 @@ async function saveState() {
         // and they must never be changed automatically by any process.
         preserved.forEach(p => {
           if (p.id) {
+            // v49N: a limit-refused promotion is a FINAL server decision — drop the local protection
+            // stamp so this client doesn't keep re-pushing the refused running status (toast loop).
+            if (p.limitRefused) {
+              delete _localOrderChanges[p.id];
+              console.log('[v49N] Cleared local protection for ' + (p.batchNumber||p.id) + ' — promotion refused (2 running slots occupied)');
+              return;
+            }
+            // v49P: a DPR-gate-refused close is also a FINAL server decision — re-protecting the refused
+            // value made this client replay it forever (26G018 every 30s in the live log). Drop protection.
+            if (p.dprGateRefused) {
+              delete _localOrderChanges[p.id];
+              console.log('[v49P] Cleared local protection for ' + (p.batchNumber||p.id) + ' — close refused by DPR gate');
+              return;
+            }
             const isRunningOrClosed = p.clientStatus === 'running' || p.clientStatus === 'closed';
             const isServerDowngradeToPending = p.dbStatus === 'pending' && p.clientStatus === 'running';
             if (isServerDowngradeToPending && !isRunningOrClosed) {
@@ -2137,10 +2310,33 @@ async function saveState() {
           // Force a re-render so the user sees the correction immediately
           try { if (typeof render === 'function') render(); } catch(e) {}
         }
+        // v49G: if any correction was a DPR-gate refusal (a close on a batch with production that isn't
+        // DPR-closed yet), tell the planner plainly instead of the batch just quietly staying open.
+        try {
+          const _gated = preserved.filter(p => p && p.dprGateRefused);
+          if (_gated.length > 0) {
+            const _names = _gated.map(p => p.batchNumber || p.id).join(', ');
+            const _plural = _gated.length > 1;
+            const _msg = `${_names}: Close in DPR first — ${_plural?'these batches have':'this batch has'} production recorded, so ${_plural?'they':'it'} must be closed in DPR before being closed in Planning.`;
+            if (typeof toast === 'function') toast(_msg, '#c77700', 7000);
+            else alert('⚠️ ' + _msg);
+          }
+          // v49N: surface limit-refused promotions by name, with the occupying batches
+          const _limited = preserved.filter(p => p && p.limitRefused);
+          if (_limited.length > 0) {
+            const _msgs = _limited.slice(0, 3).map(p => {
+              const _occ = (Array.isArray(p.occupying) && p.occupying.length) ? p.occupying.join(', ') : 'two batches';
+              return `${p.batchNumber||p.id}: MC ${p.machineId||''} already has 2 in production (${_occ}) — close one first.`;
+            }).join('\n');
+            if (typeof toast === 'function') toast(_msgs, '#c77700', 8000);
+            else alert('⚠️ ' + _msgs);
+          }
+        } catch(e) {}
       }
       try { localStorage.setItem('sunloc_state', JSON.stringify(toSave)); } catch(e) {}
       _pendingSave = null;
       _lastServerSaveTime = Date.now();
+      _v48z_capture();   // v48Z: local state is now identical to the server — new divergence baseline
       // Save to DEDICATED tables — permanent cross-device sync, never lost in JSON blob
       const _url = SYNC._url || localStorage.getItem('sunloc_server_url');
       if (_url) {
@@ -2332,6 +2528,17 @@ function calcEndDate(startDate, daysNeeded) {
   end.setDate(end.getDate() + Math.ceil(daysNeeded));
   return end;
 }
+// v47X (Ishan #4): floor a (possibly fractional, time-carrying) cursor Date to LOCAL midnight — the same
+// representation every stored order date already uses. The production cascade keeps a FRACTIONAL cursor
+// internally so a sub-day order (e.g. ZG147: 15.88L ÷ 25.8 L/day = 0.62 day) finishes the same calendar
+// day and the next order starts that day (ZG148 then ends the following morning), instead of the old
+// ceil() that made every order consume a whole day. Only the internal cursor carries time-of-day; nothing
+// with a time component is ever stored, so date serialisation (toISOString date-slice) is unchanged.
+function _v47xFloorDay(d) {
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt)) return dt;
+  return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate());
+}
 
 // Get machine orders sorted by start date
 // Auto batch number generation: YY + MachineAlpha + SerialNo
@@ -2395,6 +2602,10 @@ function recalcMachineScheduleQuiet(machineId) {
   if (!mc) return;
   const orders = getMachineOrders(machineId);
   let cursor = null;
+  // v46Q (confirmed by Ishan): track the previous order + whether its end was a PROJECTION so that when
+  // a later order's real DPR start falls before that projected end, the previous order is "stopped as on"
+  // the new order's start (it clearly ended when the next one began in DPR). See the v45W block below.
+  let prevOrder = null, prevEndProjected = false;
   for (const ord of orders) {
     if (ord.status === 'closed') {
       // Still calculate grossQty/aimOut for closed orders so they show in the table
@@ -2417,6 +2628,7 @@ function recalcMachineScheduleQuiet(machineId) {
         const closedEnd = new Date(ord.endDate);
         if (!cursor || closedEnd > cursor) cursor = closedEnd;
       }
+      prevOrder = ord; prevEndProjected = false; // v46Q: closed = real end, never pulled back
       continue;
     }
     // v41ZC #4: UNIFORM cascade. Every non-closed order re-anchors to the running cursor so an
@@ -2434,68 +2646,69 @@ function recalcMachineScheduleQuiet(machineId) {
     const hasProduction = (ord.actualProd || ord.actualQty || 0) > 0;
     // v41ZO #1: FULL run duration from TOTAL gross & effective daily rate (not remaining-work days,
     // which collapsed a fully-produced order's span to a single day). A 2-day order always shows 2 days.
-    const fullDays = (sc.effectiveCap && sc.effectiveCap > 0) ? Math.max(1, Math.ceil(sc.grossQty / sc.effectiveCap)) : 1;
+    // v47X (Ishan #4): FRACTIONAL run duration (gross ÷ effective daily rate) — no ceil, no 1-day floor.
+    // A sub-day order (ZG147: 15.88L ÷ 25.8 L/day = 0.62 day) now finishes its start day and the next order
+    // starts that same day; ZG148 then ends the following morning. Was Math.max(1, Math.ceil(...)), which
+    // forced every order to a whole day and jumped the cursor a full day. `cursor` carries the sub-day
+    // remainder internally; stored dates stay floored to local midnight (_v47xFloorDay) — no time is ever
+    // persisted, so date serialisation is unchanged.
+    const fracDays = (sc.effectiveCap && sc.effectiveCap > 0) ? Math.max(0, sc.grossQty / sc.effectiveCap) : 1;
 
-    // Determine start date.
-    // v41ZD #2: an order on a single machine can never start before the previous order finishes.
-    // Previously an order with ANY actual production was pinned to its own historical start and
-    // never moved, so an upstream overrun left downstream in-production orders overlapping (their
-    // end dates updated but start dates didn't cascade). Now: a not-yet-started order anchors to the
-    // cursor; an in-production order keeps its historical start ONLY if that start is already at/after
-    // the cursor — otherwise it is pushed forward to the cursor so it can't overlap its predecessor.
+    // Determine start date (v41ZD #2 / v41ZM #5 anchoring unchanged). Compute the FRACTIONAL start
+    // _startFrac, store its floored calendar date.
+    let _startFrac;
     if (hasProduction && ord.startDate && !isNaN(new Date(ord.startDate))) {
       const histStart = new Date(ord.startDate);
-      ord.startDate = cursor ? new Date(cursor) : histStart; // v41ZM #5: anchor to predecessor end — no gaps/overlaps
+      _startFrac = cursor ? new Date(cursor) : histStart; // v41ZM #5: anchor to predecessor end — no gaps/overlaps
     } else if (cursor) {
-      // Downstream of an earlier order — start right after it (this is the cascade).
       // v45X: floor at today — dprLastDate-anchored ends can sit in the past; an UNSTARTED
       // order can't be planned into the past (started orders keep real starts elsewhere).
-      ord.startDate = new Date(Math.max(new Date(cursor).getTime(), todayD.getTime()));
+      _startFrac = new Date(Math.max(new Date(cursor).getTime(), todayD.getTime()));
     } else {
       // First order on the machine, not yet started. Use its saved start, but never schedule
       // into the past with no production behind it.
       const savedStart = ord.startDate ? new Date(ord.startDate) : null;
-      ord.startDate = (savedStart && savedStart >= todayD) ? savedStart : todayD;
+      _startFrac = (savedStart && savedStart >= todayD) ? savedStart : todayD;
     }
+    ord.startDate = _v47xFloorDay(_startFrac);
 
     // v45W (confirmed by Ishan): a STARTED order's start date anchors to its FIRST actual DPR
     // production date — planning shows when production really began, not where the plan cursor
     // happened to sit (26ZG131: DPR 29-Jun vs the cascade's 03-Jul). Manual dates stay untouched.
     if (hasProduction && ord.dprFirstDate && !ord.manualStartDate) {
       const _fd45w = new Date(String(ord.dprFirstDate).slice(0,10) + 'T00:00:00');
-      if (!isNaN(_fd45w)) ord.startDate = _fd45w;
+      if (!isNaN(_fd45w)) {
+        ord.startDate = _v47xFloorDay(_fd45w); _startFrac = _fd45w; // anchor resets fractional start to a midnight boundary
+        // v46Q (confirmed by Ishan): a later order starting (in DPR) before the previous order's
+        // PROJECTED end means the previous order actually finished when this one began. Keep THIS
+        // order's real start and pull the previous order's end back to it ("previous stops as on date").
+        // Only for a projected previous end — a DPR-complete (real) end is left untouched.
+        if (prevOrder && prevEndProjected && cursor && _fd45w < cursor) {
+          prevOrder.endDate = _v47xFloorDay(_fd45w);
+          cursor = new Date(_fd45w);
+        }
+      }
     }
-    // Determine end date (v45T #1.1.1, rule confirmed by Ishan — DPR actuals drive the end date):
-    //   • actual ≥ planned gross → order is effectively complete: the end date pulls back to the
-    //     last production day planning can observe (today at the latest) instead of coasting to
-    //     start + full span — the defect where DPR-complete orders still showed 4th/5th/6th July.
-    //     (Planning holds cumulative DPR actuals, not per-day entries, so "last DPR production
-    //     date" resolves to today at the moment completion is observed — never a future date.)
-    //   • partially produced → end = today + remaining work at the ACTUAL daily rate
-    //     (sc.daysNeeded = remainingGross / effectiveCap; DPR rate with machine-cap fallback).
-    //   • no production yet → unchanged v41ZO behaviour: start + full run duration.
+    // Determine end date (v45T #1.1.1 / v45X, rule confirmed by Ishan — DPR actuals drive the end date):
+    //   • actual ≥ planned gross → end anchors to last DPR production date (today at latest).
+    //   • otherwise → end = fractional start + fractional run duration (v47X).
     const _acts45t = (ord.actualProd || ord.actualQty || 0);
-    // v45X (confirmed by Ishan): a DPR-complete order's end anchors to its LAST actual DPR
-    // production date — reality-driven, mirroring the v45W start anchor. today() survives only
-    // when the server hasn't exposed dprLastDate (cold cache / no DPR rows). The below-today
-    // clamp is skipped for the anchored end: pulling a finished order's end into the past is the
-    // point — downstream orders recalibrate off the real end via the cursor. The +ceil end-date
-    // convention for projections is unchanged (durations are hours-scoped, per Ishan 4-Jul).
     let _endAnchored45x = false;
+    let _endFrac;
     if (hasProduction && sc.grossQty > 0 && _acts45t >= sc.grossQty - 1e-9) {
       const _ld45x = ord.dprLastDate ? new Date(String(ord.dprLastDate).slice(0,10) + 'T00:00:00') : null;
-      if (_ld45x && !isNaN(_ld45x)) { ord.endDate = _ld45x; _endAnchored45x = true; }
-      else ord.endDate = new Date(todayD);
-    } else if (hasProduction && sc.daysNeeded != null && isFinite(sc.daysNeeded)) {
-      ord.endDate = calcEndDate(todayD, Math.max(1, Math.ceil(sc.daysNeeded)));
+      if (_ld45x && !isNaN(_ld45x)) { ord.endDate = _v47xFloorDay(_ld45x); _endFrac = _ld45x; _endAnchored45x = true; }
+      else { ord.endDate = _v47xFloorDay(todayD); _endFrac = new Date(todayD); }
     } else {
-      ord.endDate = calcEndDate(ord.startDate, fullDays);
+      _endFrac = new Date(_startFrac.getTime() + fracDays * 86400000);
+      ord.endDate = _v47xFloorDay(_endFrac);
     }
-    if (!_endAnchored45x && ord.endDate && new Date(ord.endDate) < todayD) ord.endDate = new Date(todayD);
-    if (_endAnchored45x && ord.startDate && new Date(ord.endDate) < new Date(ord.startDate)) ord.endDate = new Date(ord.startDate);
-    if (ord.endDate && !isNaN(new Date(ord.endDate))) {
-      cursor = new Date(ord.endDate);
+    if (!_endAnchored45x && ord.endDate && new Date(ord.endDate) < todayD) { ord.endDate = _v47xFloorDay(todayD); _endFrac = new Date(todayD); }
+    if (_endAnchored45x && ord.startDate && new Date(ord.endDate) < new Date(ord.startDate)) { ord.endDate = new Date(ord.startDate); _endFrac = new Date(_startFrac); }
+    if (_endFrac && !isNaN(new Date(_endFrac))) {
+      cursor = _endFrac; // v47X: fractional cursor — carries the sub-day remainder to the next order
     }
+    prevOrder = ord; prevEndProjected = !_endAnchored45x; // v46Q: remember whether this end is a projection
     continue;
   }
   // Cascade to print schedule — production end dates drive print start dates
@@ -2507,6 +2720,9 @@ function recalcMachineSchedule(machineId) {
   if (!mc) return;
   const orders = getMachineOrders(machineId);
   let cursor = null;
+  // v46Q (confirmed by Ishan): see recalcMachineScheduleQuiet — stop a previous order "as on" a later
+  // order's real DPR start when that start precedes the previous order's PROJECTED end.
+  let prevOrder = null, prevEndProjected = false;
   for (const ord of orders) {
     if (ord.status === 'closed') {
       // Still calculate grossQty/aimOut for closed orders so they show in the table
@@ -2529,6 +2745,7 @@ function recalcMachineSchedule(machineId) {
         const closedEnd = new Date(ord.endDate);
         if (!cursor || closedEnd > cursor) cursor = closedEnd;
       }
+      prevOrder = ord; prevEndProjected = false; // v46Q: closed = real end, never pulled back
       continue;
     }
     // v41ZC #4: UNIFORM cascade (same logic as recalcMachineScheduleQuiet). Re-anchor every
@@ -2544,59 +2761,62 @@ function recalcMachineSchedule(machineId) {
     const hasProduction = (ord.actualProd || ord.actualQty || 0) > 0;
     // v41ZO #1: FULL run duration from TOTAL gross & effective daily rate (not remaining-work days,
     // which collapsed a fully-produced order's span to a single day). A 2-day order always shows 2 days.
-    const fullDays = (sc.effectiveCap && sc.effectiveCap > 0) ? Math.max(1, Math.ceil(sc.grossQty / sc.effectiveCap)) : 1;
+    // v47X (Ishan #4): FRACTIONAL run duration — no ceil, no 1-day floor — so a sub-day order finishes its
+    // start day and the next order starts that day (see recalcMachineScheduleQuiet note). `cursor` carries
+    // the sub-day remainder internally; stored dates stay floored to local midnight (_v47xFloorDay).
+    const fracDays = (sc.effectiveCap && sc.effectiveCap > 0) ? Math.max(0, sc.grossQty / sc.effectiveCap) : 1;
 
     // v41ZD #2: in-production order keeps its historical start only if it's already >= cursor;
     // otherwise it is pushed forward so it can't overlap the previous order on the same machine.
+    let _startFrac;
     if (hasProduction && ord.startDate && !isNaN(new Date(ord.startDate))) {
       const histStart = new Date(ord.startDate);
-      ord.startDate = cursor ? new Date(cursor) : histStart; // v41ZM #5: anchor to predecessor end — no gaps/overlaps
+      _startFrac = cursor ? new Date(cursor) : histStart; // v41ZM #5: anchor to predecessor end — no gaps/overlaps
     } else if (cursor) {
       // v45X: today-floor — see recalcMachineScheduleQuiet note (past cursors from anchored ends).
-      ord.startDate = new Date(Math.max(new Date(cursor).getTime(), todayD.getTime()));
+      _startFrac = new Date(Math.max(new Date(cursor).getTime(), todayD.getTime()));
     } else {
       const savedStart = ord.startDate ? new Date(ord.startDate) : null;
-      ord.startDate = (savedStart && savedStart >= todayD) ? savedStart : todayD;
+      _startFrac = (savedStart && savedStart >= todayD) ? savedStart : todayD;
     }
+    ord.startDate = _v47xFloorDay(_startFrac);
 
     // v45W (confirmed by Ishan): a STARTED order's start date anchors to its FIRST actual DPR
     // production date — planning shows when production really began, not where the plan cursor
     // happened to sit (26ZG131: DPR 29-Jun vs the cascade's 03-Jul). Manual dates stay untouched.
     if (hasProduction && ord.dprFirstDate && !ord.manualStartDate) {
       const _fd45w = new Date(String(ord.dprFirstDate).slice(0,10) + 'T00:00:00');
-      if (!isNaN(_fd45w)) ord.startDate = _fd45w;
+      if (!isNaN(_fd45w)) {
+        ord.startDate = _v47xFloorDay(_fd45w); _startFrac = _fd45w;
+        // v46Q (confirmed by Ishan): a later order starting (in DPR) before the previous order's
+        // PROJECTED end means the previous order actually finished when this one began. Keep THIS
+        // order's real start and pull the previous order's end back to it ("previous stops as on date").
+        // Only for a projected previous end — a DPR-complete (real) end is left untouched.
+        if (prevOrder && prevEndProjected && cursor && _fd45w < cursor) {
+          prevOrder.endDate = _v47xFloorDay(_fd45w);
+          cursor = new Date(_fd45w);
+        }
+      }
     }
-    // Determine end date (v45T #1.1.1, rule confirmed by Ishan — DPR actuals drive the end date):
-    //   • actual ≥ planned gross → order is effectively complete: the end date pulls back to the
-    //     last production day planning can observe (today at the latest) instead of coasting to
-    //     start + full span — the defect where DPR-complete orders still showed 4th/5th/6th July.
-    //     (Planning holds cumulative DPR actuals, not per-day entries, so "last DPR production
-    //     date" resolves to today at the moment completion is observed — never a future date.)
-    //   • partially produced → end = today + remaining work at the ACTUAL daily rate
-    //     (sc.daysNeeded = remainingGross / effectiveCap; DPR rate with machine-cap fallback).
-    //   • no production yet → unchanged v41ZO behaviour: start + full run duration.
+    // Determine end date (v45T #1.1.1 / v45X — DPR actuals drive the end date; projections use the
+    // fractional start + fractional run duration, v47X).
     const _acts45t = (ord.actualProd || ord.actualQty || 0);
-    // v45X (confirmed by Ishan): a DPR-complete order's end anchors to its LAST actual DPR
-    // production date — reality-driven, mirroring the v45W start anchor. today() survives only
-    // when the server hasn't exposed dprLastDate (cold cache / no DPR rows). The below-today
-    // clamp is skipped for the anchored end: pulling a finished order's end into the past is the
-    // point — downstream orders recalibrate off the real end via the cursor. The +ceil end-date
-    // convention for projections is unchanged (durations are hours-scoped, per Ishan 4-Jul).
     let _endAnchored45x = false;
+    let _endFrac;
     if (hasProduction && sc.grossQty > 0 && _acts45t >= sc.grossQty - 1e-9) {
       const _ld45x = ord.dprLastDate ? new Date(String(ord.dprLastDate).slice(0,10) + 'T00:00:00') : null;
-      if (_ld45x && !isNaN(_ld45x)) { ord.endDate = _ld45x; _endAnchored45x = true; }
-      else ord.endDate = new Date(todayD);
-    } else if (hasProduction && sc.daysNeeded != null && isFinite(sc.daysNeeded)) {
-      ord.endDate = calcEndDate(todayD, Math.max(1, Math.ceil(sc.daysNeeded)));
+      if (_ld45x && !isNaN(_ld45x)) { ord.endDate = _v47xFloorDay(_ld45x); _endFrac = _ld45x; _endAnchored45x = true; }
+      else { ord.endDate = _v47xFloorDay(todayD); _endFrac = new Date(todayD); }
     } else {
-      ord.endDate = calcEndDate(ord.startDate, fullDays);
+      _endFrac = new Date(_startFrac.getTime() + fracDays * 86400000);
+      ord.endDate = _v47xFloorDay(_endFrac);
     }
-    if (!_endAnchored45x && ord.endDate && new Date(ord.endDate) < todayD) ord.endDate = new Date(todayD);
-    if (_endAnchored45x && ord.startDate && new Date(ord.endDate) < new Date(ord.startDate)) ord.endDate = new Date(ord.startDate);
-    if (ord.endDate && !isNaN(new Date(ord.endDate))) {
-      cursor = new Date(ord.endDate);
+    if (!_endAnchored45x && ord.endDate && new Date(ord.endDate) < todayD) { ord.endDate = _v47xFloorDay(todayD); _endFrac = new Date(todayD); }
+    if (_endAnchored45x && ord.startDate && new Date(ord.endDate) < new Date(ord.startDate)) { ord.endDate = new Date(ord.startDate); _endFrac = new Date(_startFrac); }
+    if (_endFrac && !isNaN(new Date(_endFrac))) {
+      cursor = _endFrac; // v47X: fractional cursor — carries the sub-day remainder to the next order
     }
+    prevOrder = ord; prevEndProjected = !_endAnchored45x; // v46Q: remember whether this end is a projection
     continue;
   }
   // Sync batchNumber changes to linked printOrders and dispatchPlans
@@ -3379,7 +3599,9 @@ function renderProduction() {
     // Live A-Grade for header display — uses precomputed window._machineAGrade (populated centrally
     // by _populateMachineAGrade so scheduling and display agree on the same numbers).
     const mcCumAG = window._machineAGrade?.[mc.id] || {};
-    const liveAGPct = mcCumAG.aimPct;
+    // v46Q: header shows the frozen AIM% (= Report E) — falls back to the scheduling figure if a
+    // pre-v46Q payload didn't carry the salvage/remelt split.
+    const liveAGPct = (mcCumAG.aimPctDisplay != null) ? mcCumAG.aimPctDisplay : mcCumAG.aimPct;
 
     // Avg Actual = from DPR production_actuals via server:
     // total Lakhs produced on this machine / distinct calendar days with production
@@ -3437,7 +3659,7 @@ function renderProduction() {
                   <th>Size</th>
                   <th>PC Code</th><th>Colour</th>
                   <th>PTD/UP</th><th>Print Matter Cap</th><th>Print Matter Body</th><th>Ink Cap</th><th>Ink Body</th><th>Order Qty (L)</th><th>Gross Qty (L)</th><th>Start</th><th>End</th>
-                  <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>AIM Out ↗</th><th title="Dispatched — per-batch dispatched-actuals total from Tracking (regularised + scan-out)">Dispatched (L) ↗</th><th>Status</th><th>DPR Status</th><th>Remarks</th><th>Actions</th>
+                  <th>Packing</th><th>Zone</th><th>Actual Prod</th><th>AIM Out ↗</th><th title="Short / Excess — Packable (Packed + A-Grade WIP) vs planned order; reconcile-aware, matches the Short & Excess report">Short/Excess ↗</th><th title="Dispatched — per-batch dispatched-actuals total from Tracking (regularised + scan-out)">Dispatched (L) ↗</th><th>Status</th><th>DPR Status</th><th>Remarks</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -3535,9 +3757,15 @@ async function _reconcileCustomerMismatch(idx) {
   if (!ord) { alert('Order no longer in state. Refresh and try again.'); return; }
   if (!confirm(`Update batch ${m.batchNumber}:\n\nFrom: ${ord.customer || ord.shipTo}\nTo:   ${m.labelCustomer}\n\nThis will update the Production Planning record to match the labels.\nProceed?`)) return;
   ord.customer = m.labelCustomer;
-  ord.shipTo   = m.labelCustomer;
-  // billTo stays as-is unless user manually re-edits
+  // v49E (confirmed by Ishan): CLEAR both rather than copying the label customer into shipTo and
+  // leaving billTo alone. Copying re-created the same residue this banner exists to remove — a stale
+  // billTo from the previous customer survived every reconcile, and shipTo held a guessed value the
+  // planner never entered. Blank makes both fall back to `customer`, which this line has just set
+  // correctly, and leaves the planner an empty field to fill per normal practice.
+  ord.shipTo   = '';
+  ord.billTo   = '';
   _localOrderChanges[ord.id] = Date.now();
+  ord._localEditedAt = Date.now(); // v47 Point 1: fresh stamp so this customer change wins the server staleness guard
   saveState();
   try {
     await upsertOrderToDB(ord);
@@ -3594,6 +3822,22 @@ function renderOrderRow(ord, idx, mc) {
     ? `<div style="font-size:10px;color:var(--accent4);margin-top:2px">⚠️ +${fmt(extraNeeded,2)}L extra needed (actual AIM: ${fmt(liveAimPct,1)}%)</div>` : '';
   // For unprinted: show AIM scan out vs planned
   const liveAimOut = liveAG.aim?.outQty || 0;
+  // v46P (confirmed by Ishan): real-time Short/Excess vs planned order, shown next to AIM Scan Out so the
+  // planner sees deviation live. Packable = Packed + A-Grade WIP — identical to Report C (interpretation A).
+  // Admin reconcile override wins (packing/wip from the override) so the planner and Report C never show
+  // two different values for the same batch. Dynamic: recomputed every sync as WIP is processed/packed.
+  // Colours per spec: Short = red, Excess = purple, Matched = green.
+  const _seOv = (window._planReconOv && ord.batchNumber) ? window._planReconOv[ord.batchNumber.trim().toUpperCase()] : null;
+  const _sePacked = _seOv ? _seOv.packing : (liveAG.packing?.inQty || 0);
+  const _seWip    = _seOv ? _seOv.wip     : (liveAG.wipLakhs || 0);
+  const _sePackable = _sePacked + _seWip;
+  const _sePlanned = ord.qty || 0;
+  const _seDev = _sePackable - _sePlanned;
+  const _seTip = `Packable ${fmt(_sePackable)}L (Packed ${fmt(_sePacked)} + A-Grade WIP ${fmt(_seWip)}) vs planned ${fmt(_sePlanned)}L${_seOv?' · reconciled':''}`;
+  const _seCell = !(_sePackable > 0.005 || _sePlanned > 0.005) ? '<span style="color:var(--text3)">—</span>'
+    : _seDev < -0.005 ? `<span style="color:#dc2626;font-weight:700" title="${_seTip}">▼ Short ${fmt(Math.abs(_seDev))}L</span>`
+    : _seDev >  0.005 ? `<span style="color:#7c3aed;font-weight:700" title="${_seTip}">▲ Excess ${fmt(_seDev)}L</span>`
+    : `<span style="color:#16a34a;font-weight:700" title="${_seTip}">✓ Matched</span>`;
   // v44ZJ Issue 3: per-batch dispatched-actuals total (L) for the Dispatched column.
   const liveDispatched = (state._dispatchActualsQty && state._dispatchActualsQty[ord.batchNumber]) || 0;
   const aimProgress = (!ord.isPrinted && liveAimOut > 0 && ord.grossQty)
@@ -3634,7 +3878,7 @@ function renderOrderRow(ord, idx, mc) {
       ${ord.poType==='verbal'?'<span class="tag" style="background:rgba(240,165,0,0.1);color:var(--accent);font-size:10px">VERBAL</span> ':''}${ord.poNumber||'-'}
       ${ord.batchNumber?`<br><span class="text-dim text-sm" style="cursor:pointer;text-decoration:underline dotted" title="Open batch tracking" onclick="event.stopPropagation();openBatchTracking('${(ord.batchNumber||'').replace(/'/g,'')}')">${ord.batchNumber}</span>`:''}
     </td>
-    <td style="position:sticky;left:128px;z-index:2;background:var(--surface2,#0f2a20);font-weight:500;box-shadow:2px 0 4px rgba(0,0,0,0.1)">${isWO
+    <td style="position:sticky;left:128px;z-index:2;background:var(--surface2,#0f2a20);font-weight:500;box-shadow:2px 0 4px rgba(0,0,0,0.1)">${(isWO && !String(ord.shipTo||ord.customer||'').trim())
       ? '<span style="color:var(--accent3);font-style:italic;font-size:12px">W/O — pending</span>'
       : (ord.shipTo||ord.customer||'-') + (ord.billTo && ord.billTo !== (ord.shipTo||ord.customer)
           ? '<br><span style="font-size:11px;color:var(--text3);font-weight:400">Bill To: ' + ord.billTo + '</span>'
@@ -3661,6 +3905,9 @@ function renderOrderRow(ord, idx, mc) {
     </td>
     <td class="text-mono" style="color:var(--accent2);white-space:nowrap" title="AIM Scan Out — live from Tracking">
       ${liveAimOut>0?`<strong>${fmt(liveAimOut)}L</strong>`:'<span style="color:var(--text3)">—</span>'}
+    </td>
+    <td class="text-mono" style="white-space:nowrap" title="Short / Excess — Packable (Packed + A-Grade WIP) vs planned order. Dynamic; reflects admin reconcile override so it matches the Short & Excess report.">
+      ${_seCell}
     </td>
     <td class="text-mono" style="color:var(--accent3);white-space:nowrap" title="Dispatched — per-batch dispatched-actuals total from Tracking (regularised + scan-out)">
       ${liveDispatched>0?`<strong>${fmt(liveDispatched)}L</strong>`:'<span style="color:var(--text3)">—</span>'}
@@ -3819,6 +4066,13 @@ function changeOrderStatus(ordId, machineId, newStatus) {
     if (isExportZone(ord.zone)) checkAndConsolidateExportContainer(ord);
   } else {
     ord.closedDate = null;
+  }
+  // v49G option A cascade: reopening a CLOSED batch in Planning must also reopen it in DPR (Route 1 —
+  // through the guarded endpoint, so the once-only + 2-day window are honoured in one place). If the
+  // endpoint refuses (already reopened, or window expired), revert locally and tell the planner why.
+  if (_prevStatus === 'closed' && newStatus === 'running') {
+    _v49gReopenViaDpr(ord, _prevStatus, machineId);
+    return;  // _v49gReopenViaDpr finishes the save/render on success, or reverts on refusal
   }
   // v37E PL1: protect this local change from being overwritten by next server sync
   _localOrderChanges[ordId] = Date.now();
@@ -4472,7 +4726,7 @@ function saveOrderModal(existingId, defaultMachine) {
     document.getElementById('fo-batch')?.focus();
     return;
   }
-  const batchFormatOK = /^\d{2}[A-Z]+\d+$/.test(batchVal);
+  const batchFormatOK = /^\d{2}[A-Z]+\d+(-[A-Z])?$/.test(batchVal);  // v47H (confirmed by Ishan): allow single-letter child suffix (-A), never -A1
   if (!batchFormatOK) {
     alert(`⚠️ Checkpoint 1 Failed: Invalid Batch Number format.\n\nEntered: "${batchVal}"\n\nRequired: Start with 2 digits (year) + uppercase letters + digits\n\nValid examples: 26N013, 26ZH043, 26ZA001, 27B025\n\nNote: Must start with year digits (e.g. 26 or 27).\nNo test/dummy/random names allowed.`);
     document.getElementById('fo-batch')?.focus();
@@ -4720,6 +4974,11 @@ function saveOrderModal(existingId, defaultMachine) {
     }
     const idx = state.orders.findIndex(o=>o.id===existingId);
     if (idx>=0) state.orders[idx] = ord;
+    // v48Z: the order-edit form never stamped the protection map, which is why edits made here
+    // (PTD/UP among them) were unprotected against a background server load. Divergence detection
+    // above is the structural fix; this stamp additionally covers the 30s silent-sync path, which
+    // consults the stamp map directly.
+    if (ord && ord.id) _localOrderChanges[ord.id] = Date.now();
     // v41ZE #3: detailed edit audit (re-add — did not land in v41ZD). Records what the order looks
     // like after the edit so the Audit Log shows real changes, not just "Saved planning state".
     auditLog('ORDER_EDITED', `${ord.machineId} · ${ord.batchNumber||ord.poNumber||ord.id} (${ord.customer||'—'}) · ${fmt(ord.qty||0)}L, size ${ord.size||'—'}, ${ord.zone||'—'}${ord.sapDocNum?`, SO# ${ord.sapDocNum}`:''}, status ${ord.status||'—'}`);
@@ -4762,6 +5021,7 @@ function saveOrderModal(existingId, defaultMachine) {
       }
     }
     state.orders.push(ord);
+    if (ord && ord.id) _localOrderChanges[ord.id] = Date.now();   // v48Z: protect a brand-new order too
     // v41ZE #3: detailed create audit (re-add — did not land in v41ZD).
     auditLog('ORDER_CREATED', `${ord.machineId} · ${ord.batchNumber||ord.poNumber||ord.id} (${ord.customer||'—'}) · ${fmt(ord.qty||0)}L, size ${ord.size||'—'}, ${ord.zone||'—'}${ord.sapDocNum?`, SO# ${ord.sapDocNum}`:''}, ${ord.poType||'—'}`);
   }
@@ -4856,6 +5116,11 @@ function saveOrderModal(existingId, defaultMachine) {
   recalcMachineSchedule(machineId);
   // Stamp only this specific order as locally changed
   _localOrderChanges[ord.id] = Date.now();
+  // v47 Point 1: also stamp the PERSISTED per-order edit time. saveOrderModal rebuilds `ord` fresh from
+  // the form (colour / gross-override / customer / Ship-Bill / W-O type), so without this the edit carried
+  // no _localEditedAt and the new v47 server staleness guard on those fields would treat it as stale and
+  // keep the old DB value. With a fresh stamp, this genuine edit wins over any stale tab's later push.
+  ord._localEditedAt = Date.now();
   // PERMANENT FIX: Save this order to its own dedicated row in production_orders table
   upsertOrderToDB(ord);
   // v37J Sub-issue 1.1: Push any new Ship-to/Bill-to customer names to the customer master.
@@ -4930,8 +5195,114 @@ async function _pushOrderOnce(ord){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(ord), signal: AbortSignal.timeout(8000)
     });
-    return !!(r && r.ok);
+    if (!(r && r.ok)) return false;
+    // v49G: the server refuses a direct close on a batch that has production but isn't yet DPR-closed
+    // (option B). Surface it so the planner isn't left wondering why the batch stayed open, and revert
+    // the local order to match the server so the two don't diverge.
+    try {
+      const _j = await r.clone().json();
+      if (_j && _j.dprGateRefused) _v49gHandleDprGateRefused(ord);
+      if (_j && _j.limitRefused) _v49nHandleLimitRefused(ord, _j);
+    } catch(e) {}
+    return true;
   } catch(e){ return false; }
+}
+// v49G option A cascade (Route 1): drive a Planning reopen through the guarded DPR reopen endpoint.
+// On success the batch is live in all three apps and we complete the local save/render. On refusal
+// (already reopened once, or the 2-day window expired) we revert the local status and tell the planner.
+async function _v49gReopenViaDpr(ord, prevStatus, machineId) {
+  const _url = SYNC._url || localStorage.getItem('sunloc_server_url');
+  const _revert = (msg) => {
+    ord.status = prevStatus;                 // back to closed
+    ord.closedDate = ord.closedDate || new Date();
+    try { render(); } catch(e) {}
+    if (typeof toast === 'function') toast(msg, '#c77700', 8000);
+    else alert('⚠️ ' + msg);
+  };
+  if (!_url) { _revert('Reopen needs a server connection. Please retry when online.'); return; }
+  try {
+    const r = await fetch(_url + '/api/dpr/batch-reopen', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: ord.id, batchNumber: ord.batchNumber || null,
+                             reopenedBy: (typeof currentUser === 'object' && currentUser && currentUser.username) || 'Planner' }),
+      signal: AbortSignal.timeout(8000)
+    });
+    let j = {}; try { j = await r.json(); } catch(e) {}
+    // v49ZD: admin planners may override the once-only / 2-day guards (confirmed, audited server-side)
+    if (!(r.ok && j && j.ok) && j && j.canAdminOverride
+        && (typeof currentUser === 'object' && currentUser && currentUser.role === 'admin')
+        && confirm(`${j.error}\n\nADMIN OVERRIDE: reopen ${ord.batchNumber || ord.id} anyway?\n\nRecorded in the audit log.`)) {
+      try {
+        const r2 = await fetch(_url + '/api/dpr/batch-reopen', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderId: ord.id, batchNumber: ord.batchNumber || null,
+                                 reopenedBy: (currentUser && currentUser.username) || 'Admin', adminOverride: true, userRole: 'admin' }),
+          signal: AbortSignal.timeout(8000) });
+        try { j = await r2.json(); } catch(e) { j = {}; }
+        if (r2.ok && j && j.ok) { /* fall through to the success path below via the re-check */ }
+      } catch(e) {}
+    }
+    if (j && j.ok) {
+      // reopened in DPR too — persist the Planning status and refresh
+      _localOrderChanges[ord.id] = Date.now();
+      recalcMachineSchedule(machineId);
+      upsertOrderToDB(ord);
+      saveState();
+      auditLog('ORDER_STATUS', `${machineId} · ${ord.batchNumber||ord.poNumber||ord.id} (${ord.customer||'—'}) reopened (DPR cascade)`);
+      render();
+      if (typeof toast === 'function') toast(`${ord.batchNumber||ord.id}: reopened in Planning, DPR and Tracking.`, '#2e7d32', 5000);
+    } else {
+      const _bn = ord.batchNumber || ord.id;
+      _revert(`${_bn}: ${ (j && j.error) || 'Reopen was refused.' }`);
+    }
+  } catch (e) {
+    _revert(`${ord.batchNumber||ord.id}: reopen failed (${e && e.message ? e.message : 'network error'}). Batch left closed.`);
+  }
+}
+
+// v49G option (ii): reconcile local state with a server DPR-gate refusal and tell the planner in plain terms.
+// v49N: the server refused a pending→running promotion because the machine's 2 running slots are
+// occupied. Mirror the server's held status locally, drop the local protection stamp (so the client
+// stops re-pushing the refused promotion), and tell the planner WHICH batches hold the slots.
+function _v49nHandleLimitRefused(pushedOrd, resp) {
+  try {
+    const live = state.orders.find(o => o.id === (pushedOrd && pushedOrd.id));
+    const _held = (resp && resp.heldStatus) || 'pending';
+    if (live && live.status === 'running') {
+      live.status = _held;
+      if (typeof _localOrderChanges === 'object') delete _localOrderChanges[live.id];
+      try { render(); } catch(e) {}
+    }
+    const _bn = (live && live.batchNumber) || (pushedOrd && pushedOrd.batchNumber) || 'This batch';
+    const _mc = (live && live.machineId) || (pushedOrd && pushedOrd.machineId) || '';
+    const _occ = (resp && Array.isArray(resp.occupying) && resp.occupying.length) ? resp.occupying.join(', ') : 'two batches';
+    const _msg = `${_bn}: MC ${_mc} already has 2 batches in production (${_occ}). Close one of them first, then set ${_bn} to In Production.`;
+    if (typeof toast === 'function') toast(_msg, '#c77700', 8000);
+    else alert('⚠️ ' + _msg);
+  } catch(e) {}
+}
+function _v49gHandleDprGateRefused(pushedOrd) {
+  try {
+    const live = state.orders.find(o => o.id === (pushedOrd && pushedOrd.id));
+    if (live && live.status === 'closed') {
+      // the server kept it running/pending; mirror that locally and drop the stale close stamps
+      live.status = 'running';
+      live.closedDate = null;
+      live.manualEndDate = false;
+      if (typeof _localOrderChanges === 'object') delete _localOrderChanges[live.id];
+      try { render(); } catch(e) {}
+    } else if (live && (live.closedDate || live.manualEndDate)) {
+      // v49P: status already reverted but stale close stamps linger — clear them so autosaves stop
+      // re-asserting the refused close every cycle
+      live.closedDate = null;
+      live.manualEndDate = false;
+    }
+    const _bn = (live && (live.batchNumber || live.poNumber)) || (pushedOrd && (pushedOrd.batchNumber || pushedOrd.poNumber)) || 'This batch';
+    if (typeof toast === 'function') {
+      toast(`${_bn}: Close in DPR first — this batch has production recorded, so it must be closed in DPR before it can be closed in Planning.`, '#c77700', 7000);
+    } else {
+      alert(`⚠️ ${_bn} — Close in DPR first\n\nThis batch has production recorded against it, so it must be closed in DPR before it can be closed in Planning.\n\nClose it in the DPR module, then close it here.`);
+    }
+  } catch(e) {}
 }
 let _flushingPendingOrders = false;
 async function flushPendingOrders(){
@@ -6004,6 +6375,20 @@ function _v39_jumpToOrderForBackfill(orderId) {
 window._v39_invoiceState = {};
 window._v39_invoiceStateLoadedAt = 0;
 
+// v48C (Ishan): per-batch ACTUAL dispatched (Lakhs) from the plan/actuals merge. Defined at module
+// scope so `state` here is the GLOBAL planning state (inside _v39_loadInvoiceState it is shadowed by a
+// local invoice-state object). Used to cap a reconciled request's credited qty to what actually shipped.
+function _v48c_dispByBatch() {
+  const m = {};
+  try {
+    (state.dispatchPlans || []).forEach(dp => {
+      if (!dp || !dp.batchNumber) return;
+      m[dp.batchNumber] = (m[dp.batchNumber] || 0) + (parseFloat(dp.actualDispatched) || 0);
+    });
+  } catch (_e) {}
+  return m;
+}
+
 async function _v39_loadInvoiceState({ silent = false } = {}) {
   const baseUrl = (typeof SYNC !== 'undefined' && SYNC._url)
     || localStorage.getItem('sunloc_server_url') || '';
@@ -6038,39 +6423,93 @@ async function _v39_loadInvoiceState({ silent = false } = {}) {
         }
         if (r.status === 'failed') e.hasFailed = true;
         e.lastRequestStatus = r.status;
-        // v44Q PARTIAL-INVOICE: accumulate in-flight (not-yet-received) invoiced qty/boxes.
-        // 'reconciled' is skipped here — its qty is counted from the received invoice below, so
-        // counting both would double-count. 'failed' is excluded (never billed).
+        // v47L (confirmed by Ishan): count EVERY non-failed request's qty against its OWN batch —
+        // including 'reconciled'. Previously reconciled was skipped on the assumption its received
+        // invoice would count it, but a multi-batch invoice (stored under a joined "A, B" key) or a
+        // (now-fixed) false reconcile left the qty counted NOWHERE, so the blue Invoice button re-offered
+        // already-requested quantity (26Y058 showed 36.75L instead of 12.25L). The received-invoice loop
+        // below now adds qty only for direct-SAP invoices with NO linked request, so this never double-counts.
+        // v48C (Ishan): split the credit by lifecycle. IN-FLIGHT requests (pending / sent /
+        // pending_reconciliation) count their full ASK — we must never re-offer quantity mid-flight.
+        // RECONCILED (completed) requests must count ACTUAL FULFILMENT, not the ask: ZD103 asked 43.75L
+        // but only 33.25L was invoiced/dispatched (multi-batch invoice 1823), and crediting the ask
+        // stranded the 10.5L residual at Balance 0. Reconciled asks are accumulated here and capped to the
+        // batch's actual-dispatched after the loops (finalise step below).
         if (r.status === 'pending' || r.status === 'sent_to_sap' || r.status === 'pending_reconciliation') {
-          e.invoicedQty = (e.invoicedQty || 0) + (parseFloat(r.qty_lakhs) || 0);
-          e.invoicedBoxes = (e.invoicedBoxes || 0) + (parseInt(r.boxes, 10) || 0);
+          e._pendingAsk   = (e._pendingAsk   || 0) + (parseFloat(r.qty_lakhs) || 0);
+          e._pendingBoxes = (e._pendingBoxes || 0) + (parseInt(r.boxes, 10) || 0);
+          // v48X: remember each ask individually. An ask whose invoice has ALREADY arrived and been
+          // allocated must not be added on top of that allocation — see the overlay below.
+          (e._pendingAskRows = e._pendingAskRows || []).push({
+            id: r.id, qty: parseFloat(r.qty_lakhs) || 0, boxes: parseInt(r.boxes, 10) || 0 });
+          // v47U: this batch is credited from the Sunloc request ledger; the unlinked-invoice loop below
+          // must NOT also add a direct-SAP invoice's qty for it (double-count guard).
+          e._reqCredited47u = true;
+          e._hasInFlight = true;               // v48N: nothing received yet for this ask
+        } else if (r.status === 'reconciled') {
+          e._reconciledAsk   = (e._reconciledAsk   || 0) + (parseFloat(r.qty_lakhs) || 0);
+          e._reconciledBoxes = (e._reconciledBoxes || 0) + (parseInt(r.boxes, 10) || 0);
+          e._hasReconciled = true;
+          e._reqCredited47u = true; // still suppress the unlinked-invoice double-count below
+          // v48N (confirmed by Ishan): a RECONCILED request is fulfilled by a real invoice — credit the
+          // invoice ACTUALLY received, not the ask. 26O037 asked 14.00L but reconciled to inv_45016
+          // (1861 = 10.50L), so the ask credited 14.00 and stranded a phantom 5.25L "Balance". The linked
+          // invoice is resolved in the finalise step (it is only known after the received-invoice loop).
+          (e._reconReqs = e._reconReqs || []).push({
+            invId: (r.reconciled_with_invoice_id == null ? '' : String(r.reconciled_with_invoice_id).trim()),
+            ask:   (parseFloat(r.qty_lakhs) || 0),
+            boxes: (parseInt(r.boxes, 10) || 0)
+          });
         }
       }
     }
     // Build invoiceId → batch_number lookup for scan-session mapping
     const idToBatch = {};
+    const _invById48n = {};   // v48N: id -> { qty, boxes, single } for reconciled-request resolution
     if (recvJ.ok) {
       for (const r of (recvJ.invoices || [])) {
         if (!r.batch_number) continue;
-        const e = state[r.batch_number] = state[r.batch_number] || {};
-        e.hasReceived = true;
-        e.docNum = r.sap_doc_num || r.sap_invoice_no;
-        e.dispatchStatus = r.dispatch_status;
-        e.dispatchedAt = r.dispatched_at || null;
-        e.vehicleNo = r.vehicle_no || null;
-        e.invoiceId = r.id;
-        idToBatch[r.id] = r.batch_number;
-        // v44Q PARTIAL-INVOICE: accumulate actual invoiced qty/boxes from the received invoice.
-        // Fallback (decision 1): when the stored total is missing/0 (e.g. an older un-enriched
-        // SAP-direct invoice), use the linked invoice_request's qty/boxes so we don't under-count
-        // and wrongly re-offer already-invoiced quantity.
-        const _linked = reqById[r.invoice_request_id];
-        let _rq = parseFloat(r.total_qty_lakhs) || 0;
-        let _rb = parseInt(r.total_boxes, 10) || 0;
-        if (_rq <= 0 && _linked) _rq = _linked.qty;
-        if (_rb <= 0 && _linked) _rb = _linked.boxes;
-        e.invoicedQty = (e.invoicedQty || 0) + _rq;
-        e.invoicedBoxes = (e.invoicedBoxes || 0) + _rb;
+        // v47R (proper C fix): a Sunloc-flow, request-LINKED invoice is trustworthy per-batch, so split it
+        // across its constituent batches — this keeps a genuine multi-batch invoice's "📤 Invoiced" badge on
+        // each batch (e.g. 26Y058/26T080), no cosmetic trade-off. A direct-SAP / UNLINKED invoice's batch
+        // list is a bulk SAP artifact, NOT authoritative for Sunloc's per-batch dispatch state — bulk invoice
+        // 9038 (SAP-direct, 12 batches incl. 26X082, 362.25L, dispatched) wrongly stamped 26X082 as
+        // "Dispatched 362L". Unlinked invoices therefore attribute to the batch_number KEY as stored: a
+        // single-batch key IS the batch (correct); a multi-batch/bulk key matches no batch row and stays inert.
+        const _linked47r = (r.invoice_request_id != null && String(r.invoice_request_id).trim() !== '');
+        const _tgts47r = _linked47r
+          ? String(r.batch_number).split(/[\s,]+/).map(t => t.trim()).filter(Boolean)
+          : [String(r.batch_number)];
+        if (!_tgts47r.length) continue;
+        for (const _b of _tgts47r) {
+          const e = state[_b] = state[_b] || {};
+          e.hasReceived = true;
+          e.docNum = r.sap_doc_num || r.sap_invoice_no;
+          e.dispatchStatus = r.dispatch_status;
+          e.dispatchedAt = r.dispatched_at || null;
+          e.vehicleNo = r.vehicle_no || null;
+          e.invoiceId = r.id;
+        }
+        // Qty: request-linked invoices are already counted via their request(s) above; only a direct-SAP
+        // invoice with NO linked request adds qty here, to its (joined) key — inert for a bulk multi-batch
+        // key, correct for a single-batch key. Never double-counts.
+        if (!_linked47r) {
+          const e0 = state[String(r.batch_number)];
+          // v47U: only add if this batch wasn't already credited from its Sunloc request ledger above.
+          // A batch with a reconciled request + an unlinked SAP invoice of the same qty was being counted
+          // twice; the request is authoritative, so the unlinked fulfilment is skipped here. A genuinely
+          // direct-SAP batch (no request at all — e.g. 26X082) is untouched and still counted here.
+          // v48N: hold the direct-SAP invoice and decide in the finalise step. It is a DISTINCT invoice
+          // row from anything a request reconciled to, so once every reconciled request on this batch has
+          // been resolved to its own real invoice, counting it too is correct (26O037: 1861 + 1860 = 21.00L
+          // against 19.25L packed). The v47U suppression is kept for the ambiguous cases (in-flight ask
+          // outstanding, or a reconciled request whose invoice can't be resolved) where it could double-count.
+          if (e0) (e0._unlinkedInvs = e0._unlinkedInvs || []).push({
+            qty:(parseFloat(r.total_qty_lakhs)||0), boxes:(parseInt(r.total_boxes,10)||0)
+          });
+        }
+        _invById48n[r.id] = { qty:(parseFloat(r.total_qty_lakhs)||0), boxes:(parseInt(r.total_boxes,10)||0), single:(_tgts47r.length === 1) };
+        idToBatch[r.id] = _tgts47r[0];
       }
     }
     // v40 Phase 18.12: merge in active scan sessions
@@ -6083,6 +6522,118 @@ async function _v39_loadInvoiceState({ silent = false } = {}) {
         e.scanningTruck = sess.truckNumber;
         e.scanCount = sess.scannedCount;
       }
+    }
+    // v48C (Ishan): finalise per-batch invoicedQty = in-flight asks + actual-fulfilled(reconciled) +
+    // unlinked direct-SAP. The reconciled portion is capped at the batch's ACTUAL dispatched (from the
+    // plan/actuals merge) so a partial fulfilment (ask > dispatched) leaves its residual re-dispatchable;
+    // boxes scale proportionally. When no dispatched figure is available yet, it falls back to the ask —
+    // i.e. the prior behaviour — so this can only ever free stranded residuals, never over-offer.
+    const _dispByBatch = _v48c_dispByBatch();
+    for (const [bn, e] of Object.entries(state)) {
+      // v48N: resolve each reconciled request to the invoice it ACTUALLY produced. Only an unambiguous
+      // single-batch invoice can be attributed whole to this batch; a multi-batch invoice (e.g. ZD103 /
+      // 1823) stays on the v48C ask + dispatched-cap path, which was built for exactly that case.
+      let reconQ = 0, reconB = 0, _askQ = 0, _askB = 0, _allResolved = !!e._hasReconciled;
+      const _seenInv = new Set();
+      for (const rq of (e._reconReqs || [])) {
+        const inv = rq.invId ? _invById48n[rq.invId] : null;
+        if (inv && inv.single && !_seenInv.has(rq.invId)) {
+          _seenInv.add(rq.invId);
+          reconQ += inv.qty; reconB += inv.boxes;
+        } else if (inv && inv.single) {
+          /* two requests on one invoice — already counted once; add nothing */
+        } else {
+          _askQ += rq.ask; _askB += rq.boxes; _allResolved = false;
+        }
+      }
+      if (_askQ > 0) {                                   // v48C behaviour preserved for the ask fallback
+        const disp = _dispByBatch[bn];
+        if (disp != null && disp > 0 && disp < _askQ) {
+          _askB = _askQ > 0 ? Math.round((disp / _askQ) * _askB) : 0;
+          _askQ = disp;
+        }
+      }
+      reconQ += _askQ; reconB += _askB;
+      // Direct-SAP (unlinked) invoices: count them once the request ledger is unambiguous.
+      const _countUnlinked = !e._reqCredited47u || (!e._hasInFlight && _allResolved);
+      let unlQ = 0, unlB = 0;
+      if (_countUnlinked) for (const u of (e._unlinkedInvs || [])) { unlQ += u.qty; unlB += u.boxes; }
+      e.invoicedQty   = Math.round(((e._pendingAsk || 0) + reconQ + unlQ) * 100) / 100;
+      e.invoicedBoxes = (e._pendingBoxes || 0) + reconB + unlB;
+    }
+
+    // ── v48V: AUTHORITATIVE OVERLAY ────────────────────────────────────────────────
+    // Everything above this line is the RECONSTRUCTION stack (v47L → v47R → v47U → v48C → v48N):
+    // six successive attempts to infer, from request/invoice headers alone, how much of a
+    // multi-batch invoice belonged to each batch. invoice_batch_alloc now records that per LINE,
+    // so the inferred actual-invoice portion is replaced with the recorded one.
+    //
+    // WHAT IS AND IS NOT REPLACED — the distinction is load-bearing:
+    //   • reconQ + unlQ  (quantity on invoices SAP has actually issued)  → REPLACED. These are the
+    //     figures the reconstruction was guessing at.
+    //   • _pendingAsk    (in-flight requests Sunloc has raised but SAP has not yet invoiced)
+    //     → KEPT. No invoice exists yet, so there is nothing to allocate; dropping it would make
+    //     already-requested quantity look re-invoiceable and let DM double-invoice a batch.
+    // So: invoicedQty = pending ask + authoritative allocated.
+    //
+    // A needs_manual line is deliberately absent from the totals — its quantity is credited to no
+    // batch until a human allocates it. `_allocNeedsManual` carries that count so the UI can mark
+    // the figure provisional rather than silently understating it.
+    // FAIL-SAFE: if the endpoint is unreachable, the reconstruction above stands unchanged, so this
+    // can degrade to prior behaviour but never to a blank or zero tally.
+    try {
+      const _ar = await fetch('/api/invoice/allocation-totals');
+      const _aj = _ar.ok ? await _ar.json() : null;
+      if (_aj && _aj.ok && _aj.totals) {
+        window._v48v_allocTotals = _aj.totals;
+        window._v48v_allocNeedsManual = _aj.needsManual || {};
+        window._v48v_allocOpenUnassigned = _aj.openUnassigned || 0;
+        // v48X: a request that is still 'pending_reconciliation' but whose invoice has already been
+        // received and attributed appears BOTH as an in-flight ask and as an allocated line. Adding
+        // them double-counts: on a partly-invoiced batch that understates the remaining quantity and
+        // wrongly blocks further invoicing (packed 50, allocated 20, same ask 20 → 10 remaining
+        // instead of 30). Net off any ask already linked to an allocation.
+        const _linked = new Set(_aj.linkedRequestIds || []);
+        for (const [bn, e] of Object.entries(state)) {
+          const a = _aj.totals[bn];
+          const _rows = e._pendingAskRows || [];
+          const _open = _rows.filter(r => !_linked.has(r.id));
+          const pendQ = _rows.length
+            ? Math.round(_open.reduce((t, r) => t + r.qty, 0) * 100) / 100
+            : (e._pendingAsk || 0);
+          const pendB = _rows.length
+            ? _open.reduce((t, r) => t + r.boxes, 0)
+            : (e._pendingBoxes || 0);
+          e._askCoveredByAlloc = _rows.length - _open.length;
+          if (a) {
+            e.invoicedQty   = Math.round((pendQ + (a.qty || 0)) * 100) / 100;
+            e.invoicedBoxes = pendB + (a.boxes || 0);
+          } else if (!pendQ && !(e._reconReqs || []).length && !(e._unlinkedInvs || []).length) {
+            e.invoicedQty = 0; e.invoicedBoxes = 0;   // no invoice, no ask → nothing invoiced
+          }
+          e._allocNeedsManual = (_aj.needsManual || {})[bn] || 0;
+          e._allocAuthoritative = !!a;
+          // v49C: the STATE half of the v48V flip. v48V repointed the QUANTITY at invoice_batch_alloc
+          // but left hasReceived / docNum / dispatchStatus on the reconstruction above, which cannot
+          // reach a batch whose invoice carries a multi-batch key — the key is used as a single batch
+          // name (deliberate, v47R) and matches no batch row. Result: correct balances beside a badge
+          // frozen on "Awaiting SAP Invoice" (26ZD109, 26ZD110, 26Z069, 26ZE100). Fill the flags from
+          // the same per-line attribution the quantity already trusts.
+          // ORDER MATTERS: the linked/unlinked loop above wins wherever it ran — every field here is
+          // gap-filling only, so v47R's bulk-invoice protection and the linked path are both untouched.
+          const _st49c = (_aj.invState || {})[bn];
+          if (a && _st49c && !e.hasReceived) {
+            e.hasReceived    = true;
+            e.docNum         = e.docNum         || _st49c.docNum         || null;
+            e.dispatchStatus = e.dispatchStatus || _st49c.dispatchStatus || null;
+            e.dispatchedAt   = e.dispatchedAt   || _st49c.dispatchedAt   || null;
+            e.vehicleNo      = e.vehicleNo      || _st49c.vehicleNo      || null;
+            e.invoiceId      = e.invoiceId      || _st49c.invoiceId      || null;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[v48V] allocation totals unavailable — falling back to the reconstruction:', e.message);
     }
     window._v39_invoiceState = state;
     window._v39_invoiceStateLoadedAt = Date.now();
@@ -6211,6 +6762,30 @@ async function _v39_submitInvoiceRequest() {
   }
 }
 
+// v47F (confirmed by Ishan): cancel a pending invoice request from the Invoice State dialog, freeing
+// its quantity so the batch can be re-invoiced at a different amount. Refreshes the dialog on success.
+async function _v47f_cancelInvoiceRequest(requestId, batchNumber){
+  if (!confirm(`Cancel this pending invoice request for ${batchNumber}?\n\nThis frees the quantity so you can re-invoice a different amount. Only do this if SAP has NOT already created the invoice for it — if it has, reconcile instead.`)) return;
+  const baseUrl = (typeof SYNC !== 'undefined' && SYNC._url) || localStorage.getItem('sunloc_server_url') || '';
+  try {
+    const r = await fetch(baseUrl + '/api/invoice/cancel-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Sunloc-Role': (currentUser?.role || ''), 'X-Sunloc-User': (currentUser?.username || '') },
+      body: JSON.stringify({ requestId })
+    });
+    const j = await r.json();
+    if (j.ok) {
+      toast('✅ Pending request cancelled — quantity freed for re-invoicing', 'var(--accent3)');
+      try { await _v39_loadInvoiceState({ silent: true }); } catch(e){}
+      _v39_showInvoiceState(batchNumber);
+    } else {
+      toast('⚠️ ' + (j.error || 'Cancel failed'), 'var(--red)');
+    }
+  } catch (e) {
+    toast('⚠️ Network error: ' + e.message, 'var(--red)');
+  }
+}
+
 async function _v39_showInvoiceState(batchNumber) {
   const baseUrl = (typeof SYNC !== 'undefined' && SYNC._url)
     || localStorage.getItem('sunloc_server_url') || '';
@@ -6224,7 +6799,12 @@ async function _v39_showInvoiceState(batchNumber) {
       ? requests.map(r => `
         <tr>
           <td style="font-family:monospace;font-size:10px;color:var(--text3)">${(r.id||'').substring(0,16)}</td>
-          <td style="font-size:11px">${r.status}</td>
+          <td style="font-size:11px">${r.status}${
+            (['pending','sent_to_sap','pending_reconciliation'].includes(r.status)
+             && ['admin','planning_manager','dispatch_manager'].includes(currentUser?.role))
+              ? ` <button onclick="_v47f_cancelInvoiceRequest('${r.id}','${batchNumber}')" style="margin-left:6px;font-size:9px;padding:1px 6px;border:1px solid #dc2626;background:#fef2f2;color:#b91c1c;border-radius:3px;cursor:pointer;font-weight:700" title="Cancel this pending request — frees the quantity so this batch can be re-invoiced at a different amount. Only works if SAP has not already created the invoice.">Cancel</button>`
+              : ''
+          }</td>
           <td style="font-size:11px">${r.boxes||0} bx / ${(r.qty_lakhs||0).toFixed(2)}L</td>
           <td style="font-family:monospace;font-size:11px">${r.sap_response_doc_num||'—'}</td>
           <td style="font-size:10px;color:var(--text3)">${(r.created_at||'').substring(0,16)}</td>
@@ -6393,6 +6973,19 @@ function _v44r_finalizeTruckPrompt(zone, truckNumber) {
       try { _renderImmediate(); } catch { try { renderDispatch(); } catch {} } });
 }
 
+// v46H Option B: dispatched/remaining boxes for a locked truck (same computation as the finalise
+// prompt). Used to surface an unmissable "short dispatch — finalise to roll forward" nudge so a
+// partially-dispatched truck's residual never gets silently stranded off the binning pool.
+function _truckDispatchedBoxes(truck) {
+  let d = 0;
+  (truck && truck.orders || []).forEach(o => {
+    const dp = (state.dispatchPlans || []).find(p => p.id === o.id);
+    const b = dp ? Math.round(parseFloat(dp._dispatchedBoxes || 0)) : 0;
+    d += Math.min(parseInt(o.boxes || 0, 10), b);
+  });
+  return d;
+}
+
 async function _v39_submitTruckInvoices() {
   const ctx = window._v39_truckInvoiceContext;
   if (!ctx) { toast('No truck context', 'var(--red)'); return; }
@@ -6538,10 +7131,32 @@ function _v40_openConsolidatedApprovalModal() {
     alert('None of the selected batches are still eligible for invoicing. Please refresh.');
     return;
   }
-  window._v40_approvalContext = { items, results: null };
+  // v46Q: carry any packed-but-excluded batches (set by the truck opener) into the context, one-shot,
+  // then clear the transient so a later non-truck open doesn't show a stale list.
+  window._v40_approvalContext = { items, results: null, excluded: window._v40_truckExcluded || null };
+  window._v40_truckExcluded = null;
   _v40_renderConsolidatedApprovalModalBody();
 }
 
+// v47Z (Ishan #2): live-recompute the box count when the DM amends the invoice qty in the Review &
+// Approve modal. Was static (${it.boxes}) so an up/down qty revision left boxes stale and scan-out could
+// never reconcile. Boxes = ceil(amended qty × 100000 / size-wise pack size); an unchanged qty restores the
+// actual packed box count. Generation reads the same recompute independently, so this is display-only.
+function _v47zRecalcInvBoxes(idx){
+  const ctx = window._v40_approvalContext; if(!ctx || !ctx.items || !ctx.items[idx]) return;
+  const it = ctx.items[idx];
+  const qi = document.getElementById('v40-conf-qty-'+idx);
+  const bx = document.getElementById('v40-conf-boxes-'+idx);
+  if(!qi || !bx) return;
+  const qty = parseFloat(qi.value);
+  if(!Number.isFinite(qty)){ return; }
+  let boxes = it.boxes;
+  if(Math.abs(qty - it.qtyLakhs) > 0.0005){
+    const ps = (state.packSizes && state.packSizes[it.size]) || 100000;
+    boxes = Math.max(0, Math.ceil((qty||0)*100000/ps));
+  }
+  bx.textContent = boxes;
+}
 function _v40_renderConsolidatedApprovalModalBody() {
   const ctx = window._v40_approvalContext;
   if (!ctx || !ctx.items) return;
@@ -6586,10 +7201,10 @@ function _v40_renderConsolidatedApprovalModalBody() {
         <td style="padding:5px 8px;font-size:11px">${(it.customer||'').substring(0,30)}</td>
         <td style="padding:5px 8px;font-family:var(--mono);font-size:11px;color:#0891b2;font-weight:600">${it.sapDocNum || '—'}</td>
         <td style="padding:5px 8px;font-family:var(--mono);font-size:11px">${it.pcCode || '—'}</td>
-        <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:11px;white-space:nowrap">${it.boxes}${shortWarn}</td>
+        <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:11px;white-space:nowrap"><span id="v40-conf-boxes-${idx}">${it.boxes}</span>${shortWarn}</td>
         <td style="padding:5px 8px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:600">
           ${results ? it.qtyLakhs.toFixed(3) :
-            `<input type="number" step="0.001" min="0" value="${it.qtyLakhs.toFixed(3)}" id="v40-conf-qty-${idx}" style="width:70px;text-align:right;background:var(--surface3);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-family:var(--mono);font-size:11px">`}
+            `<input type="number" step="0.001" min="0" value="${it.qtyLakhs.toFixed(3)}" id="v40-conf-qty-${idx}" oninput="_v47zRecalcInvBoxes(${idx})" style="width:70px;text-align:right;background:var(--surface3);border:1px solid var(--border);border-radius:3px;padding:2px 4px;font-family:var(--mono);font-size:11px">`}
         </td>
         <td style="padding:5px 8px;text-align:center;font-family:var(--mono);font-size:11px">${it.truckNumber || '—'}</td>
       </tr>`;
@@ -6651,6 +7266,19 @@ function _v40_renderConsolidatedApprovalModalBody() {
         <span><strong>${distinctTrucks}</strong> trucks</span>
       </div>
       ${footerHtml}
+      ${(!results && ctx.excluded && ctx.excluded.length) ? `
+      <div style="background:rgba(107,114,128,0.06);border:1px dashed rgba(107,114,128,0.4);border-radius:6px;padding:10px 14px;margin-top:10px;font-size:11px;line-height:1.6;color:var(--text3)">
+        <strong style="color:var(--text2)">&#9888; ${ctx.excluded.length} packed batch${ctx.excluded.length!==1?'es':''} in this truck cannot be invoiced yet:</strong>
+        <table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:11px;opacity:0.85">
+          <tbody>${ctx.excluded.map(e=>`<tr style="border-top:1px solid var(--border)">
+            <td style="padding:4px 8px;font-family:var(--mono)">${e.batch}</td>
+            <td style="padding:4px 8px">${(e.customer||'').substring(0,28)}</td>
+            <td style="padding:4px 8px;text-align:right;font-family:var(--mono)">${(e.packed||0).toFixed(2)} L</td>
+            <td style="padding:4px 8px;color:#b45309;font-weight:600">${e.reason}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+        <div style="margin-top:6px">Link a Sales Order (or PO reference) to these — or clear any already-invoiced flag — and they'll join the one-shot list.</div>
+      </div>` : ''}
     </div>`;
   const buttons = results ? [
     { label: '✅ Done', cls: 'btn-primary', fn: 'closeModal();window._v40_invoiceSelections.clear();_v40_renderInvoiceFloatingBar();render();' },
@@ -6691,7 +7319,14 @@ async function _v40_submitConsolidated() {
     if (cb && !cb.checked) return;
     const qtyInput = document.getElementById('v40-conf-qty-' + idx);
     const qty = qtyInput ? parseFloat(qtyInput.value) : it.qtyLakhs;
-    toSend.push({ ...it, qtyLakhs: qty });
+    // v47Z (Ishan #2): if the DM amended the qty, recompute boxes from the amended qty × size-wise pack
+    // size so scan-out reconciles; an unchanged qty keeps the actual packed box count.
+    let boxes = it.boxes;
+    if (qtyInput && Number.isFinite(qty) && Math.abs(qty - it.qtyLakhs) > 0.0005) {
+      const ps = (state.packSizes && state.packSizes[it.size]) || 100000;
+      boxes = Math.max(0, Math.ceil((qty || 0) * 100000 / ps));
+    }
+    toSend.push({ ...it, qtyLakhs: qty, boxes });
   });
   if (toSend.length === 0) {
     alert('No batches checked. Tick at least one to proceed.');
@@ -8403,20 +9038,32 @@ function truckHasProdMonth(truck, ym) {
 // remove its committed boxes from the free-binning pool so remaining boxes lay AROUND it.
 function _buildLockedTrucks(activeLocks, zone, cap) {
   return activeLocks.map(l => {
+    // v49R (confirmed by Ishan): the frozen manifest must still NET DISPATCHED boxes. The free-pool
+    // binner already nets (planned − dispatched), but a lot dispatched AFTER truck lock — scan-out OR
+    // admin regularise/deemed (26X084 / 26Z074) — kept rendering here at its full frozen allocation.
+    // Rule: a lot whose plan is 'dispatched' drops out entirely; otherwise its allocation is reduced
+    // by the lot's dispatched boxes (capped at the allocation). Truck totals recompute from what's
+    // left. Invoice generation is untouched — it bills packed − already-invoiced per batch.
     const orders = (l.manifest||[]).map(m => {
       const dp = state.dispatchPlans.find(p => p.id === m.planId) || {};
       const allocBoxes = parseInt(m.allocatedBoxes,10)||0;
+      if (dp && dp.status === 'dispatched') return null;                       // fully dispatched lot
+      const dispBoxes = Math.round(parseFloat(dp && dp._dispatchedBoxes || 0));
+      const netBoxes = Math.max(0, allocBoxes - Math.min(allocBoxes, dispBoxes));
+      if (netBoxes <= 0 && allocBoxes > 0) return null;                        // allocation fully dispatched
+      const _ratio = allocBoxes > 0 ? (netBoxes / allocBoxes) : 1;
+      const _allocQty = (m.allocatedQty != null) ? parseFloat(m.allocatedQty) : parseFloat(dp.qty || 0);
       return {
         ...dp,
         id: m.planId,
         batchNumber: m.batchNumber || dp.batchNumber,
-        boxes: allocBoxes,
+        boxes: netBoxes,
         _originalBoxes: parseInt(dp.boxes||allocBoxes,10),
-        qty: (m.allocatedQty != null) ? m.allocatedQty : dp.qty,
-        packedBoxes: allocBoxes,   // committed boxes are packed-and-loaded
+        qty: isNaN(_allocQty) ? dp.qty : _allocQty * _ratio,
+        packedBoxes: netBoxes,   // committed boxes are packed-and-loaded
         _locked: true,
       };
-    });
+    }).filter(Boolean);
     const totalBoxes = orders.reduce((s,o)=>s+(parseInt(o.boxes||0,10)),0);
     return {
       truckNumber: parseInt(l.truckNumber,10) || 1,
@@ -9457,6 +10104,15 @@ function _v44r_stallBadge(p) {
   const EPS = 0.01;
   // invoiced-but-not-dispatched (boxes committed, not physically out) — the key "finish the dispatch" nudge
   if (f.invQty != null) {
+    // v49C (confirmed by Ishan): OVER-INVOICED takes precedence over both nudges below and replaces
+    // them outright. Neither is actionable once invoiced exceeds packed — "to dispatch" would ask the
+    // floor for stock that was never packed (live: 26ZE101 offered 28.00L against 7 remaining boxes,
+    // 57.75L invoiced vs 42.00L packed), and "to invoice" is already negative so it never rendered.
+    // The excess is the only fact anyone can act on, and until now it appeared nowhere on the row.
+    const over49c = Math.round((f.invQty - f.packedQty) * 100) / 100;
+    if (over49c >= EPS) {
+      return `<span title="Invoiced ${fmt(f.invQty)}L against ${fmt(f.packedQty)}L packed — excess ${fmt(over49c)}L. Verify the SAP invoices for this batch; nothing is blocked." style="display:inline-block;margin-left:4px;background:rgba(220,38,38,0.14);color:#dc2626;border:1px solid rgba(220,38,38,0.35);padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700">⚠ ${fmt(over49c)}L over-invoiced</span>`;
+    }
     const undisp = Math.round((f.invQty - f.dispQty) * 100) / 100;
     if (undisp >= EPS) {
       return `<span title="${fmt(undisp)}L invoiced but not yet scanned out — physical dispatch is pending" style="display:inline-block;margin-left:4px;background:rgba(255,171,0,0.14);color:#ffab00;border:1px solid rgba(255,171,0,0.3);padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700">⏳ ${fmt(undisp)}L to dispatch</span>`;
@@ -9578,6 +10234,17 @@ function _v40_isInvoiceEligible(p, ord) {
   const invoicedQty = (invState && invState.invoicedQty) || 0;
   const remainingQty = Math.round((packedOut - invoicedQty) * 100) / 100;
   const anyInvoiced = !!(invState && (invState.hasPending || invState.hasReceived));
+  // v49C: a NEGATIVE remainder is not the same condition as a satisfied one. Both previously fell
+  // into the branch below and returned an identical "Fully invoiced" row, so an over-invoiced batch
+  // was indistinguishable from a cleanly closed one — the state was not hidden by accident, there
+  // was simply no branch for it. Eligibility is unchanged (still not invoiceable); this only gives
+  // the renderer something to say.
+  if (anyInvoiced && remainingQty <= -0.01) {
+    const excessQty = Math.round((invoicedQty - packedOut) * 100) / 100;
+    return { eligible: false,
+             reason: `Over-invoiced by ${excessQty.toFixed(2)}L — ${invoicedQty.toFixed(2)}L invoiced against ${packedOut.toFixed(2)}L packed`,
+             alreadyInvoiced: true, state: 'over_invoiced', remainingQty: 0, excessQty };
+  }
   if (anyInvoiced && remainingQty < 0.01) {
     // Fully invoiced — packed quantity is entirely accounted for.
     return { eligible: false, reason: invState.hasReceived ? 'Fully invoiced' : 'Delivery already sent', alreadyInvoiced: true, state: invState.hasReceived ? 'invoiced' : 'pending', remainingQty: 0 };
@@ -9669,7 +10336,7 @@ function _v39_renderInvoiceBtnForRow(p, ord) {
     } else {
       return `<span title="${elig.reason}" style="display:inline-flex;align-items:center;padding:3px 6px;background:rgba(0,0,0,0.05);border-radius:3px;font-size:11px;color:var(--text3);opacity:0.6">
         <input type="checkbox" disabled style="margin-right:4px">
-        ${elig.alreadyInvoiced ? (elig.state==='invoiced'?'Invoiced':'Sent') : 'N/A'}
+        ${elig.alreadyInvoiced ? (elig.state==='over_invoiced'?'Over-inv':(elig.state==='invoiced'?'Invoiced':'Sent')) : 'N/A'}
       </span>`;
     }
   }
@@ -9715,7 +10382,27 @@ function _v39_renderInvoiceBtnForRow(p, ord) {
     const _invd = Math.round((invState.invoicedQty || 0) * 100) / 100;
     const _remQ = Math.round((_pkd - _invd) * 100) / 100;
     const _bd = ` · Packed ${_pkd.toFixed(2)}L / Invoiced ${_invd.toFixed(2)}L / Balance ${_remQ.toFixed(2)}L`;
-    const _badge = `<button class="btn btn-ghost btn-sm" title="${tooltip}${_bd}" onclick="_v39_showInvoiceState('${batch}')" style="color:${color}">${status}</button>`;
+    // v49C: UNALLOCATED LINES. A needs_manual line is credited to no batch, so a batch whose invoice
+    // could not be attributed shows the same "⏳ Awaiting SAP Invoice" as one with no invoice at all —
+    // the exact symptom DM reported, from a different cause. v48V computed `_allocNeedsManual` "so the
+    // UI can mark the figure provisional" but nothing ever rendered it: tracking surfaces the queue and
+    // a nav count, planning showed nothing and gave no pointer to where it is resolved. Say it on the
+    // row and name the destination. Alert only; the badge and any balance button still render.
+    const _nm49c = parseInt(invState._allocNeedsManual, 10) || 0;
+    const _nmB = _nm49c > 0
+      ? `<button class="btn btn-ghost btn-sm" title="${_nm49c} invoice line(s) for this batch could not be matched to a batch automatically, so their quantity is counted against no batch and the figures above are provisional. Resolve in Tracking → Invoice Allocation." onclick="_v39_showInvoiceState('${batch}')" style="color:#f59e0b;font-weight:700;font-size:11px;margin-left:4px">⚠ ${_nm49c} line${_nm49c > 1 ? 's' : ''} unallocated</button>`
+      : '';
+    const _badge = `<button class="btn btn-ghost btn-sm" title="${tooltip}${_bd}" onclick="_v39_showInvoiceState('${batch}')" style="color:${color}">${status}</button>` + _nmB;
+    // v49C: invoiced beyond packed. Previously _remQ went negative, the >= 0.01 test below failed,
+    // and the row rendered the bare badge — visually identical to a cleanly fully-invoiced batch, so
+    // 26ZE101's 15.75L excess was invisible at the point of work while sitting unread as one of 351
+    // integrity warnings. State it on the row instead. Alert only; nothing is blocked.
+    if (_remQ <= -0.01) {
+      const _ex49c = Math.round((_invd - _pkd) * 100) / 100;
+      const _exMsg = `Over-invoiced: ${_invd.toFixed(2)}L invoiced against ${_pkd.toFixed(2)}L packed — excess ${_ex49c.toFixed(2)}L. Verify the SAP invoices for this batch.`;
+      const _exBadge = `<button class="btn btn-ghost btn-sm" title="${_exMsg}" onclick="_v39_showInvoiceState('${batch}')" style="color:#dc2626;font-weight:700;font-size:11px;margin-left:4px">⚠ ${_ex49c.toFixed(2)}L over-invoiced</button>`;
+      return _badge + _exBadge;
+    }
     if (_remQ >= 0.01) {
       // v44ZF Issue 3: accept the PO/reference field as the SO link here too (see _hasSO note below),
       // so the balance-invoice button appears for PO-linked manual orders instead of the "needs SAP SO" hint.
@@ -10070,6 +10757,22 @@ function renderTruckCard(truck, cap, truckIdx, zone) {
       })() : ''}
       <div style="font-size:11px;color:var(--text3)">${truck.orders.length} order${truck.orders.length!==1?'s':''} · click to expand</div>
       ${_v39_renderTruckInvoiceBtn(truck, truckIdx, zone)}
+      ${(() => {
+        // v46H Option B: when a locked truck is dispatched SHORT (some boxes out, some still held),
+        // surface an unmissable amber nudge — the held residual won't re-bin into the next truck
+        // until this one is finalised (finalising releases its commitment and rolls the remainder
+        // forward). Display-only: it reuses the existing finalise action, so no binning logic changes
+        // and a truck still actively loading is never auto-released.
+        if (!truck.locked) return '';
+        const _disp = _truckDispatchedBoxes(truck);
+        const _plan = truck.totalBoxes || 0;
+        const _rem = Math.max(0, _plan - _disp);
+        if (_disp > 0 && _rem > 0) {
+          const _z = zone.replace(/'/g,"\\'");
+          return `<div onclick="event.stopPropagation();_v44r_finalizeTruckPrompt('${_z}',${truck.truckNumber})" title="Click to finalise this truck and automatically roll the remaining ${_rem} box(es) forward to the next truck for this zone" style="margin-top:8px;padding:8px 10px;background:rgba(255,171,0,0.12);border:1px solid rgba(255,171,0,0.4);border-radius:6px;font-size:11px;color:#ffab00;line-height:1.4;cursor:pointer">⚠ <strong>Short dispatch — ${_disp} of ${_plan} boxes scanned out.</strong> The remaining <strong>${_rem} box(es)</strong> are held on this truck and won't re-bin until it's finalised. <u>Click here to finalise &amp; auto-roll them forward →</u></div>`;
+        }
+        return '';
+      })()}
       ${truck.locked ? `<button class="btn btn-sm" style="margin-top:6px;background:rgba(0,230,118,0.12);color:#00e676;border:1px solid rgba(0,230,118,0.3)" onclick="event.stopPropagation();_v44r_finalizeTruckPrompt('${zone.replace(/'/g,"\\'")}',${truck.truckNumber})">✅ Finalise &amp; roll remainder forward</button>` : ''}
     </div>
     <div id="truck-${truck.zone.replace(/\s/g,'-')}-${truck.truckNumber}" style="display:none;margin-top:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px">
@@ -10122,15 +10825,28 @@ function _v40_openConsolidatedForTruck(truckIdx, zone) {
   const truck = trucks[truckIdx];
   if (!truck || !truck.orders) { toast('Truck not found', 'var(--red)'); return; }
   window._v40_invoiceSelections = new Set();
+  // v46Q (confirmed by Ishan): also collect the PACKED-but-not-offered batches so the modal can show
+  // them greyed with the reason (chiefly "No Sales Order Number linked" or "already invoiced"). This
+  // makes it obvious why a packed batch isn't in the one-shot list and what to fix to include it.
+  const _excluded = [];
   for (const o of truck.orders) {
     const ord = state.orders.find(x => x.id === o.productionOrderId);
     // v44ZL Issue 2/6/7: select via the authoritative gate (DocEntry OR Sales Order number OR PO/
     // reference), matching the button counter and Order View. The old `if (!ord?.sapDocEntry) continue`
     // dropped SO-number-only / PO-only orders, so the modal showed fewer rows than the button promised
     // and PO-linked remainders (e.g. the 4 L on 26ZG124) had no invoice option.
-    if (!ord || !_v40_isInvoiceEligible(o, ord).eligible) continue;
+    const _e = ord ? _v40_isInvoiceEligible(o, ord) : { eligible:false, reason:'No order data' };
+    if (!ord || !_e.eligible) {
+      // v46R #4 (confirmed by Ishan): a fully-invoiced / already-dispatched batch (26T078) is DONE — it
+      // must drop off the modal entirely, not sit in the greyed "cannot be invoiced yet" list. Only
+      // surface batches whose block is actionable (e.g. no Sales Order linked). `alreadyInvoiced` covers
+      // both "Fully invoiced" (received) and "Delivery already sent" (pending) states.
+      if ((o.packedQty || 0) > 0 && !_e.alreadyInvoiced) _excluded.push({ batch: o.batchNumber || (ord && ord.batchNumber) || '—', customer: o.customer || (ord && ord.customer) || '', packed: o.packedQty || 0, reason: _e.reason || 'Not eligible' });
+      continue;
+    }
     window._v40_invoiceSelections.add(o.id);
   }
+  window._v40_truckExcluded = _excluded.length ? _excluded : null;
   if (window._v40_invoiceSelections.size === 0) {
     alert('⚠️ No batches in this truck are ready for invoicing.\n\nA batch needs:\n  • Sales Order Number linked\n  • At least one packed box\n  • Not already invoiced');
     return;
@@ -10248,6 +10964,7 @@ function renderTruckOrdersTable(truck) {
         <th style="padding:4px 8px;text-align:left">Customer</th>
         <th style="padding:4px 8px;text-align:left">Batch</th>
         <th style="padding:4px 8px;text-align:left">PC Code</th>
+        <th style="padding:4px 8px;text-align:left">Colour</th>
         <th style="padding:4px 8px;text-align:left" title="Month when production began (from production order start date)">Month of Production</th>
         <th style="padding:4px 8px;text-align:right">Boxes</th>
         <th style="padding:4px 8px;text-align:right">Packed</th>
@@ -10317,6 +11034,7 @@ function renderTruckOrdersTable(truck) {
                 title="Click to view batch tracking summary">${p.batchNumber||'-'}</span>
             </td>
             <td style="padding:5px 8px;font-family:var(--mono);font-size:11px;color:var(--accent)">${p.pcCode||'-'}</td>
+            <td style="padding:5px 8px">${p.colour||'-'}</td>
             <td style="padding:5px 8px;font-family:var(--mono);font-size:11px" title="Month when production began">${(()=>{ const ym = getPlanProdMonth(p); return ym ? prodMonthLabel(ym) : '—'; })()}</td>
             <td style="padding:5px 8px;text-align:right;font-family:var(--mono)">${p.boxes||0}</td>
             <td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:var(--accent2)">${packed}</td>
@@ -10535,6 +11253,8 @@ function toggleExportMenu() {
 
 // ── Helper: dispatch row to export object ─────────────────────
 function dispatchRowObj(p) {
+  // v47W: 'Dispatched (Lakhs)' after 'Boxes'. v47Z (Ishan #1): add Packed qty + Packed boxes immediately
+  // before the dispatched section, so the export mirrors the on-screen PACKED column.
   return {
     'Customer': p.customer || '',
     'Batch No': p.batchNumber || '',
@@ -10543,22 +11263,86 @@ function dispatchRowObj(p) {
     'Size': p.size || '',
     'PTD/UP': p.packing || '',
     'Zone': p.zone || '',
-    'Qty (Lakhs)': fmt(p.qty),
-    'Boxes': p.boxes || '',
+    'Qty (Lakhs)': Math.round((p.qty||0)*100)/100,
+    'Boxes': p.boxes || 0,
+    'Packed (Lakhs)': Math.round((p.packedQty||0)*100)/100,
+    'Packed Boxes': p.packedBoxes || 0,
+    'Dispatched (Lakhs)': Math.round((p.actualDispatched||0)*100)/100,
     'Planned Dispatch Date': p.plannedDate ? fmtDate(p.plannedDate) : 'Pending',
     'Date Status': p.dateManuallySet ? 'Manual' : (p.tentative ? 'Tentative' : 'Confirmed'),
-    'Dispatched (Lakhs)': fmt(p.actualDispatched || 0),
-    'Balance (Lakhs)': fmt((p.qty || 0) - (p.actualDispatched || 0)),
+    'Balance (Lakhs)': Math.round(((p.qty||0)-(p.actualDispatched||0))*100)/100,
     'Status': p.status || '',
     'Remarks': p.remarks || ''
   };
 }
 
+// v48A (Ishan #1): shared subtotal/total row in the EXACT dispatchRowObj column schema, with every
+// numeric cell a real NUMBER (not fmt()'s toFixed STRING) so all columns stay summable in Excel —
+// the standing rule that every exported sheet share one format/logic. Used for per-zone ZONE TOTAL
+// rows, the Zone Summary sheet's per-zone subtotals, and the grand TOTAL.
+function _dispatchColWidths() {
+  // matches the 17 dispatchRowObj columns in order
+  return [18,14,10,14,8,8,14,12,8,14,12,16,16,12,14,18,20].map(w=>({wch:w}));
+}
+function _dispatchTotalRow(customerLabel, zone, plans) {
+  const r2 = x => Math.round((x||0)*100)/100;
+  const sum = f => (plans||[]).reduce((s,p)=>s+(Number(f(p))||0),0);
+  const dispatched = (plans||[]).filter(p=>p.status==='dispatched').length;
+  const sQ = sum(p=>p.qty), sD = sum(p=>p.actualDispatched);
+  return {
+    'Customer': customerLabel, 'Batch No': '', 'PC Code': '', 'Colour': '', 'Size': '', 'PTD/UP': '',
+    'Zone': zone || '',
+    'Qty (Lakhs)': r2(sQ),
+    'Boxes': sum(p=>p.boxes),
+    'Packed (Lakhs)': r2(sum(p=>p.packedQty)),
+    'Packed Boxes': sum(p=>p.packedBoxes),
+    'Dispatched (Lakhs)': r2(sD),
+    'Planned Dispatch Date': '', 'Date Status': '',
+    'Balance (Lakhs)': r2(sQ - sD),
+    'Status': `${dispatched}/${(plans||[]).length} dispatched`,
+    'Remarks': ''
+  };
+}
+
 // 1. FULL DISPATCH PLAN (existing — updated with tentative col)
+// v48 (Ishan #2): Dispatch Plan exports honour the on-screen quarter/month filter (production-start
+// month) so they are month-scoped — or quarter-scoped when "All months (whole quarter)" is selected —
+// instead of dumping every legacy plan. _v48ScopedPlans mirrors _truckPlanInScope but reads the order-view
+// (_pov*) filter that drives the header; _v48OrderInScope does the same for the order-based tracker export.
+function _v48ScopedPlans(){
+  const q = (typeof _povActiveQuarter==='function') ? _povActiveQuarter() : _truckActiveQuarter();
+  const mo = window._povProdMonth || 'all';
+  return (state.dispatchPlans||[]).filter(pl => _truckPlanScopeTest(pl, q, mo));
+}
+function _v48OrderInScope(ord){
+  const q = (typeof _povActiveQuarter==='function') ? _povActiveQuarter() : _truckActiveQuarter();
+  const mo = window._povProdMonth || 'all';
+  const ref = (ord && (ord.startDate || ord.endDate)) || '';
+  if(!ref) return q === _truckCurrentQuarter();
+  const d = new Date(ref); if(isNaN(d.getTime())) return q === _truckCurrentQuarter();
+  const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  if(_truckQStart(ym) !== q) return false;
+  if(mo && mo!=='all' && ym !== mo) return false;
+  return true;
+}
 function exportDispatchPlan() {
-  const rows = state.dispatchPlans
-    .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate))
-    .map(p => dispatchRowObj(p));
+  const plans = _v48ScopedPlans()
+    .slice()
+    .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
+  const rows = plans.map(p => dispatchRowObj(p));
+  // v47W (Ishan #5): append a TOTAL row so the sheet is summable (Qty / Boxes / Dispatched / Balance).
+  const tQty  = plans.reduce((s,p)=>s+(p.qty||0),0);
+  const tBox  = plans.reduce((s,p)=>s+(p.boxes||0),0);
+  const tPkQ  = plans.reduce((s,p)=>s+(p.packedQty||0),0);
+  const tPkB  = plans.reduce((s,p)=>s+(p.packedBoxes||0),0);
+  const tDisp = plans.reduce((s,p)=>s+(p.actualDispatched||0),0);
+  rows.push({
+    'Customer':'TOTAL','Batch No':'','PC Code':'','Colour':'','Size':'','PTD/UP':'','Zone':'',
+    'Qty (Lakhs)': Math.round(tQty*100)/100, 'Boxes': tBox, 'Packed (Lakhs)': Math.round(tPkQ*100)/100, 'Packed Boxes': tPkB,
+    'Dispatched (Lakhs)': Math.round(tDisp*100)/100,
+    'Planned Dispatch Date':'','Date Status':'', 'Balance (Lakhs)': Math.round((tQty-tDisp)*100)/100,
+    'Status': `${plans.filter(p=>p.status==='dispatched').length}/${plans.length} dispatched`, 'Remarks':''
+  });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Dispatch Plan');
   XLSX.writeFile(wb, `Sunloc_Dispatch_Plan_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -10569,7 +11353,7 @@ function exportDispatchPlan() {
 function exportCustomerWise() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
   const _activeIds = getActiveDispatchOrderIds(); // v41ZC: match dispatch-plan scope
-  const _scoped = state.dispatchPlans.filter(p => !p.productionOrderId || _activeIds.has(p.productionOrderId));
+  const _scoped = _v48ScopedPlans().filter(p => !p.productionOrderId || _activeIds.has(p.productionOrderId));
   const customers = [...new Set(_scoped.map(p => p.customer).filter(Boolean))].sort();
   if (customers.length === 0) { alert('No dispatch plans found.'); return; }
 
@@ -10611,7 +11395,7 @@ function exportCustomerWise() {
 function exportZoneWise() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
   const _activeIdsZ = getActiveDispatchOrderIds(); // v41ZC: match dispatch-plan scope
-  const _scopedZ = state.dispatchPlans.filter(p => !p.productionOrderId || _activeIdsZ.has(p.productionOrderId));
+  const _scopedZ = _v48ScopedPlans().filter(p => !p.productionOrderId || _activeIdsZ.has(p.productionOrderId));
   const zones = [...new Set(_scopedZ.map(p => p.zone).filter(Boolean))].sort();
   if (zones.length === 0) { alert('No dispatch plans found.'); return; }
 
@@ -10624,47 +11408,33 @@ function exportZoneWise() {
 
     const rows = plans.map(p => dispatchRowObj(p));
 
-    // Zone summary row
-    const totalQty = plans.reduce((s,p) => s + (p.qty||0), 0);
-    const totalBoxes = plans.reduce((s,p) => s + (p.boxes||0), 0);
-    const totalDispatched = plans.reduce((s,p) => s + (p.actualDispatched||0), 0);
-    rows.push({
-      'Customer': 'ZONE TOTAL', 'Batch No': '', 'PC Code': '', 'Colour': '', 'Size': '', 'PTD/UP': '',
-      'Zone': zone, 'Qty (Lakhs)': fmt(totalQty), 'Boxes': totalBoxes,
-      'Planned Dispatch Date': '', 'Date Status': '',
-      'Dispatched (Lakhs)': fmt(totalDispatched),
-      'Balance (Lakhs)': fmt(totalQty - totalDispatched),
-      'Status': `${plans.filter(p=>p.status==='dispatched').length}/${plans.length} dispatched`,
-      'Remarks': ''
-    });
+    // v48A (Ishan #1): ZONE TOTAL row via the shared numeric helper — includes Packed (L)/Packed Boxes
+    // and every numeric cell is a real number (summable), same schema as the data rows above.
+    rows.push(_dispatchTotalRow('ZONE TOTAL', zone, plans));
 
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [18,14,10,14,8,8,14,12,8,20,12,16,14,12,20].map(w=>({wch:w}));
+    ws['!cols'] = _dispatchColWidths();
     const sheetName = zone.slice(0,31).replace(/[:\\/?*\[\]]/g,'_');
     XLSX.utils.book_append_sheet(wb, ws, sheetName);
   });
 
-  // Summary sheet — one row per zone
-  const summaryRows = zones.map(zone => {
-    const plans = state.dispatchPlans.filter(p => p.zone === zone);
-    const totalQty = plans.reduce((s,p) => s + (p.qty||0), 0);
-    const totalDispatched = plans.reduce((s,p) => s + (p.actualDispatched||0), 0);
-    const nextDispatch = plans.filter(p=>p.status!=='dispatched' && p.plannedDate)
-      .sort((a,b)=>new Date(a.plannedDate)-new Date(b.plannedDate))[0];
-    return {
-      'Zone': zone,
-      'Total Orders': plans.length,
-      'Dispatched Orders': plans.filter(p=>p.status==='dispatched').length,
-      'Pending Orders': plans.filter(p=>p.status!=='dispatched').length,
-      'Total Qty (L)': fmt(totalQty),
-      'Dispatched (L)': fmt(totalDispatched),
-      'Balance (L)': fmt(totalQty - totalDispatched),
-      'Next Dispatch Date': nextDispatch ? fmtDate(nextDispatch.plannedDate) : '-',
-      'Next Dispatch Status': nextDispatch ? (nextDispatch.tentative ? 'Tentative' : 'Confirmed') : '-'
-    };
+  // v48A (Ishan #1): Zone Summary is now MONTH/QUARTER-SCOPED (was raw state.dispatchPlans — the leak
+  // that made it disagree with the per-zone tabs) and follows the SAME format as the individual sheets:
+  // every zone's order rows stacked, a ZONE TOTAL subtotal after each, and a GRAND TOTAL at the end —
+  // all in the dispatchRowObj column schema, Packed (L)/Packed Boxes included, all columns summable.
+  const summaryRows = [];
+  zones.forEach(zone => {
+    const plans = _scopedZ
+      .filter(p => p.zone === zone)
+      .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
+    if (plans.length === 0) return;
+    plans.forEach(p => summaryRows.push(dispatchRowObj(p)));
+    summaryRows.push(_dispatchTotalRow(`ZONE TOTAL — ${zone}`, zone, plans));
   });
+  const _allZoned = _scopedZ.filter(p => p.zone && zones.includes(p.zone));
+  summaryRows.push(_dispatchTotalRow('GRAND TOTAL', '', _allZoned));
   const summaryWs = XLSX.utils.json_to_sheet(summaryRows);
-  summaryWs['!cols'] = [16,14,16,14,14,14,14,20,14].map(w=>({wch:w}));
+  summaryWs['!cols'] = _dispatchColWidths();
   XLSX.utils.book_append_sheet(wb, summaryWs, 'Zone Summary');
 
   XLSX.writeFile(wb, `Sunloc_Zone_Dispatch_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -10673,7 +11443,7 @@ function exportZoneWise() {
 // 4. PENDING DISPATCH SUMMARY — only undispatched orders
 function exportPendingDispatch() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
-  const pending = state.dispatchPlans
+  const pending = _v48ScopedPlans()
     .filter(p => p.status !== 'dispatched')
     .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
 
@@ -10712,7 +11482,7 @@ function exportPendingDispatch() {
 function exportFullOrderTracker() {
   if (document.getElementById('export-menu')) document.getElementById('export-menu').style.display = 'none';
   const rows = state.orders
-    .filter(o => !o.deleted)
+    .filter(o => !o.deleted && _v48OrderInScope(o))
     .sort((a,b) => new Date(a.startDate) - new Date(b.startDate))
     .map(ord => {
       const dp = state.dispatchPlans.find(d => d.productionOrderId === ord.id);
@@ -11037,6 +11807,15 @@ function renderDispatchCustomer() {
   const prevSelected = document.getElementById('cust-dropdown')?.value || customers[0];
   const selectedCust = customers.includes(prevSelected) ? prevSelected : customers[0];
 
+  // v49U (confirmed by Ishan; root cause of the Customer View hang): getAllTruckPlans() — which
+  // re-runs autoGenerateDispatchPlans() AND the full truck bin-packing for EVERY zone — was being
+  // called once PER TABLE ROW inside every one of the ~59 customer panels: hundreds of full truck
+  // rebuilds per render. Build everything ONCE per render and look up by id thereafter.
+  const _v49uAllTrucks = getAllTruckPlans();
+  const _v49uTruckByPlanId = new Map();
+  _v49uAllTrucks.forEach(t => (t.orders||[]).forEach(o => { if (!_v49uTruckByPlanId.has(o.id)) _v49uTruckByPlanId.set(o.id, t); }));
+  const _v49uOrdById = new Map((state.orders||[]).map(o => [o.id, o]));
+
   let html = `
     <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
       <label style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Customer</label>
@@ -11070,7 +11849,10 @@ function renderDispatchCustomer() {
           </div>
         </div>
         <div class="card">
-          <div class="card-title">Order-wise Dispatch Plan — ${cust}</div>
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+            <span>Order-wise Dispatch Plan — ${cust}</span>
+            <button class="btn btn-sm btn-secondary" onclick="exportCustDispatchCsv(this.closest('.cust-panel').dataset.cust)">⬇ Export CSV</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead><tr>
@@ -11082,10 +11864,9 @@ function renderDispatchCustomer() {
                 ${cPlans.map(p=>{
                   const balance = p.qty - (p.actualDispatched||0);
                   // v44ZU: PTD/UP from the live production order (source of truth), snapshot only as fallback.
-                  const _povOrd = state.orders.find(o=>o.id===p.productionOrderId);
+                  const _povOrd = _v49uOrdById.get(p.productionOrderId);   // v49U: O(1) lookup
                   const _isPtd = _povOrd ? !!_povOrd.isPrinted : (p.packing==='PTD');
-                  const allTrucks = getAllTruckPlans();
-                  const myTruck = allTrucks.find(t=>t.orders.some(o=>o.id===p.id));
+                  const myTruck = _v49uTruckByPlanId.get(p.id);            // v49U: prebuilt once per render
                   const etdLabel = myTruck?.etd
                     ? `<span style="color:var(--accent3);font-family:var(--mono)">${fmtDate(myTruck.etd)}</span> <span style="font-size:10px;color:var(--text3)">(Truck ${myTruck.truckNumber})</span>`
                     : `<span style="font-family:var(--mono)">${fmtDate(p.plannedDate)||'—'}</span>`;
@@ -11124,6 +11905,49 @@ function renderDispatchCustomer() {
   }
 
   document.getElementById('content').innerHTML = html;
+}
+
+// v49U (confirmed by Ishan): CSV export of the selected customer's dispatch plan — the same
+// quarter-scoped rows the on-screen table shows, with the same ETD/truck resolution.
+function exportCustDispatchCsv(cust) {
+  try {
+    const _scopeOk = (p) => _truckPlanScopeTest(p, _custActiveQuarter(), 'all');
+    const cPlans = state.dispatchPlans
+      .filter(p => p.customer === cust && _scopeOk(p))
+      .sort((a,b) => new Date(a.plannedDate) - new Date(b.plannedDate));
+    if (!cPlans.length) { toast('No dispatch plans in scope for this customer', '#c77700'); return; }
+    const allTrucks = getAllTruckPlans();
+    const truckByPlanId = new Map();
+    allTrucks.forEach(t => (t.orders||[]).forEach(o => { if (!truckByPlanId.has(o.id)) truckByPlanId.set(o.id, t); }));
+    const ordById = new Map((state.orders||[]).map(o => [o.id, o]));
+    const esc = v => { const s = (v==null?'':String(v)); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; };
+    const lines = [['Batch No','PC Code','Size','Colour','PTD/UP','Zone','Qty (L)','Boxes','ETD','Truck','Dispatched (L)','Balance (L)','Status','Remarks'].join(',')];
+    let tQty=0, tBoxes=0, tDisp=0;
+    cPlans.forEach(p => {
+      const ord = ordById.get(p.productionOrderId);
+      const isPtd = ord ? !!ord.isPrinted : (p.packing==='PTD');
+      const t = truckByPlanId.get(p.id);
+      const bal = (p.qty||0) - (p.actualDispatched||0);
+      tQty += (p.qty||0); tBoxes += (p.boxes||0); tDisp += (p.actualDispatched||0);
+      lines.push([
+        esc(p.batchNumber||''), esc(p.pcCode||''), esc(p.size!=null?p.size:''), esc(p.colour||''),
+        isPtd?'PTD':'UP', esc(p.zone||''), (p.qty!=null?p.qty:''), (p.boxes!=null?p.boxes:''),
+        esc(t&&t.etd ? fmtDate(t.etd) : (fmtDate(p.plannedDate)||'')), t ? ('Truck '+t.truckNumber) : '',
+        (p.actualDispatched||0), bal,
+        p.status==='dispatched' ? (p.manuallyDispatched?'Dispatched (Manual)':'Dispatched') : (p.status==='partial'?'Partial':'Pending'),
+        esc(p.remarks||''),
+      ].join(','));
+    });
+    lines.push(['TOTAL','','','','','',tQty,tBoxes,'','',tDisp,(tQty-tDisp),'',''].join(','));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const safe = String(cust).replace(/[^A-Za-z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40) || 'customer';
+    a.href = url; a.download = `sunloc_dispatch_${safe}_${_custActiveQuarter()}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 5000);
+    toast(`Exported ${cPlans.length} rows for ${cust}`, 'var(--green)', 3000);
+  } catch(e) { toast('Export failed: '+e.message, '#c22'); }
 }
 
 function switchCustDropdown(cust) {
@@ -11238,12 +12062,15 @@ function orderInMonth(ord, ym) {
   if (!ord.startDate && !ord.endDate) return ord.status !== 'closed';
   const start = ord.startDate ? new Date(ord.startDate) : null;
   const end   = ord.endDate   ? new Date(ord.endDate)   : null;
-  const closed = ord.closedDate ? new Date(ord.closedDate) : null;
-  // Include if: start in month, OR end in month, OR spans across month, OR closed in month
+  // v49T (confirmed by Ishan): month membership keys on PRODUCTION dates only — start in month, end
+  // in month, or spanning it. The old "closed-in-month" branch admitted any order whose closedDate
+  // fell in the month regardless of when it was produced; the July-2026 cleanup wave (dozens of
+  // Apr–Jun batches administratively closed on 26–27 Jul) flooded the July view through it. A batch
+  // manufactured Apr–Jun without spanning into July must not appear in July irrespective of when it
+  // was closed. Unclosed carry-forward below is unchanged: an open order stays visible until closed.
   if (start && start >= mStart && start <= mEnd) return true;
   if (end   && end   >= mStart && end   <= mEnd) return true;
   if (start && end   && start < mStart && end > mEnd) return true; // spans
-  if (closed && closed >= mStart && closed <= mEnd) return true;
   // Unclosed carry-forward: show if order started before month end and not yet closed
   if (ord.status !== 'closed' && start && start <= mEnd) return true;
   return false;
@@ -13054,9 +13881,10 @@ async function renderReconciliation() {
   let woPendingRequests = [], woHistory = [];
   // v40 P18.15: also load wo-split pending + history
   let woSplitPending = [], woSplitHistory = [];
+  let exuPending = [], exuRecent = []; // v49ZG: excess-unprint proposals (Printing → unprinted child)
   if (serverUrl) {
     try {
-      const [r1, r2, r3, r4, r5, rSp, rSh] = await Promise.all([
+      const [r1, r2, r3, r4, r5, rSp, rSh, rEx] = await Promise.all([
         fetch(serverUrl+'/api/temp-batches/active', {signal:AbortSignal.timeout(5000)}),
         currentUser?.role==='admin' ? fetch(serverUrl+'/api/reconciliation/pending', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}) : Promise.resolve(null),
         fetch(serverUrl+'/api/reconciliation/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
@@ -13064,7 +13892,9 @@ async function renderReconciliation() {
         fetch(serverUrl+'/api/wo/history', {headers:{'x-session-token':currentUser.token||''}, signal:AbortSignal.timeout(5000)}),
         // v40 P18.15: pending splits — admin sees all, planner sees their own
         fetch(serverUrl+'/api/wo/split/pending', {headers:{'x-session-token':currentUser?.token||''}, signal:AbortSignal.timeout(5000)}).catch(()=>null),
-        fetch(serverUrl+'/api/wo/split/history', {headers:{'x-session-token':currentUser?.token||''}, signal:AbortSignal.timeout(5000)}).catch(()=>null)
+        fetch(serverUrl+'/api/wo/split/history', {headers:{'x-session-token':currentUser?.token||''}, signal:AbortSignal.timeout(5000)}).catch(()=>null),
+        // v49ZG: excess-unprint proposals (server role-gates to planning_manager/admin here)
+        fetch(serverUrl+'/api/printing/excess-unprint/pending', {headers:{'x-session-token':currentUser?.token||''}, signal:AbortSignal.timeout(5000)}).catch(()=>null)
       ]);
       const j1 = await r1.json(); if(j1.ok) tempBatches = j1.batches;
       if(r2){ const j2 = await r2.json(); if(j2.ok) pendingRequests = j2.requests; }
@@ -13073,6 +13903,7 @@ async function renderReconciliation() {
       if(r5){ const j5 = await r5.json(); if(j5.ok) woHistory = j5.requests.slice(0,20); }
       if(rSp){ try { const jSp = await rSp.json(); if(jSp?.ok) woSplitPending = jSp.requests; } catch(e){} }
       if(rSh){ try { const jSh = await rSh.json(); if(jSh?.ok) woSplitHistory = jSh.requests.slice(0,20); } catch(e){} }
+      if(rEx){ try { const jEx = await rEx.json(); if(jEx?.ok){ exuPending = jEx.requests||[]; exuRecent = (jEx.recent||[]).slice(0,10); } } catch(e){} }
     } catch(e) { content.innerHTML = `<div class="alert alert-warn">⚠️ Could not load data: ${e.message}</div>`; return; }
   }
 
@@ -13272,6 +14103,45 @@ async function renderReconciliation() {
           </div>
         </div>`;
       }).join('')}
+    </div>
+    ` : ''}
+
+    ${exuPending.length > 0 || exuRecent.length > 0 ? `
+    <div class="card mb-4">
+      <div class="card-title" style="color:var(--accent3)">
+        ${['admin','planning_manager'].includes(currentUser?.role) ? '🔔 Excess → Unprinted — Pending Approval' : '⏳ Excess → Unprinted Proposals'}
+      </div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px">
+        Printing Manager proposals to convert physically-unprinted excess boxes (scanned into Printing, never printed out) into an <b>unprinted child batch</b>. Approving creates the child order, rebatches the selected labels/scans, and reverses their printing scan-INs — the parent's Printing WIP falls by exactly the carved quantity. A child with no customer is <b>colour stock</b>, assignable later via Re-customer.
+      </div>
+      ${exuPending.map(r=>`
+        <div style="background:var(--surface3);border-radius:8px;padding:14px;margin-bottom:12px;border-left:3px solid rgba(255,171,0,0.5)">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+            <div>
+              <span class="text-mono fw-bold" style="color:var(--accent3)">${r.id}</span>
+              <span style="font-size:12px;color:var(--text3);margin-left:10px">Batch: <strong style="color:var(--accent2)">${r.batch_number}</strong> · Proposed by ${r.proposed_by} on ${(r.proposed_at||'').slice(0,16)}</span>
+            </div>
+            ${['admin','planning_manager'].includes(currentUser?.role) ? `<div style="display:flex;gap:8px">
+              <button class="btn btn-success btn-sm" onclick="approveExcessUnprint('${r.id}')">✅ Approve</button>
+              <button class="btn btn-danger btn-sm" onclick="rejectExcessUnprint('${r.id}')">✗ Reject</button>
+            </div>` : '<span style="font-size:11px;color:var(--text3);font-style:italic">Awaiting Planning Manager / Admin</span>'}
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;font-size:12px">
+            <div><span style="color:var(--text3)">Boxes:</span> <strong>${r.boxes}</strong></div>
+            <div><span style="color:var(--text3)">Quantity:</span> <strong>${(parseFloat(r.qty_lakhs)||0).toFixed(2)} L</strong></div>
+            <div><span style="color:var(--text3)">New customer:</span> <strong>${r.new_customer||'— (colour stock)'}</strong></div>
+            <div style="grid-column:1/-1"><span style="color:var(--text3)">Reason:</span> ${r.reason||'—'}</div>
+          </div>
+        </div>`).join('')}
+      ${exuRecent.length ? `
+      <div style="font-size:12px;color:var(--text3);margin:8px 0 4px;font-weight:600">Recent decisions</div>
+      ${exuRecent.map(r=>`<div style="font-size:12px;display:flex;flex-wrap:wrap;gap:10px;border-bottom:1px dashed var(--border);padding:4px 2px">
+        <span class="text-mono">${r.batch_number}</span><span>${r.boxes} box(es) · ${(parseFloat(r.qty_lakhs)||0).toFixed(2)}L</span>
+        <span class="badge ${r.status==='approved'?'badge-completed':'badge-red'}">${(r.status||'').toUpperCase()}</span>
+        ${r.status==='approved'&&r.child_batch_number?`<span>child <strong class="text-mono">${r.child_batch_number}</strong></span>`:''}
+        ${r.status==='rejected'&&r.decision_reason?`<span style="color:var(--text3)">${r.decision_reason}</span>`:''}
+        <span style="color:var(--text3);margin-left:auto">${r.decided_by||''} ${(r.decided_at||'').slice(0,16)}</span>
+      </div>`).join('')}` : ''}
     </div>
     ` : ''}
 
@@ -13513,6 +14383,48 @@ async function rejectWoSplit(reqId) {
     });
     const j = await r.json();
     if (j.ok) { alert('Split request rejected.'); renderReconciliation(); }
+    else alert('Error: '+j.error);
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+// v49ZG: Planning Manager / Admin approves an excess-unprint proposal — executes the conversion
+// (child UP order + label/scan rebatch + printing scan-IN reversals) through the server.
+async function approveExcessUnprint(reqId) {
+  if (!confirm(`Approve excess-unprint ${reqId}?\n\nThis will:\n• Create an UNPRINTED child batch (colour stock if no customer was named)\n• Rebatch the selected labels and their scan history to the child\n• Reverse their printing scan-INs (v44C ledger — history preserved)\n• Reduce the parent proportionally; its Printing WIP falls by the carved quantity\n\nThis cannot be undone.`)) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/printing/excess-unprint/approve/'+reqId, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(20000)
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(`✅ Approved!\n\nChild batch: ${j.childBatch}\n${j.boxes} box(es) · ${j.qtyLakhs}L → UNPRINTED\nCustomer: ${j.customer}\n${j.reversedPrintingScans} printing scan(s) reversed.`);
+      auditLog('EXCESS_UNPRINT_APPROVED', `Approved ${reqId} — ${j.batchNumber} → ${j.childBatch}, ${j.boxes} box(es)`);
+      if (typeof SYNC !== 'undefined' && SYNC.loadFromServer) await SYNC.loadFromServer().catch(()=>{});
+      renderReconciliation();
+    } else {
+      alert('⚠️ Error approving: ' + (j.error||'Unknown'));
+    }
+  } catch(e) { alert('Server error: '+e.message); }
+}
+
+// v49ZG: reject with reason.
+async function rejectExcessUnprint(reqId) {
+  const reason = prompt('Reason for rejecting this excess-unprint proposal (required):');
+  if (!reason) return;
+  const serverUrl = localStorage.getItem('sunloc_server_url')||'';
+  try {
+    const r = await fetch(serverUrl+'/api/printing/excess-unprint/reject/'+reqId, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-session-token':currentUser?.token||''},
+      body: JSON.stringify({reason}),
+      signal: AbortSignal.timeout(5000)
+    });
+    const j = await r.json();
+    if (j.ok) { alert('Proposal rejected.'); renderReconciliation(); }
     else alert('Error: '+j.error);
   } catch(e) { alert('Server error: '+e.message); }
 }
@@ -14528,17 +15440,30 @@ async function _v40_taskBannerTick() {
     const j = await r.json();
     if (!j.ok) return;
     _v40_myTasks = j.tasks || [];
+    // v49ZG: excess-unprint approvals ride the banner for the Planning Manager — they see pending
+    // conversion proposals the moment they open the app, mirroring how split approvals surface.
+    let _exuN = 0;
+    if (currentUser.role === 'planning_manager') {
+      try {
+        const rx = await fetch(serverUrl + '/api/printing/excess-unprint/pending', {
+          headers:{'x-session-token': currentUser?.token||''}, signal: AbortSignal.timeout(5000) });
+        const jx = await rx.json();
+        if (jx && jx.ok) _exuN = (jx.requests||[]).length;
+      } catch(e) {}
+    }
     const banner = document.getElementById('v40-task-banner');
     const textEl = document.getElementById('v40-task-banner-text');
     if (!banner || !textEl) return;
-    if (_v40_myTasks.length === 0) {
+    if (_v40_myTasks.length === 0 && _exuN === 0) {
       banner.style.display = 'none';
       return;
     }
     const critCount = _v40_myTasks.filter(t => t.severity === 'critical').length;
-    const summary = critCount > 0
+    let summary = _v40_myTasks.length === 0 ? ''
+      : critCount > 0
       ? `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you — including <strong style="color:#dc2626">${critCount} critical</strong>`
       : `<strong>${_v40_myTasks.length} task(s)</strong> assigned to you by Admin`;
+    if (_exuN > 0) summary += `${summary?' · ':''}<strong>${_exuN} Excess→Unprinted approval(s)</strong> pending on Reconciliation`;
     textEl.innerHTML = summary;
     banner.style.display = 'flex';
   } catch(e) { /* silent — banner just stays as-is */ }
@@ -14638,8 +15563,10 @@ function _v40_esc(s) {
 
 const _v40_CHECK_TYPE_LABELS = {
   qty_mismatch_plan_dpr:       'Plan vs DPR mismatch',
-  qty_mismatch_dpr_aim:        'DPR vs AIM mismatch',
+  qty_mismatch_dpr_inspected:  'DPR vs Inspected mismatch',
+  dispatch_batch_customer_conflict: 'Batch → multiple customers',
   qty_mismatch_aim_packed:     'AIM vs Packed loss',
+  invoiced_exceeds_packed:     'Invoiced > Packed',
   upstream_missing_scan:       'Missing upstream scan',
   upstream_timestamp_inversion:'Timestamp inversion',
   wastage_exceeds_input:       'Wastage exceeds input',

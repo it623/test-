@@ -15826,6 +15826,11 @@ app.post('/api/tracking/state', async (req, res) => {
         await client.query('BEGIN');
         // On full restore, clear existing data first to avoid unique constraint conflicts
         if (isFullRestore) {
+          await client.query('DELETE FROM tracking_alerts');
+          await client.query('DELETE FROM tracking_scans');
+          await client.query('DELETE FROM tracking_stage_closure');
+          await client.query('DELETE FROM tracking_wastage');
+          await client.query('DELETE FROM tracking_dispatch_records');
           await client.query('DELETE FROM tracking_labels');
         }
         if (labels && labels.length) {

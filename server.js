@@ -81,7 +81,7 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '100mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Database — Dual Mode ──────────────────────────────────────
@@ -15819,10 +15819,20 @@ app.get('/api/tracking/state', async (req, res) => {
 app.post('/api/tracking/state', async (req, res) => {
   try {
     const { labels, scans, stageClosure, wastage, dispatchRecs, alerts } = req.body;
+    const isFullRestore = labels && labels.length > 100; // heuristic: large payload = restore
     if (pgPool) {
       const client = await pgPool.connect();
       try {
         await client.query('BEGIN');
+        // On full restore, clear existing data first to avoid unique constraint conflicts
+        if (isFullRestore) {
+          await client.query('DELETE FROM tracking_alerts');
+          await client.query('DELETE FROM tracking_scans');
+          await client.query('DELETE FROM tracking_stage_closure');
+          await client.query('DELETE FROM tracking_wastage');
+          await client.query('DELETE FROM tracking_dispatch_records');
+          await client.query('DELETE FROM tracking_labels');
+        }
         if (labels && labels.length) {
           for (const l of labels) {
             await client.query(`INSERT INTO tracking_labels

@@ -2624,7 +2624,7 @@ function originalNormalBoxMax(batchNo, batch){
   return totals.length ? Math.min(...totals) : lakhToBox(b.qty, b.size);
 }
 
-function generateLabels(batchNo, count, isPartialLast, partialQty, grossWt='', nettWt=''){
+function generateLabels(batchNo, count, isPartialLast, partialQty){
   const batch = getBatch(batchNo);
   if(!batch) return [];
   const ps = PACK_SIZES[String(batch.size)] || 1;
@@ -2660,7 +2660,6 @@ function generateLabels(batchNo, count, isPartialLast, partialQty, grossWt='', n
       poNumber:batch.poNumber, machineId:batch.machineId,
       startDate:batch.startDate||null, printMatter:batch.printMatter||batch.printingMatter||null,
       isPrinted:batch.isPrinted||false,
-      grossWt:grossWt||'', nettWt:nettWt||'',
       generated:now(), printed:false, voided:false, printedAt:null,
       qrData: '' // filled after
     };
@@ -3497,50 +3496,64 @@ function generateZPL(label, batch){
   // PC Code: check label, passed batch, and fresh getBatch lookup (_b already resolved above)
   const pcCode = (label.pcCode || batch?.pcCode || _b?.pcCode || '').toString();
 
-  // ── PRE-PRINTED BOPP STOCK ZPL (102mm x 150mm, 203dpi) ──────────────
-  // Calibrated for HPRT HT800 on pre-printed BOPP label stock.
-  // SHIFT_X / SHIFT_Y allow fine registration per-printer via Settings.
-  const cName = (customerText||'').toString();
-  const cL1   = cName.length > 42 ? cName.slice(0,42) : cName;
-  const cL2   = (!isTemp && !isWO && billTo && billTo !== shipTo) ? billTo.slice(0,42) : '';
-
-  const SHIFT_Y = parseInt(localStorage.getItem('sunloc_label_shift_y') || '0', 10);
-  const SHIFT_X = parseInt(localStorage.getItem('sunloc_label_shift_x') || '0', 10);
-  const _y = n => Math.max(0, n + SHIFT_Y);
-  const _x = n => Math.max(0, n + SHIFT_X);
-
-  const _custFont = cL1.length > 35 ? '28,26' : cL1.length > 28 ? '32,30' : cL1.length > 20 ? '36,34' : '40,38';
-  const _capFont  = (colourCap||'').length  > 8 ? ((colourCap||'').length > 14 ? '24,22' : '28,26') : '38,36';
-  const _bodyFont = (colourBody||'').length > 8 ? ((colourBody||'').length > 14 ? '24,22' : '28,26') : '38,36';
-  const _t = (val, max) => { const s = String(val||''); return s.length > max ? s.slice(0, max) : s; };
-
-  const qtyTxt      = _isSpec ? '' : pieces.toLocaleString('en-IN');
-  const containerNew = _isSpec ? '' : containerNo;
-  const grossWt  = String(label.grossWt || batch?.grossWt || '');
-  const nettWt   = String(label.nettWt  || batch?.nettWt  || '');
-
   return `^XA
-^PR4
-~SD22
-^PW816
-^LL1200
-^LH0,0
-^MNY
-^PON
 ^CI28
-^FO${_x(282)},${_y(169)}^A0N,${_custFont}^FD${_t(cL1,42)}^FS
-^FO${_x(282)},${_y(200)}^A0N,30,28^FD${_t(cL2,42)}^FS
-^FO${_x(283)},${_y(303)}^A0N,38,36^FD${_t(qtyTxt,12)}^FS
-^FO${_x(641)},${_y(303)}^A0N,38,36^FD${_t(batchNo,10)}^FS
-^FO${_x(315)},${_y(409)}^A0N,38,36^FD${_t(label.size,10)}^FS
-^FO${_x(660)},${_y(406)}^A0N,38,36^FD${_t(containerNew,10)}^FS
-^FO${_x(283)},${_y(534)}^A0N,${_capFont}^FD${_t(colourCap,20)}^FS
-^FO${_x(664)},${_y(516)}^A0N,38,36^FD${_t(grossWt,10)}^FS
-^FO${_x(283)},${_y(632)}^A0N,${_bodyFont}^FD${_t(colourBody,20)}^FS
-^FO${_x(664)},${_y(632)}^A0N,38,36^FD${_t(nettWt,10)}^FS
-^FO${_x(299)},${_y(790)}^A0N,38,36^FD${_t(pcCode,10)}^FS
-^FO${_x(635)},${_y(766)}^A0N,38,36^FD${_t(mfgDate,10)}^FS
-^FO${_x(77)},${_y(903)}^BQN,2,5^FDLA,${label.qrData}^FS
+^PW800
+^LL1200
+^MMT
+^PON
+^LH0,0
+${oBorder}
+^CF0,46
+^FO10,50^FB780,1,0,C^FDSUNIL HEALTHCARE LIMITED^FS
+^CF0,30
+^FO10,102^FB780,1,0,C^FDHARD GELATIN CAPSULE SHELLS I.P.^FS
+^FO10,${136+D}^GB780,2,2^FS
+${hBand}
+^CF0,26
+^FO10,${custY}^FDCUSTOMER NAME :  ${customerText}^FS
+^FO10,${tTop-4}^GB780,2,2^FS
+
+^FO10,${tTop}^GB390,${RH*6+2},2^FS
+^FO404,${tTop}^GB386,${RH*6+2},2^FS
+^FO10,${tTop+RH}^GB390,2,2^FS
+^FO10,${tTop+RH*2}^GB390,2,2^FS
+^FO10,${tTop+RH*3}^GB390,2,2^FS
+^FO10,${tTop+RH*4}^GB390,2,2^FS
+^FO10,${tTop+RH*5}^GB390,2,2^FS
+^FO404,${tTop+RH}^GB386,2,2^FS
+^FO404,${tTop+RH*2}^GB386,2,2^FS
+^FO404,${tTop+RH*3}^GB386,2,2^FS
+^FO404,${tTop+RH*4}^GB386,2,2^FS
+^FO404,${tTop+RH*5}^GB386,2,2^FS
+
+^CF0,26
+^FO18,${tTop+10}^FDQUANTITY    :  ${piecesTxt}^FS
+^FO18,${tTop+RH+10}^FDSIZE              :  ${label.size}^FS
+^FO18,${tTop+RH*2+10}^FDCOLOUR CAP :  ${colourCap}^FS
+^FO18,${tTop+RH*3+10}^FDCOLOUR BODY:  ${colourBody}^FS
+^FO18,${tTop+RH*4+10}^FDPRINTED       :^FS
+^FO18,${tTop+RH*5+10}^FDPC CODE    :  ${pcCode}^FS
+
+^FO412,${tTop+10}^FDBATCH NO.  :  ${batchNo}^FS
+^FO412,${tTop+RH+10}^FDCONTAINER:  ${containerTxt}^FS
+^FO412,${tTop+RH*2+10}^FDGROSS WT.:^FS
+^FO412,${tTop+RH*3+10}^FDNETT WT.  :^FS
+^FO412,${tTop+RH*4+10}^FDMFG DATE:  ${mfgDate}^FS
+
+^FO10,${tBot}^GB780,2,2^FS
+^CF0,20
+^FO10,${expY}^FDEXPIRY AFTER 5 YEARS FROM MFG DATE. DRUG MFG RAJ-867, DT 08.12.1981^FS
+^FO10,${ruleY}^GB780,2,2^FS
+
+^FO10,${qrY}^BQN,2,9^FDLA,${label.qrData}^FS
+^CF0,28
+^FO260,${qRelY}^FB300,1,0,C^FDQ RELEASED^FS
+^FO580,${sigY}^GB200,2,2^FS
+^CF0,22
+^FO580,${sigY+10}^FB200,1,0,C^FDSIGNATURE^FS
+
+^FO10,${botY}^GB780,3,3^FS
 ^XZ`;
 }
 
@@ -4598,21 +4611,11 @@ function viewLabel(labelId){
 function editLabelQty(labelId){
   const l = state.labels.find(x=>x.id===labelId);
   if(!l) return;
-  openModal('Edit Label — #'+Math.abs(l.labelNumber||0), 'Updated values will print on the label when reprinted.', `
+  openModal('Edit Label Qty — #'+Math.abs(l.labelNumber||0), 'Change qty only. Updated qty will print on the label when reprinted.', `
     <div class="form-group">
       <label>Current Qty: <strong>${fmt(l.qty)}L</strong></label>
       <input type="number" id="edit-qty-input" value="${l.qty}" min="0.01" step="0.01" style="font-size:16px;font-weight:700;margin-top:8px" />
       <div style="font-size:11px;color:var(--text3);margin-top:4px">Enter new quantity in Lakhs</div>
-    </div>
-    <div class="form-row cols-2">
-      <div class="form-group">
-        <label>Gross Wt (kg)</label>
-        <input type="number" id="edit-gross-wt" value="${l.grossWt||''}" step="0.01" placeholder="e.g. 12.50" />
-      </div>
-      <div class="form-group">
-        <label>Nett Wt (kg)</label>
-        <input type="number" id="edit-nett-wt" value="${l.nettWt||''}" step="0.01" placeholder="e.g. 11.00" />
-      </div>
     </div>
   `, [
     {label:'Cancel', cls:'btn-secondary', fn:'closeModal()'},
@@ -4626,22 +4629,12 @@ function saveLabelQtyEdit(labelId){
   const l = state.labels.find(x=>x.id===labelId);
   if(!l) return;
   l.qty = newQty;
-  const newGrossWt = document.getElementById('edit-gross-wt')?.value || '';
-  const newNettWt  = document.getElementById('edit-nett-wt')?.value  || '';
-  l.grossWt = newGrossWt || l.grossWt || '';
-  l.nettWt  = newNettWt  || l.nettWt  || '';
   l.printed = false;
-  if(newGrossWt || newNettWt){
-    state.labels.filter(x=>x.batchNumber===l.batchNumber&&!x.voided&&!x.isOrange).forEach(x=>{
-      if(newGrossWt) x.grossWt = newGrossWt;
-      if(newNettWt)  x.nettWt  = newNettWt;
-    });
-  }
   saveLocal();
-  _pushLabelUpdate({labelId, qty: newQty, grossWt: l.grossWt, nettWt: l.nettWt});
+  pushToServer('/api/tracking/label-update', {labelId, qty: newQty});
   closeModal();
   renderLabels();
-  toast('✅ Label updated — WT applied to all boxes of this batch', 'var(--green)', 3000);
+  toast('✅ Qty updated — label marked for reprint', 'var(--green)', 3000);
 }
 
 function unprintedOrangeBatch(batchNumber){
@@ -4724,16 +4717,6 @@ function openLabelGen(preselect){
       <label>Partial Box Qty (Lakhs)</label>
       <input type="number" id="lg-partial-qty" step="0.01" placeholder="e.g. 0.75">
     </div>
-    <div class="form-row cols-2">
-      <div class="form-group">
-        <label>Gross Wt (kg) <span style="color:var(--text3);font-size:11px">optional</span></label>
-        <input type="number" id="lg-gross-wt" step="0.01" placeholder="e.g. 12.50">
-      </div>
-      <div class="form-group">
-        <label>Nett Wt (kg) <span style="color:var(--text3);font-size:11px">optional</span></label>
-        <input type="number" id="lg-nett-wt" step="0.01" placeholder="e.g. 11.00">
-      </div>
-    </div>
   `,[
     {label:'Cancel',cls:'btn-secondary',fn:'closeModal()'},
     {label:'Generate Labels',cls:'btn-primary',fn:'confirmLabelGen()'}
@@ -4779,10 +4762,8 @@ function confirmLabelGen(){
     const count=parseInt(document.getElementById('lg-count')?.value)||0;
     const isPartial=document.getElementById('lg-partial')?.checked;
     const partialQty=parseFloat(document.getElementById('lg-partial-qty')?.value)||0;
-    const grossWt=document.getElementById('lg-gross-wt')?.value||'';
-    const nettWt=document.getElementById('lg-nett-wt')?.value||'';
     if(!batchNo||count<1){alert('Please select a batch and enter quantity.');return;}
-    const labels=generateLabels(batchNo,count,isPartial,partialQty,grossWt,nettWt);
+    const labels=generateLabels(batchNo,count,isPartial,partialQty);
     if(labels.length){
       closeModal();
       alert(`✅ ${labels.length} label(s) generated for batch ${batchNo}.`);
